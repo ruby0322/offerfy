@@ -1,0 +1,39 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+.next/
+out/
+.turbo/
+
+# Env and secrets
+.env
+.env.*
+!.env.example
+*.pem
+k8s/overlays/*/secret.yaml
+!k8s/overlays/*/secret.yaml.example
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Vendored Typst packages are added in a later commit; keep the directory.
+apps/backend/typst/packages/*
+!apps/backend/typst/packages/.gitkeep
+
+# Fonts (too large; document how to fetch)
+apps/backend/fonts/*
+!apps/backend/fonts/.gitkeep
+!apps/backend/fonts/README.md
