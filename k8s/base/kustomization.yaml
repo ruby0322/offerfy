@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - configmap.yaml
+  - frontend-deployment.yaml
+  - frontend-service.yaml
+  - backend-deployment.yaml
+  - backend-service.yaml
+  - postgres-pvc.yaml
+  - postgres-statefulset.yaml
+  - postgres-service.yaml
+  - seaweedfs-master-pvc.yaml
+  - seaweedfs-master-deployment.yaml
+  - seaweedfs-master-service.yaml
+  - seaweedfs-volume-pvc.yaml
+  - seaweedfs-volume-deployment.yaml
+  - seaweedfs-volume-service.yaml
+  - seaweedfs-filer-pvc.yaml
+  - seaweedfs-filer-deployment.yaml
+  - seaweedfs-filer-service.yaml
+  - seaweedfs-s3-deployment.yaml
+  - seaweedfs-s3-service.yaml
+  - ingress.yaml

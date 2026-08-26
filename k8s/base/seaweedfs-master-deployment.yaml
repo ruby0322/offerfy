@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seaweedfs-master
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: seaweedfs-master
+  template:
+    metadata:
+      labels:
+        app: seaweedfs-master
+    spec:
+      containers:
+        - name: seaweedfs-master
+          image: chrislusf/seaweedfs:3.76
+          args:
+            - master
+            - -ip=seaweedfs-master
+            - -ip.bind=0.0.0.0
+            - -mdir=/data
+          ports:
+            - containerPort: 9333
+              name: master
+            - containerPort: 19333
+              name: master-grpc
+          volumeMounts:
+            - name: seaweed-master-data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /cluster/status
+              port: 9333
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /cluster/status
+              port: 9333
+            initialDelaySeconds: 20
+            periodSeconds: 15
+      volumes:
+        - name: seaweed-master-data
+          persistentVolumeClaim:
+            claimName: seaweed-master-data

@@ -1,0 +1,174 @@
+{
+  "meta": {
+    "title": "Offerfy",
+    "description": "AI 原生求職引擎。先從主履歷開始，搜尋、客製投遞、追蹤即將推出。"
+  },
+  "nav": {
+    "brand": "Offerfy",
+    "google": "Google",
+    "dashboard": "我的履歷",
+    "login": "登入"
+  },
+  "footer": {
+    "locales": "語言",
+    "google": "Google",
+    "tagline": "Offerfy · 主履歷與 ATS 可解析性"
+  },
+  "landing": {
+    "hero": {
+      "kicker": "AI 原生求職引擎",
+      "headline": "搜尋 · 客製 · 投遞 · 追蹤",
+      "sub": "問題不是缺職缺，而是缺執行力",
+      "ctaCreate": "建立履歷",
+      "ctaUpload": "上傳履歷",
+      "microcopy": "先從主履歷開始；搜尋、客製投遞、追蹤即將推出",
+      "loopSearch": "Search",
+      "loopEnhance": "Enhance",
+      "loopTailor": "Tailor",
+      "loopApply": "Apply"
+    },
+    "problem": {
+      "title": "缺的是執行，不是職缺",
+      "lead": "職缺一直都在。真正卡住的是從找到工作到投出去的那段流程。",
+      "fragmentedTitle": "流程破碎",
+      "fragmentedBody": "搜尋、強化履歷、依職缺客製、投遞、追蹤散落在 8–12 個工具裡，每次切換都要重來一次。",
+      "switchingTitle": "切換成本",
+      "switchingBody": "每換一個節點就要重貼資料、重對職缺、重開分頁。時間花在搬運，不是花在決策。",
+      "qualityTitle": "投遞品質不穩",
+      "qualityBody": "時間一趕，客製與投遞品質就掉。同一份履歷，在壓力下的產出會抖動。"
+    },
+    "how": {
+      "title": "網路上的完整旅程",
+      "lead": "在同一個產品裡走完：媒合、強化主履歷、依職缺客製、確認後投遞、追蹤結果。",
+      "stepMatch": "媒合職缺",
+      "stepEnhance": "強化主履歷",
+      "stepTailor": "依職缺客製",
+      "stepConfirm": "確認後投遞",
+      "stepTrack": "追蹤結果",
+      "interestTitle": "興趣分級",
+      "coming": "即將推出",
+      "interestLow": "低興趣：自動投遞",
+      "interestMid": "中興趣：等待確認",
+      "interestHigh": "高興趣：等待確認"
+    },
+    "nowNext": {
+      "nowTitle": "現在",
+      "nextTitle": "即將推出",
+      "nowMaster": "建立或上傳主履歷，立即進入編輯器",
+      "nowAts": "ATS 可解析性：檢查編譯後 PDF 對解析器是否可讀",
+      "nowAnon": "匿名即可使用，Google 登入後可保存紀錄",
+      "nextSearch": "Search：蒐集並媒合職缺",
+      "nextTailor": "Tailor：依職缺客製版本",
+      "nextApply": "Apply / 追蹤：投遞與結果回饋",
+      "nextAb": "A/B：用投遞結果回饋強化主履歷",
+      "atsNote": "ATS 檢查的是編譯後 PDF 對解析器的可讀性，不預測錄取機會。"
+    }
+  },
+  "create": {
+    "title": "為履歷命名",
+    "lead": "建立一份主履歷後會立刻進入編輯器。AI 為選用，不必先分析。",
+    "nameLabel": "履歷名稱",
+    "namePlaceholder": "例如：主履歷",
+    "submit": "建立並編輯",
+    "submitting": "建立中…",
+    "error": "無法建立履歷，請再試一次。"
+  },
+  "upload": {
+    "title": "上傳現有履歷",
+    "lead": "上傳後會立刻進入編輯器，無需先跑分析。",
+    "drop": "將檔案拖放到這裡，或點擊選擇",
+    "hint": "PDF、PNG、JPG、WEBP、TXT、MD · 最大 10 MiB",
+    "uploading": "上傳中…",
+    "error": "無法上傳檔案，請再試一次。",
+    "tooLarge": "檔案超過 10 MiB。",
+    "badType": "不支援的檔案類型。"
+  },
+  "login": {
+    "title": "歡迎回來",
+    "lead": "使用 Google 登入，保存履歷紀錄。",
+    "google": "使用 Google 登入",
+    "back": "返回首頁"
+  },
+  "dashboard": {
+    "title": "我的履歷",
+    "newResume": "新增履歷",
+    "empty": "還沒有履歷。從建立或上傳開始。",
+    "open": "開啟",
+    "needLogin": "請先使用 Google 登入。",
+    "logout": "登出",
+    "sourceCreate": "建立",
+    "sourceUpload": "上傳"
+  },
+  "picker": {
+    "title": "選擇開始方式",
+    "lead": "建立空白主履歷，或上傳現有檔案。",
+    "createTitle": "建立履歷",
+    "createBody": "從 starter 範本開始，進入 Typst 編輯器。",
+    "uploadTitle": "上傳履歷",
+    "uploadBody": "上傳 PDF、圖片或文字檔，立刻進入編輯器。"
+  },
+  "editor": {
+    "tabTypst": "Typst",
+    "tabChat": "Chat",
+    "preview": "預覽",
+    "download": "下載 PDF",
+    "downloading": "下載中…",
+    "saving": "儲存中…",
+    "saved": "已儲存",
+    "composerPlaceholder": "請 AI 修改 Typst 原始碼（Enter 送出，Shift+Enter 換行）",
+    "send": "送出",
+    "sending": "送出中…",
+    "chatEmpty": "AI 為選用。可以直接編輯左側 Typst，不必開啟對話。",
+    "chatNotConfigured": "未設定 OpenAI",
+    "importing": "正在從上傳內容填入模板…",
+    "loadError": "無法載入履歷。",
+    "previewError": "預覽編譯失敗。",
+    "compileError": "PDF 編譯失敗。",
+    "chatError": "對話失敗。仍可繼續編輯 Typst。",
+    "toolRead": "讀取履歷",
+    "toolReadHint": "已查看目前的 Typst 原始碼（{count} 字元）",
+    "toolReadHintPlain": "已查看目前的 Typst 原始碼",
+    "toolSearch": "搜尋網頁",
+    "toolSearchQuery": "查詢「{query}」",
+    "toolSearchPlain": "查詢了最新資訊",
+    "toolEdit": "已更新履歷",
+    "toolEditReplace": "將「{search}」改為「{replace}」",
+    "toolEditWrite": "已覆寫 Typst 原始碼",
+    "toolEditNoChange": "履歷沒有變更",
+    "toolEditRange": "已替換第 {start}–{end} 字元",
+    "toolEditFailed": "無法更新履歷",
+    "toolUnknown": "使用了 {name}",
+    "toolDetails": "詳細內容",
+    "toolFrom": "原文",
+    "toolTo": "改為"
+  },
+  "theme": {
+    "label": "主題",
+    "light": "淺色",
+    "dark": "深色",
+    "system": "系統"
+  },
+  "ats": {
+    "title": "ATS 可解析性",
+    "disclaimer": "PDF 為 ATS 解析器而編譯；此檢查不預測錄取機會。",
+    "summary": "{passed}/{total} 通過",
+    "pass": "通過",
+    "fail": "未通過",
+    "pending": "編譯後顯示",
+    "checks": {
+      "text_extractable": "可擷取文字（非純影像 PDF）",
+      "single_column": "單欄版面",
+      "contact_in_body": "姓名與 Email 在內文（非僅頁首頁尾）",
+      "standard_headings": "標準標題（經歷／學歷）",
+      "dates_machine_readable": "日期可被機器讀取（YYYY-MM 或 Present）",
+      "no_embedded_images_as_text": "姓名／聯絡方式不是只用圖片",
+      "fonts_embedded": "字型已嵌入",
+      "parse_roundtrip_ok": "原始內容可從 PDF 還原"
+    }
+  },
+  "common": {
+    "loading": "載入中…",
+    "error": "出了點問題。",
+    "backHome": "返回首頁"
+  }
+}

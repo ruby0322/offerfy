@@ -1,0 +1,174 @@
+{
+  "meta": {
+    "title": "Offerfy",
+    "description": "An AI-native job engine. Start with a master resume; search, tailored apply, and tracking are coming soon."
+  },
+  "nav": {
+    "brand": "Offerfy",
+    "google": "Google",
+    "dashboard": "My resumes",
+    "login": "Log in"
+  },
+  "footer": {
+    "locales": "Language",
+    "google": "Google",
+    "tagline": "Offerfy · master resume and ATS parseability"
+  },
+  "landing": {
+    "hero": {
+      "kicker": "AI-native job engine",
+      "headline": "Search · Customize · Apply · Track",
+      "sub": "The problem isn't missing listings — it's missing execution",
+      "ctaCreate": "Create resume",
+      "ctaUpload": "Upload resume",
+      "microcopy": "Start with a master resume. Search, tailored apply, and tracking are coming soon.",
+      "loopSearch": "Search",
+      "loopEnhance": "Enhance",
+      "loopTailor": "Tailor",
+      "loopApply": "Apply"
+    },
+    "problem": {
+      "title": "The gap is execution, not listings",
+      "lead": "Jobs are already out there. What stalls people is the path from finding a role to sending the application.",
+      "fragmentedTitle": "Fragmented flow",
+      "fragmentedBody": "Search, enhance, tailor, apply, and track live in 8–12 tools. Every hop means starting over.",
+      "switchingTitle": "Switching cost",
+      "switchingBody": "Each node means repasting data, re-matching the JD, and opening another tab. Time goes to moving, not deciding.",
+      "qualityTitle": "Unstable apply quality",
+      "qualityBody": "Under time pressure, tailoring and apply quality drop. The same resume produces shaky output when rushed."
+    },
+    "how": {
+      "title": "The journey in one product",
+      "lead": "Stay in one place: match, enhance the master CV, tailor to the JD, confirm apply, then track.",
+      "stepMatch": "Match jobs",
+      "stepEnhance": "Enhance master CV",
+      "stepTailor": "Tailor to JD",
+      "stepConfirm": "Confirm apply",
+      "stepTrack": "Track outcomes",
+      "interestTitle": "Interest grades",
+      "coming": "Coming soon",
+      "interestLow": "Low interest: auto-apply",
+      "interestMid": "Mid interest: wait for confirm",
+      "interestHigh": "High interest: wait for confirm"
+    },
+    "nowNext": {
+      "nowTitle": "Now",
+      "nextTitle": "Next",
+      "nowMaster": "Create or upload a master resume and open the editor immediately",
+      "nowAts": "ATS parseability: checks whether the compiled PDF is readable by parsers",
+      "nowAnon": "Works anonymously; Google saves your history",
+      "nextSearch": "Search: collect and match jobs",
+      "nextTailor": "Tailor: JD-specific versions",
+      "nextApply": "Apply / track: submit and follow outcomes",
+      "nextAb": "A/B: feed outcomes back into Enhance",
+      "atsNote": "ATS checks parseability of the compiled PDF. It does not predict hireability."
+    }
+  },
+  "create": {
+    "title": "Name the resume",
+    "lead": "Create a master resume and jump straight into the editor. AI is optional — no analysis step.",
+    "nameLabel": "Resume name",
+    "namePlaceholder": "e.g. Master resume",
+    "submit": "Create and edit",
+    "submitting": "Creating…",
+    "error": "Could not create the resume. Try again."
+  },
+  "upload": {
+    "title": "Upload an existing resume",
+    "lead": "After upload you go straight to the editor. No analyze-first step.",
+    "drop": "Drop a file here, or click to choose",
+    "hint": "PDF, PNG, JPG, WEBP, TXT, MD · max 10 MiB",
+    "uploading": "Uploading…",
+    "error": "Could not upload the file. Try again.",
+    "tooLarge": "File is larger than 10 MiB.",
+    "badType": "Unsupported file type."
+  },
+  "login": {
+    "title": "Welcome back",
+    "lead": "Sign in with Google to keep your resume history.",
+    "google": "Continue with Google",
+    "back": "Back to home"
+  },
+  "dashboard": {
+    "title": "My resumes",
+    "newResume": "New resume",
+    "empty": "No resumes yet. Create one or upload a file.",
+    "open": "Open",
+    "needLogin": "Please sign in with Google first.",
+    "logout": "Log out",
+    "sourceCreate": "Created",
+    "sourceUpload": "Uploaded"
+  },
+  "picker": {
+    "title": "How do you want to start?",
+    "lead": "Create a blank master resume, or upload an existing file.",
+    "createTitle": "Create resume",
+    "createBody": "Start from the starter template in the Typst editor.",
+    "uploadTitle": "Upload resume",
+    "uploadBody": "Upload a PDF, image, or text file and open the editor immediately."
+  },
+  "editor": {
+    "tabTypst": "Typst",
+    "tabChat": "Chat",
+    "preview": "Preview",
+    "download": "Download PDF",
+    "downloading": "Downloading…",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "composerPlaceholder": "Ask AI to edit the Typst source (Enter to send, Shift+Enter for a new line)",
+    "send": "Send",
+    "sending": "Sending…",
+    "chatEmpty": "AI is optional. You can edit Typst on the left without ever opening chat.",
+    "chatNotConfigured": "OpenAI is not configured",
+    "importing": "Filling the template from your upload…",
+    "loadError": "Could not load this resume.",
+    "previewError": "Preview compile failed.",
+    "compileError": "PDF compile failed.",
+    "chatError": "Chat failed. You can keep editing Typst.",
+    "toolRead": "Read the resume",
+    "toolReadHint": "Looked at the current Typst source ({count} characters)",
+    "toolReadHintPlain": "Looked at the current Typst source",
+    "toolSearch": "Searched the web",
+    "toolSearchQuery": "Looked up “{query}”",
+    "toolSearchPlain": "Looked up current information",
+    "toolEdit": "Updated the resume",
+    "toolEditReplace": "Changed “{search}” to “{replace}”",
+    "toolEditWrite": "Rewrote the Typst source",
+    "toolEditNoChange": "No changes to the resume",
+    "toolEditRange": "Replaced characters {start}–{end}",
+    "toolEditFailed": "Couldn’t update the resume",
+    "toolUnknown": "Used {name}",
+    "toolDetails": "Details",
+    "toolFrom": "From",
+    "toolTo": "To"
+  },
+  "theme": {
+    "label": "Theme",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  },
+  "ats": {
+    "title": "ATS parseability",
+    "disclaimer": "The PDF is built for ATS parsers. This check does not predict hireability.",
+    "summary": "{passed}/{total} pass",
+    "pass": "Pass",
+    "fail": "Fail",
+    "pending": "Shown after compile",
+    "checks": {
+      "text_extractable": "Text can be extracted (not image-only)",
+      "single_column": "Single-column layout",
+      "contact_in_body": "Name and email in the body (not header/footer only)",
+      "standard_headings": "Standard headings (Experience / Education)",
+      "dates_machine_readable": "Machine-readable dates (YYYY-MM or Present)",
+      "no_embedded_images_as_text": "Name/contact is not image-only",
+      "fonts_embedded": "Fonts embedded",
+      "parse_roundtrip_ok": "Extract recovers source text"
+    }
+  },
+  "common": {
+    "loading": "Loading…",
+    "error": "Something went wrong.",
+    "backHome": "Back to home"
+  }
+}

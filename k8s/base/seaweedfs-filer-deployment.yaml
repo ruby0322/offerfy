@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seaweedfs-filer
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: seaweedfs-filer
+  template:
+    metadata:
+      labels:
+        app: seaweedfs-filer
+    spec:
+      containers:
+        - name: seaweedfs-filer
+          image: chrislusf/seaweedfs:3.76
+          args:
+            - filer
+            - -master=seaweedfs-master:9333
+            - -ip=seaweedfs-filer
+            - -ip.bind=0.0.0.0
+            - -defaultStoreDir=/data
+          ports:
+            - containerPort: 8888
+              name: filer
+            - containerPort: 18888
+              name: filer-grpc
+          volumeMounts:
+            - name: seaweed-filer-data
+              mountPath: /data
+          startupProbe:
+            httpGet:
+              path: /
+              port: 8888
+            failureThreshold: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8888
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8888
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            timeoutSeconds: 3
+      volumes:
+        - name: seaweed-filer-data
+          persistentVolumeClaim:
+            claimName: seaweed-filer-data

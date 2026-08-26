@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: offerfy-config
+data:
+  APP_ENV: "production"
+  UVICORN_HOST: "0.0.0.0"
+  UVICORN_PORT: "8000"
+  UVICORN_WORKERS: "1"
+  MAX_UPLOAD_MB: "10"
+  S3_ENDPOINT: "http://seaweedfs-s3:8333"
+  S3_REGION: "us-east-1"
+  S3_BUCKET: "offerfy-private"
+  BACKEND_INTERNAL_URL: "http://backend:8000"
+  TYPST_PACKAGE_PATH: "/app/typst/packages"
+  TYPST_FONT_PATHS: "/app/fonts"
+  OPENAI_MODEL: "gpt-5.6-terra"

@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: offerfy
+  namespace: argocd
+spec:
+  description: Offerfy GitOps applications
+  sourceRepos:
+    - https://github.com/ruby0322/offerfy.git
+  destinations:
+    - namespace: offerfy-dev
+      server: https://kubernetes.default.svc
+    - namespace: offerfy-prod
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

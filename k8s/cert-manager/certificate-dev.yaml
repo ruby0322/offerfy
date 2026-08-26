@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: test-offerfy-lu-im-ntu-edu-tw
+  namespace: offerfy-dev
+spec:
+  secretName: test-offerfy-lu-im-ntu-edu-tw-tls
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-prod
+  dnsNames:
+    - test.offerfy.lu.im.ntu.edu.tw

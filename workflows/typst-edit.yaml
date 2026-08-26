@@ -1,0 +1,62 @@
+# Optional long-running Typst-edit jobs for chat.
+#
+# Phase 1 chat (`apply_typst_edit`) runs in-process on FastAPI for short patches.
+# Compile and ATS parseability stay on the backend — do not move them into this
+# workflow. Submit this template only when a chat edit exceeds the request timeout.
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: offerfy-typst-edit
+spec:
+  entrypoint: apply-typst-edit
+  arguments:
+    parameters:
+      - name: resume_id
+        description: Resume row id whose Typst source should be patched
+      - name: patch
+        description: JSON payload for apply_typst_edit (replace range or full source)
+  imagePullSecrets:
+    - name: ghcr-pull-secret
+  templates:
+    - name: apply-typst-edit
+      inputs:
+        parameters:
+          - name: resume_id
+          - name: patch
+      container:
+        image: ghcr.io/ruby0322/offerfy-backend:latest
+        imagePullPolicy: IfNotPresent
+        command: ["python3", "-m", "app.jobs.typst_edit"]
+        args:
+          - "--resume-id"
+          - "{{inputs.parameters.resume_id}}"
+          - "--patch"
+          - "{{inputs.parameters.patch}}"
+        envFrom:
+          - configMapRef:
+              name: offerfy-config
+        env:
+          - name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: offerfy-secrets
+                key: DATABASE_URL
+          - name: OPENAI_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: offerfy-secrets
+                key: OPENAI_API_KEY
+          - name: OPENAI_BASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: offerfy-secrets
+                key: OPENAI_BASE_URL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+      retryStrategy:
+        limit: "1"

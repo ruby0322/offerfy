@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: seaweedfs-volume
+spec:
+  selector:
+    app: seaweedfs-volume
+  ports:
+    - name: volume-http
+      port: 8080
+      targetPort: 8080
+    - name: volume-grpc
+      port: 18080
+      targetPort: 18080

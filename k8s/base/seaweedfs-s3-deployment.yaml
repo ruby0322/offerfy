@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seaweedfs-s3
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: seaweedfs-s3
+  template:
+    metadata:
+      labels:
+        app: seaweedfs-s3
+    spec:
+      containers:
+        - name: seaweedfs-s3
+          image: chrislusf/seaweedfs:3.76
+          args:
+            - s3
+            - -filer=seaweedfs-filer:8888
+            - -ip.bind=0.0.0.0
+            - -port=8333
+            - -domainName=seaweedfs-s3
+          ports:
+            - containerPort: 8333
+              name: s3
+          startupProbe:
+            httpGet:
+              path: /
+              port: 8333
+            failureThreshold: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8333
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8333
+            initialDelaySeconds: 150
+            periodSeconds: 20
+            timeoutSeconds: 3

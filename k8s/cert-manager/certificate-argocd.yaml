@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: argocd-offerfy-lu-im-ntu-edu-tw
+  namespace: argocd
+spec:
+  secretName: argocd-offerfy-lu-im-ntu-edu-tw-tls
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-prod
+  dnsNames:
+    - argocd.offerfy.lu.im.ntu.edu.tw

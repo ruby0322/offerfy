@@ -1,0 +1,22 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: offerfy
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  tls:
+    - hosts:
+        - offerfy.lu.im.ntu.edu.tw
+      secretName: offerfy-lu-im-ntu-edu-tw-tls
+  rules:
+    - host: offerfy.lu.im.ntu.edu.tw
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 3000

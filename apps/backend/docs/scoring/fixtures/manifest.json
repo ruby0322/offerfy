@@ -1,0 +1,532 @@
+{
+  "fixtures": [
+    {
+      "file": "en_good_01.typ",
+      "locale": "en",
+      "name": "Alice Chen",
+      "email": "alice.chen@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "en_good_02.typ",
+      "locale": "en",
+      "name": "Bob Martinez",
+      "email": "bob.martinez@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "en_good_03.typ",
+      "locale": "en",
+      "name": "Chloe Nguyen",
+      "email": "chloe.nguyen@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "en_good_04.typ",
+      "locale": "en",
+      "name": "Diego Silva",
+      "email": "diego.silva@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "en_good_05.typ",
+      "locale": "en",
+      "name": "Elena Petrova",
+      "email": "elena.petrova@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "en_good_06.typ",
+      "locale": "en",
+      "name": "Farah Hassan",
+      "email": "farah.hassan@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "en_good_07.typ",
+      "locale": "en",
+      "name": "Grace Okonkwo",
+      "email": "grace.okonkwo@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "en_good_08.typ",
+      "locale": "en",
+      "name": "Hiro Tanaka",
+      "email": "hiro.tanaka@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "zhtw_good_01.typ",
+      "locale": "zh-TW",
+      "name": "陳雅婷",
+      "email": "yating.chen@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "zhtw_good_02.typ",
+      "locale": "zh-TW",
+      "name": "林志明",
+      "email": "chihming.lin@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "zhtw_good_03.typ",
+      "locale": "zh-TW",
+      "name": "黃淑芬",
+      "email": "shufen.huang@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "zhtw_good_04.typ",
+      "locale": "zh-TW",
+      "name": "吳建宏",
+      "email": "jianhong.wu@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "zhtw_good_05.typ",
+      "locale": "zh-TW",
+      "name": "鄭佩玲",
+      "email": "peiling.cheng@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "zhtw_good_06.typ",
+      "locale": "zh-TW",
+      "name": "蔡宗憲",
+      "email": "zongxian.tsai@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "zhtw_good_07.typ",
+      "locale": "zh-TW",
+      "name": "許雅惠",
+      "email": "yahui.hsu@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "zhtw_good_08.typ",
+      "locale": "zh-TW",
+      "name": "周俊傑",
+      "email": "junjie.chou@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "zhcn_good_01.typ",
+      "locale": "zh-CN",
+      "name": "陈雅婷",
+      "email": "yating.chen@example.cn",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "zhcn_good_02.typ",
+      "locale": "zh-CN",
+      "name": "林志明",
+      "email": "chihming.lin@example.cn",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "zhcn_good_03.typ",
+      "locale": "zh-CN",
+      "name": "黄淑芬",
+      "email": "shufen.huang@example.cn",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "zhcn_good_04.typ",
+      "locale": "zh-CN",
+      "name": "吴建宏",
+      "email": "jianhong.wu@example.cn",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "zhcn_good_05.typ",
+      "locale": "zh-CN",
+      "name": "郑佩玲",
+      "email": "peiling.zheng@example.cn",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "zhcn_good_06.typ",
+      "locale": "zh-CN",
+      "name": "蔡宗宪",
+      "email": "zongxian.cai@example.cn",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "zhcn_good_07.typ",
+      "locale": "zh-CN",
+      "name": "许雅惠",
+      "email": "yahui.xu@example.cn",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "zhcn_good_08.typ",
+      "locale": "zh-CN",
+      "name": "周俊杰",
+      "email": "junjie.zhou@example.cn",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "trap_image_only.typ",
+      "locale": "en",
+      "name": null,
+      "email": null,
+      "expected": {
+        "text_extractable": false,
+        "single_column": true,
+        "contact_in_body": false,
+        "standard_headings": false,
+        "dates_machine_readable": false,
+        "no_embedded_images_as_text": false,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "trap_two_column.typ",
+      "locale": "en",
+      "name": "Column Person",
+      "email": "column.person@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": false,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "trap_missing_headings.typ",
+      "locale": "en",
+      "name": "No Headings Person",
+      "email": "no.headings@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": false,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "trap_missing_dates.typ",
+      "locale": "en",
+      "name": "No Dates Person",
+      "email": "no.dates@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": false,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "trap_month_name_dates.typ",
+      "locale": "en",
+      "name": "Month Name Person",
+      "email": "month.name@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": false,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "trap_header_only_contact.typ",
+      "locale": "en",
+      "name": "Header Only Person",
+      "email": "header.only@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": false,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "trap_footer_only_contact.typ",
+      "locale": "en",
+      "name": "Footer Only Person",
+      "email": "footer.only@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": false,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "trap_missing_email.typ",
+      "locale": "en",
+      "name": "No Email Person",
+      "email": null,
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": false,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "trap_name_not_rendered.typ",
+      "locale": "en",
+      "name": null,
+      "email": "shown.email@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": false,
+        "standard_headings": true,
+        "dates_machine_readable": true,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": false
+      }
+    }
+  ]
+}

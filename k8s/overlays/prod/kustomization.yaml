@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: offerfy-prod
+
+resources:
+  - namespace.yaml
+  - ../../base
+  - migrate-job.yaml
+  - pdb.yaml
+
+patches:
+  - path: patch-configmap.yaml
+  - path: patch-frontend.yaml
+  - path: patch-backend.yaml
+  - path: patch-ingress.yaml
+  - path: patch-pvc-postgres.yaml
+  - path: patch-pvc-seaweed-master.yaml
+  - path: patch-pvc-seaweed-volume.yaml
+  - path: patch-pvc-seaweed-filer.yaml
+
+images:
+  - name: offerfy-frontend
+    newName: ghcr.io/ruby0322/offerfy-frontend
+    newTag: prod
+  - name: offerfy-backend
+    newName: ghcr.io/ruby0322/offerfy-backend
+    newTag: prod

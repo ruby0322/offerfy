@@ -1,5 +1,6 @@
 # Python
 .venv/
+apps/backend/.tools/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -14,6 +15,7 @@ node_modules/
 .next/
 out/
 .turbo/
+*.tsbuildinfo
 
 # Env and secrets
 .env
@@ -29,11 +31,15 @@ k8s/overlays/*/secret.yaml
 .idea/
 .vscode/
 
-# Vendored Typst packages are added in a later commit; keep the directory.
-apps/backend/typst/packages/*
-!apps/backend/typst/packages/.gitkeep
+# Vendored Typst packages (preview/basic-resume, preview/scienceicons) are committed.
 
 # Fonts (too large; document how to fetch)
 apps/backend/fonts/*
 !apps/backend/fonts/.gitkeep
 !apps/backend/fonts/README.md
+
+# Pitch deck (seed/TAM slides; loop source only)
+docs/pitch/*.pdf
+
+# Superpowers scratch
+.superpowers/

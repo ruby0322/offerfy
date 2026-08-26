@@ -1,0 +1,174 @@
+{
+  "meta": {
+    "title": "Offerfy",
+    "description": "AI 原生求职引擎。先从主简历开始；搜索、定制投递、追踪即将推出。"
+  },
+  "nav": {
+    "brand": "Offerfy",
+    "google": "Google",
+    "dashboard": "我的简历",
+    "login": "登录"
+  },
+  "footer": {
+    "locales": "语言",
+    "google": "Google",
+    "tagline": "Offerfy · 主简历与 ATS 可解析性"
+  },
+  "landing": {
+    "hero": {
+      "kicker": "AI 原生求职引擎",
+      "headline": "搜索 · 定制 · 投递 · 追踪",
+      "sub": "问题不是缺岗位，而是缺执行力",
+      "ctaCreate": "创建简历",
+      "ctaUpload": "上传简历",
+      "microcopy": "先从主简历开始；搜索、定制投递、追踪即将推出",
+      "loopSearch": "Search",
+      "loopEnhance": "Enhance",
+      "loopTailor": "Tailor",
+      "loopApply": "Apply"
+    },
+    "problem": {
+      "title": "缺的是执行，不是岗位",
+      "lead": "岗位一直都在。真正卡住的是从找到工作到投出去的那段流程。",
+      "fragmentedTitle": "流程破碎",
+      "fragmentedBody": "搜索、强化简历、按岗位定制、投递、追踪散落在 8–12 个工具里，每次切换都要重来一次。",
+      "switchingTitle": "切换成本",
+      "switchingBody": "每换一个节点就要重贴资料、重对岗位、重开分页。时间花在搬运，不是花在决策。",
+      "qualityTitle": "投递质量不稳",
+      "qualityBody": "时间一赶，定制与投递质量就掉。同一份简历，在压力下的产出会抖动。"
+    },
+    "how": {
+      "title": "网络上的完整旅程",
+      "lead": "在同一个产品里走完：匹配、强化主简历、按岗位定制、确认后投递、追踪结果。",
+      "stepMatch": "匹配岗位",
+      "stepEnhance": "强化主简历",
+      "stepTailor": "按岗位定制",
+      "stepConfirm": "确认后投递",
+      "stepTrack": "追踪结果",
+      "interestTitle": "兴趣分级",
+      "coming": "即将推出",
+      "interestLow": "低兴趣：自动投递",
+      "interestMid": "中兴趣：等待确认",
+      "interestHigh": "高兴趣：等待确认"
+    },
+    "nowNext": {
+      "nowTitle": "现在",
+      "nextTitle": "即将推出",
+      "nowMaster": "创建或上传主简历，立即进入编辑器",
+      "nowAts": "ATS 可解析性：检查编译后 PDF 对解析器是否可读",
+      "nowAnon": "匿名即可使用，Google 登录后可保存记录",
+      "nextSearch": "Search：收集并匹配岗位",
+      "nextTailor": "Tailor：按岗位定制版本",
+      "nextApply": "Apply / 追踪：投递与结果反馈",
+      "nextAb": "A/B：用投递结果反馈强化主简历",
+      "atsNote": "ATS 检查的是编译后 PDF 对解析器的可读性，不预测录取机会。"
+    }
+  },
+  "create": {
+    "title": "为简历命名",
+    "lead": "创建一份主简历后会立刻进入编辑器。AI 为选用，不必先分析。",
+    "nameLabel": "简历名称",
+    "namePlaceholder": "例如：主简历",
+    "submit": "创建并编辑",
+    "submitting": "创建中…",
+    "error": "无法创建简历，请再试一次。"
+  },
+  "upload": {
+    "title": "上传现有简历",
+    "lead": "上传后会立刻进入编辑器，无需先跑分析。",
+    "drop": "将文件拖放到这里，或点击选择",
+    "hint": "PDF、PNG、JPG、WEBP、TXT、MD · 最大 10 MiB",
+    "uploading": "上传中…",
+    "error": "无法上传文件，请再试一次。",
+    "tooLarge": "文件超过 10 MiB。",
+    "badType": "不支持的文件类型。"
+  },
+  "login": {
+    "title": "欢迎回来",
+    "lead": "使用 Google 登录，保存简历记录。",
+    "google": "使用 Google 登录",
+    "back": "返回首页"
+  },
+  "dashboard": {
+    "title": "我的简历",
+    "newResume": "新增简历",
+    "empty": "还没有简历。从创建或上传开始。",
+    "open": "打开",
+    "needLogin": "请先使用 Google 登录。",
+    "logout": "退出",
+    "sourceCreate": "创建",
+    "sourceUpload": "上传"
+  },
+  "picker": {
+    "title": "选择开始方式",
+    "lead": "创建空白主简历，或上传现有文件。",
+    "createTitle": "创建简历",
+    "createBody": "从 starter 模板开始，进入 Typst 编辑器。",
+    "uploadTitle": "上传简历",
+    "uploadBody": "上传 PDF、图片或文本文件，立刻进入编辑器。"
+  },
+  "editor": {
+    "tabTypst": "Typst",
+    "tabChat": "Chat",
+    "preview": "预览",
+    "download": "下载 PDF",
+    "downloading": "下载中…",
+    "saving": "保存中…",
+    "saved": "已保存",
+    "composerPlaceholder": "请 AI 修改 Typst 源码（Enter 发送，Shift+Enter 换行）",
+    "send": "发送",
+    "sending": "发送中…",
+    "chatEmpty": "AI 为选用。可以直接编辑左侧 Typst，不必打开对话。",
+    "chatNotConfigured": "未设置 OpenAI",
+    "importing": "正在从上传内容填入模板…",
+    "loadError": "无法加载简历。",
+    "previewError": "预览编译失败。",
+    "compileError": "PDF 编译失败。",
+    "chatError": "对话失败。仍可继续编辑 Typst。",
+    "toolRead": "读取简历",
+    "toolReadHint": "已查看当前 Typst 源码（{count} 字符）",
+    "toolReadHintPlain": "已查看当前 Typst 源码",
+    "toolSearch": "搜索网页",
+    "toolSearchQuery": "查询“{query}”",
+    "toolSearchPlain": "查询了最新信息",
+    "toolEdit": "已更新简历",
+    "toolEditReplace": "将“{search}”改为“{replace}”",
+    "toolEditWrite": "已覆写 Typst 源码",
+    "toolEditNoChange": "简历没有变更",
+    "toolEditRange": "已替换第 {start}–{end} 字符",
+    "toolEditFailed": "无法更新简历",
+    "toolUnknown": "使用了 {name}",
+    "toolDetails": "详细内容",
+    "toolFrom": "原文",
+    "toolTo": "改为"
+  },
+  "theme": {
+    "label": "主题",
+    "light": "浅色",
+    "dark": "深色",
+    "system": "系统"
+  },
+  "ats": {
+    "title": "ATS 可解析性",
+    "disclaimer": "PDF 为 ATS 解析器而编译；此检查不预测录取机会。",
+    "summary": "{passed}/{total} 通过",
+    "pass": "通过",
+    "fail": "未通过",
+    "pending": "编译后显示",
+    "checks": {
+      "text_extractable": "可提取文字（非纯图像 PDF）",
+      "single_column": "单栏版面",
+      "contact_in_body": "姓名与 Email 在正文（非仅页眉页脚）",
+      "standard_headings": "标准标题（经历／学历）",
+      "dates_machine_readable": "日期可被机器读取（YYYY-MM 或 Present）",
+      "no_embedded_images_as_text": "姓名／联系方式不是只用图片",
+      "fonts_embedded": "字体已嵌入",
+      "parse_roundtrip_ok": "原始内容可从 PDF 还原"
+    }
+  },
+  "common": {
+    "loading": "加载中…",
+    "error": "出了点问题。",
+    "backHome": "返回首页"
+  }
+}
