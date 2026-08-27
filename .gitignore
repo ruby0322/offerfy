@@ -48,5 +48,8 @@ apps/backend/fonts/*
 # Pitch deck (seed/TAM slides; loop source only)
 docs/pitch/*.pdf
 
+# Host-local ops runbook (abbey live state; do not commit)
+docs/deploy.md
+
 # Superpowers scratch
 .superpowers/
