@@ -13,7 +13,9 @@
     "locales": "Language",
     "google": "Google",
     "login": "Log in",
-    "tagline": "Offerfy · get the resume right first"
+    "tagline": "Offerfy · get the resume right first",
+    "terms": "Terms",
+    "privacy": "Privacy"
   },
   "landing": {
     "hero": {
@@ -191,5 +193,189 @@
     "loading": "Loading…",
     "error": "Something went wrong.",
     "backHome": "Back to home"
+  },
+  "legal": {
+    "termsLink": "Terms",
+    "privacyLink": "Privacy",
+    "lastUpdated": "Last updated {date}",
+    "loginAgree": "By continuing, you agree to the <terms>Terms</terms> and <privacy>Privacy Policy</privacy>.",
+    "seeAlsoTerms": "Read the Terms of Service",
+    "seeAlsoPrivacy": "Read the Privacy Policy",
+    "cookieName": "Cookie",
+    "cookiePurpose": "Purpose",
+    "terms": {
+      "metaTitle": "Terms — Offerfy",
+      "title": "Terms of Service",
+      "intro": "These Terms of Service describe how you may use Offerfy at https://offerfy.cc. They describe current Phase 1 practices. They are not legal advice.",
+      "sections": [
+        {
+          "heading": "Who we are",
+          "paragraphs": [
+            "Offerfy operates the website at https://offerfy.cc. These pages list the product name only; there is no separate company legal name here. Contact us at james@offerfy.cc."
+          ]
+        },
+        {
+          "heading": "The service",
+          "paragraphs": [
+            "Offerfy is a web resume editor. You can create a resume from a starter template or upload a file, edit Typst source, preview a live compile, export a PDF, and check whether that compiled PDF can be parsed by applicant tracking systems (ATS).",
+            "ATS checks parseability of the compiled PDF only. They do not predict hireability or job outcomes.",
+            "You may use the editor without an account. Signing in with Google saves your resume history.",
+            "Search, tailor-to-a-job, apply, and tracking are not part of the current service."
+          ]
+        },
+        {
+          "heading": "Accounts",
+          "paragraphs": [
+            "If you use Offerfy without signing in, we set an offerfy_guest cookie so an anonymous session can own your resumes.",
+            "If you sign in with Google, we request the openid, email, and profile scopes. We store your Google subject identifier and email so we can keep you signed in and attach resumes to your account."
+          ]
+        },
+        {
+          "heading": "Your content",
+          "paragraphs": [
+            "You retain rights in the resumes, uploads, and chat messages you provide.",
+            "You grant Offerfy a license to host that content, compile it, generate previews and PDFs, run ATS parseability checks, and — only when you use chat — send relevant content to our language-model provider so we can operate the service.",
+            "You are responsible for the accuracy of your resume and for having the right to upload any file you provide."
+          ]
+        },
+        {
+          "heading": "Acceptable use",
+          "paragraphs": [
+            "Do not abuse the service, upload malware, attempt to disrupt or overload it, scrape it in a way that harms availability, or use it to process personal data you have no right to process."
+          ]
+        },
+        {
+          "heading": "AI",
+          "paragraphs": [
+            "Chat is optional. You can edit Typst without ever opening chat.",
+            "Model output can be wrong or incomplete. You must review any AI-edited resume before you use it.",
+            "Guest use is rate-limited to 10 chat turns and 20 PDF exports per hour."
+          ]
+        },
+        {
+          "heading": "Availability",
+          "paragraphs": [
+            "Offerfy is provided as-is. Phase 1 is an early product. We do not promise uptime, backups, or that features will remain unchanged."
+          ]
+        },
+        {
+          "heading": "Liability",
+          "paragraphs": [
+            "To the extent permitted by applicable law, Offerfy is not liable for indirect, incidental, special, or consequential damages, or for lost opportunities, arising from your use of the service.",
+            "Our total liability for claims relating to the service is limited to the amount you paid us for the service in the 12 months before the claim. Phase 1 is provided without charge, so that amount is currently zero.",
+            "Some jurisdictions do not allow certain limitations. Those limits apply only to the extent the law allows."
+          ]
+        },
+        {
+          "heading": "Changes",
+          "paragraphs": [
+            "We may update these terms. The date at the top is the latest version. If you keep using Offerfy after a change, you accept the updated terms."
+          ]
+        },
+        {
+          "heading": "Governing law",
+          "paragraphs": [
+            "These terms are governed by the laws of Taiwan (Republic of China), without regard to conflict-of-law rules."
+          ]
+        },
+        {
+          "heading": "Contact",
+          "paragraphs": [
+            "Questions about these terms: james@offerfy.cc."
+          ]
+        }
+      ]
+    },
+    "privacy": {
+      "metaTitle": "Privacy — Offerfy",
+      "title": "Privacy Policy",
+      "intro": "This Privacy Policy describes how Offerfy collects and uses personal data on https://offerfy.cc. It describes current Phase 1 practices. It is not legal advice.",
+      "sections": [
+        {
+          "heading": "Who we are",
+          "paragraphs": [
+            "Offerfy operates https://offerfy.cc. We process personal data to run the service. Contact: james@offerfy.cc."
+          ]
+        },
+        {
+          "heading": "What we collect",
+          "paragraphs": [
+            "Guest use: we set an offerfy_guest cookie (HttpOnly, SameSite=Lax, Secure in production). We store a guest session, the resumes attached to it, and rate-limit events in our database.",
+            "Signed-in use: when you sign in with Google we receive identifiers from the openid, email, and profile scopes. We store your Google subject identifier, email, and locale, and we set an offerfy_session cookie (HttpOnly, SameSite=Lax, Secure in production).",
+            "Language: we set an offerfy_locale cookie so the site stays in the language you chose.",
+            "Theme: light/dark preference is stored in the browser with localStorage. It is not a cookie.",
+            "Resume data: title, Typst source, compiled SVG and PDF, ATS parseability report, and chat messages.",
+            "Uploads: PDF, PNG, JPG, JPEG, WEBP, TXT, and MD files, up to 10 MiB, stored in object storage."
+          ]
+        },
+        {
+          "heading": "Why we use it",
+          "paragraphs": [
+            "We use this data to provide the editor, live preview, PDF export, ATS parseability checks, authentication, guest rate limits, and the language you selected."
+          ]
+        },
+        {
+          "heading": "When we share",
+          "paragraphs": [
+            "Google: to sign you in.",
+            "Language-model provider: we send resume, upload, and chat content to an OpenAI-compatible API only when you use chat.",
+            "Infrastructure: database, object storage, and hosting that run Offerfy.",
+            "We do not sell personal data. Offerfy does not include a third-party analytics product today."
+          ]
+        },
+        {
+          "heading": "Retention",
+          "paragraphs": [
+            "Guest data is tied to the offerfy_guest cookie. If you lose that cookie, you lose access to that anonymous session.",
+            "Signed-in data is kept until you ask us to delete it. There is no in-app account or data deletion yet. Email james@offerfy.cc to request deletion."
+          ]
+        },
+        {
+          "heading": "Your rights",
+          "paragraphs": [
+            "You may ask us for access to, correction of, or deletion of personal data we hold about you by emailing james@offerfy.cc. We will handle requests in line with Taiwan's Personal Data Protection Act as it applies to us. These pages do not claim GDPR or CCPA compliance that we have not implemented."
+          ]
+        },
+        {
+          "heading": "Children",
+          "paragraphs": [
+            "Offerfy is not directed at children under 13. The product does not include an age gate."
+          ]
+        },
+        {
+          "heading": "International processing",
+          "paragraphs": [
+            "Google and the language-model provider may process data on servers outside Taiwan."
+          ]
+        },
+        {
+          "heading": "Cookies",
+          "paragraphs": [
+            "We use these essential cookies to run the service. There is no cookie banner because we do not use non-essential tracking cookies."
+          ],
+          "rows": [
+            [
+              "offerfy_guest",
+              "Identifies an anonymous session so you can create and edit resumes without signing in."
+            ],
+            [
+              "offerfy_session",
+              "Keeps you signed in after Google."
+            ],
+            [
+              "offerfy_locale",
+              "Remembers the language you chose."
+            ]
+          ]
+        },
+        {
+          "heading": "Changes and contact",
+          "paragraphs": [
+            "We may update this policy. The date at the top is the latest version.",
+            "Questions: james@offerfy.cc."
+          ]
+        }
+      ]
+    }
   }
 }

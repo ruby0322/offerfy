@@ -13,7 +13,9 @@
     "locales": "语言",
     "google": "Google",
     "login": "登录",
-    "tagline": "Offerfy · 先把简历做好"
+    "tagline": "Offerfy · 先把简历做好",
+    "terms": "条款",
+    "privacy": "隐私"
   },
   "landing": {
     "hero": {
@@ -191,5 +193,189 @@
     "loading": "加载中…",
     "error": "出了点问题。",
     "backHome": "返回首页"
+  },
+  "legal": {
+    "termsLink": "条款",
+    "privacyLink": "隐私",
+    "lastUpdated": "最后更新 {date}",
+    "loginAgree": "继续即表示你同意<terms>服务条款</terms>与<privacy>隐私政策</privacy>。",
+    "seeAlsoTerms": "阅读服务条款",
+    "seeAlsoPrivacy": "阅读隐私政策",
+    "cookieName": "Cookie",
+    "cookiePurpose": "用途",
+    "terms": {
+      "metaTitle": "服务条款 — Offerfy",
+      "title": "服务条款",
+      "intro": "本服务条款说明你如何使用 https://offerfy.cc 上的 Offerfy。内容反映目前第一阶段的实际做法，不构成法律意见。",
+      "sections": [
+        {
+          "heading": "我们是谁",
+          "paragraphs": [
+            "Offerfy 运营 https://offerfy.cc。这些页面只列出产品名称，没有另列公司法定名称。请写信至 james@offerfy.cc。"
+          ]
+        },
+        {
+          "heading": "服务内容",
+          "paragraphs": [
+            "Offerfy 是网页简历编辑器。你可以从起始模板创建简历或上传文件、编辑 Typst 源码、实时预览编译结果、导出 PDF，并检查该编译后的 PDF 能否被求职者跟踪系统（ATS）解析。",
+            "ATS 只检查编译后 PDF 的可解析性，不预测录取或职业结果。",
+            "你可以不注册就使用编辑器。使用 Google 登录会保存简历记录。",
+            "搜索职位、按职位定制、投递与跟踪目前都不是本服务的一部分。"
+          ]
+        },
+        {
+          "heading": "账号",
+          "paragraphs": [
+            "若你未登录就使用 Offerfy，我们会设置 offerfy_guest Cookie，让匿名会话拥有你的简历。",
+            "若你使用 Google 登录，我们会请求 openid、email 与 profile 权限范围。我们存储你的 Google 主体标识符与电子邮件，以便维持登录状态并把简历归到你的账号。"
+          ]
+        },
+        {
+          "heading": "你的内容",
+          "paragraphs": [
+            "你提供的简历、上传文件与聊天消息，权利仍归你所有。",
+            "你授权 Offerfy 托管该内容、编译、生成预览与 PDF、执行 ATS 可解析性检查，以及——仅在你使用聊天时——把相关内容传给语言模型提供商，以便我们提供服务。",
+            "你须为简历内容的准确性负责，并确保你有权上传所提供的文件。"
+          ]
+        },
+        {
+          "heading": "使用规范",
+          "paragraphs": [
+            "请勿滥用本服务、上传恶意程序、试图中断或过载系统、以损害可用性的方式抓取数据，或用本服务处理你无权处理的个人数据。"
+          ]
+        },
+        {
+          "heading": "AI",
+          "paragraphs": [
+            "聊天是选用功能。你可以只编辑 Typst，永远不打开聊天。",
+            "模型输出可能错误或不完整。使用任何经 AI 修改的简历前，你必须自行检查。",
+            "访客使用有速率限制：每小时 10 次聊天、20 次 PDF 导出。"
+          ]
+        },
+        {
+          "heading": "可用性",
+          "paragraphs": [
+            "Offerfy 按现状提供。第一阶段仍是早期产品。我们不保证在线时间、备份，或功能会维持不变。"
+          ]
+        },
+        {
+          "heading": "责任限制",
+          "paragraphs": [
+            "在适用法律允许的范围内，Offerfy 不对你使用本服务所生的间接、附带、特殊或衍生损害，或机会损失负责。",
+            "与本服务有关的请求，我们的总责任上限为你在请求发生前 12 个月内就本服务支付的金额。第一阶段免费提供，因此该金额目前为零。",
+            "部分法域不允许特定责任限制。这些限制仅在法律允许的范围内适用。"
+          ]
+        },
+        {
+          "heading": "变更",
+          "paragraphs": [
+            "我们可能更新本条款。页首日期为最新版本。变更后若你继续使用 Offerfy，即表示接受更新后的条款。"
+          ]
+        },
+        {
+          "heading": "准据法",
+          "paragraphs": [
+            "本条款以台湾（中华民国）法律为准据法，不适用法律冲突规则。"
+          ]
+        },
+        {
+          "heading": "联系",
+          "paragraphs": [
+            "关于本条款的问题：james@offerfy.cc。"
+          ]
+        }
+      ]
+    },
+    "privacy": {
+      "metaTitle": "隐私政策 — Offerfy",
+      "title": "隐私政策",
+      "intro": "本隐私政策说明 Offerfy 如何在 https://offerfy.cc 收集与使用个人数据。内容反映目前第一阶段的实际做法，不构成法律意见。",
+      "sections": [
+        {
+          "heading": "我们是谁",
+          "paragraphs": [
+            "Offerfy 运营 https://offerfy.cc。我们为提供服务而处理个人数据。联系：james@offerfy.cc。"
+          ]
+        },
+        {
+          "heading": "我们收集什么",
+          "paragraphs": [
+            "访客使用：我们设置 offerfy_guest Cookie（HttpOnly、SameSite=Lax，正式环境为 Secure）。我们在数据库存储访客会话、其下的简历，以及速率限制事件。",
+            "登录使用：你以 Google 登录时，我们会从 openid、email 与 profile 权限范围取得标识数据。我们存储你的 Google 主体标识符、电子邮件与语言，并设置 offerfy_session Cookie（HttpOnly、SameSite=Lax，正式环境为 Secure）。",
+            "语言：我们设置 offerfy_locale Cookie，让网站维持你选择的语言。",
+            "主题：浅色／深色偏好存在浏览器的 localStorage，不是 Cookie。",
+            "简历数据：标题、Typst 源码、编译后的 SVG 与 PDF、ATS 可解析性报告，以及聊天消息。",
+            "上传：PDF、PNG、JPG、JPEG、WEBP、TXT、MD，上限 10 MiB，存在对象存储。"
+          ]
+        },
+        {
+          "heading": "使用目的",
+          "paragraphs": [
+            "我们用这些数据提供编辑器、实时预览、PDF 导出、ATS 可解析性检查、身份验证、访客速率限制，以及你选择的语言。"
+          ]
+        },
+        {
+          "heading": "何时会分享",
+          "paragraphs": [
+            "Google：用于登录。",
+            "语言模型提供商：仅在你使用聊天时，我们才会把简历、上传文件与聊天内容送到 OpenAI 兼容的 API。",
+            "基础设施：运行 Offerfy 的数据库、对象存储与主机。",
+            "我们不出售个人数据。Offerfy 目前没有第三方分析产品。"
+          ]
+        },
+        {
+          "heading": "保存期限",
+          "paragraphs": [
+            "访客数据与 offerfy_guest Cookie 绑定。若你失去该 Cookie，就无法再访问该匿名会话。",
+            "登录后的数据会保存到你要求删除为止。目前没有应用内的账号或数据删除功能。请写信至 james@offerfy.cc 提出删除请求。"
+          ]
+        },
+        {
+          "heading": "你的权利",
+          "paragraphs": [
+            "你可以写信至 james@offerfy.cc，请求查阅、更正或删除我们持有关于你的个人数据。我们会依适用于我们的台湾《个人资料保护法》处理。这些页面不主张我们尚未实现的 GDPR 或 CCPA 合规。"
+          ]
+        },
+        {
+          "heading": "儿童",
+          "paragraphs": [
+            "Offerfy 并非以 13 岁以下儿童为对象。产品没有年龄门槛。"
+          ]
+        },
+        {
+          "heading": "跨境处理",
+          "paragraphs": [
+            "Google 与语言模型提供商可能在台湾以外的服务器处理数据。"
+          ]
+        },
+        {
+          "heading": "Cookie",
+          "paragraphs": [
+            "我们使用这些必要 Cookie 来运行服务。没有 Cookie 横幅，因为我们不使用非必要的跟踪 Cookie。"
+          ],
+          "rows": [
+            [
+              "offerfy_guest",
+              "识别匿名会话，让你不必登录就能创建与编辑简历。"
+            ],
+            [
+              "offerfy_session",
+              "Google 登录后维持登录状态。"
+            ],
+            [
+              "offerfy_locale",
+              "记住你选择的语言。"
+            ]
+          ]
+        },
+        {
+          "heading": "变更与联系",
+          "paragraphs": [
+            "我们可能更新本政策。页首日期为最新版本。",
+            "问题请寄：james@offerfy.cc。"
+          ]
+        }
+      ]
+    }
   }
 }

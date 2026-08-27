@@ -25,7 +25,13 @@ export default function Footer({ variant }: Props) {
         }
       >
         <p className="text-sm opacity-80">{t("tagline")}</p>
-        <div className="flex items-center gap-1 sm:gap-4">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Link href="/terms" className="text-sm font-medium">
+            {t("terms")}
+          </Link>
+          <Link href="/privacy" className="text-sm font-medium">
+            {t("privacy")}
+          </Link>
           <LocaleSwitcher />
           <ThemeSwitcher />
           <Link href="/login" className="text-sm font-medium">

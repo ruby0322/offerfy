@@ -179,6 +179,98 @@ textarea {
   background-color: var(--hover);
 }
 
+.legal-article {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 4rem 1.25rem 5rem;
+  color: var(--ink);
+}
+
+.legal-article h1 {
+  font-size: 1.9rem;
+  line-height: 1.18;
+  letter-spacing: -0.03em;
+}
+
+@media (min-width: 768px) {
+  .legal-article h1 {
+    font-size: 2.65rem;
+  }
+}
+
+.legal-updated {
+  margin-top: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.legal-article > p,
+.legal-article section p {
+  margin-top: 1rem;
+  line-height: 1.7;
+}
+
+.legal-article h2 {
+  margin-top: 2.25rem;
+  font-size: 1.25rem;
+  letter-spacing: -0.02em;
+}
+
+.legal-table-wrap {
+  margin-top: 1rem;
+  overflow-x: auto;
+}
+
+.legal-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.legal-table th,
+.legal-table td {
+  border: 1px solid var(--rule);
+  padding: 0.6rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.legal-table th {
+  background: var(--sheet);
+  font-weight: 600;
+}
+
+.legal-table code {
+  font-size: 0.85em;
+}
+
+.legal-see-also {
+  margin-top: 2.5rem;
+}
+
+.legal-see-also a {
+  color: var(--clay);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.legal-agree {
+  margin-top: 1rem;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.legal-agree a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+}
+
+.legal-agree a:hover {
+  color: var(--clay);
+}
+
 .landing-kicker {
   display: inline-flex;
   align-items: center;

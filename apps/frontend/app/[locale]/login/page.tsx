@@ -9,6 +9,7 @@ import { googleStartUrl } from "@/lib/api";
 
 export default function LoginPage() {
   const t = useTranslations("login");
+  const tLegal = useTranslations("legal");
 
   return (
     <div className="rr-shell">
@@ -21,6 +22,12 @@ export default function LoginPage() {
             <GoogleMark />
             {t("google")}
           </a>
+          <p className="legal-agree">
+            {tLegal.rich("loginAgree", {
+              terms: (chunks) => <Link href="/terms">{chunks}</Link>,
+              privacy: (chunks) => <Link href="/privacy">{chunks}</Link>,
+            })}
+          </p>
           <Link href="/" className="rr-back-link mt-8 inline-block text-sm">
             ← {t("back")}
           </Link>
