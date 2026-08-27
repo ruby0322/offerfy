@@ -1,10 +1,24 @@
 import type { Metadata } from "next";
+import { Fraunces, Source_Sans_3 } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages, getTranslations, setRequestLocale } from "next-intl/server";
 import ThemeProvider from "@/components/ThemeProvider";
 import { routing } from "@/i18n/routing";
 import { resolveLocale } from "@/lib/locale";
 import "./globals.css";
+
+const fraunces = Fraunces({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-landing-display",
+});
+
+const sourceSans = Source_Sans_3({
+  subsets: ["latin"],
+  display: "swap",
+  weight: ["400", "500", "600"],
+  variable: "--font-landing-sans",
+});
 
 type Props = {
   children: React.ReactNode;
@@ -37,7 +51,7 @@ export default async function LocaleLayout({ children, params }: Props) {
 
   return (
     <html lang={locale} suppressHydrationWarning>
-      <body>
+      <body className={`${fraunces.variable} ${sourceSans.variable}`}>
         <ThemeProvider>
           <NextIntlClientProvider locale={locale} messages={messages}>
             {children}

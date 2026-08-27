@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Offerfy",
-    "description": "AI 原生求职引擎。先从主简历开始；搜索、定制投递、追踪即将推出。"
+    "description": "一份真的能拿去投的简历。搜索、定制、投递还在路上。"
   },
   "nav": {
     "brand": "Offerfy",
@@ -12,56 +12,37 @@
   "footer": {
     "locales": "语言",
     "google": "Google",
-    "tagline": "Offerfy · 主简历与 ATS 可解析性"
+    "login": "登录",
+    "tagline": "Offerfy · 先把简历做好"
   },
   "landing": {
     "hero": {
-      "kicker": "AI 原生求职引擎",
-      "headline": "搜索 · 定制 · 投递 · 追踪",
-      "sub": "问题不是缺岗位，而是缺执行力",
+      "kicker": "现在可做",
+      "headline": "一份真的能拿去投的简历。",
+      "sub": "搜索、定制、投递还在路上。今天先从简历开始。",
       "ctaCreate": "创建简历",
-      "ctaUpload": "上传简历",
-      "microcopy": "先从主简历开始；搜索、定制投递、追踪即将推出",
-      "loopSearch": "Search",
-      "loopEnhance": "Enhance",
-      "loopTailor": "Tailor",
-      "loopApply": "Apply"
+      "ctaUpload": "上传一份"
     },
-    "problem": {
-      "title": "缺的是执行，不是岗位",
-      "lead": "岗位一直都在。真正卡住的是从找到工作到投出去的那段流程。",
-      "fragmentedTitle": "流程破碎",
-      "fragmentedBody": "搜索、强化简历、按岗位定制、投递、追踪散落在 8–12 个工具里，每次切换都要重来一次。",
-      "switchingTitle": "切换成本",
-      "switchingBody": "每换一个节点就要重贴资料、重对岗位、重开分页。时间花在搬运，不是花在决策。",
-      "qualityTitle": "投递质量不稳",
-      "qualityBody": "时间一赶，定制与投递质量就掉。同一份简历，在压力下的产出会抖动。"
+    "sheet": {
+      "experience": "经历",
+      "education": "学历"
     },
-    "how": {
-      "title": "网络上的完整旅程",
-      "lead": "在同一个产品里走完：匹配、强化主简历、按岗位定制、确认后投递、追踪结果。",
-      "stepMatch": "匹配岗位",
-      "stepEnhance": "强化主简历",
-      "stepTailor": "按岗位定制",
-      "stepConfirm": "确认后投递",
-      "stepTrack": "追踪结果",
-      "interestTitle": "兴趣分级",
-      "coming": "即将推出",
-      "interestLow": "低兴趣：自动投递",
-      "interestMid": "中兴趣：等待确认",
-      "interestHigh": "高兴趣：等待确认"
+    "reasons": {
+      "one": "职位一直都在。卡住的是从看到到送出。",
+      "two": "搜索、改简历、投递散在一堆标签页里，每次都重来。",
+      "three": "赶的时候，投出去的品质会掉。"
     },
-    "nowNext": {
+    "roadmap": {
       "nowTitle": "现在",
-      "nextTitle": "即将推出",
-      "nowMaster": "创建或上传主简历，立即进入编辑器",
-      "nowAts": "ATS 可解析性：检查编译后 PDF 对解析器是否可读",
-      "nowAnon": "匿名即可使用，Google 登录后可保存记录",
-      "nextSearch": "Search：收集并匹配岗位",
-      "nextTailor": "Tailor：按岗位定制版本",
-      "nextApply": "Apply / 追踪：投递与结果反馈",
-      "nextAb": "A/B：用投递结果反馈强化主简历",
-      "atsNote": "ATS 检查的是编译后 PDF 对解析器的可读性，不预测录取机会。"
+      "nextTitle": "接下来",
+      "nowEditor": "创建或上传简历，立刻进入编辑器",
+      "nowAts": "检查编译出的 PDF 能不能被 ATS 解析",
+      "nowAnon": "可匿名使用；用 Google 登录才会保存记录",
+      "nextSearch": "搜索与匹配职位",
+      "nextTailor": "按职位定制",
+      "nextApply": "投递与追踪",
+      "nextAb": "用结果回馈简历",
+      "atsNote": "ATS 只检查编译出的 PDF 能不能被解析，不预测录取。"
     }
   },
   "create": {

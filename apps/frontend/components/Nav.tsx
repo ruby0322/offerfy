@@ -17,7 +17,13 @@ export default function Nav({ variant }: Props) {
 
   return (
     <header className={landing ? "landing-nav" : "rr-nav border-b"}>
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3">
+      <div
+        className={
+          landing
+            ? "mx-auto flex max-w-[44rem] items-center justify-between gap-4 px-5 py-3"
+            : "mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3"
+        }
+      >
         <Link href="/" className="text-lg font-semibold tracking-tight">
           {t("brand")}
         </Link>
@@ -25,7 +31,7 @@ export default function Nav({ variant }: Props) {
           <LocaleSwitcher />
           <ThemeSwitcher />
           <Link href="/login" className={landing ? "text-sm font-medium" : "rr-btn-nav"}>
-            {landing ? t("google") : t("login")}
+            {t("login")}
           </Link>
         </div>
       </div>

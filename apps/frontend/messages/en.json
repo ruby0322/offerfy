@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Offerfy",
-    "description": "An AI-native job engine. Start with a master resume; search, tailored apply, and tracking are coming soon."
+    "description": "A resume that can actually go to work. Search, tailor, and apply are on the way."
   },
   "nav": {
     "brand": "Offerfy",
@@ -12,55 +12,36 @@
   "footer": {
     "locales": "Language",
     "google": "Google",
-    "tagline": "Offerfy · master resume and ATS parseability"
+    "login": "Log in",
+    "tagline": "Offerfy · get the resume right first"
   },
   "landing": {
     "hero": {
-      "kicker": "AI-native job engine",
-      "headline": "Search · Customize · Apply · Track",
-      "sub": "The problem isn't missing listings — it's missing execution",
+      "kicker": "Now shipping",
+      "headline": "A resume that can actually go to work.",
+      "sub": "Search, tailor, and apply are on the way. Start with the resume today.",
       "ctaCreate": "Create resume",
-      "ctaUpload": "Upload resume",
-      "microcopy": "Start with a master resume. Search, tailored apply, and tracking are coming soon.",
-      "loopSearch": "Search",
-      "loopEnhance": "Enhance",
-      "loopTailor": "Tailor",
-      "loopApply": "Apply"
+      "ctaUpload": "or upload one"
     },
-    "problem": {
-      "title": "The gap is execution, not listings",
-      "lead": "Jobs are already out there. What stalls people is the path from finding a role to sending the application.",
-      "fragmentedTitle": "Fragmented flow",
-      "fragmentedBody": "Search, enhance, tailor, apply, and track live in 8–12 tools. Every hop means starting over.",
-      "switchingTitle": "Switching cost",
-      "switchingBody": "Each node means repasting data, re-matching the JD, and opening another tab. Time goes to moving, not deciding.",
-      "qualityTitle": "Unstable apply quality",
-      "qualityBody": "Under time pressure, tailoring and apply quality drop. The same resume produces shaky output when rushed."
+    "sheet": {
+      "experience": "Experience",
+      "education": "Education"
     },
-    "how": {
-      "title": "The journey in one product",
-      "lead": "Stay in one place: match, enhance the master CV, tailor to the JD, confirm apply, then track.",
-      "stepMatch": "Match jobs",
-      "stepEnhance": "Enhance master CV",
-      "stepTailor": "Tailor to JD",
-      "stepConfirm": "Confirm apply",
-      "stepTrack": "Track outcomes",
-      "interestTitle": "Interest grades",
-      "coming": "Coming soon",
-      "interestLow": "Low interest: auto-apply",
-      "interestMid": "Mid interest: wait for confirm",
-      "interestHigh": "High interest: wait for confirm"
+    "reasons": {
+      "one": "Jobs aren't missing. Getting from found to sent is.",
+      "two": "Search, rewrite, and apply live in a pile of tabs. Every hop starts over.",
+      "three": "When you rush, what you send gets worse."
     },
-    "nowNext": {
+    "roadmap": {
       "nowTitle": "Now",
       "nextTitle": "Next",
-      "nowMaster": "Create or upload a master resume and open the editor immediately",
-      "nowAts": "ATS parseability: checks whether the compiled PDF is readable by parsers",
+      "nowEditor": "Create or upload a resume and open the editor immediately",
+      "nowAts": "Checks whether the compiled PDF is readable by ATS parsers",
       "nowAnon": "Works anonymously; Google saves your history",
-      "nextSearch": "Search: collect and match jobs",
-      "nextTailor": "Tailor: JD-specific versions",
-      "nextApply": "Apply / track: submit and follow outcomes",
-      "nextAb": "A/B: feed outcomes back into Enhance",
+      "nextSearch": "Search and match jobs",
+      "nextTailor": "Tailor to the job",
+      "nextApply": "Apply and track",
+      "nextAb": "Feed outcomes back into the resume",
       "atsNote": "ATS checks parseability of the compiled PDF. It does not predict hireability."
     }
   },

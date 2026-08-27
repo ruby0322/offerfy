@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Offerfy",
-    "description": "AI 原生求職引擎。先從主履歷開始，搜尋、客製投遞、追蹤即將推出。"
+    "description": "一份真的能拿去投的履歷。搜尋、客製、投遞還在路上。"
   },
   "nav": {
     "brand": "Offerfy",
@@ -12,56 +12,37 @@
   "footer": {
     "locales": "語言",
     "google": "Google",
-    "tagline": "Offerfy · 主履歷與 ATS 可解析性"
+    "login": "登入",
+    "tagline": "Offerfy · 先把履歷做好"
   },
   "landing": {
     "hero": {
-      "kicker": "AI 原生求職引擎",
-      "headline": "搜尋 · 客製 · 投遞 · 追蹤",
-      "sub": "問題不是缺職缺，而是缺執行力",
+      "kicker": "現在可做",
+      "headline": "一份真的能拿去投的履歷。",
+      "sub": "搜尋、客製、投遞還在路上。今天先從履歷開始。",
       "ctaCreate": "建立履歷",
-      "ctaUpload": "上傳履歷",
-      "microcopy": "先從主履歷開始；搜尋、客製投遞、追蹤即將推出",
-      "loopSearch": "Search",
-      "loopEnhance": "Enhance",
-      "loopTailor": "Tailor",
-      "loopApply": "Apply"
+      "ctaUpload": "上傳一份"
     },
-    "problem": {
-      "title": "缺的是執行，不是職缺",
-      "lead": "職缺一直都在。真正卡住的是從找到工作到投出去的那段流程。",
-      "fragmentedTitle": "流程破碎",
-      "fragmentedBody": "搜尋、強化履歷、依職缺客製、投遞、追蹤散落在 8–12 個工具裡，每次切換都要重來一次。",
-      "switchingTitle": "切換成本",
-      "switchingBody": "每換一個節點就要重貼資料、重對職缺、重開分頁。時間花在搬運，不是花在決策。",
-      "qualityTitle": "投遞品質不穩",
-      "qualityBody": "時間一趕，客製與投遞品質就掉。同一份履歷，在壓力下的產出會抖動。"
+    "sheet": {
+      "experience": "經歷",
+      "education": "學歷"
     },
-    "how": {
-      "title": "網路上的完整旅程",
-      "lead": "在同一個產品裡走完：媒合、強化主履歷、依職缺客製、確認後投遞、追蹤結果。",
-      "stepMatch": "媒合職缺",
-      "stepEnhance": "強化主履歷",
-      "stepTailor": "依職缺客製",
-      "stepConfirm": "確認後投遞",
-      "stepTrack": "追蹤結果",
-      "interestTitle": "興趣分級",
-      "coming": "即將推出",
-      "interestLow": "低興趣：自動投遞",
-      "interestMid": "中興趣：等待確認",
-      "interestHigh": "高興趣：等待確認"
+    "reasons": {
+      "one": "職缺一直都在。卡住的是從看到到送出。",
+      "two": "搜尋、改履歷、投遞散在一堆分頁裡，每次都重來。",
+      "three": "趕的時候，投出去的品質會掉。"
     },
-    "nowNext": {
+    "roadmap": {
       "nowTitle": "現在",
-      "nextTitle": "即將推出",
-      "nowMaster": "建立或上傳主履歷，立即進入編輯器",
-      "nowAts": "ATS 可解析性：檢查編譯後 PDF 對解析器是否可讀",
-      "nowAnon": "匿名即可使用，Google 登入後可保存紀錄",
-      "nextSearch": "Search：蒐集並媒合職缺",
-      "nextTailor": "Tailor：依職缺客製版本",
-      "nextApply": "Apply / 追蹤：投遞與結果回饋",
-      "nextAb": "A/B：用投遞結果回饋強化主履歷",
-      "atsNote": "ATS 檢查的是編譯後 PDF 對解析器的可讀性，不預測錄取機會。"
+      "nextTitle": "接下來",
+      "nowEditor": "建立或上傳履歷，立刻進入編輯器",
+      "nowAts": "檢查編譯出的 PDF 能不能被 ATS 解析",
+      "nowAnon": "可匿名使用；用 Google 登入才會保存紀錄",
+      "nextSearch": "搜尋與配對職缺",
+      "nextTailor": "依職缺客製",
+      "nextApply": "投遞與追蹤",
+      "nextAb": "用結果回饋履歷",
+      "atsNote": "ATS 只檢查編譯出的 PDF 能不能被解析，不預測錄取。"
     }
   },
   "create": {

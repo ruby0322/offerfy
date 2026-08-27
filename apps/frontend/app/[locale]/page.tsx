@@ -1,10 +1,9 @@
 import { setRequestLocale } from "next-intl/server";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
-import HeroLoop from "@/components/landing/HeroLoop";
-import HowItWorks from "@/components/landing/HowItWorks";
-import NowNext from "@/components/landing/NowNext";
-import Problem from "@/components/landing/Problem";
+import Hero from "@/components/landing/Hero";
+import Reasons from "@/components/landing/Reasons";
+import Roadmap from "@/components/landing/Roadmap";
 import { resolveLocale } from "@/lib/locale";
 
 type Props = {
@@ -20,10 +19,9 @@ export default async function LandingPage({ params }: Props) {
     <div className="landing-page">
       <Nav variant="landing" />
       <main>
-        <HeroLoop />
-        <Problem />
-        <HowItWorks />
-        <NowNext />
+        <Hero />
+        <Reasons />
+        <Roadmap />
       </main>
       <Footer variant="landing" />
     </div>
