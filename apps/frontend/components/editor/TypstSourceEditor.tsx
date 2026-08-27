@@ -2,8 +2,9 @@
 
 import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import { autocompletion } from "@codemirror/autocomplete";
+import { indentWithTab } from "@codemirror/commands";
 import { Compartment, EditorState } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { EditorView, keymap } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { typst_lezer } from "codemirror-lang-typst/lezer";
 import { useTheme } from "next-themes";
@@ -60,6 +61,27 @@ function TypstTextareaFallback({
       value={value}
       lang={lang}
       onChange={(event) => onChange(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key !== "Tab") return;
+        event.preventDefault();
+        const el = event.currentTarget;
+        const start = el.selectionStart;
+        const end = el.selectionEnd;
+        if (event.shiftKey) {
+          const before = value.slice(0, start);
+          const cut = before.endsWith("  ") ? 2 : before.endsWith("\t") ? 1 : 0;
+          if (!cut) return;
+          onChange(before.slice(0, -cut) + value.slice(end));
+          queueMicrotask(() => {
+            el.selectionStart = el.selectionEnd = start - cut;
+          });
+          return;
+        }
+        onChange(value.slice(0, start) + "  " + value.slice(end));
+        queueMicrotask(() => {
+          el.selectionStart = el.selectionEnd = start + 2;
+        });
+      }}
       aria-label={ariaLabel}
     />
   );
@@ -112,6 +134,7 @@ function TypstCodeMirror({ value, onChange, ariaLabel, lang }: TypstSourceEditor
           doc: initialDoc,
           extensions: [
             basicSetup,
+            keymap.of([indentWithTab]),
             typst_lezer(),
             autocompletion(),
             themeCompartment.of(editorTheme(isDark)),
