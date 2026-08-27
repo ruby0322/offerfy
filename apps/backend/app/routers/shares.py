@@ -12,6 +12,7 @@ from app.deps import (
 )
 from app.models import Resume, ResumeShare, User
 from app.schemas import PreviewPages, PublicShareOut, ShareState, ShareUpdate
+from app.services.og_image import compose_og_png, og_cache_get, og_cache_put, og_etag
 from app.services.typst_compile import compile_typst, compile_typst_pages
 
 router = APIRouter()
@@ -128,3 +129,33 @@ def public_export(token: str, db: Session = Depends(get_db)):
         media_type="application/pdf",
         headers={"Content-Disposition": _pdf_disposition(resume.title)},
     )
+
+
+def _og_cache_headers(etag: str) -> dict[str, str]:
+    return {
+        "ETag": etag,
+        "Cache-Control": "public, max-age=300",
+    }
+
+
+def _png_response(body: bytes, etag: str) -> RawResponse:
+    return RawResponse(
+        content=body,
+        media_type="image/png",
+        headers=_og_cache_headers(etag),
+    )
+
+
+@router.get("/v1/shares/{token}/og.png")
+def public_og(token: str, request: Request, db: Session = Depends(get_db)):
+    resume = _resume_for_token(token, db)
+    etag = og_etag(resume.typst_source)
+    if request.headers.get("if-none-match") == etag:
+        return RawResponse(status_code=304, headers=_og_cache_headers(etag))
+    cached = og_cache_get(token, etag)
+    if cached is not None:
+        return _png_response(cached, etag)
+    pages = compile_typst_pages(resume.typst_source, "png", pages="1")
+    body = compose_og_png(pages[0])
+    og_cache_put(token, etag, body)
+    return _png_response(body, etag)

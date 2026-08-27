@@ -180,7 +180,10 @@
     "downloading": "Downloading…",
     "preview": "Preview",
     "previewError": "Preview compile failed.",
-    "notFound": "This share link is private or does not exist."
+    "notFound": "This share link is private or does not exist.",
+    "metaTitle": "Resume · Offerfy",
+    "metaDescription": "This resume was made and shared on Offerfy.",
+    "cta": "Create yours"
   },
   "theme": {
     "label": "Theme",

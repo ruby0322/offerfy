@@ -1,10 +1,14 @@
+from io import BytesIO
+
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from app.config import get_settings
 from app.deps import SESSION_COOKIE, _sign
 from app.main import app
 from app.models import User
 from app.services.guest import GUEST_COOKIE
+from app.services.og_image import OG_HEIGHT, OG_WIDTH, og_cache_clear
 
 
 def _session_cookie(user: User) -> dict[str, str]:
@@ -156,3 +160,100 @@ def test_public_share_meta_preview_export(client: TestClient, db_session, monkey
     assert anon.get("/v1/shares/not-a-real-token").status_code == 404
     assert anon.get("/v1/shares/not-a-real-token/preview").status_code == 404
     assert anon.get("/v1/shares/not-a-real-token/export").status_code == 404
+
+
+def _tiny_png() -> bytes:
+    buf = BytesIO()
+    Image.new("RGB", (40, 80), (10, 20, 30)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_public_og_png_anonymous(client, db_session, monkeypatch):
+    og_cache_clear()
+    monkeypatch.setattr(
+        "app.routers.shares.compile_typst_pages",
+        lambda source, fmt, pages=None: [_tiny_png()],
+    )
+    user = _make_user(db_session, sub="sub-og", email="og@example.com")
+    cookies = _session_cookie(user)
+    created = client.post(
+        "/v1/resumes",
+        json={"locale": "en", "title": "Secret Title"},
+        cookies=cookies,
+    ).json()
+    token = client.put(
+        f"/v1/resumes/{created['id']}/share",
+        json={"public": True},
+        cookies=cookies,
+    ).json()["token"]
+
+    anon = TestClient(app)
+    response = anon.get(f"/v1/shares/{token}/og.png")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/png")
+    assert response.content[:8] == b"\x89PNG\r\n\x1a\n"
+    img = Image.open(BytesIO(response.content))
+    assert img.size == (OG_WIDTH, OG_HEIGHT)
+    etag = response.headers["etag"]
+    assert etag
+    assert "max-age=300" in response.headers.get("cache-control", "")
+
+    again = anon.get(f"/v1/shares/{token}/og.png", headers={"If-None-Match": etag})
+    assert again.status_code == 304
+    assert again.headers["etag"] == etag
+    assert "max-age=300" in again.headers.get("cache-control", "")
+
+    assert anon.get("/v1/shares/not-a-real-token/og.png").status_code == 404
+
+
+def test_public_og_png_404_after_private(client, db_session, monkeypatch):
+    og_cache_clear()
+    monkeypatch.setattr(
+        "app.routers.shares.compile_typst_pages",
+        lambda source, fmt, pages=None: [_tiny_png()],
+    )
+    user = _make_user(db_session, sub="sub-og-priv", email="ogp@example.com")
+    cookies = _session_cookie(user)
+    created = client.post(
+        "/v1/resumes", json={"locale": "en", "title": "T"}, cookies=cookies
+    ).json()
+    token = client.put(
+        f"/v1/resumes/{created['id']}/share",
+        json={"public": True},
+        cookies=cookies,
+    ).json()["token"]
+    client.put(
+        f"/v1/resumes/{created['id']}/share",
+        json={"public": False},
+        cookies=cookies,
+    )
+    anon = TestClient(app)
+    assert anon.get(f"/v1/shares/{token}/og.png").status_code == 404
+
+
+def test_public_og_etag_changes_when_source_changes(client, db_session, monkeypatch):
+    og_cache_clear()
+    monkeypatch.setattr(
+        "app.routers.shares.compile_typst_pages",
+        lambda source, fmt, pages=None: [_tiny_png()],
+    )
+    user = _make_user(db_session, sub="sub-og-src", email="ogs@example.com")
+    cookies = _session_cookie(user)
+    created = client.post(
+        "/v1/resumes", json={"locale": "en", "title": "T"}, cookies=cookies
+    ).json()
+    resume_id = created["id"]
+    token = client.put(
+        f"/v1/resumes/{resume_id}/share",
+        json={"public": True},
+        cookies=cookies,
+    ).json()["token"]
+    anon = TestClient(app)
+    first = anon.get(f"/v1/shares/{token}/og.png").headers["etag"]
+    client.put(
+        f"/v1/resumes/{resume_id}",
+        json={"typst_source": created["typst_source"] + "\n// changed\n"},
+        cookies=cookies,
+    )
+    second = anon.get(f"/v1/shares/{token}/og.png").headers["etag"]
+    assert first != second

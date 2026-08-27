@@ -180,7 +180,10 @@
     "downloading": "下載中…",
     "preview": "預覽",
     "previewError": "預覽編譯失敗。",
-    "notFound": "此分享連結已設為私人或不存在。"
+    "notFound": "此分享連結已設為私人或不存在。",
+    "metaTitle": "履歷 · Offerfy",
+    "metaDescription": "這份履歷在 Offerfy 製作並分享。",
+    "cta": "建立你的"
   },
   "theme": {
     "label": "主題",

@@ -15,12 +15,14 @@ type Props = {
   token: string;
 };
 
+type LoadStatus = "loading" | "ok" | "missing" | "error";
+
 export default function ShareView({ token }: Props) {
   const t = useTranslations("share");
   const [title, setTitle] = useState("");
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
-  const [missing, setMissing] = useState(false);
-  const [loadError, setLoadError] = useState(false);
+  const [status, setStatus] = useState<LoadStatus>("loading");
+  const [previewError, setPreviewError] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const previewObjectUrls = useRef<string[]>([]);
 
@@ -42,19 +44,28 @@ export default function ShareView({ token }: Props) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setStatus("loading");
+      setPreviewError(false);
+      setTitle("");
+      setPreviewPages([]);
       try {
         const meta = await getPublicShare(token);
         if (cancelled) return;
         setTitle(meta.title);
-        const pages = await getPublicPreviewPages(token);
-        if (!cancelled) setPreviewPages(pages);
+        setStatus("ok");
+        try {
+          const pages = await getPublicPreviewPages(token);
+          if (!cancelled) setPreviewPages(pages);
+        } catch {
+          if (!cancelled) setPreviewError(true);
+        }
       } catch (err) {
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 404) {
-          setMissing(true);
+          setStatus("missing");
           return;
         }
-        setLoadError(true);
+        setStatus("error");
       }
     })();
     return () => {
@@ -77,7 +88,7 @@ export default function ShareView({ token }: Props) {
     }
   }
 
-  if (missing) {
+  if (status === "missing") {
     return (
       <div className="flex min-h-screen flex-col bg-background">
         <header className="border-b border-border px-4 py-3">
@@ -92,17 +103,18 @@ export default function ShareView({ token }: Props) {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
-      <header className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
-        <Link href="/" className="shrink-0 text-lg font-bold tracking-tight">
+      <header className="border-b border-border px-4 py-3">
+        <Link href="/" className="text-lg font-bold tracking-tight">
           {t("brand")}
         </Link>
-        <span className="truncate text-sm text-muted-foreground">{title}</span>
       </header>
       <div className="min-h-0 flex-1">
         <EditorPreview
           previewUrls={previewUrls}
           previewAlt={t("preview")}
-          previewError={loadError ? t("previewError") : ""}
+          previewError={
+            status === "error" || previewError ? t("previewError") : ""
+          }
           report={null}
           showAts={false}
           downloadLabel={downloading ? t("downloading") : t("download")}
@@ -110,6 +122,14 @@ export default function ShareView({ token }: Props) {
           onDownload={onDownload}
         />
       </div>
+      {status === "ok" && (
+        <p className="shrink-0 border-t border-border px-4 py-3 text-center text-sm text-muted-foreground">
+          {t("metaDescription")}{" "}
+          <Link href="/create" className="font-medium text-foreground underline underline-offset-2">
+            {t("cta")}
+          </Link>
+        </p>
+      )}
     </div>
   );
 }

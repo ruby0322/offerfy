@@ -126,3 +126,19 @@ export function blogPostingJsonLd(input: {
     publisher: organizationNode(),
   };
 }
+
+export function shareOgImageUrl(token: string): string {
+  return `${SITE_URL}/api/v1/shares/${encodeURIComponent(token)}/og.png`;
+}
+
+export async function publicShareExists(token: string): Promise<boolean> {
+  const base = process.env.BACKEND_INTERNAL_URL || "http://backend:8000";
+  try {
+    const res = await fetch(`${base}/v1/shares/${encodeURIComponent(token)}`, {
+      cache: "no-store",
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
