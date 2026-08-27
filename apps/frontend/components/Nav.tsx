@@ -20,7 +20,7 @@ export default function Nav({ variant }: Props) {
       <div
         className={
           landing
-            ? "mx-auto flex max-w-[44rem] items-center justify-between gap-4 px-5 py-3"
+            ? "mx-auto flex max-w-[72rem] items-center justify-between gap-4 px-5 py-3"
             : "mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3"
         }
       >

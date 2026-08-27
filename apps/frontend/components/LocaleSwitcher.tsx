@@ -2,7 +2,7 @@
 
 import { Globe } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { usePathname, useRouter } from "@/i18n/navigation";
 import { routing, type AppLocale } from "@/i18n/routing";
-import { cn } from "@/lib/utils";
 
 const LABELS: Record<AppLocale, string> = {
   en: "English",
@@ -27,14 +26,13 @@ export default function LocaleSwitcher() {
   const pathname = usePathname();
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "text-current")}
-        aria-label={t("locales")}
-      >
-        <Globe className="h-4 w-4" />
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm" className="text-current" aria-label={t("locales")}>
+          <Globe className="h-4 w-4" />
+        </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" className="z-[200]">
         <DropdownMenuRadioGroup
           value={locale}
           onValueChange={(value) => router.replace(pathname, { locale: value as AppLocale })}

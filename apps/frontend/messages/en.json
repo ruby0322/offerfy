@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Offerfy",
-    "description": "A resume that can actually go to work. Search, tailor, and apply are on the way."
+    "description": "The AI resume editor you’ll keep using. Chat edits this file. No account needed."
   },
   "nav": {
     "brand": "Offerfy",
@@ -31,20 +31,11 @@
   },
   "landing": {
     "hero": {
-      "kicker": "Now shipping",
-      "headline": "A resume that can actually go to work.",
-      "sub": "Search, tailor, and apply are on the way. Start with the resume today.",
+      "kicker": "Same resume. Keep editing.",
+      "headline": "The AI resume editor you’ll keep using.",
+      "sub": "Chat edits this file. The PDF updates. Not a generate-and-download. No account needed.",
       "ctaCreate": "Create resume",
       "ctaUpload": "or upload one"
-    },
-    "sheet": {
-      "experience": "Experience",
-      "education": "Education"
-    },
-    "reasons": {
-      "one": "Jobs aren't missing. Getting from found to sent is.",
-      "two": "Search, rewrite, and apply live in a pile of tabs. Every hop starts over.",
-      "three": "When you rush, what you send gets worse."
     },
     "roadmap": {
       "nowTitle": "Now",
@@ -57,6 +48,15 @@
       "nextApply": "Apply and track",
       "nextAb": "Feed outcomes back into the resume",
       "atsNote": "ATS checks parseability of the compiled PDF. It does not predict hireability."
+    },
+    "notes": {
+      "typst": "Typst is how the PDF is typeset — a calmer LaTeX. You see the file, not a black box.",
+      "antiSlop": "This is not another generate-and-download resume. Same file. You come back."
+    },
+    "mock": {
+      "chatPrompt": "Tighten the first Offerfy bullet.",
+      "docTitle": "Resume",
+      "experience": "Experience"
     }
   },
   "create": {

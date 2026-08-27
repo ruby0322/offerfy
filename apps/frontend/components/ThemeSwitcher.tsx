@@ -1,6 +1,6 @@
 "use client";
 
-import { buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8,38 +8,40 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
 import { Laptop, Moon, Sun } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
-import { useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 
-const subscribe = () => () => {};
 const ICON_SIZE = 16;
 
 export default function ThemeSwitcher() {
   const t = useTranslations("theme");
-  const mounted = useSyncExternalStore(subscribe, () => true, () => false);
   const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
 
-  const resolved = mounted ? theme : "system";
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const icon =
+    mounted && theme === "light" ? (
+      <Sun size={ICON_SIZE} />
+    ) : mounted && theme === "dark" ? (
+      <Moon size={ICON_SIZE} />
+    ) : (
+      <Laptop size={ICON_SIZE} />
+    );
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "text-current")}
-        aria-label={t("label")}
-      >
-        {resolved === "light" ? (
-          <Sun size={ICON_SIZE} />
-        ) : resolved === "dark" ? (
-          <Moon size={ICON_SIZE} />
-        ) : (
-          <Laptop size={ICON_SIZE} />
-        )}
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm" className="text-current" aria-label={t("label")}>
+          {icon}
+        </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuRadioGroup value={mounted ? theme : "system"} onValueChange={setTheme}>
+      <DropdownMenuContent align="end" className="z-[200]">
+        <DropdownMenuRadioGroup value={theme} onValueChange={setTheme}>
           <DropdownMenuRadioItem className="flex gap-2" value="light">
             <Sun size={ICON_SIZE} className="text-muted-foreground" />
             <span>{t("light")}</span>

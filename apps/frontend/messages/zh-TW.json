@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Offerfy",
-    "description": "一份真的能拿去投的履歷。搜尋、客製、投遞還在路上。"
+    "description": "一個你會一直回來用的 AI 履歷編輯器。對話裡改履歷，不用登入。"
   },
   "nav": {
     "brand": "Offerfy",
@@ -31,20 +31,11 @@
   },
   "landing": {
     "hero": {
-      "kicker": "現在開始製作",
-      "headline": "一份真能拿去投的履歷。",
-      "sub": "搜尋、客製、投遞還在路上。今天先從履歷開始。",
+      "kicker": "同一份履歷，持續修改",
+      "headline": "一個你會一直回來用的 AI 履歷編輯器",
+      "sub": "對話裡改的是這份履歷，PDF 會一起更新。不是產生完就丟。不用登入。",
       "ctaCreate": "建立履歷",
       "ctaUpload": "上傳一份"
-    },
-    "sheet": {
-      "experience": "經歷",
-      "education": "學歷"
-    },
-    "reasons": {
-      "one": "職缺一直都在。卡住的是從看到到送出。",
-      "two": "搜尋、改履歷、投遞散在一堆分頁裡，每次都重來。",
-      "three": "趕的時候，投出去的品質會掉。"
     },
     "roadmap": {
       "nowTitle": "現在",
@@ -57,6 +48,15 @@
       "nextApply": "投遞與追蹤",
       "nextAb": "用結果回饋履歷",
       "atsNote": "ATS 只檢查編譯出的 PDF 能不能被解析，不預測錄取。"
+    },
+    "notes": {
+      "typst": "PDF 用 Typst 排，有點像更好上手的 LaTeX。原始檔看得到、改得到。",
+      "antiSlop": "這不是產生完就下載的那種。同一份檔，你會一直回來改。"
+    },
+    "mock": {
+      "chatPrompt": "把 Offerfy 的第一則經歷寫具體一點。",
+      "docTitle": "履歷",
+      "experience": "經歷"
     }
   },
   "create": {

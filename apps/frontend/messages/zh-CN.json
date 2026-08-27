@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Offerfy",
-    "description": "一份真的能拿去投的简历。搜索、定制、投递还在路上。"
+    "description": "一个你会一直回来用的 AI 履历编辑器。对话里改履历，不用登录。"
   },
   "nav": {
     "brand": "Offerfy",
@@ -31,20 +31,11 @@
   },
   "landing": {
     "hero": {
-      "kicker": "现在开始制作",
-      "headline": "一份真能拿去投的简历。",
-      "sub": "搜索、定制、投递还在路上。今天先从简历开始。",
+      "kicker": "同一份简历，持续修改",
+      "headline": "一个你会一直回来用的 AI 履历编辑器",
+      "sub": "对话里改的是这份简历，PDF 会一起更新。不是生成完就扔。不用登录。",
       "ctaCreate": "创建简历",
       "ctaUpload": "上传一份"
-    },
-    "sheet": {
-      "experience": "经历",
-      "education": "学历"
-    },
-    "reasons": {
-      "one": "职位一直都在。卡住的是从看到到送出。",
-      "two": "搜索、改简历、投递散在一堆标签页里，每次都重来。",
-      "three": "赶的时候，投出去的品质会掉。"
     },
     "roadmap": {
       "nowTitle": "现在",
@@ -57,6 +48,15 @@
       "nextApply": "投递与追踪",
       "nextAb": "用结果回馈简历",
       "atsNote": "ATS 只检查编译出的 PDF 能不能被解析，不预测录取。"
+    },
+    "notes": {
+      "typst": "PDF 用 Typst 排，有点像更好上手的 LaTeX。源文件看得到、改得到。",
+      "antiSlop": "这不是生成完就下载的那种。同一份文件，你会一直回来改。"
+    },
+    "mock": {
+      "chatPrompt": "把 Offerfy 的第一条经历写具体一点。",
+      "docTitle": "简历",
+      "experience": "经历"
     }
   },
   "create": {

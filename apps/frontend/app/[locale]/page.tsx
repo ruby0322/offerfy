@@ -2,7 +2,7 @@ import { setRequestLocale } from "next-intl/server";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
 import Hero from "@/components/landing/Hero";
-import Reasons from "@/components/landing/Reasons";
+import Notes from "@/components/landing/Notes";
 import Roadmap from "@/components/landing/Roadmap";
 import JsonLd from "@/components/seo/JsonLd";
 import { resolveLocale } from "@/lib/locale";
@@ -23,7 +23,7 @@ export default async function LandingPage({ params }: Props) {
       <JsonLd data={organizationJsonLd()} />
       <main>
         <Hero />
-        <Reasons />
+        <Notes />
         <Roadmap />
       </main>
       <Footer variant="landing" />

@@ -20,7 +20,7 @@ export default function Footer({ variant }: Props) {
       <div
         className={
           landing
-            ? "mx-auto flex max-w-[44rem] flex-wrap items-center justify-between gap-4 px-5 py-8"
+            ? "mx-auto flex max-w-[72rem] flex-wrap items-center justify-between gap-4 px-5 py-8"
             : "mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-8"
         }
       >

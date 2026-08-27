@@ -4,7 +4,7 @@ export default function Roadmap() {
   const t = useTranslations("landing.roadmap");
 
   return (
-    <section className="mx-auto max-w-[44rem] px-5 pb-8 pt-8 md:pb-12 md:pt-4">
+    <section className="mx-auto max-w-[72rem] px-5 pb-12 pt-4 md:pb-16 md:pt-8">
       <div className="landing-roadmap">
         <div>
           <h2 className="font-display">{t("nowTitle")}</h2>
@@ -24,7 +24,7 @@ export default function Roadmap() {
           </ul>
         </div>
       </div>
-      <p className="mt-10 max-w-[40rem] text-sm leading-relaxed text-muted-foreground">
+      <p className="landing-ats-note mt-10 max-w-[42rem] text-sm leading-relaxed text-muted-foreground md:mt-12">
         {t("atsNote")}
       </p>
     </section>
