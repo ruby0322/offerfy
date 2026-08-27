@@ -1,7 +1,9 @@
 import { getTranslations } from "next-intl/server";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
+import JsonLd from "@/components/seo/JsonLd";
 import { Link } from "@/i18n/navigation";
+import { organizationJsonLd } from "@/lib/seo";
 
 export const LEGAL_UPDATED = "2026-08-27";
 
@@ -27,6 +29,7 @@ export default async function LegalDocument({ doc }: Props) {
   return (
     <div className="landing-page">
       <Nav variant="landing" />
+      <JsonLd data={organizationJsonLd()} />
       <main>
         <article className="legal-article">
           <h1 className="font-display">{t("title")}</h1>

@@ -24,9 +24,16 @@ export default function Nav({ variant }: Props) {
             : "mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3"
         }
       >
-        <Link href="/" className="text-lg font-semibold tracking-tight">
-          {t("brand")}
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link href="/" className="text-lg font-semibold tracking-tight">
+            {t("brand")}
+          </Link>
+          {landing ? (
+            <Link href="/blog" className="text-sm font-medium">
+              {t("blog")}
+            </Link>
+          ) : null}
+        </div>
         <div className="flex items-center gap-1 sm:gap-3">
           <LocaleSwitcher />
           <ThemeSwitcher />

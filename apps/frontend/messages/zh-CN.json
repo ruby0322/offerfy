@@ -7,7 +7,8 @@
     "brand": "Offerfy",
     "google": "Google",
     "dashboard": "我的简历",
-    "login": "登录"
+    "login": "登录",
+    "blog": "Blog"
   },
   "footer": {
     "locales": "语言",
@@ -15,7 +16,18 @@
     "login": "登录",
     "tagline": "Offerfy · 先把简历做好",
     "terms": "条款",
-    "privacy": "隐私"
+    "privacy": "隐私",
+    "blog": "Blog"
+  },
+  "blog": {
+    "metaTitle": "Blog · Offerfy",
+    "metaDescription": "Offerfy 的笔记与指南。简历编辑器已上线；搜索、定制、投递还在路上。",
+    "title": "Blog",
+    "empty": "还没有文章。",
+    "guide": "指南",
+    "note": "笔记",
+    "draft": "草稿",
+    "updated": "更新于 {date}"
   },
   "landing": {
     "hero": {

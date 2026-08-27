@@ -7,7 +7,8 @@
     "brand": "Offerfy",
     "google": "Google",
     "dashboard": "我的履歷",
-    "login": "登入"
+    "login": "登入",
+    "blog": "Blog"
   },
   "footer": {
     "locales": "語言",
@@ -15,7 +16,18 @@
     "login": "登入",
     "tagline": "Offerfy · 先把履歷做好",
     "terms": "條款",
-    "privacy": "隱私權"
+    "privacy": "隱私權",
+    "blog": "Blog"
+  },
+  "blog": {
+    "metaTitle": "Blog · Offerfy",
+    "metaDescription": "Offerfy 的筆記與指南。履歷編輯器已上線；搜尋、客製、投遞還在路上。",
+    "title": "Blog",
+    "empty": "還沒有文章。",
+    "guide": "指南",
+    "note": "筆記",
+    "draft": "草稿",
+    "updated": "更新於 {date}"
   },
   "landing": {
     "hero": {

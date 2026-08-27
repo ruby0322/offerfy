@@ -5,6 +5,7 @@ import { getMessages, getTranslations, setRequestLocale } from "next-intl/server
 import ThemeProvider from "@/components/ThemeProvider";
 import { routing } from "@/i18n/routing";
 import { resolveLocale } from "@/lib/locale";
+import { pageMetadata, SITE_URL } from "@/lib/seo";
 import "./globals.css";
 
 const fraunces = Fraunces({
@@ -38,8 +39,13 @@ export async function generateMetadata({
   const locale = resolveLocale(localeParam);
   const t = await getTranslations({ locale, namespace: "meta" });
   return {
-    title: t("title"),
-    description: t("description"),
+    metadataBase: new URL(SITE_URL),
+    ...pageMetadata({
+      locale,
+      href: "/",
+      title: t("title"),
+      description: t("description"),
+    }),
   };
 }
 

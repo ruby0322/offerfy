@@ -7,7 +7,8 @@
     "brand": "Offerfy",
     "google": "Google",
     "dashboard": "My resumes",
-    "login": "Log in"
+    "login": "Log in",
+    "blog": "Blog"
   },
   "footer": {
     "locales": "Language",
@@ -15,7 +16,18 @@
     "login": "Log in",
     "tagline": "Offerfy · get the resume right first",
     "terms": "Terms",
-    "privacy": "Privacy"
+    "privacy": "Privacy",
+    "blog": "Blog"
+  },
+  "blog": {
+    "metaTitle": "Blog · Offerfy",
+    "metaDescription": "Notes and guides from Offerfy. The resume editor is shipping; search, tailor, and apply are on the way.",
+    "title": "Blog",
+    "empty": "Nothing published yet.",
+    "guide": "Guide",
+    "note": "Note",
+    "draft": "Draft",
+    "updated": "Updated {date}"
   },
   "landing": {
     "hero": {
