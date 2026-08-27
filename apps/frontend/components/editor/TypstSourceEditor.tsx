@@ -11,9 +11,10 @@ import { useTheme } from "next-themes";
 
 export type TypstSourceEditorProps = {
   value: string;
-  onChange: (value: string) => void;
+  onChange?: (value: string) => void;
   ariaLabel: string;
   lang?: string;
+  readOnly?: boolean;
 };
 
 function editorTheme(dark: boolean) {
@@ -53,6 +54,7 @@ function TypstTextareaFallback({
   onChange,
   ariaLabel,
   lang,
+  readOnly,
 }: TypstSourceEditorProps) {
   return (
     <textarea
@@ -60,9 +62,13 @@ function TypstTextareaFallback({
       spellCheck={false}
       value={value}
       lang={lang}
-      onChange={(event) => onChange(event.target.value)}
+      readOnly={readOnly}
+      onChange={(event) => {
+        if (readOnly) return;
+        onChange?.(event.target.value);
+      }}
       onKeyDown={(event) => {
-        if (event.key !== "Tab") return;
+        if (readOnly || event.key !== "Tab") return;
         event.preventDefault();
         const el = event.currentTarget;
         const start = el.selectionStart;
@@ -71,13 +77,13 @@ function TypstTextareaFallback({
           const before = value.slice(0, start);
           const cut = before.endsWith("  ") ? 2 : before.endsWith("\t") ? 1 : 0;
           if (!cut) return;
-          onChange(before.slice(0, -cut) + value.slice(end));
+          onChange?.(before.slice(0, -cut) + value.slice(end));
           queueMicrotask(() => {
             el.selectionStart = el.selectionEnd = start - cut;
           });
           return;
         }
-        onChange(value.slice(0, start) + "  " + value.slice(end));
+        onChange?.(value.slice(0, start) + "  " + value.slice(end));
         queueMicrotask(() => {
           el.selectionStart = el.selectionEnd = start + 2;
         });
@@ -103,7 +109,7 @@ class EditorErrorBoundary extends Component<
   }
 }
 
-function TypstCodeMirror({ value, onChange, ariaLabel, lang }: TypstSourceEditorProps) {
+function TypstCodeMirror({ value, onChange, ariaLabel, lang, readOnly }: TypstSourceEditorProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const themeCompartmentRef = useRef<Compartment | null>(null);
@@ -138,14 +144,14 @@ function TypstCodeMirror({ value, onChange, ariaLabel, lang }: TypstSourceEditor
             typst_lezer(),
             autocompletion(),
             themeCompartment.of(editorTheme(isDark)),
+            EditorState.readOnly.of(Boolean(readOnly)),
             EditorView.contentAttributes.of({
               "aria-label": ariaLabel,
               ...(lang ? { lang } : {}),
             }),
             EditorView.updateListener.of((update) => {
-              if (update.docChanged) {
-                onChangeRef.current(update.state.doc.toString());
-              }
+              if (readOnly || !update.docChanged) return;
+              onChangeRef.current?.(update.state.doc.toString());
             }),
           ],
         }),
@@ -166,7 +172,7 @@ function TypstCodeMirror({ value, onChange, ariaLabel, lang }: TypstSourceEditor
     };
     // Theme is reconfigured separately so the editor does not remount on toggle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ariaLabel, initialDoc, lang]);
+  }, [ariaLabel, initialDoc, lang, readOnly]);
 
   useEffect(() => {
     const view = viewRef.current;

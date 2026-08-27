@@ -7,15 +7,18 @@ import CompileErrorDialog from "@/components/editor/CompileErrorDialog";
 import EditorChatPanel from "@/components/editor/EditorChatPanel";
 import EditorHeader from "@/components/editor/EditorHeader";
 import EditorPreview from "@/components/editor/EditorPreview";
+import EditorSettingsPanel from "@/components/editor/EditorSettingsPanel";
 import EditorTemplatePanel from "@/components/editor/EditorTemplatePanel";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ApiError,
+  claimResumes,
   compileResume,
   exportPdf,
   getAtsReport,
   getChatMessages,
+  getMe,
   getPreviewPages,
   getResume,
   putResumeSource,
@@ -23,6 +26,8 @@ import {
   typstCompileDetail,
   type AtsReport,
   type ChatMessage,
+  type ImportStatus,
+  type ResumeSource,
 } from "@/lib/api";
 import { formatUserAttachmentMessage } from "@/lib/chat-tools";
 import type { AtsCheckName } from "@/lib/ats-checks";
@@ -56,6 +61,10 @@ export default function EditorShell({ resumeId }: Props) {
   const tNav = useTranslations("nav");
   const locale = useLocale();
   const [title, setTitle] = useState("");
+  const [createdAt, setCreatedAt] = useState<string | undefined>();
+  const [resumeSource, setResumeSource] = useState<ResumeSource | undefined>();
+  const [resumeLocale, setResumeLocale] = useState<string | undefined>();
+  const [importStatus, setImportStatus] = useState<ImportStatus | undefined>();
   const [source, setSource] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -115,9 +124,25 @@ export default function EditorShell({ resumeId }: Props) {
     let cancelled = false;
     (async () => {
       try {
+        try {
+          const me = await getMe();
+          if (me) {
+            try {
+              await claimResumes();
+            } catch {
+              /* claim is best-effort */
+            }
+          }
+        } catch {
+          /* auth check is optional */
+        }
         const resume = await getResume(resumeId);
         if (cancelled) return;
         setTitle(resume.title || "");
+        setCreatedAt(resume.created_at);
+        setResumeSource(resume.source);
+        setResumeLocale(resume.locale);
+        setImportStatus(resume.import_status);
         setSource(resume.typst_source || "");
         try {
           const history = await getChatMessages(resumeId);
@@ -435,11 +460,20 @@ export default function EditorShell({ resumeId }: Props) {
               onValueChange={setLeftTab}
               className="flex h-full min-h-0 flex-col gap-0"
             >
-              <div className="flex shrink-0 items-center overflow-x-auto border-b border-border bg-background px-3 py-2">
-                <TabsList>
-                  <TabsTrigger value="typst">{t("tabTypst")}</TabsTrigger>
-                  <TabsTrigger value="chat">{t("tabChat")}</TabsTrigger>
-                  <TabsTrigger value="template">{t("tabTemplate")}</TabsTrigger>
+              <div className="flex shrink-0 items-center overflow-x-auto border-b border-border bg-background px-2 py-2 sm:px-3">
+                <TabsList className="shrink-0">
+                  <TabsTrigger value="typst" className="px-1.5 text-xs sm:px-2 sm:text-sm">
+                    {t("tabTypst")}
+                  </TabsTrigger>
+                  <TabsTrigger value="chat" className="px-1.5 text-xs sm:px-2 sm:text-sm">
+                    {t("tabChat")}
+                  </TabsTrigger>
+                  <TabsTrigger value="template" className="px-1.5 text-xs sm:px-2 sm:text-sm">
+                    {t("tabTemplate")}
+                  </TabsTrigger>
+                  <TabsTrigger value="settings" className="px-1.5 text-xs sm:px-2 sm:text-sm">
+                    {t("tabSettings")}
+                  </TabsTrigger>
                 </TabsList>
               </div>
               <TabsContent
@@ -484,6 +518,20 @@ export default function EditorShell({ resumeId }: Props) {
                 className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
               >
                 <EditorTemplatePanel sending={sending} onApply={onApplyTemplate} />
+              </TabsContent>
+              <TabsContent
+                value="settings"
+                className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+              >
+                <EditorSettingsPanel
+                  resumeId={resumeId}
+                  title={title}
+                  createdAt={createdAt}
+                  source={resumeSource}
+                  resumeLocale={resumeLocale}
+                  importStatus={importStatus}
+                  onTitleChange={setTitle}
+                />
               </TabsContent>
             </Tabs>
             </div>

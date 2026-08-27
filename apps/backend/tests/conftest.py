@@ -3,6 +3,7 @@ import os
 # Tests must never inherit the repo .env Postgres URL. setdefault is not
 # enough: a exported DATABASE_URL makes drop_all wipe the live database.
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+os.environ["APP_ENV"] = "development"
 os.environ.setdefault("AUTH_TOKEN_SECRET", "test-secret-for-unit-tests")
 os.environ.setdefault("OPENAI_MODEL", "gpt-5.6-terra")
 os.environ["OPENAI_API_KEY"] = ""

@@ -68,6 +68,27 @@ def require_user(user: User | None = Depends(get_current_user)) -> User:
     return user
 
 
+def admin_email_set() -> set[str]:
+    raw = get_settings().admin_emails or ""
+    return {part.strip().casefold() for part in raw.split(",") if part.strip()}
+
+
+def require_admin(user: User | None = Depends(get_current_user)) -> User:
+    if user is None:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    allowed = admin_email_set()
+    if not allowed or (user.email or "").strip().casefold() not in allowed:
+        raise HTTPException(status_code=404, detail="Not found")
+    return user
+
+
+def load_resume_for_admin(resume_id: str, db: Session) -> Resume:
+    resume = db.get(Resume, resume_id)
+    if resume is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    return resume
+
+
 def load_resume_for_owner(
     resume_id: str,
     request: Request,

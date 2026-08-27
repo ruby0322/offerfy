@@ -120,6 +120,7 @@ export type AuthUser = {
   id?: string;
   email?: string | null;
   locale?: string | null;
+  picture?: string | null;
 };
 
 function asResume(data: unknown): Resume {
@@ -234,6 +235,39 @@ export async function getAtsReport(id: string): Promise<AtsReport> {
 
 export async function exportPdf(id: string): Promise<Blob> {
   return apiBlob(`/api/v1/resumes/${id}/export`);
+}
+
+export type ShareState = { public: boolean; token: string | null };
+
+export type PublicShare = { title: string; locale: string };
+
+export async function getResumeShare(id: string): Promise<ShareState> {
+  return apiJson<ShareState>(`/api/v1/resumes/${id}/share`);
+}
+
+export async function putResumeShare(id: string, isPublic: boolean): Promise<ShareState> {
+  return apiJson<ShareState>(`/api/v1/resumes/${id}/share`, {
+    method: "PUT",
+    body: JSON.stringify({ public: isPublic }),
+  });
+}
+
+export async function getPublicShare(token: string): Promise<PublicShare> {
+  return apiJson<PublicShare>(`/api/v1/shares/${encodeURIComponent(token)}`);
+}
+
+export async function getPublicPreviewPages(token: string): Promise<string[]> {
+  const data = await apiJson<unknown>(
+    `/api/v1/shares/${encodeURIComponent(token)}/preview`,
+  );
+  if (data && typeof data === "object" && Array.isArray((data as { pages?: unknown }).pages)) {
+    return (data as { pages: unknown[] }).pages.filter((page): page is string => typeof page === "string");
+  }
+  return [];
+}
+
+export async function exportPublicPdf(token: string): Promise<Blob> {
+  return apiBlob(`/api/v1/shares/${encodeURIComponent(token)}/export`);
 }
 
 export type UniverseTemplate = {
@@ -385,6 +419,187 @@ export async function logout(): Promise<void> {
   await apiJson("/api/v1/auth/logout", { method: "POST" });
 }
 
-export function googleStartUrl(): string {
+const EDITOR_NEXT =
+  /^\/editor\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+export function googleStartUrl(next?: string): string {
+  if (
+    next &&
+    (next === "/admin" || next.startsWith("/admin/") || EDITOR_NEXT.test(next))
+  ) {
+    return `/api/v1/auth/google/start?next=${encodeURIComponent(next)}`;
+  }
   return "/api/v1/auth/google/start";
+}
+
+export type AdminOwnerKind = "user" | "guest";
+
+export type AdminHealth = {
+  api: string;
+  database: string;
+  s3_configured: boolean;
+};
+
+export type AdminCounts = {
+  users: number;
+  guest_sessions: number;
+  resumes: number;
+  resumes_create: number;
+  resumes_upload: number;
+  resumes_guest: number;
+  resumes_user: number;
+  chat_messages_24h: number;
+  chat_messages_7d: number;
+  guest_rate_chat_24h: number;
+  guest_rate_export_24h: number;
+};
+
+export type AdminRecentUser = {
+  id: string;
+  email: string;
+  locale: string;
+  created_at: string;
+  resume_count: number;
+};
+
+export type AdminRecentResume = {
+  id: string;
+  title: string;
+  source: string;
+  import_status: string;
+  owner_kind: AdminOwnerKind;
+  owner_label: string;
+  created_at: string;
+  message_count: number;
+};
+
+export type AdminDayPoint = {
+  date: string;
+  users: number;
+  resumes_create: number;
+  resumes_upload: number;
+  chats: number;
+  guest_rate_chat: number;
+  guest_rate_export: number;
+};
+
+export type AdminOverview = {
+  health: AdminHealth;
+  counts: AdminCounts;
+  series: AdminDayPoint[];
+  recent_users: AdminRecentUser[];
+  recent_resumes: AdminRecentResume[];
+};
+
+export type AdminUserListItem = {
+  id: string;
+  email: string;
+  locale: string;
+  picture: string | null;
+  created_at: string;
+  resume_count: number;
+};
+
+export type AdminUserResume = {
+  id: string;
+  title: string;
+  source: string;
+  import_status: string;
+  created_at: string;
+  message_count: number;
+};
+
+export type AdminUserDetail = {
+  id: string;
+  email: string;
+  google_sub: string;
+  locale: string;
+  picture: string | null;
+  created_at: string;
+  resumes: AdminUserResume[];
+};
+
+export type AdminResumeListItem = {
+  id: string;
+  title: string;
+  source: string;
+  import_status: string;
+  locale: string;
+  owner_kind: AdminOwnerKind;
+  owner_id: string;
+  owner_label: string;
+  claimed_at: string | null;
+  created_at: string;
+  message_count: number;
+};
+
+export type AdminResumeDetail = AdminResumeListItem & {
+  typst_source: string;
+};
+
+export type AdminChatMessage = {
+  id: string;
+  role: string;
+  content: string;
+  created_at: string;
+};
+
+export type AdminPage<T> = {
+  items: T[];
+  total: number;
+};
+
+function adminQuery(params: Record<string, string | number | undefined>): string {
+  const sp = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === "") continue;
+    sp.set(key, String(value));
+  }
+  const text = sp.toString();
+  return text ? `?${text}` : "";
+}
+
+export async function adminOverview(): Promise<AdminOverview> {
+  return apiJson<AdminOverview>("/api/v1/admin/overview");
+}
+
+export async function adminUsers(params: {
+  q?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<AdminPage<AdminUserListItem>> {
+  return apiJson(`/api/v1/admin/users${adminQuery(params)}`);
+}
+
+export async function adminUser(id: string): Promise<AdminUserDetail> {
+  return apiJson(`/api/v1/admin/users/${id}`);
+}
+
+export async function adminResumes(params: {
+  q?: string;
+  owner?: string;
+  source?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<AdminPage<AdminResumeListItem>> {
+  return apiJson(`/api/v1/admin/resumes${adminQuery(params)}`);
+}
+
+export async function adminResume(id: string): Promise<AdminResumeDetail> {
+  return apiJson(`/api/v1/admin/resumes/${id}`);
+}
+
+export async function adminResumeMessages(id: string): Promise<AdminChatMessage[]> {
+  const data = await apiJson<{ items: AdminChatMessage[] }>(
+    `/api/v1/admin/resumes/${id}/messages`,
+  );
+  return data.items;
+}
+
+export async function adminResumePreview(id: string): Promise<{ pages: string[] }> {
+  return apiJson(`/api/v1/admin/resumes/${id}/preview`);
+}
+
+export async function adminResumeAts(id: string): Promise<AtsReport> {
+  return apiJson(`/api/v1/admin/resumes/${id}/ats`);
 }

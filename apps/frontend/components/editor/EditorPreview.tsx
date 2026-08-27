@@ -18,6 +18,7 @@ type Props = {
   onFixAts?: (name: AtsCheckName) => void;
   fixingAts?: boolean;
   overlay?: ReactNode;
+  showAts?: boolean;
 };
 
 export default function EditorPreview({
@@ -31,6 +32,7 @@ export default function EditorPreview({
   onFixAts,
   fixingAts,
   overlay,
+  showAts = true,
 }: Props) {
   const [scale, setScale] = useState(1);
 
@@ -78,7 +80,9 @@ export default function EditorPreview({
         </div>
         {overlay}
       </div>
-      <AtsStrip report={report} onFix={onFixAts} fixing={fixingAts} />
+      {showAts ? (
+        <AtsStrip report={report} onFix={onFixAts} fixing={fixingAts} />
+      ) : null}
     </div>
   );
 }

@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 from fastapi import HTTPException
 from types import SimpleNamespace
 import json
+import threading
 
 import pytest
 
@@ -115,7 +116,7 @@ def test_chat_read_then_search_replace_and_second_read(
             llm_message(content="Updated the name."),
         ]
     )
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
 
     result = post_chat(client, created["id"], json={"message": "Rename me to Ada Lovelace"})
     assert result["status"] == 200
@@ -211,7 +212,7 @@ def test_chat_stale_source_plus_search_replace_applies_search(
             llm_message(content="Renamed."),
         ]
     )
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
     result = post_chat(client, created["id"], json={"message": "Rename me to Ada Lovelace"})
     assert result["status"] == 200
     body = result["json"]
@@ -249,7 +250,7 @@ def test_chat_noop_search_with_full_source_rewrites(
             llm_message(content="Rewrote from the attachment."),
         ]
     )
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
     result = post_chat(client, created["id"], json={"message": "Rewrite from my old resume"})
     assert result["status"] == 200
     body = result["json"]
@@ -278,7 +279,7 @@ def test_chat_full_source_write_includes_real_diff(
             llm_message(content="Rewrote the name."),
         ]
     )
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
     result = post_chat(client, created["id"], json={"message": "Rename me to Ada Lovelace"})
     assert result["status"] == 200
     body = result["json"]
@@ -314,7 +315,7 @@ def test_chat_noop_source_write_is_not_applied(
             llm_message(content="Already correct."),
         ]
     )
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
     result = post_chat(client, created["id"], json={"message": "Fix the name"})
     assert result["status"] == 200
     body = result["json"]
@@ -332,7 +333,7 @@ def test_chat_read_only_does_not_mark_applied(
             llm_message(content="Looks good."),
         ]
     )
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
     result = post_chat(client, created["id"], json={"message": "What is on this resume?"})
     assert result["status"] == 200
     body = result["json"]
@@ -353,7 +354,7 @@ def test_chat_web_search_is_traced(client: TestClient, openai_enabled, monkeypat
             )
         ]
     )
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
     result = post_chat(client, created["id"], json={"message": "Who was Ada Lovelace?"})
     assert result["status"] == 200
     body = result["json"]
@@ -386,7 +387,7 @@ def test_chat_read_ats_returns_failed_checks(
             llm_message(content="Dates should use YYYY-MM or Present."),
         ]
     )
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
 
     result = post_chat(client, created["id"], json={"message": "Why did the ATS check fail?"})
     assert result["status"] == 200
@@ -422,7 +423,7 @@ def test_chat_read_ats_compile_error(
             llm_message(content="The PDF does not compile yet."),
         ]
     )
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
     result = post_chat(client, created["id"], json={"message": "Check ATS"})
     assert result["status"] == 200
     tools = [
@@ -450,11 +451,17 @@ def test_chat_surfaces_provider_error_message(
         def __exit__(self, *args):
             return False
 
-        def post(self, url, headers=None, json=None):
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, headers=None, json=None):
             payload = {"error": {"message": "invalid model ID", "type": "invalid_request_error"}}
             return SimpleNamespace(status_code=400, json=lambda: payload, text="bad")
 
-    monkeypatch.setattr("app.services.llm.httpx.Client", FailingOpenAI)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", FailingOpenAI)
     result = post_chat(client, created["id"], json={"message": "Rename me"})
     assert result["status"] == 200
     assert result["error"] is not None
@@ -477,7 +484,7 @@ def test_chat_attachment_txt_reaches_llm_and_is_stored(
 ):
     created = client.post("/v1/resumes", json={"locale": "en"}).json()
     scripted = ScriptedOpenAI([llm_message(content="Noted the attached notes.")])
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
     result = post_chat(
         client,
         created["id"],
@@ -533,7 +540,7 @@ def test_chat_fill_prompt_with_file_rewrites_source(
         timeouts.append(kwargs.get("timeout"))
         return scripted
 
-    monkeypatch.setattr("app.services.llm.httpx.Client", fake_client)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", fake_client)
     result = post_chat(
         client,
         created["id"],
@@ -582,7 +589,7 @@ def test_chat_fill_prompt_repairs_compile_error(
             llm_message(content="Fixed the compile errors."),
         ]
     )
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
     result = post_chat(
         client,
         created["id"],
@@ -638,7 +645,7 @@ def test_chat_plain_edit_repairs_compile_error(
             llm_message(content="Fixed the compile errors."),
         ]
     )
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
     result = post_chat(client, created["id"], json={"message": "Rename me to Ada Lovelace"})
     assert result["status"] == 200
     body = result["json"]
@@ -678,7 +685,7 @@ def test_chat_edit_sanitizes_unescaped_quotes_so_it_compiles(
             llm_message(content="Updated the name."),
         ]
     )
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
     result = post_chat(client, created["id"], json={"message": "Set my name to Wei Eric Chen"})
     assert result["status"] == 200
     body = result["json"]
@@ -695,7 +702,7 @@ def test_chat_attachment_only_file_is_allowed(
 ):
     created = client.post("/v1/resumes", json={"locale": "en"}).json()
     scripted = ScriptedOpenAI([llm_message(content="Using the file.")])
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
     result = post_chat(
         client,
         created["id"],
@@ -753,7 +760,7 @@ def test_chat_template_switch_rewrites_full_source_despite_unmatched_search(
         timeouts.append(kwargs.get("timeout"))
         return scripted
 
-    monkeypatch.setattr("app.services.llm.httpx.Client", fake_client)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", fake_client)
     result = post_chat(client, created["id"], json={"message": prompt})
     assert result["status"] == 200
     body = result["json"]
@@ -794,7 +801,7 @@ def test_chat_prefer_full_source_flag_writes_document(
             llm_message(content="Rewrote."),
         ]
     )
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
     result = post_chat(
         client,
         created["id"],
@@ -848,7 +855,7 @@ def test_chat_template_switch_includes_package_example(
     created = client.post("/v1/resumes", json={"locale": "en"}).json()
     prompt = apply_prompt("acorn-resume", "0.1.0")
     scripted = ScriptedOpenAI([llm_message(content="ok")])
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
     result = post_chat(client, created["id"], json={"message": prompt})
     assert result["status"] == 200
     systems = _system_blobs(scripted.requests)
@@ -888,7 +895,7 @@ def test_chat_template_switch_repairs_compile_error(
             llm_message(content="Fixed the compile errors."),
         ]
     )
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
     result = post_chat(client, created["id"], json={"message": prompt})
     assert result["status"] == 200
     body = result["json"]
@@ -932,7 +939,7 @@ def test_chat_noop_edit_retries_instead_of_asking_user(
             llm_message(content="Updated the name."),
         ]
     )
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
 
     result = post_chat(client, created["id"], json={"message": "Rename me to Ada Lovelace"})
     assert result["status"] == 200
@@ -995,7 +1002,7 @@ def test_chat_search_not_found_retries_instead_of_stopping(
             llm_message(content="Updated the name."),
         ]
     )
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
 
     result = post_chat(client, created["id"], json={"message": "Rename me to Ada Lovelace"})
     assert result["status"] == 200
@@ -1005,3 +1012,37 @@ def test_chat_search_not_found_retries_instead_of_stopping(
     edits = _edit_results(body)
     assert "error" in edits[0]["result"]
     assert edits[-1]["result"]["changed"] is True
+
+
+def test_compile_status_runs_off_request_thread(
+    client: TestClient, openai_enabled, monkeypatch
+):
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    main_ident = threading.get_ident()
+    seen: list[int] = []
+
+    def wrapped(source: str):
+        seen.append(threading.get_ident())
+        return {"ok": True}
+
+    monkeypatch.setattr("app.services.llm.compile_status", wrapped)
+    scripted = ScriptedOpenAI(
+        [
+            llm_message(tool_calls=[tool_call("read_typst", {}, "read-1")]),
+            llm_message(
+                tool_calls=[
+                    tool_call(
+                        "apply_typst_edit",
+                        {"search": "Your Name", "replace": "Ada Lovelace"},
+                        "edit-1",
+                    )
+                ]
+            ),
+            llm_message(content="Updated the name."),
+        ]
+    )
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+    result = post_chat(client, created["id"], json={"message": "Rename me to Ada Lovelace"})
+    assert result["status"] == 200
+    assert seen
+    assert all(ident != main_ident for ident in seen)

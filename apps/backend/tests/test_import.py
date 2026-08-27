@@ -43,7 +43,7 @@ def test_upload_is_idle_starter_without_extracted_comments(client: TestClient):
 
 def test_upload_does_not_call_llm(client: TestClient, openai_enabled, monkeypatch):
     scripted = ScriptedOpenAI([llm_message(content="should not run")])
-    monkeypatch.setattr("app.services.llm.httpx.Client", lambda *a, **k: scripted)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
     response = _upload(client)
     assert response.status_code == 201
     assert response.json()["import_status"] == "idle"

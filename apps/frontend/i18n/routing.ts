@@ -2,8 +2,8 @@ import { defineRouting } from "next-intl/routing";
 
 export const routing = defineRouting({
   locales: ["en", "zh-TW", "zh-CN"],
-  defaultLocale: "zh-TW",
-  localePrefix: "as-needed",
+  defaultLocale: "en",
+  localePrefix: "always",
   localeDetection: false,
   localeCookie: {
     name: "offerfy_locale",

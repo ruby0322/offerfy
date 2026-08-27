@@ -23,6 +23,7 @@ class ResumeOut(BaseModel):
     import_status: str = "idle"
     upload_s3_key: str | None = None
     claimed_at: str | None = None
+    created_at: str
 
     model_config = {"from_attributes": True}
 
@@ -80,3 +81,17 @@ class AuthMe(BaseModel):
 
 class ClaimResponse(BaseModel):
     claimed: int
+
+
+class ShareUpdate(BaseModel):
+    public: bool
+
+
+class ShareState(BaseModel):
+    public: bool
+    token: str | None = None
+
+
+class PublicShareOut(BaseModel):
+    title: str
+    locale: str

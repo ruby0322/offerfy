@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 from urllib.parse import urlencode
 
@@ -21,6 +22,16 @@ from app.services.guest import GUEST_COOKIE, hash_guest_key
 router = APIRouter()
 
 
+def _google_picture(info: dict) -> str | None:
+    raw = info.get("picture")
+    if not isinstance(raw, str):
+        return None
+    url = raw.strip()
+    if url.startswith("https://") and len(url) <= 1024:
+        return url
+    return None
+
+
 def _public_origin(request: Request) -> str:
     proto = request.headers.get("x-forwarded-proto", request.url.scheme)
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
@@ -33,6 +44,24 @@ def _redirect_uri(request: Request) -> str:
         return settings.google_redirect_uri
     # Browser hits Next's /api rewrite, not the backend path.
     return f"{_public_origin(request)}/api/v1/auth/google/callback"
+
+
+_EDITOR_NEXT = re.compile(
+    r"^/editor/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+def _safe_next(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    path = raw.strip()
+    if "//" in path or "://" in path or "\\" in path:
+        return None
+    if path == "/admin" or path.startswith("/admin/"):
+        return path
+    if _EDITOR_NEXT.fullmatch(path):
+        return path
+    return None
 
 
 @router.get("/v1/auth/google/start")
@@ -48,6 +77,9 @@ def google_start(request: Request):
         "access_type": "online",
         "prompt": "select_account",
     }
+    nxt = _safe_next(request.query_params.get("next"))
+    if nxt:
+        params["state"] = nxt
     url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
     return RedirectResponse(url, status_code=302)
 
@@ -94,15 +126,18 @@ def google_callback(request: Request, code: str | None = None, db: Session = Dep
     if not sub or not email:
         raise HTTPException(status_code=400, detail="Google sign-in failed")
 
+    picture = _google_picture(info)
     user = db.query(User).filter(User.google_sub == sub).one_or_none()
     if user is None:
-        user = User(google_sub=sub, email=email, locale="zh-TW")
+        user = User(google_sub=sub, email=email, locale="zh-TW", picture=picture)
         db.add(user)
         db.flush()
     else:
         user.email = email
+        user.picture = picture
 
-    redirect = RedirectResponse("/dashboard", status_code=302)
+    next_path = _safe_next(request.query_params.get("state"))
+    redirect = RedirectResponse(next_path or "/dashboard", status_code=302)
     set_session_cookie(redirect, user.id)
     return redirect
 
@@ -138,7 +173,12 @@ def me(user: User | None = Depends(get_current_user)):
     if user is None:
         return AuthMe(user=None, guest=True)
     return AuthMe(
-        user={"id": user.id, "email": user.email, "locale": user.locale},
+        user={
+            "id": user.id,
+            "email": user.email,
+            "locale": user.locale,
+            "picture": user.picture,
+        },
         guest=False,
     )
 

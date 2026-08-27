@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import Response as RawResponse
 from sqlalchemy.orm import Session
@@ -37,8 +39,15 @@ def _validate_locale(locale: str | None) -> str:
     return value
 
 
+def _iso(dt: datetime | None) -> str | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None or dt.utcoffset() is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
+
 def _to_out(resume: Resume) -> ResumeOut:
-    claimed = resume.claimed_at.isoformat() if resume.claimed_at else None
     return ResumeOut(
         id=resume.id,
         title=resume.title,
@@ -47,7 +56,8 @@ def _to_out(resume: Resume) -> ResumeOut:
         locale=resume.locale,
         import_status=resume.import_status,
         upload_s3_key=resume.upload_s3_key,
-        claimed_at=claimed,
+        claimed_at=_iso(resume.claimed_at),
+        created_at=_iso(resume.created_at) or "",
     )
 
 
@@ -207,7 +217,12 @@ def put_resume(
     if body.typst_source is not None:
         resume.typst_source = body.typst_source
     if body.title is not None:
-        resume.title = body.title
+        stripped = body.title.strip()
+        if not stripped:
+            raise HTTPException(status_code=400, detail="Title is required")
+        if len(stripped) > 255:
+            raise HTTPException(status_code=400, detail="Title is too long")
+        resume.title = stripped
     db.flush()
     out = _to_out(resume)
     db.commit()

@@ -3,7 +3,8 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Repo-root .env (same file docker compose reads). Not apps/backend/.env.
+# Dest / compose read repo-root .env. Public systemd injects .env.production
+# (process env overrides this file). Not apps/backend/.env.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -30,6 +31,7 @@ class Settings(BaseSettings):
     auth_token_secret: str = "dev-insecure-change-me"
     app_env: str = "development"
     google_redirect_uri: str | None = None
+    admin_emails: str = ""
 
     def s3_configured(self) -> bool:
         return all(

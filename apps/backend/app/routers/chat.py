@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pathlib import Path
+import asyncio
 import json
 
 from app.db import get_db
@@ -10,7 +11,7 @@ from app.models import ChatMessage, User
 from app.schemas import ChatMessageOut, ChatRequest
 from app.services.attachment import llm_content_for_upload, stored_user_message
 from app.services.extract import MAX_UPLOAD_BYTES, allowed_upload, extract_upload_text
-from app.services.llm import TEMPLATE_SWITCH_EXTRA, iter_chat_edit, llm_configured
+from app.services.llm import TEMPLATE_SWITCH_EXTRA, aiter_chat_edit, llm_configured
 from app.services.rate_limit import enforce_guest_rate
 from app.services.s3 import put_object
 from app.services.templates import is_template_switch_message, parse_preview_spec, template_api_block
@@ -158,11 +159,11 @@ async def chat(
     if spec:
         extra += template_api_block(*spec)
 
-    def generate():
+    async def generate():
         assistant_text = ""
         new_source = original_source
         try:
-            for event in iter_chat_edit(
+            async for event in aiter_chat_edit(
                 messages,
                 original_source,
                 prefer_full_source=prefer_full_source,
@@ -200,7 +201,7 @@ async def chat(
                     )
             repairs = 0
             while new_source != original_source and repairs < 3:
-                status = compile_status(new_source)
+                status = await asyncio.to_thread(compile_status, new_source)
                 if status.get("ok") is not False:
                     break
                 repairs += 1
@@ -232,7 +233,7 @@ async def chat(
                         ),
                     },
                 ]
-                for event in iter_chat_edit(
+                async for event in aiter_chat_edit(
                     repair_messages,
                     new_source,
                     prefer_full_source=True,

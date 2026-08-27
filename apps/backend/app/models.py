@@ -22,6 +22,10 @@ class User(Base):
     google_sub: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     locale: Mapped[str] = mapped_column(String(16), nullable=False, default="zh-TW")
+    picture: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
 
     resumes: Mapped[list["Resume"]] = relationship(back_populates="user")
 
@@ -73,12 +77,36 @@ class Resume(Base):
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     upload_s3_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     import_status: Mapped[str] = mapped_column(String(16), nullable=False, default="idle")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
 
     guest_session: Mapped[GuestSession | None] = relationship(back_populates="resumes")
     user: Mapped[User | None] = relationship(back_populates="resumes")
     messages: Mapped[list["ChatMessage"]] = relationship(
         back_populates="resume", cascade="all, delete-orphan"
     )
+    share: Mapped["ResumeShare | None"] = relationship(
+        back_populates="resume", uselist=False, cascade="all, delete-orphan"
+    )
+
+
+class ResumeShare(Base):
+    __tablename__ = "resume_shares"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    resume_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("resumes.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+    )
+    token: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    resume: Mapped[Resume] = relationship(back_populates="share")
 
 
 class ChatMessage(Base):

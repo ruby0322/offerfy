@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -315,7 +316,7 @@ def _edit_needs_retry(name: str | None, parsed: Any) -> bool:
     return parsed.get("changed") is False
 
 
-def iter_llm_turn(
+async def aiter_llm_turn(
     messages: list[dict],
     typst_source: str,
     *,
@@ -325,7 +326,7 @@ def iter_llm_turn(
     prefer_full_source: bool = False,
     verify_compile: bool = False,
 ):
-    """Yield tool/source/assistant events. OpenAI calls stay blocking."""
+    """Yield tool/source/assistant events. OpenAI waits on the event loop."""
     if not llm_configured():
         raise HTTPException(status_code=503, detail="Chat is not configured")
     settings = get_settings()
@@ -343,7 +344,7 @@ def iter_llm_turn(
         "Content-Type": "application/json",
     }
 
-    with httpx.Client(timeout=timeout) as client:
+    async with httpx.AsyncClient(timeout=timeout) as client:
         for _ in range(max_rounds):
             body = {
                 "model": model,
@@ -355,7 +356,7 @@ def iter_llm_turn(
                 **completions_tool_extras(model),
             }
             try:
-                resp = client.post(url, headers=headers, json=body)
+                resp = await client.post(url, headers=headers, json=body)
             except httpx.HTTPError as exc:
                 logger.warning("openai chat transport failed: %s", exc.__class__.__name__)
                 raise HTTPException(status_code=502, detail="Chat request failed") from exc
@@ -384,7 +385,8 @@ def iter_llm_turn(
                     if name == READ_TOOL:
                         result = json.dumps({"source": source})
                     elif name == ATS_TOOL:
-                        result = json.dumps(read_ats_report(source), ensure_ascii=False)
+                        report = await asyncio.to_thread(read_ats_report, source)
+                        result = json.dumps(report, ensure_ascii=False)
                     elif name == EDIT_TOOL:
                         try:
                             before = source
@@ -398,7 +400,9 @@ def iter_llm_turn(
                             )
                             if verify_compile and source != before:
                                 payload = json.loads(result)
-                                payload["compile"] = compile_status(source)
+                                payload["compile"] = await asyncio.to_thread(
+                                    compile_status, source
+                                )
                                 if payload["compile"].get("ok") is False:
                                     payload["hint"] = (
                                         "Typst compile failed. Escape special "
@@ -462,40 +466,7 @@ def iter_llm_turn(
     yield {"kind": "assistant", "content": assistant_text or "Updated the Typst source."}
 
 
-def run_llm_turn(
-    messages: list[dict],
-    typst_source: str,
-    *,
-    timeout: float = 90.0,
-    extra_system: str = "",
-    max_rounds: int = 6,
-    prefer_full_source: bool = False,
-    verify_compile: bool = False,
-) -> tuple[str, str, list[dict[str, Any]]]:
-    """Run tool-calling turns. Returns (assistant_text, source, tool_traces)."""
-    source = typst_source
-    traces: list[dict[str, Any]] = []
-    assistant_text = ""
-    for event in iter_llm_turn(
-        messages,
-        typst_source,
-        timeout=timeout,
-        extra_system=extra_system,
-        max_rounds=max_rounds,
-        prefer_full_source=prefer_full_source,
-        verify_compile=verify_compile,
-    ):
-        kind = event.get("kind")
-        if kind == "tool":
-            traces.append(event["trace"])
-        elif kind == "source":
-            source = event["typst_source"]
-        elif kind == "assistant":
-            assistant_text = event["content"]
-    return assistant_text or "Updated the Typst source.", source, traces
-
-
-def iter_chat_edit(
+async def aiter_chat_edit(
     messages: list[dict],
     typst_source: str,
     *,
@@ -513,7 +484,7 @@ def iter_chat_edit(
         "Escape Typst special characters in strings and markup."
         + extra_system
     )
-    yield from iter_llm_turn(
+    async for event in aiter_llm_turn(
         messages,
         typst_source,
         timeout=120.0 if prefer_full_source else 90.0,
@@ -521,33 +492,5 @@ def iter_chat_edit(
         max_rounds=8 if (prefer_full_source or verify_compile) else 6,
         prefer_full_source=prefer_full_source,
         verify_compile=verify_compile,
-    )
-
-
-def chat_edit(
-    messages: list[dict],
-    typst_source: str,
-    *,
-    prefer_full_source: bool = False,
-    extra_system: str = "",
-    verify_compile: bool = False,
-) -> tuple[str, str, list[dict[str, Any]]]:
-    """Run one chat turn. Returns (assistant_text, updated_typst_source, tool_traces)."""
-    source = typst_source
-    traces: list[dict[str, Any]] = []
-    assistant_text = ""
-    for event in iter_chat_edit(
-        messages,
-        typst_source,
-        prefer_full_source=prefer_full_source,
-        extra_system=extra_system,
-        verify_compile=verify_compile,
     ):
-        kind = event.get("kind")
-        if kind == "tool":
-            traces.append(event["trace"])
-        elif kind == "source":
-            source = event["typst_source"]
-        elif kind == "assistant":
-            assistant_text = event["content"]
-    return assistant_text or "Updated the Typst source.", source, traces
+        yield event

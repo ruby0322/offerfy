@@ -59,8 +59,8 @@ def compile_typst_pages(source: str, fmt: str, pages: str | None = None) -> list
     output path. PDF remains a single file. Never pass `--pages 1` as a
     substitute for a page template — that drops every page after the first.
     """
-    if fmt not in {"svg", "pdf"}:
-        raise HTTPException(status_code=400, detail="format must be svg or pdf")
+    if fmt not in {"svg", "pdf", "png"}:
+        raise HTTPException(status_code=400, detail="format must be svg, pdf, or png")
     binary = typst_binary()
     if binary is None:
         raise HTTPException(status_code=503, detail="Typst is not available")
@@ -72,7 +72,13 @@ def compile_typst_pages(source: str, fmt: str, pages: str | None = None) -> list
         tmp_path = Path(tmp)
         src_path = tmp_path / "resume.typ"
         src_path.write_text(source, encoding="utf-8")
-        out_path = tmp_path / ("resume-{p}.svg" if fmt == "svg" else f"resume.{fmt}")
+        if fmt == "pdf":
+            out_name = "resume.pdf"
+        elif fmt == "png":
+            out_name = "resume-{p}.png"
+        else:
+            out_name = "resume-{p}.svg"
+        out_path = tmp_path / out_name
         cmd = [
             binary,
             "compile",
@@ -105,6 +111,14 @@ def compile_typst_pages(source: str, fmt: str, pages: str | None = None) -> list
             pdf_path = tmp_path / "resume.pdf"
             if pdf_path.is_file():
                 return [pdf_path.read_bytes()]
+            raise HTTPException(status_code=500, detail="Typst produced no output")
+        if fmt == "png":
+            numbered = sorted(tmp_path.glob("resume-*.png"), key=_svg_page_index)
+            if numbered:
+                return [path.read_bytes() for path in numbered]
+            fallback = tmp_path / "resume.png"
+            if fallback.is_file():
+                return [fallback.read_bytes()]
             raise HTTPException(status_code=500, detail="Typst produced no output")
         numbered = sorted(tmp_path.glob("resume-*.svg"), key=_svg_page_index)
         if numbered:

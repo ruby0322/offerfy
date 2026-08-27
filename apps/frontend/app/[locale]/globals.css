@@ -41,6 +41,11 @@
   --rr-border: var(--rule);
   --rr-radius: var(--radius);
   --rr-shadow: none;
+  --chart-1: #a35c3a;
+  --chart-2: #2f6f5e;
+  --chart-3: #3d5a80;
+  --chart-4: #d4a574;
+  --chart-5: #5c564e;
 }
 
 .dark {
@@ -55,6 +60,11 @@
   --success: #7dba9a;
   --destructive: #ef4444;
   --destructive-foreground: #161411;
+  --chart-1: #c47854;
+  --chart-2: #7dba9a;
+  --chart-3: #8aa4c8;
+  --chart-4: #f4be82;
+  --chart-5: #a39a8e;
 }
 
 @theme inline {
@@ -84,6 +94,11 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -539,31 +554,6 @@ textarea {
   }
 }
 
-.landing-notes-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1.75rem;
-}
-
-.landing-notes p {
-  color: var(--ink);
-  font-size: 1.125rem;
-  line-height: 1.65;
-  max-width: 36rem;
-}
-
-@media (min-width: 768px) {
-  .landing-notes-grid {
-    grid-template-columns: 1fr 1fr;
-    gap: 3rem;
-  }
-
-  .landing-notes-grid > p + p {
-    border-left: 1px solid var(--rule);
-    padding-left: 3rem;
-  }
-}
-
 .landing-mock {
   min-height: 18rem;
   background: var(--sheet);
@@ -687,42 +677,6 @@ textarea {
   .landing-mock,
   .landing-mock * {
     transition: none;
-  }
-}
-
-.landing-roadmap {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 2rem;
-}
-
-.landing-roadmap h2 {
-  font-size: 1.5rem;
-  margin: 0 0 0.85rem;
-  color: var(--ink);
-}
-
-.landing-roadmap ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-  color: var(--ink);
-  font-size: 1.05rem;
-  line-height: 1.5;
-}
-
-@media (min-width: 768px) {
-  .landing-roadmap {
-    grid-template-columns: 1fr 1fr;
-    gap: 3rem;
-  }
-
-  .landing-roadmap > div + div {
-    border-left: 1px solid var(--rule);
-    padding-left: 3rem;
   }
 }
 
@@ -1235,3 +1189,27 @@ textarea {
   }
 }
 
+.admin-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.admin-sidebar {
+  display: flex;
+  width: 14rem;
+  flex-shrink: 0;
+  flex-direction: column;
+  background: #1a1f2e;
+  color: #c9d1d9;
+}
+
+.admin-sidebar a {
+  color: inherit;
+}
+
+.admin-main {
+  min-width: 0;
+  flex: 1;
+  background: var(--paper);
+  color: var(--ink);
+}

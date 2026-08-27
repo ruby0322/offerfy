@@ -93,3 +93,15 @@ def test_compile_svg_escapes_ampersands_in_links():
     svg = pages[0].decode("utf-8")
     assert "query=" in svg
     assert _RAW_AMP.search(svg) is None
+
+
+def test_compile_png_pages_returns_png():
+    pages = compile_typst_pages(ONE_PAGE, "png")
+    assert len(pages) == 1
+    assert pages[0][:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_compile_png_pages_arg_only_first_page():
+    pages = compile_typst_pages(TWO_PAGE, "png", pages="1")
+    assert len(pages) == 1
+    assert pages[0][:8] == b"\x89PNG\r\n\x1a\n"

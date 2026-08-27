@@ -1,0 +1,18 @@
+[Unit]
+Description=Offerfy API (uvicorn on 127.0.0.1:8001)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ruby0322
+Group=baeir
+WorkingDirectory=/home/ruby0322/offerfy/apps/backend
+EnvironmentFile=/home/ruby0322/offerfy/.env.production
+Environment=PATH=/home/ruby0322/offerfy/apps/backend/.tools:/home/ruby0322/offerfy/apps/backend/.venv/bin:/usr/local/bin:/usr/bin
+ExecStart=/home/ruby0322/offerfy/apps/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 2
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
