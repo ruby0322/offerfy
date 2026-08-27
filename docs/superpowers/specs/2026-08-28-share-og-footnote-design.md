@@ -20,7 +20,7 @@ Public `/s/{token}` links unfurl with a real first-page preview (contained on cr
 ## Decisions
 
 - **No names on the public surface.** Header is brand only. Tab / OG title is `Resume · Offerfy` (i18n). Footnote has no `{username}`.
-- **Share OG = live page 1, contain.** `GET /v1/shares/{token}/og.png` compiles Typst PNG for page 1, letterboxes it onto 1200×630 cream paper, padding so the page does not kiss the edge. Never `cover`-crop.
+- **Share OG = live page 1, contain.** *(Superseded for compositing by [2026-08-28-share-og-topcrop-design.md](./2026-08-28-share-og-topcrop-design.md): top-half width-fit crop, three-side pad, Offerfy mark.)* `GET /v1/shares/{token}/og.png` still compiles Typst PNG for page 1 onto 1200×630 cream paper.
 - **Everywhere else = marketing card C.** Next `opengraph-image` (English headline on the image; localized title/description still come from `pageMetadata`). Share `generateMetadata` overrides `images` with the live PNG URL when the token exists.
 - **OG pipeline stays on the backend** for share images (same Typst path as preview/PDF). Next only points `og:image` at that URL.
 - **Cache without a table.** ETag from `sha256(typst_source + canvas version)`. In-process LRU of composed PNGs (max 32). `Cache-Control: public, max-age=300`. `If-None-Match` → 304.
@@ -33,11 +33,7 @@ Unchanged. `GET /v1/shares/{token}/og.png` is anonymous. Missing or deleted toke
 
 ## Canvas
 
-- Size: **1200×630**
-- Background: **`#F6F1E8`**
-- Version string (included in ETag): `og-v1-1200x630-f6f1e8-pad48`
-- Inner box: canvas minus **48px** padding on all sides (1056×534). Scale page with `min(inner_w/page_w, inner_h/page_h)`, center. Do not stretch.
-- Always light cream, ignoring the visitor’s theme.
+Compositing for `og.png` is defined in [2026-08-28-share-og-topcrop-design.md](./2026-08-28-share-og-topcrop-design.md) (`og-v2`, three-side pad, width-fit top crop). Size remains **1200×630**, background **`#F6F1E8`**, always light cream.
 
 ## APIs
 
@@ -53,7 +49,7 @@ New:
 - Compile failure: **400** (Typst error) or **504** (timeout), same family as existing compile endpoints
 - Headers: `ETag`, `Cache-Control: public, max-age=300`
 
-Typst: extend `compile_typst_pages` to accept `fmt="png"`. Share OG compiles **page 1 only** (`pages="1"`). Default Typst PNG ppi is fine.
+Typst: share OG compiles **page 1 only** (`pages="1"`) with `--ppi 144`. See the topcrop spec. Preview PNG is unchanged.
 
 Pillow composites the page onto the canvas. New dependency: `pillow`.
 
@@ -117,8 +113,8 @@ Backend pytest (`apps/backend`, PATH includes `.tools`):
 - After private, old token `og.png` **404**
 - `ETag` present; second request with `If-None-Match` → **304**
 - Changing `typst_source` (via owner PUT) changes ETag (monkeypatch compile still ok if the handler hashes source, not the PNG)
-- Monkeypatch `compile_typst_pages` to return a tiny PNG so tests do not need Typst for the HTTP contract; add a focused unit test for contain compositing with a known small PNG (full page visible, background `#F6F1E8` in the letterbox)
+- Monkeypatch `compile_typst_pages` to return a tiny PNG so tests do not need Typst for the HTTP contract. Crop / mark pixel tests live in the topcrop spec (`test_og_image.py`).
 
 Existing public meta/preview/export tests stay green. Public JSON still has no `id` / `typst_source` / owner.
 
-Browser: share page has no title in the header, footnote + CTA to `/create`, 404 unchanged. Confirm `generateMetadata` in view-source: generic title, `og:image` to `/api/v1/shares/{token}/og.png`. Open that URL: cream letterbox, whole first page visible. A non-share page (home) view-source uses the marketing card, not a resume page.
+Browser: share page has no title in the header, footnote + CTA to `/create`, 404 unchanged. Confirm `generateMetadata` in view-source: generic title, `og:image` to `/api/v1/shares/{token}/og.png`. Open that URL: cream on top/left/right, page-1 top close-up, Offerfy mark in the top band, page reaching the bottom edge. A non-share page (home) view-source uses the marketing card, not a resume page.
