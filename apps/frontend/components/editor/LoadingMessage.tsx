@@ -9,6 +9,7 @@ export default function LoadingMessage() {
       animate={{ opacity: 1 }}
       className="flex justify-start py-1"
       aria-hidden="true"
+      data-testid="chat-loading"
     >
       <div className="flex space-x-1">
         <motion.div

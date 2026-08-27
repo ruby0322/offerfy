@@ -3,7 +3,12 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
-from app.services.typst_compile import compile_typst, compile_typst_pages, typst_available
+from app.services.typst_compile import (
+    compile_typst,
+    compile_typst_pages,
+    sanitize_typst_svg,
+    typst_available,
+)
 
 pytestmark = pytest.mark.skipif(not typst_available(), reason="Typst CLI is required")
 
@@ -66,3 +71,25 @@ def test_preview_endpoint_returns_all_svg_pages(client: TestClient):
     blobs = [page.encode("utf-8") for page in pages]
     assert _svg_height_pt(blobs[0]) == pytest.approx(8 * 72 / 2.54, rel=0.02)
     assert _svg_height_pt(blobs[1]) == pytest.approx(14 * 72 / 2.54, rel=0.02)
+
+
+_RAW_AMP = re.compile(r"&(?!(?:#\d+|#x[0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]*);)")
+
+LINK_PAGE = """
+#set page(width: 10cm, height: 4cm, margin: 8pt)
+#link("https://example.com/search/?api=1&query=Taipei")[Maps]
+"""
+
+
+def test_sanitize_typst_svg_escapes_raw_ampersands_in_urls():
+    raw = '<svg><a href="https://maps.example/?api=1&query=Taipei">x</a></svg>'
+    out = sanitize_typst_svg(raw)
+    assert "api=1&amp;query=Taipei" in out
+    assert sanitize_typst_svg("a &amp; b &#123; c &#x1f;") == "a &amp; b &#123; c &#x1f;"
+
+
+def test_compile_svg_escapes_ampersands_in_links():
+    pages = compile_typst_pages(LINK_PAGE, "svg")
+    svg = pages[0].decode("utf-8")
+    assert "query=" in svg
+    assert _RAW_AMP.search(svg) is None

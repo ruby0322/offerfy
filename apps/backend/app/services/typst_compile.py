@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -13,6 +14,8 @@ _TYPST_BIN_CANDIDATES = (
     str(Path(__file__).resolve().parents[2] / ".tools" / "typst"),
     "typst",
 )
+
+_RAW_AMP = re.compile(r"&(?!(?:#\d+|#x[0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]*);)")
 
 
 def typst_binary() -> str | None:
@@ -34,6 +37,19 @@ def typst_available() -> bool:
 def _svg_page_index(path: Path) -> int:
     suffix = path.stem.rsplit("-", 1)[-1]
     return int(suffix) if suffix.isdigit() else 0
+
+
+def sanitize_typst_svg(svg: str) -> str:
+    """Make Typst SVG well-formed XML.
+
+    Typst emits raw ``&`` in URLs (``?api=1&query=``). Browsers refuse to
+    decode that as ``<img src>``, so the first preview page disappears.
+    """
+    return _RAW_AMP.sub("&amp;", svg)
+
+
+def _svg_bytes(path: Path) -> bytes:
+    return sanitize_typst_svg(path.read_text(encoding="utf-8")).encode("utf-8")
 
 
 def compile_typst_pages(source: str, fmt: str, pages: str | None = None) -> list[bytes]:
@@ -92,11 +108,21 @@ def compile_typst_pages(source: str, fmt: str, pages: str | None = None) -> list
             raise HTTPException(status_code=500, detail="Typst produced no output")
         numbered = sorted(tmp_path.glob("resume-*.svg"), key=_svg_page_index)
         if numbered:
-            return [path.read_bytes() for path in numbered]
+            return [_svg_bytes(path) for path in numbered]
         fallback = tmp_path / "resume.svg"
         if fallback.is_file():
-            return [fallback.read_bytes()]
+            return [_svg_bytes(fallback)]
         raise HTTPException(status_code=500, detail="Typst produced no output")
+
+
+def compile_status(source: str) -> dict:
+    if not typst_available():
+        return {"ok": True, "skipped": True}
+    try:
+        compile_typst(source, "pdf")
+        return {"ok": True}
+    except HTTPException as exc:
+        return {"ok": False, "error": str(exc.detail)[:2000]}
 
 
 def compile_typst(source: str, fmt: str, pages: str | None = None) -> bytes:

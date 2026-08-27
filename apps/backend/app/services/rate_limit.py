@@ -3,13 +3,20 @@ from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.models import RateEvent
 
 LIMITS = {"chat": 10, "export": 20}
 WINDOW = timedelta(hours=1)
 
 
+def guest_rate_limits_enabled() -> bool:
+    return get_settings().app_env == "production"
+
+
 def try_consume_guest_rate(db: Session, guest_session_id: str, kind: str) -> bool:
+    if not guest_rate_limits_enabled():
+        return True
     limit = LIMITS[kind]
     since = datetime.now(timezone.utc) - WINDOW
     count = (

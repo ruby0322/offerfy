@@ -5,6 +5,16 @@ def test_healthz(client):
     assert body.get("status") == "ok" or body == {"ok": True}
 
 
+def test_healthz_sse_probe(client, monkeypatch):
+    monkeypatch.setenv("APP_ENV", "development")
+    with client.stream("GET", "/healthz/sse") as response:
+        assert response.status_code == 200
+        assert "event-stream" in (response.headers.get("content-type") or "")
+        assert response.headers.get("x-accel-buffering") == "no"
+        body = "".join(response.iter_text())
+    assert '"n":1' in body and '"n":2' in body
+
+
 def test_readyz(client):
     response = client.get("/readyz")
     assert response.status_code == 200

@@ -55,6 +55,7 @@ class AtsReport(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
+    prefer_full_source: bool = False
 
 
 class ChatMessageOut(BaseModel):

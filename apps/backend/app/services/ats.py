@@ -19,6 +19,17 @@ ATS_CHECK_NAMES = (
     "parse_roundtrip_ok",
 )
 
+ATS_CHECK_HINTS = {
+    "text_extractable": "Text can be extracted (not image-only)",
+    "single_column": "Single-column layout",
+    "contact_in_body": "Name and email in the body (not header/footer only)",
+    "standard_headings": "Standard headings (Experience / Education)",
+    "dates_machine_readable": "Machine-readable dates (YYYY-MM or Present)",
+    "no_embedded_images_as_text": "Name/contact is not image-only",
+    "fonts_embedded": "Fonts embedded",
+    "parse_roundtrip_ok": "Extract recovers source text",
+}
+
 NAME_LET_RE = re.compile(r'#let\s+name\s*=\s*"([^"]*)"')
 EMAIL_LET_RE = re.compile(r'#let\s+email\s*=\s*"([^"]*)"')
 AUTHOR_RE = re.compile(r"author:\s*(?:name|\"([^\"]+)\")")
@@ -62,6 +73,42 @@ def analyze_pdf(pdf_bytes: bytes, typst_source: str) -> dict[str, Any]:
         },
     ]
     return {"checks": checks}
+
+
+def read_ats_report(typst_source: str) -> dict[str, Any]:
+    """Compile the live Typst source and return ATS pass/fail checks."""
+    from fastapi import HTTPException
+    from app.services import typst_compile
+
+    try:
+        pdf = typst_compile.compile_typst(typst_source, "pdf")
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, str) else "Typst compile failed"
+        return {"error": str(detail)[:2000]}
+    report = analyze_pdf(pdf, typst_source)
+    checks_out: list[dict[str, Any]] = []
+    failed: list[str] = []
+    passed = 0
+    for check in report.get("checks") or []:
+        if not isinstance(check, dict):
+            continue
+        name = str(check.get("name") or "")
+        ok = bool(check.get("passed"))
+        row: dict[str, Any] = {"name": name, "passed": ok}
+        if not ok:
+            failed.append(name)
+            hint = ATS_CHECK_HINTS.get(name)
+            if hint:
+                row["hint"] = hint
+        else:
+            passed += 1
+        checks_out.append(row)
+    return {
+        "checks": checks_out,
+        "passed": passed,
+        "total": len(checks_out),
+        "failed": failed,
+    }
 
 
 def extract_pdf_text(pdf_bytes: bytes) -> str:

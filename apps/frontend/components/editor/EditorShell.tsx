@@ -3,9 +3,11 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useLocale, useTranslations } from "next-intl";
+import CompileErrorDialog from "@/components/editor/CompileErrorDialog";
 import EditorChatPanel from "@/components/editor/EditorChatPanel";
 import EditorHeader from "@/components/editor/EditorHeader";
 import EditorPreview from "@/components/editor/EditorPreview";
+import EditorTemplatePanel from "@/components/editor/EditorTemplatePanel";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -16,14 +18,14 @@ import {
   getChatMessages,
   getPreviewPages,
   getResume,
-  isImportPending,
   putResumeSource,
   sendChat,
+  typstCompileDetail,
   type AtsReport,
   type ChatMessage,
-  type ImportStatus,
 } from "@/lib/api";
-import { chatAppliedTypstEdit } from "@/lib/chat-tools";
+import { formatUserAttachmentMessage } from "@/lib/chat-tools";
+import { peekPendingUpload, takePendingUpload } from "@/lib/pending-upload";
 
 const TypstSourceEditor = dynamic(
   () => import("@/components/editor/TypstSourceEditor"),
@@ -60,11 +62,16 @@ export default function EditorShell({ resumeId }: Props) {
   const [status, setStatus] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
+  const [attachment, setAttachment] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [importStatus, setImportStatus] = useState<ImportStatus>("idle");
   const [chatUnavailable, setChatUnavailable] = useState(false);
+  const [leftTab, setLeftTab] = useState(() =>
+    peekPendingUpload(resumeId) ? "chat" : "typst",
+  );
+  const [compileError, setCompileError] = useState<string | null>(null);
   const skipTimers = useRef(true);
+  const sendingRef = useRef(false);
   const previewObjectUrls = useRef<string[]>([]);
 
   const setPreviewPages = useCallback((svgs: string[]) => {
@@ -79,12 +86,28 @@ export default function EditorShell({ resumeId }: Props) {
   const refreshPreview = useCallback(async () => {
     const pages = await getPreviewPages(resumeId);
     setPreviewPages(pages);
+    setCompileError(null);
   }, [resumeId, setPreviewPages]);
 
   const refreshAts = useCallback(async () => {
     const report = await getAtsReport(resumeId);
     setAts(report);
   }, [resumeId]);
+
+  const failCompile = useCallback((err: unknown, fallback: string) => {
+    const detail = typstCompileDetail(err);
+    if (detail) {
+      setCompileError(detail);
+      setStatus(fallback);
+      return;
+    }
+    if (err instanceof ApiError && (err.status === 400 || err.status === 500 || err.status === 504)) {
+      setCompileError(err.message || fallback);
+      setStatus(fallback);
+      return;
+    }
+    setStatus(fallback);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,25 +117,28 @@ export default function EditorShell({ resumeId }: Props) {
         if (cancelled) return;
         setTitle(resume.title || "");
         setSource(resume.typst_source || "");
-        setImportStatus(resume.import_status ?? "idle");
+        try {
+          const history = await getChatMessages(resumeId);
+          if (!cancelled) setMessages(history.map(withMessageId));
+        } catch {
+          /* chat history is optional */
+        }
+        if (cancelled) return;
         setLoaded(true);
         try {
           const pages = await getPreviewPages(resumeId);
-          if (!cancelled) setPreviewPages(pages);
-        } catch {
-          if (!cancelled) setStatus(t("previewError"));
+          if (!cancelled) {
+            setPreviewPages(pages);
+            setCompileError(null);
+          }
+        } catch (err) {
+          if (!cancelled) failCompile(err, t("previewError"));
         }
         try {
           const report = await getAtsReport(resumeId);
           if (!cancelled) setAts(report);
         } catch {
           /* ATS appears after a successful compile */
-        }
-        try {
-          const history = await getChatMessages(resumeId);
-          if (!cancelled) setMessages(history.map(withMessageId));
-        } catch {
-          /* chat history is optional */
         }
       } catch {
         if (!cancelled) setLoadError(t("loadError"));
@@ -121,7 +147,7 @@ export default function EditorShell({ resumeId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [resumeId, setPreviewPages, t]);
+  }, [failCompile, resumeId, setPreviewPages, t]);
 
   useEffect(() => {
     return () => {
@@ -130,49 +156,7 @@ export default function EditorShell({ resumeId }: Props) {
   }, []);
 
   useEffect(() => {
-    if (!isImportPending(importStatus)) return;
-    let cancelled = false;
-
-    async function applySettledImport() {
-      const resume = await getResume(resumeId);
-      if (cancelled) return;
-      const nextStatus = resume.import_status ?? "idle";
-      if (isImportPending(nextStatus)) return;
-      skipTimers.current = true;
-      setTitle(resume.title || "");
-      setSource(resume.typst_source || "");
-      setImportStatus(nextStatus);
-      try {
-        await refreshPreview();
-      } catch {
-        setStatus(t("previewError"));
-      }
-      try {
-        await refreshAts();
-      } catch {
-        /* ATS needs a successful PDF compile */
-      }
-      try {
-        setMessages((await getChatMessages(resumeId)).map(withMessageId));
-      } catch {
-        /* chat history is optional */
-      }
-      skipTimers.current = false;
-    }
-
-    const handle = window.setInterval(() => {
-      void applySettledImport();
-    }, 1500);
-    void applySettledImport();
-    return () => {
-      cancelled = true;
-      window.clearInterval(handle);
-    };
-  }, [importStatus, refreshAts, refreshPreview, resumeId, t]);
-
-  useEffect(() => {
     if (!loaded) return;
-    if (isImportPending(importStatus)) return;
     if (skipTimers.current) return;
     const handle = window.setTimeout(async () => {
       try {
@@ -185,16 +169,15 @@ export default function EditorShell({ resumeId }: Props) {
           /* ATS needs a successful PDF compile */
         }
         setStatus(t("saved"));
-      } catch {
-        setStatus(t("previewError"));
+      } catch (err) {
+        failCompile(err, t("previewError"));
       }
     }, 400);
     return () => window.clearTimeout(handle);
-  }, [importStatus, loaded, refreshAts, refreshPreview, resumeId, source, t]);
+  }, [failCompile, loaded, refreshAts, refreshPreview, resumeId, source, t]);
 
   useEffect(() => {
     if (!loaded) return;
-    if (isImportPending(importStatus)) return;
     if (skipTimers.current) {
       skipTimers.current = false;
       return;
@@ -202,13 +185,14 @@ export default function EditorShell({ resumeId }: Props) {
     const handle = window.setTimeout(async () => {
       try {
         await compileResume(resumeId, "pdf");
+        setCompileError(null);
         await refreshAts();
-      } catch {
-        setStatus(t("compileError"));
+      } catch (err) {
+        failCompile(err, t("compileError"));
       }
     }, 2000);
     return () => window.clearTimeout(handle);
-  }, [importStatus, loaded, refreshAts, resumeId, source, t]);
+  }, [failCompile, loaded, refreshAts, resumeId, source, t]);
 
   async function onDownload() {
     setDownloading(true);
@@ -225,22 +209,31 @@ export default function EditorShell({ resumeId }: Props) {
       } catch {
         /* export still succeeded */
       }
-    } catch {
-      setStatus(t("compileError"));
+      setCompileError(null);
+    } catch (err) {
+      failCompile(err, t("compileError"));
     } finally {
       setDownloading(false);
     }
   }
 
-  async function onChat(event: FormEvent) {
-    event.preventDefault();
-    const text = draft.trim();
-    if (!text || sending) return;
+  const sendUserChat = useCallback(
+    async (
+      text: string,
+      file: File | null = null,
+      options?: { preferFullSource?: boolean },
+    ) => {
+    const trimmed = text.trim();
+    if ((!trimmed && !file) || sendingRef.current) return;
+    sendingRef.current = true;
     setSending(true);
-    setDraft("");
     setMessages((prev) => [
       ...prev,
-      withMessageId({ role: "user", content: text, timestamp: new Date().toISOString() }),
+      withMessageId({
+        role: "user",
+        content: formatUserAttachmentMessage(trimmed, file?.name ?? null),
+        timestamp: new Date().toISOString(),
+      }),
     ]);
     try {
       skipTimers.current = true;
@@ -252,43 +245,60 @@ export default function EditorShell({ resumeId }: Props) {
         ...prev,
         withMessageId({ role: "assistant", content: message, timestamp: new Date().toISOString() }),
       ]);
+      sendingRef.current = false;
       setSending(false);
       return;
     } finally {
       skipTimers.current = false;
     }
     try {
-      const result = await sendChat(resumeId, text);
-      setChatUnavailable(false);
-      const reply = result.reply || t("chatError");
-      setMessages((prev) => {
-        if (result.messages.length > 0) {
-          return result.messages.map((msg, index) =>
-            withMessageId({ ...msg, id: prev[index]?.id ?? msg.id }),
-          );
+      await sendChat(resumeId, trimmed, file, options, async (event) => {
+        if (event.type === "tool" || event.type === "assistant") {
+          setChatUnavailable(false);
+          setMessages((prev) => [...prev, withMessageId(event.message)]);
+          return;
         }
-        return [
-          ...prev,
-          withMessageId({ role: "assistant", content: reply, timestamp: new Date().toISOString() }),
-        ];
+        if (event.type === "source") {
+          skipTimers.current = true;
+          setSource(event.typst_source);
+          try {
+            await refreshPreview();
+            try {
+              await compileResume(resumeId, "pdf");
+              await refreshAts();
+            } catch (err) {
+              failCompile(err, t("previewError"));
+            }
+          } catch (err) {
+            failCompile(err, t("previewError"));
+          } finally {
+            skipTimers.current = false;
+          }
+          return;
+        }
+        if (event.type === "error") {
+          if (event.status === 503) {
+            setChatUnavailable(true);
+            setMessages((prev) => [
+              ...prev,
+              withMessageId({
+                role: "assistant",
+                content: t("chatNotConfigured"),
+                timestamp: new Date().toISOString(),
+              }),
+            ]);
+            return;
+          }
+          setMessages((prev) => [
+            ...prev,
+            withMessageId({
+              role: "assistant",
+              content: event.detail || t("chatError"),
+              timestamp: new Date().toISOString(),
+            }),
+          ]);
+        }
       });
-      if (
-        result.typstSource &&
-        chatAppliedTypstEdit(result.messages, result.typstSource, source, result.applied)
-      ) {
-        skipTimers.current = true;
-        setSource(result.typstSource);
-        try {
-          await putResumeSource(resumeId, { typst_source: result.typstSource });
-          await refreshPreview();
-          await compileResume(resumeId, "pdf");
-          await refreshAts();
-        } catch {
-          setStatus(t("previewError"));
-        } finally {
-          skipTimers.current = false;
-        }
-      }
     } catch (err) {
       if (err instanceof ApiError && err.status === 503) {
         setChatUnavailable(true);
@@ -308,8 +318,78 @@ export default function EditorShell({ resumeId }: Props) {
         ]);
       }
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
+    },
+    [failCompile, refreshAts, refreshPreview, resumeId, source, t],
+  );
+  const sendUserChatRef = useRef(sendUserChat);
+  useEffect(() => {
+    sendUserChatRef.current = sendUserChat;
+  }, [sendUserChat]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    if (!peekPendingUpload(resumeId)) return;
+    const prompt = t("importFillPrompt");
+    const handle = window.setTimeout(() => {
+      const file = takePendingUpload(resumeId);
+      if (!file) return;
+      void sendUserChatRef.current(prompt, file, { preferFullSource: true });
+    }, 0);
+    return () => window.clearTimeout(handle);
+  }, [loaded, resumeId, t]);
+
+  async function onChat(event: FormEvent) {
+    event.preventDefault();
+    const text = draft.trim();
+    const file = attachment;
+    if ((!text && !file) || sendingRef.current) return;
+    setDraft("");
+    setAttachment(null);
+    await sendUserChat(text, file);
+  }
+
+  function onApplyTemplate(prompt: string) {
+    setLeftTab("chat");
+    void sendUserChat(prompt, null, { preferFullSource: true });
+  }
+
+  async function onRestoreEdit(previousSource: string) {
+    if (sendingRef.current || previousSource === source) return;
+    sendingRef.current = true;
+    setSending(true);
+    skipTimers.current = true;
+    setSource(previousSource);
+    try {
+      await putResumeSource(resumeId, { typst_source: previousSource });
+      await refreshPreview();
+      try {
+        await compileResume(resumeId, "pdf");
+        await refreshAts();
+      } catch (err) {
+        failCompile(err, t("previewError"));
+      }
+    } catch (err) {
+      failCompile(err, t("previewError"));
+    } finally {
+      skipTimers.current = false;
+      sendingRef.current = false;
+      setSending(false);
+    }
+  }
+
+  async function onCopyCompileError() {
+    if (!compileError) return;
+    await navigator.clipboard.writeText(compileError);
+  }
+
+  function onAskCompileError() {
+    if (!compileError || sendingRef.current) return;
+    const prompt = t("compileErrorAskPrompt", { error: compileError });
+    setLeftTab("chat");
+    void sendUserChat(prompt);
   }
 
   if (loadError) {
@@ -328,28 +408,30 @@ export default function EditorShell({ resumeId }: Props) {
     );
   }
 
-  const headerStatus = isImportPending(importStatus) ? t("importing") : status;
-  const chatEmptyHint = chatUnavailable
-    ? t("chatNotConfigured")
-    : isImportPending(importStatus)
-      ? t("importing")
-      : t("chatEmpty");
+  const chatEmptyHint = chatUnavailable ? t("chatNotConfigured") : t("chatEmpty");
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-white dark:bg-gray-950">
-      <EditorHeader brand={tNav("brand")} title={title} status={headerStatus} />
+      <EditorHeader brand={tNav("brand")} title={title} status={status} />
       <div className="min-h-0 flex-1">
         <ResizablePanelGroup direction="horizontal" className="h-full">
           <ResizablePanel defaultSize={48} minSize={28} maxSize={65} className="h-full">
-            <Tabs defaultValue="typst" className="flex h-full min-h-0 flex-col gap-0">
-              <div className="flex shrink-0 items-center border-b border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
+            <div className="relative h-full min-h-0">
+            <Tabs
+              value={leftTab}
+              onValueChange={setLeftTab}
+              className="flex h-full min-h-0 flex-col gap-0"
+            >
+              <div className="flex shrink-0 items-center overflow-x-auto border-b border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
                 <TabsList>
                   <TabsTrigger value="typst">{t("tabTypst")}</TabsTrigger>
                   <TabsTrigger value="chat">{t("tabChat")}</TabsTrigger>
+                  <TabsTrigger value="template">{t("tabTemplate")}</TabsTrigger>
                 </TabsList>
               </div>
               <TabsContent
                 value="typst"
+                forceMount
                 className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
               >
                 <TypstSourceEditor
@@ -367,15 +449,31 @@ export default function EditorShell({ resumeId }: Props) {
                   messages={messages}
                   draft={draft}
                   onDraftChange={setDraft}
+                  attachment={attachment}
+                  onAttachmentChange={setAttachment}
                   onSubmit={onChat}
                   sending={sending}
                   placeholder={t("composerPlaceholder")}
                   sendLabel={sending ? t("sending") : t("send")}
                   emptyHint={chatEmptyHint}
                   ariaLabel={t("tabChat")}
+                  attachLabel={t("attach")}
+                  attachRemoveLabel={t("attachRemove")}
+                  attachHint={t("attachHint")}
+                  attachBadType={t("attachBadType")}
+                  attachTooLarge={t("attachTooLarge")}
+                  currentSource={source}
+                  onRestoreEdit={onRestoreEdit}
                 />
               </TabsContent>
+              <TabsContent
+                value="template"
+                className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+              >
+                <EditorTemplatePanel sending={sending} onApply={onApplyTemplate} />
+              </TabsContent>
             </Tabs>
+            </div>
           </ResizablePanel>
           <ResizableHandle withHandle className="bg-gray-200 dark:bg-gray-700" />
           <ResizablePanel defaultSize={52} minSize={35} className="h-full">
@@ -387,6 +485,19 @@ export default function EditorShell({ resumeId }: Props) {
               downloadLabel={downloading ? t("downloading") : t("download")}
               downloading={downloading}
               onDownload={onDownload}
+              overlay={
+                compileError ? (
+                  <CompileErrorDialog
+                    error={compileError}
+                    copyLabel={t("compileErrorCopy")}
+                    copiedLabel={t("compileErrorCopied")}
+                    askLabel={t("compileErrorAskAi")}
+                    asking={sending}
+                    onCopy={onCopyCompileError}
+                    onAsk={onAskCompileError}
+                  />
+                ) : null
+              }
             />
           </ResizablePanel>
         </ResizablePanelGroup>

@@ -56,9 +56,18 @@ def compact_line_diff(old: str, new: str, *, limit: int = DIFF_LINE_LIMIT) -> li
 
 def edit_result_payload(before: str, after: str, _args: dict) -> dict[str, Any]:
     changed = before != after
-    return {
+    payload: dict[str, Any] = {
         "ok": True,
         "changed": changed,
         "source": after,
         "diff": compact_line_diff(before, after) if changed else [],
     }
+    if changed:
+        payload["previous_source"] = before
+    else:
+        payload["hint"] = (
+            "No change applied. Call apply_typst_edit again with an exact "
+            "substring from the latest read_typst, or write the full source. "
+            "Do not ask the user to retry."
+        )
+    return payload

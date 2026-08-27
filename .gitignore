@@ -32,6 +32,13 @@ k8s/overlays/*/secret.yaml
 .vscode/
 
 # Vendored Typst packages (preview/basic-resume, preview/scienceicons) are committed.
+# Runtime-prefetched Universe CV templates stay local.
+apps/backend/typst/packages/preview/*
+!apps/backend/typst/packages/preview/basic-resume/
+!apps/backend/typst/packages/preview/basic-resume/**
+!apps/backend/typst/packages/preview/scienceicons/
+!apps/backend/typst/packages/preview/scienceicons/**
+apps/backend/typst/packages/.universe-thumbs/
 
 # Fonts (too large; document how to fetch)
 apps/backend/fonts/*

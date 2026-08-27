@@ -30,8 +30,50 @@ def test_search_replace_raises_when_missing():
 
 
 def test_range_raises_on_invalid_offsets():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="invalid range"):
         apply_typst_edit("abcd", {"start": 3, "end": 1, "replacement": "x"})
+
+
+def test_invalid_range_falls_back_to_full_source():
+    original = '#let name = "Your Name"\n'
+    filled = '#let name = "Ada Lovelace"\nMicrosoft intern\n'
+    updated = apply_typst_edit(
+        original,
+        {
+            "source": filled,
+            "start": 0,
+            "end": 8000,
+            "replacement": "",
+        },
+    )
+    assert updated == filled
+
+
+def test_schema_zero_range_does_not_block_full_source():
+    original = '#let name = "Your Name"\n'
+    filled = '#let name = "Ada Lovelace"\nCAMP\n'
+    updated = apply_typst_edit(
+        original,
+        {
+            "source": filled,
+            "search": "",
+            "replace": "",
+            "start": 0,
+            "end": 0,
+            "replacement": "",
+        },
+    )
+    assert updated == filled
+
+
+def test_noop_range_falls_back_to_full_source():
+    original = "hello"
+    filled = "hello from CAMP"
+    updated = apply_typst_edit(
+        original,
+        {"source": filled, "start": 0, "end": 5, "replacement": "hello"},
+    )
+    assert updated == filled
 
 
 def test_compact_line_diff_search_replace_style():
@@ -68,6 +110,40 @@ def test_search_replace_wins_over_stale_full_source():
     assert "extra" not in updated
 
 
+def test_noop_search_falls_back_to_full_source():
+    original = '#let name = "Your Name"\nkeep\n'
+    filled = '#let name = "Ada Lovelace"\nCAMP intern\n'
+    updated = apply_typst_edit(
+        original,
+        {
+            "source": filled,
+            "search": "Your Name",
+            "replace": "Your Name",
+        },
+    )
+    assert updated == filled
+
+
+def test_missing_search_falls_back_to_full_source():
+    original = '#let name = "Your Name"\n'
+    filled = '#let name = "Ada Lovelace"\nMicrosoft\n'
+    updated = apply_typst_edit(
+        original,
+        {
+            "source": filled,
+            "search": '#let name = "Ada Lovelace"',
+            "replace": '#let name = "Ada Lovelace"',
+        },
+    )
+    assert updated == filled
+
+
+def test_identity_search_without_source_stays_noop():
+    original = '#let name = "Ada"\n'
+    updated = apply_typst_edit(original, {"search": "Ada", "replace": "Ada"})
+    assert updated == original
+
+
 def test_empty_search_does_not_block_full_source_write():
     original = '#let name = "Kuan-Cheng (James) Ku"\n'
     rewritten = '#let name = "Kuan-Cheng Ku"\n'
@@ -76,6 +152,37 @@ def test_empty_search_does_not_block_full_source_write():
         {"source": rewritten, "search": "", "replace": ""},
     )
     assert updated == rewritten
+
+
+def test_prefer_full_source_writes_document_even_with_unmatched_search():
+    original = '#let name = "Your Name"\n'
+    filled = '#import "@preview/basic-resume:0.2.9": *\n#let name = "Ada Lovelace"\n'
+    updated = apply_typst_edit(
+        original,
+        {
+            "source": filled,
+            "search": '#let name = "Ada Lovelace"',
+            "replace": '#let name = "Ada Lovelace"',
+        },
+        prefer_full_source=True,
+    )
+    assert updated == filled
+
+
+def test_prefer_full_source_ignores_live_search_when_rewriting():
+    original = '#let name = "Your Name"\nkeep\n'
+    filled = '#import "@preview/basic-resume:0.2.9": *\n#let name = "Ada Lovelace"\n'
+    updated = apply_typst_edit(
+        original,
+        {
+            "source": filled,
+            "search": "Your Name",
+            "replace": "Ada Lovelace",
+        },
+        prefer_full_source=True,
+    )
+    assert updated == filled
+    assert "keep" not in updated
 
 
 def test_edit_result_payload_diffs_actual_source_not_empty_args():
@@ -92,6 +199,7 @@ def test_edit_result_payload_diffs_actual_source_not_empty_args():
         {"op": "del", "text": '#let linkedin = "James Ku"'},
         {"op": "add", "text": '#let linkedin = "Kuan-Cheng Ku"'},
     ]
+    assert payload["previous_source"] == before
 
 
 def test_edit_result_payload_diffs_live_document_not_unused_search():
@@ -113,6 +221,10 @@ def test_edit_result_payload_marks_noop():
     payload = edit_result_payload(source, source, {"source": source})
     assert payload["changed"] is False
     assert payload["diff"] == []
+    assert "previous_source" not in payload
+    hint = payload.get("hint") or ""
+    assert "retry" in hint.lower() or "again" in hint.lower()
+    assert "user" in hint.lower()
 
 
 def test_compact_line_diff_trailing_newline_only():

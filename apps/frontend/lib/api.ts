@@ -35,6 +35,23 @@ function errorMessage(body: unknown, fallback: string): string {
   return fallback;
 }
 
+const COMPILE_FAIL_PREFIX = /^Typst compile failed:\s*/i;
+
+export function typstCompileDetail(err: unknown): string | null {
+  if (!(err instanceof ApiError)) return null;
+  if (err.status !== 400 && err.status !== 500 && err.status !== 504) return null;
+  const raw = err.message.trim();
+  if (!raw) return null;
+  if (
+    COMPILE_FAIL_PREFIX.test(raw) ||
+    /timed out/i.test(raw) ||
+    /produced no output/i.test(raw)
+  ) {
+    return raw.replace(COMPILE_FAIL_PREFIX, "").trim() || raw;
+  }
+  return raw;
+}
+
 export async function apiFetch(
   path: string,
   init: RequestInit = {},
@@ -71,10 +88,6 @@ export async function apiBlob(path: string, init: RequestInit = {}): Promise<Blo
 export type ResumeSource = "create" | "upload";
 
 export type ImportStatus = "idle" | "pending" | "done" | "failed";
-
-export function isImportPending(status?: string | null): boolean {
-  return status === "pending";
-}
 
 export type Resume = {
   id: string;
@@ -223,33 +236,107 @@ export async function exportPdf(id: string): Promise<Blob> {
   return apiBlob(`/api/v1/resumes/${id}/export`);
 }
 
-export type ChatResult = {
-  messages: ChatMessage[];
-  reply: string;
-  typstSource: string | null;
-  applied: boolean;
+export type UniverseTemplate = {
+  name: string;
+  version: string;
+  description: string;
+  universe_url: string;
+  import_line: string;
+  apply_prompt: string;
+  cached: boolean;
 };
 
-export async function sendChat(id: string, message: string): Promise<ChatResult> {
-  const data = await apiJson<Record<string, unknown>>(`/api/v1/resumes/${id}/chat`, {
+export function templatePreviewUrl(name: string): string {
+  return `/api/v1/templates/${encodeURIComponent(name)}/preview`;
+}
+
+export async function listTemplates(): Promise<UniverseTemplate[]> {
+  const data = await apiJson<unknown>("/api/v1/templates");
+  if (data && typeof data === "object" && Array.isArray((data as { templates?: unknown }).templates)) {
+    return (data as { templates: UniverseTemplate[] }).templates.filter(
+      (row) => row && typeof row.name === "string" && typeof row.apply_prompt === "string",
+    );
+  }
+  return [];
+}
+
+export type ChatStreamEvent =
+  | { type: "tool"; message: ChatMessage }
+  | { type: "source"; typst_source: string; applied: boolean }
+  | { type: "assistant"; message: ChatMessage }
+  | { type: "done"; typst_source: string; applied: boolean }
+  | { type: "error"; detail: string; status: number };
+
+export type ChatSendOptions = {
+  preferFullSource?: boolean;
+};
+
+function parseSseBlock(block: string): ChatStreamEvent | null {
+  const line = block.trim();
+  if (!line.startsWith("data:")) return null;
+  try {
+    const parsed = JSON.parse(line.slice(5).trim()) as ChatStreamEvent;
+    if (parsed && typeof parsed === "object" && typeof parsed.type === "string") {
+      return parsed;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export async function sendChat(
+  id: string,
+  message: string,
+  file: File | null | undefined,
+  options: ChatSendOptions | undefined,
+  onEvent: (event: ChatStreamEvent) => void | Promise<void>,
+): Promise<void> {
+  const init: RequestInit = {
     method: "POST",
-    body: JSON.stringify({ message }),
-  });
-  const messages = asMessages(data);
-  const typstSource = typeof data.typst_source === "string" ? data.typst_source : null;
-  const applied = data.applied === true || data.typst_applied === true || data.source_updated === true;
-  const nestedMessage =
-    data.message && typeof data.message === "object"
-      ? (data.message as Record<string, unknown>).content
-      : undefined;
-  const reply =
-    (typeof data.reply === "string" && data.reply) ||
-    (typeof data.assistant_message === "string" && data.assistant_message) ||
-    (typeof data.content === "string" && data.content) ||
-    (typeof data.message === "string" && data.message) ||
-    (typeof nestedMessage === "string" && nestedMessage) ||
-    (messages.filter((m) => m.role === "assistant").at(-1)?.content ?? "");
-  return { messages, reply, typstSource, applied };
+    cache: "no-store",
+    headers: { Accept: "text/event-stream" },
+  };
+  if (file) {
+    const form = new FormData();
+    form.append("message", message);
+    form.append("file", file, file.name);
+    if (options?.preferFullSource) {
+      form.append("prefer_full_source", "true");
+    }
+    init.body = form;
+  } else {
+    init.body = JSON.stringify({
+      message,
+      ...(options?.preferFullSource ? { prefer_full_source: true } : {}),
+    });
+  }
+  const res = await apiFetch(`/api/v1/resumes/${id}/chat`, init);
+  if (!res.ok) {
+    const body = await parseBody(res);
+    throw new ApiError(errorMessage(body, res.statusText || "Request failed"), res.status, body);
+  }
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("event-stream") || !res.body) {
+    throw new ApiError("Chat response was not a stream", res.status);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() ?? "";
+    for (const block of parts) {
+      const event = parseSseBlock(block);
+      if (event) await onEvent(event);
+    }
+  }
+  buffer += decoder.decode();
+  const tail = parseSseBlock(buffer);
+  if (tail) await onEvent(tail);
 }
 
 export async function getChatMessages(id: string): Promise<ChatMessage[]> {

@@ -1,13 +1,15 @@
 "use client";
 
 import { useLocale, useTranslations } from "next-intl";
-import { Check, ChevronDown, FilePenLine, FileSearch, Globe, Wrench, X } from "lucide-react";
+import { Check, ChevronDown, ClipboardList, FilePenLine, FileSearch, Globe, Paperclip, Redo2, Undo2, Wrench, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@/lib/api";
 import MarkdownBody from "@/components/editor/MarkdownBody";
 import EditDiff from "@/components/editor/EditDiff";
 import {
   clipText,
+  editCheckpointAction,
+  parseAttachedUserMessage,
   parseToolPayload,
   toolErrorMessage,
   type ToolPayload,
@@ -16,10 +18,27 @@ import { diffFromEditPayload } from "@/lib/edit-diff";
 
 type Props = {
   message: ChatMessage;
+  sending?: boolean;
+  currentSource?: string;
+  onRestoreEdit?: (source: string) => void;
 };
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function atsCounts(result: unknown): { passed: number; total: number } | null {
+  if (!result || typeof result !== "object") return null;
+  const rec = result as { passed?: unknown; total?: unknown; checks?: unknown };
+  const total =
+    typeof rec.total === "number"
+      ? rec.total
+      : Array.isArray(rec.checks)
+        ? rec.checks.length
+        : null;
+  const passed = typeof rec.passed === "number" ? rec.passed : null;
+  if (passed == null || total == null) return null;
+  return { passed, total };
 }
 
 function sourceLength(result: unknown): number | null {
@@ -45,6 +64,19 @@ function toolHeadline(payload: ToolPayload | null, t: Translate): {
     return {
       title: t("toolRead"),
       detail: chars != null ? t("toolReadHint", { count: chars }) : t("toolReadHintPlain"),
+      failed: Boolean(error),
+      showCheck: !error,
+    };
+  }
+  if (payload.name === "read_ats") {
+    const counts = atsCounts(payload.result);
+    return {
+      title: t("toolAts"),
+      detail: counts
+        ? counts.passed === counts.total
+          ? t("toolAtsAllPass")
+          : t("toolAtsHint", { passed: counts.passed, total: counts.total })
+        : null,
       failed: Boolean(error),
       showCheck: !error,
     };
@@ -104,6 +136,7 @@ function ToolIcon({ name, failed }: { name: string; failed: boolean }) {
   const className = "h-3.5 w-3.5 shrink-0";
   if (failed) return <X className={className} aria-hidden="true" />;
   if (name === "read_typst") return <FileSearch className={className} aria-hidden="true" />;
+  if (name === "read_ats") return <ClipboardList className={className} aria-hidden="true" />;
   if (name === "web_search") return <Globe className={className} aria-hidden="true" />;
   if (name === "apply_typst_edit") return <FilePenLine className={className} aria-hidden="true" />;
   return <Wrench className={className} aria-hidden="true" />;
@@ -175,20 +208,67 @@ function ToolDetails({ payload }: { payload: ToolPayload }) {
   );
 }
 
-function ToolCallCard({ message }: { message: ChatMessage }) {
+function RestoreButton({
+  disabled,
+  kind,
+  label,
+  onClick,
+}: {
+  disabled: boolean;
+  kind: "restore" | "reapply";
+  label: string;
+  onClick: () => void;
+}) {
+  const Icon = kind === "reapply" ? Redo2 : Undo2;
+  return (
+    <button
+      type="button"
+      data-testid={kind === "reapply" ? "tool-edit-reapply" : "tool-edit-restore"}
+      disabled={disabled}
+      className="tool-edit-action inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:pointer-events-none disabled:opacity-50 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+      onClick={onClick}
+    >
+      <Icon className="size-3.5" aria-hidden="true" />
+      {label}
+    </button>
+  );
+}
+
+function ToolCallCard({
+  message,
+  sending = false,
+  currentSource = "",
+  onRestoreEdit,
+}: {
+  message: ChatMessage;
+  sending?: boolean;
+  currentSource?: string;
+  onRestoreEdit?: (source: string) => void;
+}) {
   const t = useTranslations("editor");
   const payload = parseToolPayload(message.content);
   const { title, detail, failed, showCheck } = toolHeadline(payload, t as Translate);
   const name = payload?.name ?? "tool";
+  const checkpoint = onRestoreEdit ? editCheckpointAction(payload, currentSource) : null;
+  const actionButton =
+    checkpoint && onRestoreEdit ? (
+      <RestoreButton
+        disabled={sending}
+        kind={checkpoint.kind}
+        label={checkpoint.kind === "reapply" ? t("toolEditReapply") : t("toolEditRestore")}
+        onClick={() => onRestoreEdit(checkpoint.source)}
+      />
+    ) : null;
   const diffLines =
     payload && payload.name === "apply_typst_edit" && !failed ? diffFromEditPayload(payload) : [];
   const showDetails = Boolean(
     payload &&
       payload.name !== "apply_typst_edit" &&
+      payload.name !== "read_typst" &&
+      payload.name !== "read_ats" &&
       (asString(payload.arguments.search) ||
         asString(payload.arguments.replace) ||
         asString(payload.arguments.query) ||
-        sourceLength(payload.result) != null ||
         sourceLinks(payload).length > 0 ||
         toolErrorMessage(payload)),
   );
@@ -224,7 +304,11 @@ function ToolCallCard({ message }: { message: ChatMessage }) {
         ) : null}
         {diffLines.length > 0 ? (
           <div className="mt-1 pl-8">
-            <EditDiff lines={diffLines} />
+            <EditDiff lines={diffLines} action={actionButton} />
+          </div>
+        ) : actionButton ? (
+          <div className="mt-1 flex pl-8">
+            <div className="ml-auto">{actionButton}</div>
           </div>
         ) : null}
         {showDetails && payload ? (
@@ -241,13 +325,20 @@ function ToolCallCard({ message }: { message: ChatMessage }) {
   );
 }
 
-export default function ChatMessageCard({ message }: Props) {
+export default function ChatMessageCard({ message, sending, currentSource, onRestoreEdit }: Props) {
   const locale = useLocale();
   const isUser = message.role === "user";
   const time = message.timestamp ? new Date(message.timestamp) : null;
 
   if (message.role === "tool") {
-    return <ToolCallCard message={message} />;
+    return (
+      <ToolCallCard
+        message={message}
+        sending={sending}
+        currentSource={currentSource}
+        onRestoreEdit={onRestoreEdit}
+      />
+    );
   }
 
   if (!isUser) {
@@ -258,10 +349,20 @@ export default function ChatMessageCard({ message }: Props) {
     );
   }
 
+  const { filename, text } = parseAttachedUserMessage(message.content);
+
   return (
     <div className="flex w-full justify-end">
       <div className="w-fit max-w-[min(90%,32rem)] rounded-2xl bg-cyan-600 px-4 py-2 text-white">
-        <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{message.content}</p>
+        {filename ? (
+          <p className="mb-1.5 flex items-center gap-1.5 text-xs text-white/90">
+            <Paperclip className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 truncate">{filename}</span>
+          </p>
+        ) : null}
+        {text ? (
+          <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{text}</p>
+        ) : null}
         {time && !Number.isNaN(time.getTime()) ? (
           <p className="mt-1 text-xs text-white/70">
             {time.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}

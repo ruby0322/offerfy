@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import Response as RawResponse
 from sqlalchemy.orm import Session
 
@@ -21,11 +21,7 @@ from app.services.ats import analyze_pdf
 from app.services.extract import (
     MAX_UPLOAD_BYTES,
     allowed_upload,
-    as_typst_comments,
-    extract_upload_text,
 )
-from app.services.import_resume import import_uploaded_resume
-from app.services.llm import llm_configured
 from app.services.rate_limit import enforce_guest_rate
 from app.services.s3 import put_object
 from app.services.starter import default_title, generate_starter
@@ -115,7 +111,6 @@ def create_resume(
 async def upload_resume(
     request: Request,
     response: Response,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     title: str | None = Form(None),
     locale: str | None = Form(None),
@@ -133,16 +128,6 @@ async def upload_resume(
     if user is None and guest is None:
         raise HTTPException(status_code=401, detail="Guest session required")
 
-    extracted = extract_upload_text(filename, data)
-    source = generate_starter(locale_v)
-    if extracted:
-        source = (
-            source
-            + "\n\n// --- extracted from upload ---\n"
-            + as_typst_comments(extracted)
-        )
-
-    start_import = llm_configured()
     resume = _new_resume(
         db,
         user,
@@ -150,8 +135,8 @@ async def upload_resume(
         title=title or default_title(locale_v),
         locale=locale_v,
         source="upload",
-        typst_source=source,
-        import_status="pending" if start_import else "idle",
+        typst_source=generate_starter(locale_v),
+        import_status="idle",
     )
     owner = user.id if user is not None else (guest.id if guest else "anon")
     key = f"uploads/{owner}/{resume.id}/{Path(filename).name}"
@@ -159,18 +144,7 @@ async def upload_resume(
     resume.upload_s3_key = stored
     db.commit()
     db.refresh(resume)
-    payload = _to_out(resume)
-    if start_import:
-        guest_id = None if user is not None else (guest.id if guest else None)
-        background_tasks.add_task(
-            import_uploaded_resume,
-            resume.id,
-            filename,
-            data,
-            extracted,
-            guest_id,
-        )
-    return payload
+    return _to_out(resume)
 
 
 @router.get("/v1/resumes", response_model=list[ResumeListItem])

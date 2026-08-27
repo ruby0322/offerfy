@@ -37,7 +37,7 @@ def test_put_updates_typst_source_and_title(client: TestClient):
     assert response.json()["title"] == "Ada"
 
 
-def test_upload_txt_returns_resume_with_extracted_comments(client: TestClient):
+def test_upload_txt_returns_resume_starter(client: TestClient):
     response = client.post(
         "/v1/resumes/upload",
         data={"title": "From file", "locale": "en"},
@@ -46,7 +46,8 @@ def test_upload_txt_returns_resume_with_extracted_comments(client: TestClient):
     assert response.status_code in (200, 201)
     data = response.json()
     assert data["source"] == "upload"
-    assert "Hello from upload" in data["typst_source"]
+    assert data["import_status"] == "idle"
+    assert "Hello from upload" not in data["typst_source"]
     assert "@preview/basic-resume:0.2.9" in data["typst_source"]
 
 

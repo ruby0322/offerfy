@@ -42,6 +42,36 @@ export function isSuccessfulTypstEdit(payload: ToolPayload | null): boolean {
   return true;
 }
 
+export function editPreviousSource(payload: ToolPayload | null): string | null {
+  if (!isSuccessfulTypstEdit(payload) || !payload) return null;
+  const result = payload.result;
+  if (!result || typeof result !== "object") return null;
+  const previous = (result as { previous_source?: unknown }).previous_source;
+  return typeof previous === "string" && previous.length > 0 ? previous : null;
+}
+
+export function editResultSource(payload: ToolPayload | null): string | null {
+  if (!isSuccessfulTypstEdit(payload) || !payload) return null;
+  const result = payload.result;
+  if (!result || typeof result !== "object") return null;
+  const source = (result as { source?: unknown }).source;
+  return typeof source === "string" && source.length > 0 ? source : null;
+}
+
+export function editCheckpointAction(
+  payload: ToolPayload | null,
+  currentSource: string,
+): { kind: "restore" | "reapply"; source: string } | null {
+  const previous = editPreviousSource(payload);
+  if (!previous) return null;
+  if (currentSource === previous) {
+    const next = editResultSource(payload);
+    if (!next || next === currentSource) return null;
+    return { kind: "reapply", source: next };
+  }
+  return { kind: "restore", source: previous };
+}
+
 export function chatAppliedTypstEdit(
   messages: ChatMessage[],
   nextSource: string | null,
@@ -53,6 +83,18 @@ export function chatAppliedTypstEdit(
   return messages.some(
     (message) => message.role === "tool" && isSuccessfulTypstEdit(parseToolPayload(message.content)),
   );
+}
+
+export function formatUserAttachmentMessage(message: string, filename: string | null): string {
+  const text = message.trim();
+  if (!filename) return text;
+  return `Attached file: ${filename}\n\n${text || "Please use this file."}`;
+}
+
+export function parseAttachedUserMessage(content: string): { filename: string | null; text: string } {
+  const match = content.match(/^Attached file: (.+)\n\n([\s\S]*)$/);
+  if (!match) return { filename: null, text: content };
+  return { filename: match[1], text: match[2] };
 }
 
 export function clipText(value: string, max = 72): string {

@@ -6,6 +6,7 @@ os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 os.environ.setdefault("AUTH_TOKEN_SECRET", "test-secret-for-unit-tests")
 os.environ.setdefault("OPENAI_MODEL", "gpt-5.6-terra")
 os.environ["OPENAI_API_KEY"] = ""
+os.environ["OFFERFY_SKIP_TEMPLATE_PREFETCH"] = "1"
 
 import pytest
 from fastapi.testclient import TestClient

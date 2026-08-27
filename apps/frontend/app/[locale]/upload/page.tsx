@@ -7,6 +7,7 @@ import Nav from "@/components/Nav";
 import Dropzone from "@/components/upload/Dropzone";
 import { useRouter } from "@/i18n/navigation";
 import { ApiError, uploadResume } from "@/lib/api";
+import { stashPendingUpload } from "@/lib/pending-upload";
 
 export default function UploadPage() {
   const t = useTranslations("upload");
@@ -20,6 +21,7 @@ export default function UploadPage() {
     setError(null);
     try {
       const resume = await uploadResume({ file, locale });
+      stashPendingUpload(resume.id, file);
       router.push(`/editor/${resume.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("error"));
