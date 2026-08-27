@@ -66,7 +66,7 @@ export default function DashboardPage() {
         <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="rr-page-title">{t("title")}</h1>
-            {email ? <p className="mt-2 text-sm text-[var(--rr-muted)]">{email}</p> : null}
+            {email ? <p className="mt-2 text-sm text-muted-foreground">{email}</p> : null}
           </div>
           <div className="flex gap-2">
             <Link href="/new" className="rr-btn">
@@ -78,14 +78,14 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {error ? <p className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
         {resumes == null && !error ? (
-          <p className="text-sm text-[var(--rr-muted)]">{tCommon("loading")}</p>
+          <p className="text-sm text-muted-foreground">{tCommon("loading")}</p>
         ) : null}
 
         {resumes && resumes.length === 0 ? (
-          <div className="rr-card p-10 text-sm text-[var(--rr-muted)]">{t("empty")}</div>
+          <div className="rr-card p-10 text-sm text-muted-foreground">{t("empty")}</div>
         ) : null}
 
         {resumes && resumes.length > 0 ? (
@@ -94,7 +94,7 @@ export default function DashboardPage() {
               <li key={resume.id} className="rr-card rr-row-card flex items-center justify-between gap-4 px-5 py-4">
                 <div>
                   <p className="font-medium tracking-tight">{resume.title || resume.id}</p>
-                  <p className="mt-1 text-xs text-[var(--rr-muted)]">
+                  <p className="mt-1 text-xs text-muted-foreground">
                     {resume.source === "upload" ? t("sourceUpload") : t("sourceCreate")}
                   </p>
                 </div>

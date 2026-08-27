@@ -7,7 +7,7 @@ export default function Roadmap() {
     <section className="mx-auto max-w-[44rem] px-5 pb-8 pt-8 md:pb-12 md:pt-4">
       <div className="landing-roadmap">
         <div>
-          <h2 className="landing-display">{t("nowTitle")}</h2>
+          <h2 className="font-display">{t("nowTitle")}</h2>
           <ul>
             <li>{t("nowEditor")}</li>
             <li>{t("nowAts")}</li>
@@ -15,7 +15,7 @@ export default function Roadmap() {
           </ul>
         </div>
         <div>
-          <h2 className="landing-display">{t("nextTitle")}</h2>
+          <h2 className="font-display">{t("nextTitle")}</h2>
           <ul>
             <li>{t("nextSearch")}</li>
             <li>{t("nextTailor")}</li>
@@ -24,7 +24,7 @@ export default function Roadmap() {
           </ul>
         </div>
       </div>
-      <p className="mt-10 max-w-[40rem] text-sm leading-relaxed text-[var(--landing-muted)]">
+      <p className="mt-10 max-w-[40rem] text-sm leading-relaxed text-muted-foreground">
         {t("atsNote")}
       </p>
     </section>

@@ -11,6 +11,22 @@ def _upload(client: TestClient, body: bytes = b"Hello from upload\ncontact@examp
     )
 
 
+def test_upload_defaults_title_to_filename_stem(client: TestClient):
+    response = client.post(
+        "/v1/resumes/upload",
+        data={"locale": "en"},
+        files={"file": ("Ada Lovelace CV.pdf", b"Hello from upload", "application/pdf")},
+    )
+    assert response.status_code == 201
+    assert response.json()["title"] == "Ada Lovelace CV"
+
+
+def test_upload_explicit_title_wins_over_filename(client: TestClient):
+    response = _upload(client)
+    assert response.status_code == 201
+    assert response.json()["title"] == "From file"
+
+
 def test_upload_is_idle_starter_without_extracted_comments(client: TestClient):
     response = _upload(client)
     assert response.status_code == 201

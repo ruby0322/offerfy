@@ -4,6 +4,7 @@ import { ReactNode, useState } from "react";
 import ZoomToolbar from "@/components/editor/ZoomToolbar";
 import AtsStrip from "@/components/editor/AtsStrip";
 import { Button } from "@/components/ui/button";
+import type { AtsCheckName } from "@/lib/ats-checks";
 import type { AtsReport } from "@/lib/api";
 
 type Props = {
@@ -14,6 +15,8 @@ type Props = {
   downloadLabel: string;
   downloading: boolean;
   onDownload: () => void;
+  onFixAts?: (name: AtsCheckName) => void;
+  fixingAts?: boolean;
   overlay?: ReactNode;
 };
 
@@ -25,12 +28,14 @@ export default function EditorPreview({
   downloadLabel,
   downloading,
   onDownload,
+  onFixAts,
+  fixingAts,
   overlay,
 }: Props) {
   const [scale, setScale] = useState(1);
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col bg-gray-50 dark:bg-gray-950">
+    <div className="relative flex h-full min-h-0 flex-col bg-background">
       <div className="relative min-h-0 flex-1">
         <div className="h-full min-h-0 overflow-auto">
           <div className="sticky top-0 z-30 flex justify-end pointer-events-none">
@@ -38,7 +43,7 @@ export default function EditorPreview({
               <Button
                 type="button"
                 size="sm"
-                className="bg-cyan-600 hover:bg-cyan-700"
+                className="bg-primary text-primary-foreground hover:opacity-90"
                 onClick={onDownload}
                 disabled={downloading}
               >
@@ -54,7 +59,7 @@ export default function EditorPreview({
                   {previewUrls.map((url, index) => (
                     <div
                       key={url}
-                      className="overflow-hidden rounded-lg bg-white shadow-md dark:bg-gray-900"
+                      className="overflow-hidden rounded-lg border border-rule bg-sheet"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
@@ -67,13 +72,13 @@ export default function EditorPreview({
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-gray-500 dark:text-gray-400">{previewError}</p>
+              <p className="text-sm text-muted-foreground">{previewError}</p>
             )}
           </div>
         </div>
         {overlay}
       </div>
-      <AtsStrip report={report} />
+      <AtsStrip report={report} onFix={onFixAts} fixing={fixingAts} />
     </div>
   );
 }

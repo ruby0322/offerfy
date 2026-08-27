@@ -114,6 +114,14 @@ def default_title(locale: str) -> str:
     return "Untitled"
 
 
+def title_from_filename(filename: str | None, locale: str) -> str:
+    stem = Path(filename or "").name.strip()
+    stem = Path(stem).stem.strip()
+    if not stem:
+        return default_title(locale)
+    return stem[:255]
+
+
 def resolve_package_path() -> str:
     settings = get_settings()
     if settings.typst_package_path:

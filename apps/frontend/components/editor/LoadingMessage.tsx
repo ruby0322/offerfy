@@ -13,17 +13,17 @@ export default function LoadingMessage() {
     >
       <div className="flex space-x-1">
         <motion.div
-          className="h-1.5 w-1.5 rounded-full bg-gray-400"
+          className="h-1.5 w-1.5 rounded-full bg-muted-foreground"
           animate={{ y: [0, -6, 0] }}
           transition={{ duration: 0.6, repeat: Infinity, delay: 0 }}
         />
         <motion.div
-          className="h-1.5 w-1.5 rounded-full bg-gray-400"
+          className="h-1.5 w-1.5 rounded-full bg-muted-foreground"
           animate={{ y: [0, -6, 0] }}
           transition={{ duration: 0.6, repeat: Infinity, delay: 0.1 }}
         />
         <motion.div
-          className="h-1.5 w-1.5 rounded-full bg-gray-400"
+          className="h-1.5 w-1.5 rounded-full bg-muted-foreground"
           animate={{ y: [0, -6, 0] }}
           transition={{ duration: 0.6, repeat: Infinity, delay: 0.2 }}
         />

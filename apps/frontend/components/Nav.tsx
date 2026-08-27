@@ -16,7 +16,7 @@ export default function Nav({ variant }: Props) {
   const landing = isLanding === "landing";
 
   return (
-    <header className={landing ? "landing-nav" : "rr-nav border-b"}>
+    <header className={landing ? "landing-nav" : "rr-nav"}>
       <div
         className={
           landing
@@ -30,7 +30,7 @@ export default function Nav({ variant }: Props) {
         <div className="flex items-center gap-1 sm:gap-3">
           <LocaleSwitcher />
           <ThemeSwitcher />
-          <Link href="/login" className={landing ? "text-sm font-medium" : "rr-btn-nav"}>
+          <Link href="/login" className="text-sm font-medium">
             {t("login")}
           </Link>
         </div>

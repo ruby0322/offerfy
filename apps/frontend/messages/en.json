@@ -164,6 +164,8 @@
     "pass": "Pass",
     "fail": "Fail",
     "pending": "Shown after compile",
+    "fixWithAi": "Fix with AI",
+    "fixPrompt": "ATS check \"{check}\" ({name}) failed. {meaning}\n\nCall read_ats, then apply_typst_edit to fix this check. Keep the template package, A4 paper, and accent color.",
     "checks": {
       "text_extractable": "Text can be extracted (not image-only)",
       "single_column": "Single-column layout",
@@ -173,6 +175,16 @@
       "no_embedded_images_as_text": "Name/contact is not image-only",
       "fonts_embedded": "Fonts embedded",
       "parse_roundtrip_ok": "Extract recovers source text"
+    },
+    "meanings": {
+      "text_extractable": "ATS copies characters from the PDF. An image-only page looks empty to parsers.",
+      "single_column": "Parsers read top to bottom. Two columns often scramble jobs and dates.",
+      "contact_in_body": "Name and email in the header or footer are often dropped.",
+      "standard_headings": "Parsers look for Experience and Education. Custom titles get skipped.",
+      "dates_machine_readable": "Use YYYY-MM or Present. Month names often don't parse into a timeline.",
+      "no_embedded_images_as_text": "If the name is a picture, ATS cannot tell who you are.",
+      "fonts_embedded": "Unembedded fonts can extract as missing or garbled glyphs.",
+      "parse_roundtrip_ok": "Extracted text should match the page, including your name."
     }
   },
   "common": {

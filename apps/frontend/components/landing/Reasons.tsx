@@ -5,7 +5,7 @@ export default function Reasons() {
   const keys = ["one", "two", "three"] as const;
 
   return (
-    <section className="mx-auto max-w-[44rem] border-t border-[var(--landing-rule)] px-5 py-16 md:py-20">
+    <section className="mx-auto max-w-[44rem] border-t border-rule px-5 py-16 md:py-20">
       <ul className="landing-reasons">
         {keys.map((key) => (
           <li key={key}>{t(key)}</li>

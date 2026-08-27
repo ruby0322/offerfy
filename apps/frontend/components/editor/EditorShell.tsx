@@ -25,6 +25,7 @@ import {
   type ChatMessage,
 } from "@/lib/api";
 import { formatUserAttachmentMessage } from "@/lib/chat-tools";
+import type { AtsCheckName } from "@/lib/ats-checks";
 import { peekPendingUpload, takePendingUpload } from "@/lib/pending-upload";
 
 const TypstSourceEditor = dynamic(
@@ -50,6 +51,7 @@ type Props = {
 
 export default function EditorShell({ resumeId }: Props) {
   const t = useTranslations("editor");
+  const tAts = useTranslations("ats");
   const tCommon = useTranslations("common");
   const tNav = useTranslations("nav");
   const locale = useLocale();
@@ -392,18 +394,29 @@ export default function EditorShell({ resumeId }: Props) {
     void sendUserChat(prompt);
   }
 
+  function onFixAts(name: AtsCheckName) {
+    if (sendingRef.current) return;
+    const prompt = tAts("fixPrompt", {
+      name,
+      check: tAts(`checks.${name}`),
+      meaning: tAts(`meanings.${name}`),
+    });
+    setLeftTab("chat");
+    void sendUserChat(prompt);
+  }
+
   if (loadError) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-white p-6 dark:bg-gray-950 dark:text-gray-100">
-        <p>{loadError}</p>
+      <div className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground">
+        <p className="text-sm text-destructive">{loadError}</p>
       </div>
     );
   }
 
   if (!loaded) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-white p-6 dark:bg-gray-950">
-        <p className="text-sm text-gray-600 dark:text-gray-400">{tCommon("loading")}</p>
+      <div className="flex min-h-screen items-center justify-center bg-background p-6">
+        <p className="text-sm text-muted-foreground">{tCommon("loading")}</p>
       </div>
     );
   }
@@ -411,7 +424,7 @@ export default function EditorShell({ resumeId }: Props) {
   const chatEmptyHint = chatUnavailable ? t("chatNotConfigured") : t("chatEmpty");
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-white dark:bg-gray-950">
+    <div className="flex h-screen flex-col overflow-hidden bg-background">
       <EditorHeader brand={tNav("brand")} title={title} status={status} />
       <div className="min-h-0 flex-1">
         <ResizablePanelGroup direction="horizontal" className="h-full">
@@ -422,7 +435,7 @@ export default function EditorShell({ resumeId }: Props) {
               onValueChange={setLeftTab}
               className="flex h-full min-h-0 flex-col gap-0"
             >
-              <div className="flex shrink-0 items-center overflow-x-auto border-b border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
+              <div className="flex shrink-0 items-center overflow-x-auto border-b border-border bg-background px-3 py-2">
                 <TabsList>
                   <TabsTrigger value="typst">{t("tabTypst")}</TabsTrigger>
                   <TabsTrigger value="chat">{t("tabChat")}</TabsTrigger>
@@ -475,7 +488,7 @@ export default function EditorShell({ resumeId }: Props) {
             </Tabs>
             </div>
           </ResizablePanel>
-          <ResizableHandle withHandle className="bg-gray-200 dark:bg-gray-700" />
+          <ResizableHandle withHandle className="bg-rule" />
           <ResizablePanel defaultSize={52} minSize={35} className="h-full">
             <EditorPreview
               previewUrls={previewUrls}
@@ -485,6 +498,8 @@ export default function EditorShell({ resumeId }: Props) {
               downloadLabel={downloading ? t("downloading") : t("download")}
               downloading={downloading}
               onDownload={onDownload}
+              onFixAts={onFixAts}
+              fixingAts={sending}
               overlay={
                 compileError ? (
                   <CompileErrorDialog

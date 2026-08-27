@@ -17,8 +17,8 @@
   },
   "landing": {
     "hero": {
-      "kicker": "現在可做",
-      "headline": "一份真的能拿去投的履歷。",
+      "kicker": "現在開始製作",
+      "headline": "一份真能拿去投的履歷。",
       "sub": "搜尋、客製、投遞還在路上。今天先從履歷開始。",
       "ctaCreate": "建立履歷",
       "ctaUpload": "上傳一份"
@@ -164,6 +164,8 @@
     "pass": "通過",
     "fail": "未通過",
     "pending": "編譯後顯示",
+    "fixWithAi": "用 AI 修正",
+    "fixPrompt": "ATS 檢查「{check}」（{name}）未通過。{meaning}\n\n請先呼叫 read_ats，再 apply_typst_edit 修正這項。保留套件、A4 紙張與 accent 顏色。",
     "checks": {
       "text_extractable": "可擷取文字（非純影像 PDF）",
       "single_column": "單欄版面",
@@ -173,6 +175,16 @@
       "no_embedded_images_as_text": "姓名／聯絡方式不是只用圖片",
       "fonts_embedded": "字型已嵌入",
       "parse_roundtrip_ok": "原始內容可從 PDF 還原"
+    },
+    "meanings": {
+      "text_extractable": "ATS 要能從 PDF 複製文字。純影像頁面對解析器等於空白。",
+      "single_column": "解析器由上往下讀。雙欄常會把經歷和日期讀亂。",
+      "contact_in_body": "姓名與 Email 只放頁首或頁尾時，常被 ATS 丟掉。",
+      "standard_headings": "解析器找的是經歷／學歷這類標題。自訂標題容易被略過。",
+      "dates_machine_readable": "請用 YYYY-MM 或 Present。月份英文常無法排進時間軸。",
+      "no_embedded_images_as_text": "姓名若是圖片，ATS 看不出你是誰。",
+      "fonts_embedded": "未嵌入的字型擷取後可能缺字或亂碼。",
+      "parse_roundtrip_ok": "擷取出的文字應對得上頁面內容，包含姓名。"
     }
   },
   "common": {

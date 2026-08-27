@@ -16,7 +16,7 @@ export default function Footer({ variant }: Props) {
   const landing = isLanding === "landing";
 
   return (
-    <footer className={landing ? "landing-footer mt-16" : "rr-footer mt-16 border-t"}>
+    <footer className={landing ? "landing-footer mt-16" : "rr-footer mt-16"}>
       <div
         className={
           landing

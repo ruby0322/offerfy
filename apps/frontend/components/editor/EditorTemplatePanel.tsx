@@ -64,21 +64,21 @@ export default function EditorTemplatePanel({ sending, onApply }: Props) {
   if (!loaded) {
     return (
       <div className="flex h-full items-center justify-center p-3">
-        <p className="text-sm text-gray-500">{t("templateLoading")}</p>
+        <p className="text-sm text-muted-foreground">{t("templateLoading")}</p>
       </div>
     );
   }
   if (error) {
     return (
       <div className="flex h-full items-center justify-center p-3">
-        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        <p className="text-sm text-destructive">{error}</p>
       </div>
     );
   }
   if (!current) {
     return (
       <div className="flex h-full items-center justify-center p-3">
-        <p className="text-sm text-gray-500">{t("templateEmpty")}</p>
+        <p className="text-sm text-muted-foreground">{t("templateEmpty")}</p>
       </div>
     );
   }
@@ -104,10 +104,10 @@ export default function EditorTemplatePanel({ sending, onApply }: Props) {
     >
       <header className="flex shrink-0 items-start justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="truncate text-base font-semibold text-gray-900 dark:text-gray-100">
+          <h2 className="truncate text-base font-semibold text-foreground">
             {current.name}
           </h2>
-          <p className="text-[11px] text-gray-500 dark:text-gray-400">
+          <p className="text-[11px] text-muted-foreground">
             {current.version}
             <span className="px-1">·</span>
             {t("templateCount", { current: index + 1, total: count })}
@@ -116,7 +116,7 @@ export default function EditorTemplatePanel({ sending, onApply }: Props) {
               href={current.universe_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-cyan-700 underline-offset-2 hover:underline dark:text-cyan-300"
+              className="text-clay underline-offset-2 hover:underline"
             >
               {t("templateUniverse")}
             </a>
@@ -126,14 +126,14 @@ export default function EditorTemplatePanel({ sending, onApply }: Props) {
           type="button"
           size="sm"
           disabled={sending}
-          className="shrink-0 bg-cyan-600 hover:bg-cyan-700"
+          className="shrink-0"
           onClick={() => onApply(current.apply_prompt)}
         >
           {t("templateApply")}
         </Button>
       </header>
 
-      <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-900">
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-paper">
         {showImage ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -144,12 +144,12 @@ export default function EditorTemplatePanel({ sending, onApply }: Props) {
             onError={() => setBroken((prev) => ({ ...prev, [current.name]: true }))}
           />
         ) : (
-          <p className="px-4 text-center text-sm text-gray-400">{current.name}</p>
+          <p className="px-4 text-center text-sm text-muted-foreground">{current.name}</p>
         )}
       </div>
 
       {current.description ? (
-        <p className="line-clamp-3 shrink-0 text-xs leading-relaxed text-gray-600 dark:text-gray-300">
+        <p className="line-clamp-3 shrink-0 text-xs leading-relaxed text-muted-foreground">
           {current.description}
         </p>
       ) : null}
@@ -177,17 +177,15 @@ export default function EditorTemplatePanel({ sending, onApply }: Props) {
                 type="button"
                 data-active={active ? "true" : "false"}
                 className={cn(
-                  "h-16 w-12 shrink-0 overflow-hidden rounded border bg-gray-50 dark:bg-gray-900",
-                  active
-                    ? "border-cyan-600 ring-2 ring-cyan-500/40"
-                    : "border-gray-200 dark:border-gray-700",
+                  "h-16 w-12 shrink-0 overflow-hidden rounded border bg-sheet",
+                  active ? "border-clay ring-2 ring-clay/40" : "border-rule",
                 )}
                 aria-label={row.name}
                 aria-current={active ? "true" : undefined}
                 onClick={() => setIndex(i)}
               >
                 {broken[row.name] ? (
-                  <span className="flex h-full items-center justify-center px-0.5 text-[8px] leading-tight text-gray-400">
+                  <span className="flex h-full items-center justify-center px-0.5 text-[8px] leading-tight text-muted-foreground">
                     {row.name}
                   </span>
                 ) : (

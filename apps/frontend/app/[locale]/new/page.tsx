@@ -23,11 +23,11 @@ export default async function NewPickerPage({ params }: Props) {
         <div className="mt-10 grid gap-4 md:grid-cols-2">
           <Link href="/create" className="rr-card rr-choice-card block p-7">
             <h2 className="text-lg font-semibold tracking-tight">{t("createTitle")}</h2>
-            <p className="mt-2 text-sm leading-6 text-[var(--rr-muted)]">{t("createBody")}</p>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">{t("createBody")}</p>
           </Link>
           <Link href="/upload" className="rr-card rr-choice-card block p-7">
             <h2 className="text-lg font-semibold tracking-tight">{t("uploadTitle")}</h2>
-            <p className="mt-2 text-sm leading-6 text-[var(--rr-muted)]">{t("uploadBody")}</p>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">{t("uploadBody")}</p>
           </Link>
         </div>
       </main>

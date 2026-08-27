@@ -167,12 +167,12 @@ export default function EditorChatPanel({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-white dark:bg-gray-900">
+    <div className="flex h-full min-h-0 flex-col bg-background">
       <div className="min-h-0 flex-1 overflow-hidden px-4">
         <ScrollArea className="h-full" viewportRef={viewportRef}>
           <div className="space-y-4 py-4">
             {messages.length === 0 && !sending ? (
-              <p className="text-sm text-gray-500 dark:text-gray-400">{emptyHint}</p>
+              <p className="text-sm text-muted-foreground">{emptyHint}</p>
             ) : null}
             <AnimatePresence initial={false}>
               {messages.map((message, index) => (
@@ -198,8 +198,8 @@ export default function EditorChatPanel({
       </div>
       <form
         className={cn(
-          "space-y-2 border-t border-gray-200 px-3 py-2 dark:border-gray-700",
-          dragging && "bg-cyan-50 dark:bg-cyan-950/40",
+          "space-y-2 border-t border-border px-3 py-2",
+          dragging && "bg-hover",
         )}
         onSubmit={onSubmit}
         onDragOver={onDragOver}
@@ -207,12 +207,12 @@ export default function EditorChatPanel({
         onDrop={onDrop}
       >
         {attachment ? (
-          <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200">
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-sheet px-2 py-1.5 text-xs text-foreground">
             <Paperclip className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             <span className="min-w-0 flex-1 truncate">{attachment.name}</span>
             <button
               type="button"
-              className="rounded p-0.5 hover:bg-gray-200 dark:hover:bg-gray-700"
+              className="rounded p-0.5 hover:bg-accent"
               aria-label={attachRemoveLabel}
               onClick={() => onAttachmentChange(null)}
             >
@@ -220,7 +220,7 @@ export default function EditorChatPanel({
             </button>
           </div>
         ) : null}
-        {attachError ? <p className="text-xs text-red-600 dark:text-red-400">{attachError}</p> : null}
+        {attachError ? <p className="text-xs text-destructive">{attachError}</p> : null}
         <div className="flex items-end justify-center space-x-1">
           <Button
             type="button"
@@ -229,7 +229,7 @@ export default function EditorChatPanel({
             disabled={sending}
             aria-label={attachLabel}
             title={`${attachLabel} · ${attachHint}`}
-            className="h-12 w-12 shrink-0 text-gray-600 hover:text-cyan-700 dark:text-gray-300 dark:hover:text-cyan-300"
+            className="h-12 w-12 shrink-0 text-muted-foreground hover:text-clay"
             onClick={() => fileRef.current?.click()}
           >
             <Paperclip className="h-5 w-5" />
@@ -261,7 +261,7 @@ export default function EditorChatPanel({
             placeholder={placeholder}
             disabled={sending}
             aria-label={ariaLabel}
-            className="max-h-[120px] min-h-[48px] flex-1 resize-none px-2 text-sm transition-colors focus:border-cyan-500 focus:ring-cyan-500"
+            className="max-h-[120px] min-h-[48px] flex-1 resize-none px-2 text-sm transition-colors focus-visible:border-ring focus-visible:ring-ring/50"
             rows={1}
           />
           <Button
@@ -269,7 +269,7 @@ export default function EditorChatPanel({
             size="icon"
             disabled={!canSend()}
             aria-label={sendLabel}
-            className="h-12 w-12 shrink-0 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50"
+            className="h-12 w-12 shrink-0 disabled:opacity-50"
           >
             <Send className="h-5 w-5" />
           </Button>

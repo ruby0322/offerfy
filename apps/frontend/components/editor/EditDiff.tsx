@@ -13,7 +13,7 @@ type Props = {
 
 export default function EditDiff({ lines, action }: Props) {
   const t = useTranslations("editor");
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   if (lines.length === 0) return null;
   const added = lines.filter((line) => line.op === "add").length;
   const removed = lines.filter((line) => line.op === "del").length;
@@ -25,7 +25,7 @@ export default function EditDiff({ lines, action }: Props) {
           data-testid="tool-edit-diff-toggle"
           aria-expanded={open}
           aria-label={open ? t("toolEditDiffCollapse") : t("toolEditDiffExpand")}
-          className="tool-edit-action inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+          className="tool-edit-action inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
           onClick={() => setOpen((value) => !value)}
         >
           <ChevronDown
@@ -34,10 +34,10 @@ export default function EditDiff({ lines, action }: Props) {
           />
           <span className="flex items-center gap-1.5 tabular-nums" data-testid="tool-edit-diff-stats">
             {added > 0 ? (
-              <span className="text-emerald-700 dark:text-emerald-400">+{added}</span>
+              <span className="text-success">+{added}</span>
             ) : null}
             {removed > 0 ? (
-              <span className="text-red-700 dark:text-red-400">-{removed}</span>
+              <span className="text-destructive">-{removed}</span>
             ) : null}
           </span>
         </button>

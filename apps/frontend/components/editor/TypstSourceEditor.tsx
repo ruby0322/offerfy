@@ -15,62 +15,36 @@ export type TypstSourceEditorProps = {
   lang?: string;
 };
 
-const lightTheme = EditorView.theme(
-  {
-    "&": {
-      height: "100%",
-      backgroundColor: "#f8fafc",
-      color: "#1e293b",
-      fontSize: "0.85rem",
-    },
-    "&.cm-focused": { outline: "none" },
-    ".cm-scroller": {
-      fontFamily:
-        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-      lineHeight: "1.55",
-    },
-    ".cm-content": { caretColor: "#0f172a", padding: "1.15rem 0.25rem" },
-    ".cm-gutters": {
-      backgroundColor: "#f1f5f9",
-      color: "#64748b",
-      border: "none",
-    },
-  },
-  { dark: false },
-);
-
-const darkTheme = EditorView.theme(
-  {
-    "&": {
-      height: "100%",
-      backgroundColor: "#0f172a",
-      color: "#e2e8f0",
-      fontSize: "0.85rem",
-    },
-    "&.cm-focused": { outline: "none" },
-    ".cm-scroller": {
-      fontFamily:
-        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-      lineHeight: "1.55",
-    },
-    ".cm-content": { caretColor: "#f8fafc", padding: "1.15rem 0.25rem" },
-    ".cm-gutters": {
-      backgroundColor: "#1e293b",
-      color: "#94a3b8",
-      border: "none",
-    },
-    ".cm-activeLine": { backgroundColor: "#1e293b" },
-    ".cm-activeLineGutter": { backgroundColor: "#1e293b" },
-    ".cm-cursor, .cm-dropCursor": { borderLeftColor: "#f8fafc" },
-    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
-      backgroundColor: "#334155",
-    },
-  },
-  { dark: true },
-);
-
 function editorTheme(dark: boolean) {
-  return dark ? darkTheme : lightTheme;
+  return EditorView.theme(
+    {
+      "&": {
+        height: "100%",
+        backgroundColor: "var(--sheet)",
+        color: "var(--ink)",
+        fontSize: "0.85rem",
+      },
+      "&.cm-focused": { outline: "none" },
+      ".cm-scroller": {
+        fontFamily:
+          'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+        lineHeight: "1.55",
+      },
+      ".cm-content": { caretColor: "var(--ink)", padding: "1.15rem 0.25rem" },
+      ".cm-gutters": {
+        backgroundColor: "var(--paper)",
+        color: "var(--muted)",
+        border: "none",
+      },
+      ".cm-activeLine": { backgroundColor: "var(--hover)" },
+      ".cm-activeLineGutter": { backgroundColor: "var(--paper)" },
+      ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--ink)" },
+      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
+        backgroundColor: "var(--rule)",
+      },
+    },
+    { dark },
+  );
 }
 
 function TypstTextareaFallback({

@@ -22,7 +22,7 @@ export default function ZoomToolbar({ value, min = 0.5, max = 2, step = 0.1, onC
   const percentage = Math.round(value * 100);
 
   return (
-    <div className={cn("inline-flex items-center gap-1 rounded-md border bg-white/90 dark:bg-gray-900/90 backdrop-blur px-2 py-1 shadow-sm", className)}>
+    <div className={cn("inline-flex items-center gap-1 rounded-md border border-border bg-sheet/90 px-2 py-1 backdrop-blur", className)}>
       <Button size="icon" variant="ghost" onClick={handleZoomOut} disabled={value <= min} className="h-8 w-8">
         <Minus className="h-4 w-4" />
       </Button>

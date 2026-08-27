@@ -17,8 +17,8 @@
   },
   "landing": {
     "hero": {
-      "kicker": "现在可做",
-      "headline": "一份真的能拿去投的简历。",
+      "kicker": "现在开始制作",
+      "headline": "一份真能拿去投的简历。",
       "sub": "搜索、定制、投递还在路上。今天先从简历开始。",
       "ctaCreate": "创建简历",
       "ctaUpload": "上传一份"
@@ -164,6 +164,8 @@
     "pass": "通过",
     "fail": "未通过",
     "pending": "编译后显示",
+    "fixWithAi": "用 AI 修正",
+    "fixPrompt": "ATS 检查「{check}」（{name}）未通过。{meaning}\n\n请先调用 read_ats，再 apply_typst_edit 修正这项。保留套件、A4 纸张与 accent 颜色。",
     "checks": {
       "text_extractable": "可提取文字（非纯图像 PDF）",
       "single_column": "单栏版面",
@@ -173,6 +175,16 @@
       "no_embedded_images_as_text": "姓名／联系方式不是只用图片",
       "fonts_embedded": "字体已嵌入",
       "parse_roundtrip_ok": "原始内容可从 PDF 还原"
+    },
+    "meanings": {
+      "text_extractable": "ATS 要能从 PDF 复制文字。纯图像页面对解析器等于空白。",
+      "single_column": "解析器从上往下读。双栏常会把经历和日期读乱。",
+      "contact_in_body": "姓名与 Email 只放页眉或页脚时，常被 ATS 丢掉。",
+      "standard_headings": "解析器找的是经历／学历这类标题。自定义标题容易被跳过。",
+      "dates_machine_readable": "请用 YYYY-MM 或 Present。月份英文常无法排进时间轴。",
+      "no_embedded_images_as_text": "姓名若是图片，ATS 看不出你是谁。",
+      "fonts_embedded": "未嵌入的字体提取后可能缺字或乱码。",
+      "parse_roundtrip_ok": "提取出的文字应对得上页面内容，包括姓名。"
     }
   },
   "common": {

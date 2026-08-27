@@ -173,16 +173,16 @@ function ToolDetails({ payload }: { payload: ToolPayload }) {
   const links = sourceLinks(payload);
 
   return (
-    <div className="mt-2 space-y-2 border-t border-gray-200/80 pt-2 text-[11px] leading-relaxed text-gray-600 dark:border-gray-600 dark:text-gray-300">
+    <div className="mt-2 space-y-2 border-t border-border pt-2 text-[11px] leading-relaxed text-muted-foreground">
       {search ? (
         <p>
-          <span className="font-medium text-gray-500 dark:text-gray-400">{t("toolFrom")} </span>
+          <span className="font-medium text-muted-foreground">{t("toolFrom")} </span>
           {clipText(search, 160)}
         </p>
       ) : null}
       {replace ? (
         <p>
-          <span className="font-medium text-gray-500 dark:text-gray-400">{t("toolTo")} </span>
+          <span className="font-medium text-muted-foreground">{t("toolTo")} </span>
           {clipText(replace, 160)}
         </p>
       ) : null}
@@ -195,7 +195,7 @@ function ToolDetails({ payload }: { payload: ToolPayload }) {
                 href={link.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="break-all underline decoration-gray-400 underline-offset-2 hover:text-cyan-700 dark:hover:text-cyan-300"
+                className="break-all underline decoration-rule underline-offset-2 hover:text-clay"
               >
                 {clipText(link.title, 80)}
               </a>
@@ -203,7 +203,7 @@ function ToolDetails({ payload }: { payload: ToolPayload }) {
           ))}
         </ul>
       ) : null}
-      {error ? <p className="text-red-600 dark:text-red-400">{error}</p> : null}
+      {error ? <p className="text-destructive">{error}</p> : null}
     </div>
   );
 }
@@ -225,7 +225,7 @@ function RestoreButton({
       type="button"
       data-testid={kind === "reapply" ? "tool-edit-reapply" : "tool-edit-restore"}
       disabled={disabled}
-      className="tool-edit-action inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:pointer-events-none disabled:opacity-50 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+      className="tool-edit-action inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
       onClick={onClick}
     >
       <Icon className="size-3.5" aria-hidden="true" />
@@ -279,8 +279,8 @@ function ToolCallCard({
         className={cn(
           "w-full max-w-[90vw] rounded-lg border px-3 py-2 text-sm",
           failed
-            ? "border-red-200 bg-red-50 text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100"
-            : "border-gray-200 bg-gray-50 text-gray-800 dark:border-gray-700 dark:bg-gray-800/70 dark:text-gray-100",
+            ? "border-destructive/30 bg-destructive/10 text-destructive"
+            : "border-border bg-sheet text-foreground",
         )}
       >
         <p className="flex items-center gap-2 font-medium tracking-tight">
@@ -288,19 +288,19 @@ function ToolCallCard({
             className={cn(
               "flex h-6 w-6 items-center justify-center rounded-full",
               failed
-                ? "bg-red-100 text-red-700 dark:bg-red-900/80 dark:text-red-100"
-                : "bg-white text-gray-600 dark:bg-gray-900 dark:text-gray-300",
+                ? "bg-destructive/15 text-destructive"
+                : "bg-paper text-muted-foreground",
             )}
           >
             <ToolIcon name={name} failed={failed} />
           </span>
           <span className="min-w-0 flex-1">{title}</span>
           {showCheck ? (
-            <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+            <Check className="h-3.5 w-3.5 shrink-0 text-success" aria-hidden="true" />
           ) : null}
         </p>
         {detail && diffLines.length === 0 ? (
-          <p className="mt-1 pl-8 text-xs text-gray-600 dark:text-gray-300">{detail}</p>
+          <p className="mt-1 pl-8 text-xs text-muted-foreground">{detail}</p>
         ) : null}
         {diffLines.length > 0 ? (
           <div className="mt-1 pl-8">
@@ -313,7 +313,7 @@ function ToolCallCard({
         ) : null}
         {showDetails && payload ? (
           <details className="group pl-8">
-            <summary className="mt-1 flex cursor-pointer list-none items-center gap-1 text-[11px] font-medium text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200">
+            <summary className="mt-1 flex cursor-pointer list-none items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground">
               <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" aria-hidden="true" />
               {t("toolDetails")}
             </summary>
@@ -343,7 +343,7 @@ export default function ChatMessageCard({ message, sending, currentSource, onRes
 
   if (!isUser) {
     return (
-      <div className="w-full max-w-none text-gray-900 dark:text-gray-100">
+      <div className="w-full max-w-none text-foreground">
         <MarkdownBody text={message.content} />
       </div>
     );
@@ -353,9 +353,9 @@ export default function ChatMessageCard({ message, sending, currentSource, onRes
 
   return (
     <div className="flex w-full justify-end">
-      <div className="w-fit max-w-[min(90%,32rem)] rounded-2xl bg-cyan-600 px-4 py-2 text-white">
+      <div className="w-fit max-w-[min(90%,32rem)] rounded-lg bg-primary px-4 py-2 text-primary-foreground">
         {filename ? (
-          <p className="mb-1.5 flex items-center gap-1.5 text-xs text-white/90">
+          <p className="mb-1.5 flex items-center gap-1.5 text-xs text-primary-foreground/90">
             <Paperclip className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             <span className="min-w-0 truncate">{filename}</span>
           </p>
@@ -364,7 +364,7 @@ export default function ChatMessageCard({ message, sending, currentSource, onRes
           <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{text}</p>
         ) : null}
         {time && !Number.isNaN(time.getTime()) ? (
-          <p className="mt-1 text-xs text-white/70">
+          <p className="mt-1 text-xs text-primary-foreground/70">
             {time.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}
           </p>
         ) : null}

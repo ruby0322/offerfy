@@ -24,7 +24,7 @@ from app.services.extract import (
 )
 from app.services.rate_limit import enforce_guest_rate
 from app.services.s3 import put_object
-from app.services.starter import default_title, generate_starter
+from app.services.starter import default_title, generate_starter, title_from_filename
 from app.services.typst_compile import compile_typst, compile_typst_pages
 
 router = APIRouter()
@@ -132,7 +132,7 @@ async def upload_resume(
         db,
         user,
         guest if user is None else None,
-        title=title or default_title(locale_v),
+        title=(title.strip() if title and title.strip() else title_from_filename(filename, locale_v)),
         locale=locale_v,
         source="upload",
         typst_source=generate_starter(locale_v),

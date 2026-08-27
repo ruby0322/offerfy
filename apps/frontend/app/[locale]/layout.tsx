@@ -10,14 +10,14 @@ import "./globals.css";
 const fraunces = Fraunces({
   subsets: ["latin"],
   display: "swap",
-  variable: "--font-landing-display",
+  variable: "--font-display",
 });
 
 const sourceSans = Source_Sans_3({
   subsets: ["latin"],
   display: "swap",
   weight: ["400", "500", "600"],
-  variable: "--font-landing-sans",
+  variable: "--font-ui",
 });
 
 type Props = {
@@ -50,8 +50,8 @@ export default async function LocaleLayout({ children, params }: Props) {
   const messages = await getMessages();
 
   return (
-    <html lang={locale} suppressHydrationWarning>
-      <body className={`${fraunces.variable} ${sourceSans.variable}`}>
+    <html lang={locale} className={`${fraunces.variable} ${sourceSans.variable}`} suppressHydrationWarning>
+      <body>
         <ThemeProvider>
           <NextIntlClientProvider locale={locale} messages={messages}>
             {children}

@@ -61,7 +61,7 @@ export default function Dropzone({ disabled, onFile }: Props) {
           />
         </svg>
         <p className="text-base font-semibold tracking-tight">{t("drop")}</p>
-        <p className="mt-2 text-sm text-[var(--rr-muted)]">{t("hint")}</p>
+        <p className="mt-2 text-sm text-muted-foreground">{t("hint")}</p>
       </button>
       <input
         ref={inputRef}
@@ -70,7 +70,7 @@ export default function Dropzone({ disabled, onFile }: Props) {
         accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.md,application/pdf,image/png,image/jpeg,image/webp,text/plain,text/markdown"
         onChange={(event) => accept(event.target.files?.[0])}
       />
-      {error ? <p className="mt-3 text-sm text-red-700 dark:text-red-400">{error}</p> : null}
+      {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
     </div>
   );
 }

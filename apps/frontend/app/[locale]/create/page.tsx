@@ -49,7 +49,7 @@ export default function CreatePage() {
                 autoFocus
               />
             </label>
-            {error ? <p className="text-sm text-red-700 dark:text-red-400">{error}</p> : null}
+            {error ? <p className="text-sm text-destructive">{error}</p> : null}
             <button className="rr-btn w-full py-3" type="submit" disabled={busy}>
               {busy ? t("submitting") : t("submit")}
             </button>

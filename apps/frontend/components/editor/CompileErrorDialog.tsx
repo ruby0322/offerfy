@@ -34,19 +34,18 @@ export default function CompileErrorDialog({
     <div
       role="alert"
       data-slot="compile-error-dialog"
-      className="pointer-events-auto absolute inset-x-3 bottom-3 z-20 flex max-h-[45%] flex-col overflow-hidden rounded-lg border border-red-200 bg-white/95 shadow-lg dark:border-red-900 dark:bg-gray-900/95"
+      className="pointer-events-auto absolute inset-x-3 bottom-3 z-20 flex max-h-[45%] flex-col overflow-hidden rounded-lg border border-destructive/30 bg-sheet"
     >
-      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words px-3 py-2.5 font-mono text-xs leading-relaxed text-red-800 dark:text-red-200">
+      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words px-3 py-2.5 font-mono text-xs leading-relaxed text-destructive">
         {error}
       </pre>
-      <div className="flex shrink-0 justify-end gap-2 border-t border-red-100 px-3 py-2 dark:border-red-900">
+      <div className="flex shrink-0 justify-end gap-2 border-t border-destructive/20 px-3 py-2">
         <Button type="button" size="sm" variant="outline" onClick={() => void handleCopy()}>
           {copied ? copiedLabel : copyLabel}
         </Button>
         <Button
           type="button"
           size="sm"
-          className="bg-cyan-600 hover:bg-cyan-700"
           disabled={asking}
           onClick={onAsk}
         >

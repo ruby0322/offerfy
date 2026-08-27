@@ -39,8 +39,8 @@ export default function UploadPage() {
           <div className="mt-8">
             <Dropzone disabled={busy} onFile={onFile} />
           </div>
-          {busy ? <p className="mt-4 text-sm text-[var(--rr-muted)]">{t("uploading")}</p> : null}
-          {error ? <p className="mt-4 text-sm text-red-700 dark:text-red-400">{error}</p> : null}
+          {busy ? <p className="mt-4 text-sm text-muted-foreground">{t("uploading")}</p> : null}
+          {error ? <p className="mt-4 text-sm text-destructive">{error}</p> : null}
         </div>
       </main>
       <Footer variant="app" />
