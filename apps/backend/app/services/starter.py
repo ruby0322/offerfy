@@ -77,7 +77,7 @@ def _render(p: dict) -> str:
   author: name,
   location: location,
   email: email,
-  accent-color: "#f4be82",
+  accent-color: "#26428b",
   font: "{p["font"]}",
   paper: "a4",
   lang: "{p["lang"]}",

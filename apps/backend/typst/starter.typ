@@ -12,7 +12,7 @@
   author: name,
   location: location,
   email: email,
-  accent-color: "#f4be82",
+  accent-color: "#26428b",
   font: "New Computer Modern",
   paper: "a4",
   lang: "en",

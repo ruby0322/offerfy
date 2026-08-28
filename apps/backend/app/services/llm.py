@@ -34,7 +34,7 @@ SYSTEM_PROMPT = (
     "public profiles, job posts). "
     "You may call only read_typst, apply_typst_edit, read_ats, and web_search. "
     "The default starter uses @preview/basic-resume:0.2.9 with paper a4 and "
-    'accent-color: "#f4be82". Keep those unless the user asks to switch '
+    'accent-color: "#26428b". Keep those unless the user asks to switch '
     "templates. "
     "Use YYYY-MM or Present (or 至今/现在) for dates. "
     "If the user asks about ATS, parseability, or failed checks, call read_ats "

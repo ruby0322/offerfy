@@ -180,7 +180,7 @@ def test_chat_read_then_search_replace_and_second_read(
     assert "previous_source" not in edit_model_out
     assert "@preview/basic-resume:0.2.9" in body["typst_source"]
     assert 'paper: "a4"' in body["typst_source"]
-    assert 'accent-color: "#f4be82"' in body["typst_source"]
+    assert 'accent-color: "#26428b"' in body["typst_source"]
     assert scripted.requests[0]["model"] == "gpt-5.6-terra"
     assert scripted.requests[0]["reasoning"]["effort"] == "none"
     tool_types = [row.get("type") for row in scripted.requests[0].get("tools") or []]

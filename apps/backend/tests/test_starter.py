@@ -16,7 +16,7 @@ def test_en_starter_uses_basic_resume_a4_and_accent():
     src = generate_starter("en")
     assert "@preview/basic-resume:0.2.9" in src
     assert 'paper: "a4"' in src
-    assert 'accent-color: "#f4be82"' in src
+    assert 'accent-color: "#26428b"' in src
     assert "New Computer Modern" in src
     assert 'lang: "en"' in src
 
@@ -26,7 +26,7 @@ def test_zh_tw_starter_uses_noto_tc():
     assert "Noto Serif CJK TC" in src
     assert 'lang: "zh"' in src
     assert 'paper: "a4"' in src
-    assert 'accent-color: "#f4be82"' in src
+    assert 'accent-color: "#26428b"' in src
     assert "學歷" in src or "教育" in src
     assert "工作經歷" in src
 
@@ -35,6 +35,7 @@ def test_zh_cn_starter_uses_noto_sc():
     src = generate_starter("zh-CN")
     assert "Noto Serif CJK SC" in src
     assert 'lang: "zh"' in src
+    assert 'accent-color: "#26428b"' in src
     assert "教育" in src or "教育经历" in src
     assert "工作经历" in src
 
