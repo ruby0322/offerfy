@@ -1,6 +1,6 @@
 import re
 from datetime import datetime, timezone
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -38,12 +38,24 @@ def _public_origin(request: Request) -> str:
     return f"{proto}://{host}"
 
 
+def _is_loopback_uri(uri: str) -> bool:
+    host = (urlparse(uri).hostname or "").lower()
+    return host in ("127.0.0.1", "localhost", "::1")
+
+
 def _redirect_uri(request: Request) -> str:
     settings = get_settings()
     if settings.google_redirect_uri:
-        return settings.google_redirect_uri
-    # Browser hits Next's /api rewrite, not the backend path.
-    return f"{_public_origin(request)}/api/v1/auth/google/callback"
+        uri = settings.google_redirect_uri
+    else:
+        # Browser hits Next's /api rewrite, not the backend path.
+        uri = f"{_public_origin(request)}/api/v1/auth/google/callback"
+    if settings.app_env == "production" and _is_loopback_uri(uri):
+        raise HTTPException(
+            status_code=500,
+            detail="GOOGLE_REDIRECT_URI must be the public HTTPS origin in production",
+        )
+    return uri
 
 
 _EDITOR_NEXT = re.compile(

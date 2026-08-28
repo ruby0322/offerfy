@@ -5,7 +5,7 @@ export default createMiddleware(routing);
 
 export const config = {
   matcher: [
-    "/((?!api|trpc|_next|_vercel|.*\\..*).*)",
+    "/((?!api|trpc|_next|_vercel|icon(?:/|$)|apple-icon(?:/|$)|.*\\..*).*)",
     "/blog/rss.xml",
     "/(en|zh-TW|zh-CN)/blog/rss.xml",
   ],

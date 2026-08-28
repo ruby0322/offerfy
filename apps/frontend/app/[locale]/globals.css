@@ -233,16 +233,9 @@ textarea {
 
 .blog-index,
 .blog-article {
-  max-width: 72rem;
-  margin: 0 auto;
-  padding: 4rem 1.25rem 5rem;
+  padding-top: 4rem;
+  padding-bottom: 5rem;
   color: var(--ink);
-}
-
-.blog-article .blog-dek,
-.blog-article .blog-body,
-.blog-article .blog-cta {
-  max-width: 42rem;
 }
 
 .blog-kicker {

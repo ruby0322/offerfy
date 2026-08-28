@@ -13,7 +13,7 @@ export default async function PostIndex({ locale }: Props) {
   const posts = listPosts();
 
   return (
-    <div className="blog-index">
+    <div className="blog-index mx-auto max-w-[72rem] px-5">
       <div className="blog-kicker" aria-hidden="true" />
       <h1 className="font-display">{t("title")}</h1>
       {posts.length === 0 ? (

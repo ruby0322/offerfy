@@ -105,3 +105,15 @@ def test_compile_png_pages_arg_only_first_page():
     pages = compile_typst_pages(TWO_PAGE, "png", pages="1")
     assert len(pages) == 1
     assert pages[0][:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_compile_png_ppi_doubles_pixel_width():
+    from io import BytesIO
+
+    from PIL import Image
+
+    lo = compile_typst_pages(ONE_PAGE, "png", ppi=72)
+    hi = compile_typst_pages(ONE_PAGE, "png", ppi=144)
+    w72 = Image.open(BytesIO(lo[0])).size[0]
+    w144 = Image.open(BytesIO(hi[0])).size[0]
+    assert w144 == pytest.approx(w72 * 2, rel=0.05)

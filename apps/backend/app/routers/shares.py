@@ -155,7 +155,7 @@ def public_og(token: str, request: Request, db: Session = Depends(get_db)):
     cached = og_cache_get(token, etag)
     if cached is not None:
         return _png_response(cached, etag)
-    pages = compile_typst_pages(resume.typst_source, "png", pages="1")
+    pages = compile_typst_pages(resume.typst_source, "png", pages="1", ppi=144)
     body = compose_og_png(pages[0])
     og_cache_put(token, etag, body)
     return _png_response(body, etag)

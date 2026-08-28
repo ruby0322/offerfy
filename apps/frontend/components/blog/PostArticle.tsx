@@ -20,7 +20,7 @@ export default async function PostArticle({ post, locale }: Props) {
   const dateLabel = post.updatedAt ? t("updated", { date }) : date;
 
   return (
-    <article className="blog-article">
+    <article className="blog-article mx-auto max-w-[72rem] px-5">
       <p className="blog-meta">
         <span>{t(post.type)}</span>
         <span aria-hidden="true"> · </span>

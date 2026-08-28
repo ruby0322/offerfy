@@ -5,6 +5,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Dest / compose read repo-root .env. Public systemd injects .env.production
 # (process env overrides this file). Not apps/backend/.env.
+# Public Next /api rewrites are a separate footgun: they are baked at
+# `next build` from BACKEND_INTERNAL_URL (see docs/deploy.md).
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 

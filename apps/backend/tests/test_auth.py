@@ -120,6 +120,42 @@ def test_google_next_editor_allowed(client: TestClient, monkeypatch):
     assert cb.headers["location"] == f"/editor/{editor_id}"
 
 
+def test_google_start_production_rejects_loopback_redirect(
+    client: TestClient, monkeypatch
+):
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "test-secret")
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv(
+        "GOOGLE_REDIRECT_URI",
+        "http://127.0.0.1:3001/api/v1/auth/google/callback",
+    )
+    get_settings.cache_clear()
+    response = client.get("/v1/auth/google/start", follow_redirects=False)
+    assert response.status_code == 500
+
+
+def test_google_start_production_uses_public_redirect(
+    client: TestClient, monkeypatch
+):
+    from urllib.parse import parse_qs, urlparse
+
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "test-secret")
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv(
+        "GOOGLE_REDIRECT_URI",
+        "https://offerfy.cc/api/v1/auth/google/callback",
+    )
+    get_settings.cache_clear()
+    response = client.get("/v1/auth/google/start", follow_redirects=False)
+    assert response.status_code == 302
+    uri = parse_qs(urlparse(response.headers["location"]).query)["redirect_uri"][
+        0
+    ]
+    assert uri == "https://offerfy.cc/api/v1/auth/google/callback"
+
+
 def test_google_next_editor_traversal_rejected(client: TestClient, monkeypatch):
     from urllib.parse import parse_qs, urlparse
 

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Link, usePathname, useRouter } from "@/i18n/navigation";
+import BrandMark from "@/components/BrandMark";
 import LocaleSwitcher from "@/components/LocaleSwitcher";
 import ThemeSwitcher from "@/components/ThemeSwitcher";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -68,7 +69,11 @@ export default function Nav({ variant }: Props) {
         }
       >
         <div className="flex items-center gap-4">
-          <Link href="/" className="text-lg font-semibold tracking-tight">
+          <Link
+            href="/"
+            className="flex items-center gap-2 text-lg font-semibold tracking-tight"
+          >
+            <BrandMark />
             {t("brand")}
           </Link>
           {landing ? (

@@ -6,6 +6,7 @@ from app.services.og_image import (
     OG_BG_RGB,
     OG_CACHE_MAX,
     OG_HEIGHT,
+    OG_VERSION,
     OG_WIDTH,
     compose_og_png,
     og_cache_clear,
@@ -13,6 +14,8 @@ from app.services.og_image import (
     og_cache_put,
     og_etag,
 )
+
+OG_CLAY = (0xA3, 0x5C, 0x3A)
 
 
 def _solid_png(w: int, h: int, color: tuple[int, int, int]) -> bytes:
@@ -30,16 +33,29 @@ def test_og_etag_changes_with_source():
     assert og_etag("#let x = 1") == a
 
 
-def test_compose_og_png_is_1200x630_cream_letterbox():
+def test_og_version_is_v2_topcrop():
+    assert OG_VERSION == "og-v2-1200x630-f6f1e8-top-pad48-mark"
+
+
+def test_compose_og_png_width_fit_top_crop():
     page = _solid_png(200, 400, (0, 0, 255))
     composed = compose_og_png(page)
-    assert composed[:8] == b"\x89PNG\r\n\x1a\n"
     img = Image.open(BytesIO(composed)).convert("RGB")
     assert img.size == (OG_WIDTH, OG_HEIGHT)
     assert img.getpixel((0, 0)) == OG_BG_RGB
-    assert img.getpixel((OG_WIDTH - 1, OG_HEIGHT - 1)) == OG_BG_RGB
-    cx, cy = OG_WIDTH // 2, OG_HEIGHT // 2
-    assert img.getpixel((cx, cy)) == (0, 0, 255)
+    assert img.getpixel((OG_WIDTH - 1, 0)) == OG_BG_RGB
+    assert img.getpixel((0, 47)) == OG_BG_RGB
+    assert img.getpixel((0, 100)) == OG_BG_RGB
+    assert img.getpixel((OG_WIDTH // 2, OG_HEIGHT - 1)) == (0, 0, 255)
+    assert img.getpixel((48, 50)) == (0, 0, 255)
+    assert img.getpixel((48, 20)) == OG_CLAY
+    assert img.getpixel((51, 23)) == OG_CLAY
+
+
+def test_compose_og_png_landscape_leaves_cream_below():
+    page = _solid_png(400, 100, (0, 0, 255))
+    img = Image.open(BytesIO(compose_og_png(page))).convert("RGB")
+    assert img.getpixel((OG_WIDTH // 2, OG_HEIGHT - 1)) == OG_BG_RGB
 
 
 def test_og_cache_lru_evicts_oldest():

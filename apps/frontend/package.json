@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:public": "BACKEND_INTERNAL_URL=http://127.0.0.1:8001 next build",
     "start": "next start",
     "lint": "eslint",
     "blog:validate": "tsx scripts/validate-blog.ts"

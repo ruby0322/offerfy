@@ -52,7 +52,9 @@ def _svg_bytes(path: Path) -> bytes:
     return sanitize_typst_svg(path.read_text(encoding="utf-8")).encode("utf-8")
 
 
-def compile_typst_pages(source: str, fmt: str, pages: str | None = None) -> list[bytes]:
+def compile_typst_pages(
+    source: str, fmt: str, pages: str | None = None, ppi: int | None = None
+) -> list[bytes]:
     """Compile the document.
 
     Typst 0.15 writes one SVG/PNG file per page and requires `{p}` in the
@@ -88,6 +90,8 @@ def compile_typst_pages(source: str, fmt: str, pages: str | None = None) -> list
         ]
         if pages:
             cmd.extend(["--pages", pages])
+        if ppi is not None:
+            cmd.extend(["--ppi", str(ppi)])
         for font_path in font_paths:
             cmd.extend(["--font-path", font_path])
         cmd.extend([str(src_path), str(out_path)])

@@ -72,7 +72,7 @@ Share `generateMetadata`:
 
 Internal existence check uses `BACKEND_INTERNAL_URL` (same host as the Next rewrite), not `SITE_URL`.
 
-Site OG image (C): `app/[locale]/opengraph-image.tsx` via `next/og` `ImageResponse`, 1200×630, cream `#F6F1E8`, 8px clay `#A35C3A` square, English headline **The AI resume editor you’ll keep using.** and sub **Chat edits this file. No account needed.** Image copy is English on every locale so we do not bundle a CJK font into the OG renderer. Localized `og:title` / `og:description` still come from `meta.*` / page-specific strings.
+Site OG image (C): `app/[locale]/opengraph-image.tsx` via `next/og` `ImageResponse`, 1200×630, cream `#F6F1E8`. Brand line **Offerfy** in Source Sans 3, then English headline **The AI resume editor you’ll keep using.** in Fraunces. No kicker square, no sub. Image copy is English on every locale so we do not bundle a CJK font into the OG renderer. Localized `og:title` / `og:description` still come from `meta.*` / page-specific strings.
 
 Share does **not** add a second `opengraph-image.tsx`; it overrides `images` in `generateMetadata`.
 

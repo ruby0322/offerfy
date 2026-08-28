@@ -168,11 +168,36 @@ def _tiny_png() -> bytes:
     return buf.getvalue()
 
 
+def test_public_og_compiles_with_ppi_144(client, db_session, monkeypatch):
+    og_cache_clear()
+    seen: dict[str, object] = {}
+
+    def _fake(source, fmt, pages=None, ppi=None):
+        seen["fmt"] = fmt
+        seen["pages"] = pages
+        seen["ppi"] = ppi
+        return [_tiny_png()]
+
+    monkeypatch.setattr("app.routers.shares.compile_typst_pages", _fake)
+    user = _make_user(db_session, sub="sub-og-ppi", email="ogppi@example.com")
+    cookies = _session_cookie(user)
+    created = client.post(
+        "/v1/resumes", json={"locale": "en", "title": "T"}, cookies=cookies
+    ).json()
+    token = client.put(
+        f"/v1/resumes/{created['id']}/share",
+        json={"public": True},
+        cookies=cookies,
+    ).json()["token"]
+    TestClient(app).get(f"/v1/shares/{token}/og.png")
+    assert seen == {"fmt": "png", "pages": "1", "ppi": 144}
+
+
 def test_public_og_png_anonymous(client, db_session, monkeypatch):
     og_cache_clear()
     monkeypatch.setattr(
         "app.routers.shares.compile_typst_pages",
-        lambda source, fmt, pages=None: [_tiny_png()],
+        lambda source, fmt, pages=None, ppi=None: [_tiny_png()],
     )
     user = _make_user(db_session, sub="sub-og", email="og@example.com")
     cookies = _session_cookie(user)
@@ -210,7 +235,7 @@ def test_public_og_png_404_after_private(client, db_session, monkeypatch):
     og_cache_clear()
     monkeypatch.setattr(
         "app.routers.shares.compile_typst_pages",
-        lambda source, fmt, pages=None: [_tiny_png()],
+        lambda source, fmt, pages=None, ppi=None: [_tiny_png()],
     )
     user = _make_user(db_session, sub="sub-og-priv", email="ogp@example.com")
     cookies = _session_cookie(user)
@@ -235,7 +260,7 @@ def test_public_og_etag_changes_when_source_changes(client, db_session, monkeypa
     og_cache_clear()
     monkeypatch.setattr(
         "app.routers.shares.compile_typst_pages",
-        lambda source, fmt, pages=None: [_tiny_png()],
+        lambda source, fmt, pages=None, ppi=None: [_tiny_png()],
     )
     user = _make_user(db_session, sub="sub-og-src", email="ogs@example.com")
     cookies = _session_cookie(user)
