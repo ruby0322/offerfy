@@ -47,13 +47,15 @@ export default async function JobDetailPage({ params }: Props) {
     ? jobPostingJsonLd({
         locale,
         href,
+        jobId: job.id,
         title: job.title,
-        description: excerpt(job.description_text, 400) || job.title,
+        descriptionHtml: job.description_html,
+        descriptionText: job.description_text,
         company: job.company,
         location: job.location,
         remote: job.remote,
         datePosted: job.posted_at ?? job.first_seen_at,
-        applyUrl: job.apply_url,
+        lastSeenAt: job.last_seen_at,
       })
     : null;
 

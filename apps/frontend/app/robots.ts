@@ -2,7 +2,16 @@ import type { MetadataRoute } from "next";
 import { routing, type AppLocale } from "@/i18n/routing";
 import { SITE_URL } from "@/lib/seo";
 
-const DISALLOW_PATHS = ["/admin", "/dashboard", "/editor", "/login", "/api"] as const;
+const DISALLOW_PATHS = [
+  "/admin",
+  "/dashboard",
+  "/editor",
+  "/login",
+  "/api",
+  "/create",
+  "/upload",
+  "/new",
+] as const;
 
 function withLocales(path: string): string[] {
   return routing.locales.map((locale: AppLocale) => `/${locale}${path}`);

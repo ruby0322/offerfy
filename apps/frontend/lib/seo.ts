@@ -127,42 +127,79 @@ export function blogPostingJsonLd(input: {
   };
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function jobDescriptionHtml(html: string, text: string, title: string): string {
+  const trimmedHtml = html.trim();
+  if (trimmedHtml) return trimmedHtml;
+  const body = (text.trim() || title).trim();
+  return `<p>${escapeHtml(body)}</p>`;
+}
+
+function validThroughIso(lastSeenAt: string): string {
+  const stamp = new Date(lastSeenAt);
+  stamp.setUTCDate(stamp.getUTCDate() + 30);
+  return stamp.toISOString();
+}
+
 export function jobPostingJsonLd(input: {
   locale: AppLocale;
   href: string;
+  jobId: string;
   title: string;
-  description: string;
+  descriptionHtml: string;
+  descriptionText: string;
   company: string;
   location: string | null;
   remote: boolean | null;
   datePosted: string | null;
-  applyUrl: string;
-}) {
+  lastSeenAt: string;
+}): Record<string, unknown> | null {
+  const remote = input.remote === true;
+  const location = input.location?.trim() || "";
+  if (!remote && !location) {
+    return null;
+  }
+
   const posting: Record<string, unknown> = {
     "@context": "https://schema.org",
     "@type": "JobPosting",
     title: input.title,
-    description: input.description,
+    description: jobDescriptionHtml(input.descriptionHtml, input.descriptionText, input.title),
     url: pageUrl(input.href, input.locale),
+    identifier: {
+      "@type": "PropertyValue",
+      name: SITE_NAME,
+      value: input.jobId,
+    },
     hiringOrganization: {
       "@type": "Organization",
       name: input.company,
     },
     directApply: false,
+    validThrough: validThroughIso(input.lastSeenAt),
   };
   if (input.datePosted) {
     posting.datePosted = input.datePosted;
   }
-  if (input.remote) {
+  if (remote) {
     posting.jobLocationType = "TELECOMMUTE";
   }
-  if (input.location) {
+  if (location) {
     posting.jobLocation = {
       "@type": "Place",
-      address: input.location,
+      address: {
+        "@type": "PostalAddress",
+        addressLocality: location,
+      },
     };
   }
-  posting.url = pageUrl(input.href, input.locale);
   return posting;
 }
 
