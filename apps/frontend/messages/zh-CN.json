@@ -62,9 +62,10 @@
       "kicker": "同一份简历，持续修改",
       "headline": "一个你会一直回来用的 AI 履历编辑器",
       "sub": "对话里改的是这份简历，PDF 会一起更新。不是生成完就扔。不用登录。",
-      "ctaCreate": "创建简历",
-      "ctaUpload": "上传一份"
+      "ctaCreate": "或创建一份",
+      "ctaUpload": "上传现有简历"
     },
+    "featuredLabel": "从这些职位拿到 offer",
     "mock": {
       "chatPrompt": "把 Offerfy 的第一条经历写具体一点。",
       "docTitle": "简历",

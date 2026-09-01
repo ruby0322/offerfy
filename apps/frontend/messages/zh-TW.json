@@ -62,9 +62,10 @@
       "kicker": "同一份履歷，持續修改",
       "headline": "一個你會一直回來用的 AI 履歷編輯器",
       "sub": "對話裡改的是這份履歷，PDF 會一起更新。不是產生完就丟。不用登入。",
-      "ctaCreate": "建立履歷",
-      "ctaUpload": "上傳一份"
+      "ctaCreate": "或建立一份",
+      "ctaUpload": "上傳現有履歷"
     },
+    "featuredLabel": "從這些職缺拿到 offer",
     "mock": {
       "chatPrompt": "把 Offerfy 的第一則經歷寫具體一點。",
       "docTitle": "履歷",

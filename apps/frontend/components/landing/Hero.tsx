@@ -18,11 +18,11 @@ export default function Hero() {
           {t("sub")}
         </p>
         <div className="mt-8 flex flex-wrap items-center gap-4">
-          <Link href="/create" className="landing-cta">
-            {t("ctaCreate")}
-          </Link>
-          <Link href="/upload" className="landing-cta-link">
+          <Link href="/upload" className="landing-cta">
             {t("ctaUpload")}
+          </Link>
+          <Link href="/create" className="landing-cta-link">
+            {t("ctaCreate")}
           </Link>
         </div>
       </div>

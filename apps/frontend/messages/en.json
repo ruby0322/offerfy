@@ -62,9 +62,10 @@
       "kicker": "Same resume. Keep editing.",
       "headline": "The AI resume editor you’ll keep using.",
       "sub": "Chat edits this file. The PDF updates. Not a generate-and-download. No account needed.",
-      "ctaCreate": "Create resume",
-      "ctaUpload": "or upload one"
+      "ctaCreate": "or create one",
+      "ctaUpload": "Upload existing"
     },
+    "featuredLabel": "Get offers from",
     "mock": {
       "chatPrompt": "Tighten the first Offerfy bullet.",
       "docTitle": "Resume",

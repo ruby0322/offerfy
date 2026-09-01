@@ -6,17 +6,19 @@ import { sourceLabel, type JobListItem } from "@/lib/jobs";
 type Props = {
   locale: AppLocale;
   jobs: JobListItem[];
+  label?: string;
 };
 
-export default async function JobsMarquee({ locale, jobs }: Props) {
+export default async function JobsMarquee({ locale, jobs, label }: Props) {
   const t = await getTranslations("jobs");
   if (jobs.length === 0) {
     return null;
   }
+  const heading = label ?? t("featuredLabel");
   const loop = jobs.length > 1 ? [...jobs, ...jobs] : jobs;
   return (
-    <section className="jobs-marquee" aria-label={t("featuredLabel")}>
-      <p className="jobs-featured-label">{t("featuredLabel")}</p>
+    <section className="jobs-marquee" aria-label={heading}>
+      <p className="jobs-featured-label">{heading}</p>
       <div className="jobs-marquee-viewport">
         <div className={`jobs-marquee-track${jobs.length > 1 ? " jobs-marquee-loop" : ""}`}>
           {loop.map((job, index) => {
