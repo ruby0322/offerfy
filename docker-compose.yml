@@ -2,6 +2,7 @@ version: "2.3"
 
 # Local stack: Postgres 16, SeaweedFS 3.76 (master/volume/filer/s3), backend, frontend.
 # Intentionally omitted vs pd-care: LINE/LIFF, model-cache, Grafana, TLS gateway.
+# Job catalog: docker compose run --rm backend python -m app.jobs.ingest_catalog
 
 services:
   postgres:

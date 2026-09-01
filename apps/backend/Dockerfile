@@ -18,6 +18,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+COPY data ./data
 COPY typst ./typst
 COPY fonts ./fonts
 COPY alembic ./alembic

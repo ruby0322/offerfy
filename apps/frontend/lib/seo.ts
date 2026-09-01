@@ -127,6 +127,45 @@ export function blogPostingJsonLd(input: {
   };
 }
 
+export function jobPostingJsonLd(input: {
+  locale: AppLocale;
+  href: string;
+  title: string;
+  description: string;
+  company: string;
+  location: string | null;
+  remote: boolean | null;
+  datePosted: string | null;
+  applyUrl: string;
+}) {
+  const posting: Record<string, unknown> = {
+    "@context": "https://schema.org",
+    "@type": "JobPosting",
+    title: input.title,
+    description: input.description,
+    url: pageUrl(input.href, input.locale),
+    hiringOrganization: {
+      "@type": "Organization",
+      name: input.company,
+    },
+    directApply: false,
+  };
+  if (input.datePosted) {
+    posting.datePosted = input.datePosted;
+  }
+  if (input.remote) {
+    posting.jobLocationType = "TELECOMMUTE";
+  }
+  if (input.location) {
+    posting.jobLocation = {
+      "@type": "Place",
+      address: input.location,
+    };
+  }
+  posting.url = pageUrl(input.href, input.locale);
+  return posting;
+}
+
 export function shareOgImageUrl(token: string): string {
   return `${SITE_URL}/api/v1/shares/${encodeURIComponent(token)}/og.png`;
 }

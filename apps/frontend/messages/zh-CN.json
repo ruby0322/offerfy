@@ -10,7 +10,8 @@
     "login": "登录",
     "logout": "退出",
     "account": "账户",
-    "blog": "Blog"
+    "blog": "Blog",
+    "jobs": "职位"
   },
   "footer": {
     "locales": "语言",
@@ -18,18 +19,43 @@
     "login": "登录",
     "tagline": "Offerfy · 先把简历做好",
     "blog": "Blog",
+    "jobs": "职位",
     "terms": "条款",
     "privacy": "隐私"
   },
   "blog": {
     "metaTitle": "Blog · Offerfy",
-    "metaDescription": "Offerfy 的笔记与指南。简历编辑器已上线；搜索、定制、投递还在路上。",
+    "metaDescription": "Offerfy 的笔记与指南。简历编辑器与公开职位目录已上线；按职位定制与投递还在路上。",
     "title": "Blog",
     "empty": "还没有文章。",
     "guide": "指南",
     "note": "笔记",
     "draft": "草稿",
     "updated": "更新于 {date}"
+  },
+  "jobs": {
+    "metaTitle": "职位 · Offerfy",
+    "metaDescription": "来自雇主职位板与台湾就业通的公开职位目录。投递在原始网站完成。尚未包含简历匹配、定制与投递跟踪。",
+    "title": "职位",
+    "lead": "数据来自雇主官方 ATS 职位板与台湾就业通开放数据。Offerfy 不是 104 或 LinkedIn。请到原始职位页投递。",
+    "emptyFiltered": "没有符合条件的职位。",
+    "emptyCatalog": "目录里还没有职位。可能还没跑过数据导入。",
+    "queryLabel": "搜索",
+    "queryPlaceholder": "职位、公司或地点",
+    "sourceLabel": "来源",
+    "sourceAll": "全部来源",
+    "sourceTaiwanjobs": "台湾就业通",
+    "remoteLabel": "远程",
+    "remoteAll": "不限",
+    "remoteYes": "远程",
+    "remoteNo": "现场／混合",
+    "remote": "远程",
+    "submit": "搜索",
+    "more": "更多职位",
+    "featuredLabel": "值得看的职位",
+    "closed": "这则职位目前已不在开放清单中。",
+    "apply": "到 {source} 投递",
+    "attribution": "原始职位："
   },
   "landing": {
     "hero": {
@@ -252,7 +278,7 @@
             "Offerfy 是网页简历编辑器。你可以从起始模板创建简历或上传文件、编辑 Typst 源码、实时预览编译结果、导出 PDF，并检查该编译后的 PDF 能否被求职者跟踪系统（ATS）解析。",
             "ATS 只检查编译后 PDF 的可解析性，不预测录取或职业结果。",
             "你可以不注册就使用编辑器。使用 Google 登录会保存简历记录。",
-            "搜索职位、按职位定制、投递与跟踪目前都不是本服务的一部分。"
+            "Offerfy 也提供公开职位目录，数据来自雇主职位板 API（Greenhouse、Lever、Ashby）与台湾就业通开放数据。投递在原始职位页完成。我们不运营 104 或 LinkedIn。简历与职位匹配、按职位定制简历、投递跟踪目前都不是本服务的一部分。"
           ]
         },
         {
@@ -337,13 +363,14 @@
             "语言：我们设置 offerfy_locale Cookie，让网站维持你选择的语言。",
             "主题：浅色／深色偏好存在浏览器的 localStorage，不是 Cookie。",
             "简历数据：标题、Typst 源码、编译后的 SVG 与 PDF、ATS 可解析性报告，以及聊天消息。",
-            "上传：PDF、PNG、JPG、JPEG、WEBP、TXT、MD，上限 10 MiB，存在对象存储。"
+            "上传：PDF、PNG、JPG、JPEG、WEBP、TXT、MD，上限 10 MiB，存在对象存储。",
+            "职位目录：我们存储雇主 ATS 职位板 API 与台湾就业通开放数据中的公开职位副本，以便显示目录。这些职位不是你的个人数据。"
           ]
         },
         {
           "heading": "使用目的",
           "paragraphs": [
-            "我们用这些数据提供编辑器、实时预览、PDF 导出、ATS 可解析性检查、身份验证、访客速率限制，以及你选择的语言。"
+            "我们用这些数据提供编辑器、实时预览、PDF 导出、ATS 可解析性检查、公开职位目录、身份验证、访客速率限制，以及你选择的语言。"
           ]
         },
         {

@@ -26,6 +26,9 @@ export default function Footer({ variant }: Props) {
       >
         <p className="text-sm opacity-80">{t("tagline")}</p>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Link href="/jobs" className="text-sm font-medium">
+            {t("jobs")}
+          </Link>
           <Link href="/blog" className="text-sm font-medium">
             {t("blog")}
           </Link>

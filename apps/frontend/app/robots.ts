@@ -15,6 +15,6 @@ export default function robots(): MetadataRoute.Robots {
       allow: "/",
       disallow: DISALLOW_PATHS.flatMap(withLocales),
     },
-    sitemap: `${SITE_URL}/sitemap.xml`,
+    sitemap: [`${SITE_URL}/sitemap.xml`, `${SITE_URL}/jobs-sitemap.xml`],
   };
 }

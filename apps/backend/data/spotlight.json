@@ -1,0 +1,36 @@
+{
+  "recency_half_life_days": 21,
+  "remote_boost": 1.08,
+  "default_role_weight": 0.12,
+  "source_weights": {
+    "greenhouse": 1.0,
+    "lever": 1.0,
+    "ashby": 1.0,
+    "taiwanjobs": 0.85
+  },
+  "role_rules": [
+    { "weight": 1.15, "any": ["staff", "principal", "資深", "主任"] },
+    {
+      "weight": 1.0,
+      "any": [
+        "engineer",
+        "developer",
+        "designer",
+        "scientist",
+        "product",
+        "工程師",
+        "設計師",
+        "研發",
+        "後端",
+        "前端",
+        "資料"
+      ]
+    },
+    { "weight": 0.55, "any": ["analyst", "specialist", "專員", "助理"] }
+  ],
+  "featured_limit": 24,
+  "candidate_pool": 400,
+  "max_per_company": 2,
+  "min_sources": 2,
+  "max_consecutive_source": 2
+}

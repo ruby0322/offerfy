@@ -10,7 +10,8 @@
     "login": "登入",
     "logout": "登出",
     "account": "帳戶",
-    "blog": "Blog"
+    "blog": "Blog",
+    "jobs": "職缺"
   },
   "footer": {
     "locales": "語言",
@@ -18,18 +19,43 @@
     "login": "登入",
     "tagline": "Offerfy · 先把履歷做好",
     "blog": "Blog",
+    "jobs": "職缺",
     "terms": "條款",
     "privacy": "隱私權"
   },
   "blog": {
     "metaTitle": "Blog · Offerfy",
-    "metaDescription": "Offerfy 的筆記與指南。履歷編輯器已上線；搜尋、客製、投遞還在路上。",
+    "metaDescription": "Offerfy 的筆記與指南。履歷編輯器與公開職缺目錄已上線；依職缺客製與投遞還在路上。",
     "title": "Blog",
     "empty": "還沒有文章。",
     "guide": "指南",
     "note": "筆記",
     "draft": "草稿",
     "updated": "更新於 {date}"
+  },
+  "jobs": {
+    "metaTitle": "職缺 · Offerfy",
+    "metaDescription": "來自雇主職缺板與台灣就業通的公開職缺目錄。投遞在原始網站完成。尚未包含履歷配對、客製與投遞追蹤。",
+    "title": "職缺",
+    "lead": "資料來自雇主官方 ATS 職缺板與台灣就業通開放資料。Offerfy 不是 104 或 LinkedIn。請到原始職缺頁投遞。",
+    "emptyFiltered": "沒有符合條件的職缺。",
+    "emptyCatalog": "目錄裡還沒有職缺。可能還沒跑過資料匯入。",
+    "queryLabel": "搜尋",
+    "queryPlaceholder": "職稱、公司或地點",
+    "sourceLabel": "來源",
+    "sourceAll": "全部來源",
+    "sourceTaiwanjobs": "台灣就業通",
+    "remoteLabel": "遠端",
+    "remoteAll": "不限",
+    "remoteYes": "遠端",
+    "remoteNo": "現場／混合",
+    "remote": "遠端",
+    "submit": "搜尋",
+    "more": "更多職缺",
+    "featuredLabel": "值得看的職缺",
+    "closed": "這則職缺目前已不在開放清單中。",
+    "apply": "到 {source} 投遞",
+    "attribution": "原始職缺："
   },
   "landing": {
     "hero": {
@@ -252,7 +278,7 @@
             "Offerfy 是網頁履歷編輯器。你可以從起始範本建立履歷或上傳檔案、編輯 Typst 原始碼、即時預覽編譯結果、匯出 PDF，並檢查該編譯後的 PDF 能否被求職者追蹤系統（ATS）解析。",
             "ATS 只檢查編譯後 PDF 的可解析性，不預測錄取或職涯結果。",
             "你可以不註冊就使用編輯器。使用 Google 登入會保存履歷紀錄。",
-            "搜尋職缺、依職缺客製、投遞與追蹤目前都不是本服務的一部分。"
+            "Offerfy 也提供公開職缺目錄，資料來自雇主職缺板 API（Greenhouse、Lever、Ashby）與台灣就業通開放資料。投遞在原始職缺頁完成。我們不營運 104 或 LinkedIn。履歷與職缺配對、依職缺客製履歷、投遞追蹤目前都不是本服務的一部分。"
           ]
         },
         {
@@ -337,13 +363,14 @@
             "語言：我們設定 offerfy_locale Cookie，讓網站維持你選擇的語言。",
             "主題：亮色／暗色偏好存在瀏覽器的 localStorage，不是 Cookie。",
             "履歷資料：標題、Typst 原始碼、編譯後的 SVG 與 PDF、ATS 可解析性報告，以及聊天訊息。",
-            "上傳：PDF、PNG、JPG、JPEG、WEBP、TXT、MD，上限 10 MiB，存在物件儲存。"
+            "上傳：PDF、PNG、JPG、JPEG、WEBP、TXT、MD，上限 10 MiB，存在物件儲存。",
+            "職缺目錄：我們儲存雇主 ATS 職缺板 API 與台灣就業通開放資料中的公開職缺副本，以便顯示目錄。這些職缺不是你的個人資料。"
           ]
         },
         {
           "heading": "使用目的",
           "paragraphs": [
-            "我們用這些資料提供編輯器、即時預覽、PDF 匯出、ATS 可解析性檢查、身分驗證、訪客速率限制，以及你選擇的語言。"
+            "我們用這些資料提供編輯器、即時預覽、PDF 匯出、ATS 可解析性檢查、公開職缺目錄、身分驗證、訪客速率限制，以及你選擇的語言。"
           ]
         },
         {

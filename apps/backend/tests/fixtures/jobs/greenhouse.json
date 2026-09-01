@@ -1,0 +1,12 @@
+{
+  "jobs": [
+    {
+      "id": 4242,
+      "title": "Software Engineer",
+      "absolute_url": "https://boards.greenhouse.io/stripe/jobs/4242",
+      "updated_at": "2026-01-15T12:00:00Z",
+      "location": {"name": "Remote - North America"},
+      "content": "&lt;p&gt;Build payments.&lt;script&gt;alert(1)&lt;/script&gt;&lt;a href=&quot;javascript:alert(1)&quot;&gt;x&lt;/a&gt;&lt;a href=&quot;https://stripe.com/jobs&quot;&gt;ok&lt;/a&gt;&lt;/p&gt;"
+    }
+  ]
+}

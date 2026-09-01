@@ -16,7 +16,15 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Frontend: http://localhost:3000 (default locale `zh-TW`). API is rewritten from `/api/*` to the FastAPI backend.
+Frontend: http://localhost:3100 (default locale `en`). API is rewritten from `/api/*` to the FastAPI backend.
+
+Ingest the public job catalog (official ATS boards + TaiwanJobs; no 104 scrape):
+
+```bash
+docker compose run --rm backend python -m app.jobs.ingest_catalog
+```
+
+Production runs the same command every 6 hours via the `jobs-ingest` CronJob.
 
 Backend tests:
 

@@ -5,7 +5,7 @@ import JsonLd from "@/components/seo/JsonLd";
 import { Link } from "@/i18n/navigation";
 import { organizationJsonLd } from "@/lib/seo";
 
-export const LEGAL_UPDATED = "2026-08-27";
+export const LEGAL_UPDATED = "2026-09-01";
 
 type LegalDoc = "terms" | "privacy";
 

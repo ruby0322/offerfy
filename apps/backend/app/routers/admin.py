@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.config import get_settings
 from app.db import get_db
 from app.deps import load_resume_for_admin, require_admin
-from app.models import ChatMessage, GuestSession, RateEvent, Resume, User
+from app.models import ChatMessage, GuestSession, JobIngestRun, RateEvent, Resume, User
 from app.schemas import AtsReport, PreviewPages
 from app.schemas_admin import (
     AdminChatMessage,
@@ -26,6 +26,7 @@ from app.schemas_admin import (
     AdminUserListItem,
     AdminUserResume,
 )
+from app.schemas_jobs import AdminIngestRun, AdminIngestRunList
 from app.services.ats import analyze_pdf
 from app.services.typst_compile import compile_typst, compile_typst_pages
 
@@ -396,3 +397,34 @@ def admin_resume_ats(
     resume = load_resume_for_admin(resume_id, db)
     pdf = compile_typst(resume.typst_source, "pdf")
     return analyze_pdf(pdf, resume.typst_source)
+
+
+@router.get("/v1/admin/jobs/ingest", response_model=AdminIngestRunList)
+def admin_jobs_ingest(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    rows = (
+        db.query(JobIngestRun)
+        .order_by(JobIngestRun.started_at.desc())
+        .limit(20)
+        .all()
+    )
+    return AdminIngestRunList(
+        items=[
+            AdminIngestRun(
+                id=row.id,
+                source=row.source,
+                board_slug=row.board_slug,
+                started_at=_iso(row.started_at) or "",
+                finished_at=_iso(row.finished_at),
+                status=row.status,
+                ok_count=row.ok_count,
+                error_count=row.error_count,
+                upserted_count=row.upserted_count,
+                expired_count=row.expired_count,
+                error_snippet=row.error_snippet,
+            )
+            for row in rows
+        ]
+    )

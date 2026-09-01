@@ -53,3 +53,7 @@ docs/deploy.md
 
 # Superpowers scratch
 .superpowers/
+
+# Local review screenshots (not product)
+.review-shots/
+apps/frontend/public/review-shots/

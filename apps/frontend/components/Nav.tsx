@@ -77,9 +77,14 @@ export default function Nav({ variant }: Props) {
             {t("brand")}
           </Link>
           {landing ? (
-            <Link href="/blog" className="text-sm font-medium">
-              {t("blog")}
-            </Link>
+            <>
+              <Link href="/jobs" className="text-sm font-medium">
+                {t("jobs")}
+              </Link>
+              <Link href="/blog" className="text-sm font-medium">
+                {t("blog")}
+              </Link>
+            </>
           ) : null}
         </div>
         <div className="flex items-center gap-1 sm:gap-3">

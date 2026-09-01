@@ -1,0 +1,17 @@
+{
+  "queries": [
+    {"count": 200, "zipno": "100"},
+    {"count": 200, "zipno": "104"},
+    {"count": 200, "zipno": "110"},
+    {"count": 200, "zipno": "220"},
+    {"count": 200, "zipno": "300"},
+    {"count": 200, "zipno": "320"},
+    {"count": 200, "zipno": "400"},
+    {"count": 200, "zipno": "600"},
+    {"count": 200, "zipno": "700"},
+    {"count": 200, "zipno": "800"},
+    {"count": 200, "zipno": "900"},
+    {"count": 200, "zipno": "260"},
+    {"count": 200, "zipno": "970"}
+  ]
+}

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<NewDataSet>
+  <Table>
+    <OCCU_DESC（職務名稱）>軟體工程師</OCCU_DESC（職務名稱）>
+    <COMPNAME（公司名稱）>範例科技</COMPNAME（公司名稱）>
+    <JOB_DETAIL（工作內容）>開發內部系統，可部分遠端。</JOB_DETAIL（工作內容）>
+    <CITYNAME>臺北市</CITYNAME>
+    <URL_QUERY>https://www.taiwanjobs.gov.tw/Internet/Index/JobDesc.aspx?id=tw-1</URL_QUERY>
+    <JOBNO>tw-1</JOBNO>
+    <TRANDATE>2026-03-01</TRANDATE>
+  </Table>
+</NewDataSet>

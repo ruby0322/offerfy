@@ -11,6 +11,7 @@ patches:
   - path: patch-configmap.yaml
   - path: patch-frontend.yaml
   - path: patch-backend.yaml
+  - path: patch-jobs-ingest.yaml
   - path: patch-ingress.yaml
   - path: patch-pvc-postgres.yaml
   - path: patch-pvc-seaweed-master.yaml

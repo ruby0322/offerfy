@@ -1,0 +1,20 @@
+{
+  "recency_half_life_days": 14,
+  "remote_boost": 1.0,
+  "default_role_weight": 0.1,
+  "source_weights": {
+    "greenhouse": 1.0,
+    "lever": 1.0,
+    "ashby": 1.0,
+    "taiwanjobs": 0.5
+  },
+  "role_rules": [
+    { "weight": 2.0, "any": ["engineer", "工程師"] },
+    { "weight": 0.5, "any": ["analyst"] }
+  ],
+  "featured_limit": 4,
+  "candidate_pool": 20,
+  "max_per_company": 1,
+  "min_sources": 2,
+  "max_consecutive_source": 1
+}

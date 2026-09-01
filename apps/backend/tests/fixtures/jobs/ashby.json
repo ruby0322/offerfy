@@ -1,0 +1,14 @@
+{
+  "jobs": [
+    {
+      "id": "job-9",
+      "title": "Product Designer",
+      "jobUrl": "https://jobs.ashbyhq.com/notion/job-9",
+      "applyUrl": "https://jobs.ashbyhq.com/notion/job-9",
+      "location": "San Francisco",
+      "isRemote": false,
+      "descriptionHtml": "<p>Design docs</p>",
+      "publishedAt": "2026-02-01T00:00:00Z"
+    }
+  ]
+}

@@ -141,3 +141,56 @@ class RateEvent(Base):
     )
 
     guest_session: Mapped[GuestSession] = relationship(back_populates="rate_events")
+
+
+JOB_SOURCES = ("greenhouse", "lever", "ashby", "taiwanjobs")
+
+
+class Job(Base):
+    __tablename__ = "jobs"
+    __table_args__ = (
+        CheckConstraint(
+            "source IN ('greenhouse', 'lever', 'ashby', 'taiwanjobs')",
+            name="job_source_values",
+        ),
+        UniqueConstraint("source", "source_id", name="jobs_source_source_id_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    company: Mapped[str] = mapped_column(String(255), nullable=False)
+    title: Mapped[str] = mapped_column(String(512), nullable=False)
+    location: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    remote: Mapped[bool | None] = mapped_column(nullable=True)
+    apply_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    source_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    description_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    description_html: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    is_active: Mapped[bool] = mapped_column(nullable=False, default=True)
+    spotlight_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
+
+
+class JobIngestRun(Base):
+    __tablename__ = "job_ingest_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    board_slug: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ok_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    error_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    upserted_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    expired_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    error_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")

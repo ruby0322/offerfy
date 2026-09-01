@@ -10,7 +10,8 @@
     "login": "Log in",
     "logout": "Log out",
     "account": "Account",
-    "blog": "Blog"
+    "blog": "Blog",
+    "jobs": "Jobs"
   },
   "footer": {
     "locales": "Language",
@@ -18,18 +19,43 @@
     "login": "Log in",
     "tagline": "Offerfy · get the resume right first",
     "blog": "Blog",
+    "jobs": "Jobs",
     "terms": "Terms",
     "privacy": "Privacy"
   },
   "blog": {
     "metaTitle": "Blog · Offerfy",
-    "metaDescription": "Notes and guides from Offerfy. The resume editor is shipping; search, tailor, and apply are on the way.",
+    "metaDescription": "Notes and guides from Offerfy. The resume editor and a public job catalog are shipping; tailor and apply are on the way.",
     "title": "Blog",
     "empty": "Nothing published yet.",
     "guide": "Guide",
     "note": "Note",
     "draft": "Draft",
     "updated": "Updated {date}"
+  },
+  "jobs": {
+    "metaTitle": "Jobs · Offerfy",
+    "metaDescription": "Public job catalog from employer career boards and TaiwanJobs. Apply on the source site. Matching, tailor, and apply tracking are not included.",
+    "title": "Jobs",
+    "lead": "Listings from official employer ATS boards and TaiwanJobs open data. Offerfy does not run 104 or LinkedIn. Apply on the original posting.",
+    "emptyFiltered": "No jobs match these filters.",
+    "emptyCatalog": "No jobs in the catalog yet. Ingest may not have run.",
+    "queryLabel": "Search",
+    "queryPlaceholder": "Title, company, or location",
+    "sourceLabel": "Source",
+    "sourceAll": "All sources",
+    "sourceTaiwanjobs": "TaiwanJobs",
+    "remoteLabel": "Remote",
+    "remoteAll": "Any",
+    "remoteYes": "Remote",
+    "remoteNo": "On-site / hybrid",
+    "remote": "Remote",
+    "submit": "Search",
+    "more": "More jobs",
+    "featuredLabel": "Open roles worth a look",
+    "closed": "This posting is no longer listed as open.",
+    "apply": "Apply on {source}",
+    "attribution": "Original posting:"
   },
   "landing": {
     "hero": {
@@ -252,7 +278,7 @@
             "Offerfy is a web resume editor. You can create a resume from a starter template or upload a file, edit Typst source, preview a live compile, export a PDF, and check whether that compiled PDF can be parsed by applicant tracking systems (ATS).",
             "ATS checks parseability of the compiled PDF only. They do not predict hireability or job outcomes.",
             "You may use the editor without an account. Signing in with Google saves your resume history.",
-            "Search, tailor-to-a-job, apply, and tracking are not part of the current service."
+            "Offerfy also publishes a public job catalog collected from employer career-board APIs (Greenhouse, Lever, Ashby) and TaiwanJobs open data. Applying happens on the original posting. We do not operate 104 or LinkedIn. Resume-to-job matching, tailoring a resume to a posting, and apply tracking are not part of the current service."
           ]
         },
         {
@@ -337,13 +363,14 @@
             "Language: we set an offerfy_locale cookie so the site stays in the language you chose.",
             "Theme: light/dark preference is stored in the browser with localStorage. It is not a cookie.",
             "Resume data: title, Typst source, compiled SVG and PDF, ATS parseability report, and chat messages.",
-            "Uploads: PDF, PNG, JPG, JPEG, WEBP, TXT, and MD files, up to 10 MiB, stored in object storage."
+            "Uploads: PDF, PNG, JPG, JPEG, WEBP, TXT, and MD files, up to 10 MiB, stored in object storage.",
+            "Job catalog: we store copies of public job postings from employer ATS board APIs and TaiwanJobs open data so we can show the catalog. These listings are not your personal data."
           ]
         },
         {
           "heading": "Why we use it",
           "paragraphs": [
-            "We use this data to provide the editor, live preview, PDF export, ATS parseability checks, authentication, guest rate limits, and the language you selected."
+            "We use this data to provide the editor, live preview, PDF export, ATS parseability checks, the public job catalog, authentication, guest rate limits, and the language you selected."
           ]
         },
         {
