@@ -32,6 +32,12 @@ export default function Footer({ variant }: Props) {
           <Link href="/blog" className="text-sm font-medium">
             {t("blog")}
           </Link>
+          <Link href="/about" className="text-sm font-medium">
+            {t("about")}
+          </Link>
+          <Link href="/contact" className="text-sm font-medium">
+            {t("contact")}
+          </Link>
           <Link href="/terms" className="text-sm font-medium">
             {t("terms")}
           </Link>

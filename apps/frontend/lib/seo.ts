@@ -4,6 +4,9 @@ import { routing, type AppLocale } from "@/i18n/routing";
 
 export const SITE_URL = "https://offerfy.cc";
 export const SITE_NAME = "Offerfy";
+export const CONTACT_EMAIL = "james@offerfy.cc";
+export const ORG_DESCRIPTION =
+  "The AI resume editor you’ll keep using. Chat edits this file. No account needed.";
 
 export const OG_LOCALE: Record<AppLocale, string> = {
   en: "en_US",
@@ -86,6 +89,12 @@ function organizationNode() {
     "@type": "Organization",
     name: SITE_NAME,
     url: SITE_URL,
+    description: ORG_DESCRIPTION,
+    contactPoint: {
+      "@type": "ContactPoint",
+      contactType: "customer support",
+      email: CONTACT_EMAIL,
+    },
   };
 }
 

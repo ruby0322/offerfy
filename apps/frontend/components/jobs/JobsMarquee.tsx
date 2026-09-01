@@ -18,7 +18,7 @@ export default async function JobsMarquee({ locale, jobs, label }: Props) {
   const loop = jobs.length > 1 ? [...jobs, ...jobs] : jobs;
   return (
     <section className="jobs-marquee" aria-label={heading}>
-      <p className="jobs-featured-label">{heading}</p>
+      <h2 className="jobs-featured-label">{heading}</h2>
       <div className="jobs-marquee-viewport">
         <div className={`jobs-marquee-track${jobs.length > 1 ? " jobs-marquee-loop" : ""}`}>
           {loop.map((job, index) => {

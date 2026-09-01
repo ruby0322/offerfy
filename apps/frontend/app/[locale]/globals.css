@@ -207,6 +207,15 @@ textarea {
   letter-spacing: -0.03em;
 }
 
+.not-found-links {
+  margin-top: 1.25rem;
+  padding-left: 1.2rem;
+}
+
+.not-found-links li {
+  margin: 0.35rem 0;
+}
+
 @media (min-width: 768px) {
   .legal-article h1 {
     font-size: 2.65rem;
@@ -418,6 +427,7 @@ textarea {
 .jobs-featured-label {
   margin: 0 0 0.75rem;
   font-size: 0.8rem;
+  font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--clay);

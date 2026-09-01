@@ -11,6 +11,7 @@ const DISALLOW_PATHS = [
   "/create",
   "/upload",
   "/new",
+  "/agent-markdown",
 ] as const;
 
 function withLocales(path: string): string[] {

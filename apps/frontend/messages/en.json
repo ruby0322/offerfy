@@ -20,8 +20,39 @@
     "tagline": "Offerfy · get the resume right first",
     "blog": "Blog",
     "jobs": "Jobs",
+    "about": "About",
+    "contact": "Contact",
     "terms": "Terms",
     "privacy": "Privacy"
+  },
+  "notFound": {
+    "title": "Not found",
+    "lead": "This URL is not a page on Offerfy.",
+    "home": "Home",
+    "llms": "llms.txt",
+    "sitemap": "Sitemap",
+    "jobs": "Jobs",
+    "blog": "Blog"
+  },
+  "about": {
+    "metaTitle": "About · Offerfy",
+    "metaDescription": "Offerfy is a web resume editor. Chat edits the same Typst file. A public jobs catalog lists official postings; apply on the source site.",
+    "title": "About",
+    "paragraphs": [
+      "Offerfy is a web resume editor at https://offerfy.cc. You keep a Typst source file in the browser. Chat can edit that same file. The PDF preview updates from the compile. This is not a generate-and-download product. You can start without creating an account.",
+      "We also publish a public job catalog from official employer ATS boards (Greenhouse, Lever, Ashby) and TaiwanJobs open data. Offerfy does not scrape 104 or LinkedIn. When you apply, you leave Offerfy and use the original posting. We do not match your resume to jobs, tailor a resume to a listing, or submit applications for you.",
+      "The homepage sells the editor first. Featured listings are real open roles from that catalog. Contact is james@offerfy.cc. There is no public office address."
+    ]
+  },
+  "contact": {
+    "metaTitle": "Contact · Offerfy",
+    "metaDescription": "Email james@offerfy.cc. Offerfy has no public office and no self-serve API keys.",
+    "title": "Contact",
+    "paragraphs": [
+      "Email james@offerfy.cc for product questions, privacy requests, and signed-in data deletion. There is no public office, no phone desk, and no in-app staff chat.",
+      "Google sign-in is for people using the website. There is no self-serve API key, OAuth authorization server for machines, or agent sandbox. Guest use of the editor is rate-limited in production to protect compile and chat.",
+      "Questions about the public jobs catalog — what we ingest, and that apply happens on the source site — can go to the same address. We do not apply, match, or tailor on your behalf."
+    ]
   },
   "blog": {
     "metaTitle": "Blog · Offerfy",

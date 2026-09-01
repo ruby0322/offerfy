@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { jobPostingJsonLd } from "./seo";
+import { jobPostingJsonLd, organizationJsonLd, CONTACT_EMAIL, SITE_NAME, SITE_URL } from "./seo";
 
 const base = {
   locale: "en" as const,
@@ -67,4 +67,19 @@ test("wraps plain description text in a paragraph when HTML is empty", () => {
   assert.ok(posting);
   assert.equal(posting.description, "<p>Build things</p>");
   assert.equal(posting.jobLocationType, undefined);
+});
+
+test("Organization JSON-LD has name, description, url, and email contactPoint", () => {
+  const org = organizationJsonLd();
+  assert.equal(org["@type"], "Organization");
+  assert.equal(org.name, SITE_NAME);
+  assert.equal(org.url, SITE_URL);
+  assert.equal(typeof org.description, "string");
+  assert.ok(String(org.description).length > 20);
+  assert.deepEqual(org.contactPoint, {
+    "@type": "ContactPoint",
+    contactType: "customer support",
+    email: CONTACT_EMAIL,
+  });
+  assert.equal("address" in org, false);
 });
