@@ -9,7 +9,7 @@
   --clay: #a35c3a;
   --sheet: #fffbf7;
   --rule: #e3d8c8;
-  --cta: #1c1914;
+  --cta: var(--clay);
   --cta-ink: #f6f1e8;
   --hover: color-mix(in srgb, var(--ink) 6%, var(--paper));
   --success: #2f6f5e;
@@ -1095,14 +1095,15 @@ textarea {
   color: color-mix(in srgb, var(--muted) 78%, transparent);
   background: transparent;
   box-shadow: none;
+  cursor: pointer;
 }
 
 .editor-tabs .editor-tab:hover {
-  color: var(--muted);
+  color: var(--clay);
 }
 
 .editor-tabs .editor-tab[data-state="active"] {
-  color: var(--ink);
+  color: var(--clay);
   background: transparent;
   box-shadow: none;
 }
@@ -1114,7 +1115,7 @@ textarea {
   right: 0.75rem;
   bottom: -1px;
   height: 2px;
-  background: var(--ink);
+  background: var(--clay);
   border-radius: 1px;
 }
 
