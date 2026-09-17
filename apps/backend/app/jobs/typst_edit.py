@@ -38,8 +38,7 @@ def main(argv: list[str] | None = None) -> int:
         if resume is None:
             print(f"resume not found: {args.resume_id}", file=sys.stderr)
             return 1
-        resume.typst_source = apply_typst_edit(resume.typst_source, patch)
-        set_draft_source(session, resume, resume.typst_source)
+        set_draft_source(session, resume, apply_typst_edit(resume.typst_source, patch))
         session.commit()
     except ValueError as exc:
         session.rollback()

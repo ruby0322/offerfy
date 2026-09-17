@@ -6,8 +6,8 @@ from fastapi.testclient import TestClient
 from app.config import get_settings
 from app.deps import SESSION_COOKIE, _sign
 from app.main import app
-from app.models import Resume, ResumeRevision, User
-from app.services.revisions import set_draft_source
+from app.models import Resume, ResumeRevision, ResumeShare, User
+from app.services.revisions import backfill_existing_resumes, set_draft_source
 
 
 def _session_cookie(user: User) -> dict[str, str]:
@@ -174,6 +174,69 @@ def test_restore_sets_draft_without_moving_published_pointer(client: TestClient,
     assert restored.json()["typst_source"] == first_source
     assert restored.json()["published_revision_id"] == published_id
     assert restored.json()["unpublished_changes"] is True
+
+
+def test_restore_within_coalesce_window_keeps_prior_revision(client: TestClient, db_session):
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    resume_id = created["id"]
+    resume = db_session.get(Resume, resume_id)
+    assert resume is not None
+    older_id = _latest(db_session, resume_id).id
+    starter = created["typst_source"]
+    edited = starter + "\n// unpublished\n"
+    t0 = _origin(db_session, resume_id)
+    set_draft_source(db_session, resume, edited, now=t0 + timedelta(seconds=121))
+    db_session.commit()
+    edited_id = _latest(db_session, resume_id).id
+    assert edited_id != older_id
+    restored = client.post(f"/v1/resumes/{resume_id}/revisions/{older_id}/restore")
+    assert restored.status_code == 200
+    assert restored.json()["typst_source"] == starter
+    db_session.expire_all()
+    assert _revision_count(db_session, resume_id) == 3
+    edited_row = db_session.get(ResumeRevision, edited_id)
+    assert edited_row is not None
+    assert edited_row.typst_source == edited
+
+
+def test_backfill_existing_share_keeps_preview_source(client: TestClient, db_session, monkeypatch):
+    seen: list[str] = []
+
+    def _pages(source, fmt):
+        seen.append(source)
+        return [b"<svg>page</svg>"]
+
+    monkeypatch.setattr("app.routers.shares.compile_typst_pages", _pages)
+    created = client.post("/v1/resumes", json={"locale": "en", "title": "Old"}).json()
+    resume_id = created["id"]
+    original = created["typst_source"]
+    resume = db_session.get(Resume, resume_id)
+    assert resume is not None
+    resume.published_revision_id = None
+    db_session.query(ResumeRevision).filter(ResumeRevision.resume_id == resume_id).delete()
+    db_session.add(ResumeShare(resume_id=resume_id, token="backfilltok"))
+    db_session.commit()
+    db_session.expire_all()
+    anon = TestClient(app)
+    missing = anon.get("/v1/shares/backfilltok/preview")
+    assert missing.status_code == 404
+    backfill_existing_resumes(db_session)
+    db_session.commit()
+    db_session.expire_all()
+    resume = db_session.get(Resume, resume_id)
+    assert resume is not None
+    assert resume.published_revision_id
+    preview = anon.get("/v1/shares/backfilltok/preview")
+    assert preview.status_code == 200
+    assert seen[-1] == original
+    client.put(
+        f"/v1/resumes/{resume_id}",
+        json={"typst_source": original + "\n// later draft\n"},
+    )
+    again = anon.get("/v1/shares/backfilltok/preview")
+    assert again.status_code == 200
+    assert seen[-1] == original
+    assert "// later draft" not in seen[-1]
 
 
 def test_guest_cannot_publish(client: TestClient):

@@ -77,9 +77,10 @@ export default function EditorHistoryPanel({ resumeId, reloadKey, onRestored }: 
       const saved = await restoreResumeRevision(resumeId, selectedId);
       const list = await listResumeRevisions(resumeId);
       setRows(list);
+      setLoadError(null);
       onRestored(saved);
-    } catch {
-      /* keep current selection */
+    } catch (err) {
+      setLoadError(err instanceof ApiError ? err.message : t("historyRestoreError"));
     } finally {
       setBusy(false);
     }

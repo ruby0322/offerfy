@@ -309,7 +309,7 @@ def restore_revision(
 ):
     resume = _owned_resume(resume_id, request, response, db, user, ensure=True)
     row = _revision_or_404(db, resume, revision_id)
-    set_draft_source(db, resume, row.typst_source)
+    set_draft_source(db, resume, row.typst_source, coalesce=False)
     out = _to_out(db, resume)
     db.commit()
     return out

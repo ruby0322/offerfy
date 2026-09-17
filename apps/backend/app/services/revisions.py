@@ -36,6 +36,7 @@ def set_draft_source(
     source: str,
     *,
     now: datetime | None = None,
+    coalesce: bool = True,
 ) -> ResumeRevision:
     when = now or datetime.now(timezone.utc)
     resume.typst_source = source
@@ -45,7 +46,8 @@ def set_draft_source(
     if latest is not None and latest.content_hash == digest:
         return latest
     if (
-        latest is not None
+        coalesce
+        and latest is not None
         and latest.id != resume.published_revision_id
         and (when - _aware(latest.created_at)) < COALESCE_WINDOW
     ):

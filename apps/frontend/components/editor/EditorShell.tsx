@@ -87,6 +87,7 @@ export default function EditorShell({ resumeId }: Props) {
   const [compileError, setCompileError] = useState<string | null>(null);
   const [signedIn, setSignedIn] = useState(false);
   const [unpublishedChanges, setUnpublishedChanges] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState("");
   const [publishing, setPublishing] = useState(false);
   const skipTimers = useRef(true);
   const sendingRef = useRef(false);
@@ -152,6 +153,7 @@ export default function EditorShell({ resumeId }: Props) {
         setResumeLocale(resume.locale);
         setImportStatus(resume.import_status);
         setSource(resume.typst_source || "");
+        setUpdatedAt(resume.updated_at || "");
         setUnpublishedChanges(resume.unpublished_changes ?? true);
         try {
           const history = await getChatMessages(resumeId);
@@ -198,6 +200,7 @@ export default function EditorShell({ resumeId }: Props) {
       try {
         setStatus(t("saving"));
         const saved = await putResumeSource(resumeId, { typst_source: source });
+        if (saved.updated_at) setUpdatedAt(saved.updated_at);
         if (typeof saved.unpublished_changes === "boolean") {
           setUnpublishedChanges(saved.unpublished_changes);
         }
@@ -276,7 +279,8 @@ export default function EditorShell({ resumeId }: Props) {
     ]);
     try {
       skipTimers.current = true;
-      await putResumeSource(resumeId, { typst_source: source });
+      const saved = await putResumeSource(resumeId, { typst_source: source });
+      if (saved.updated_at) setUpdatedAt(saved.updated_at);
     } catch (err) {
       skipTimers.current = false;
       const message = err instanceof ApiError ? err.message : t("chatError");
@@ -300,6 +304,7 @@ export default function EditorShell({ resumeId }: Props) {
         if (event.type === "source") {
           skipTimers.current = true;
           setSource(event.typst_source);
+          setUpdatedAt(new Date().toISOString());
           setUnpublishedChanges(true);
           try {
             await refreshPreview();
@@ -399,6 +404,7 @@ export default function EditorShell({ resumeId }: Props) {
   async function onRestoreHistory(saved: Resume) {
     skipTimers.current = true;
     setSource(saved.typst_source || "");
+    if (saved.updated_at) setUpdatedAt(saved.updated_at);
     if (typeof saved.unpublished_changes === "boolean") {
       setUnpublishedChanges(saved.unpublished_changes);
     }
@@ -424,7 +430,7 @@ export default function EditorShell({ resumeId }: Props) {
       const state = await publishResume(resumeId);
       setUnpublishedChanges(state.unpublished_changes ?? false);
     } catch {
-      /* keep unpublished */
+      setStatus(t("publishError"));
     } finally {
       setPublishing(false);
     }
@@ -444,6 +450,7 @@ export default function EditorShell({ resumeId }: Props) {
     setSource(previousSource);
     try {
       const saved = await putResumeSource(resumeId, { typst_source: previousSource });
+      if (saved.updated_at) setUpdatedAt(saved.updated_at);
       if (typeof saved.unpublished_changes === "boolean") {
         setUnpublishedChanges(saved.unpublished_changes);
       }
@@ -612,7 +619,7 @@ export default function EditorShell({ resumeId }: Props) {
               >
                 <EditorHistoryPanel
                   resumeId={resumeId}
-                  reloadKey={`${unpublishedChanges}:${source.length}`}
+                  reloadKey={`${leftTab}:${updatedAt}`}
                   onRestored={onRestoreHistory}
                 />
               </TabsContent>

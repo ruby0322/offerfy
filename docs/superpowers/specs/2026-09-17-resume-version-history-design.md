@@ -58,7 +58,7 @@ Alembic `008_resume_revisions` after `007_jobs_spotlight`.
 3. Else if latest is **not** the published revision **and** `now - created_at < 120s`, update that row in place (source, hash, `created_at`).
 4. Else insert a new revision.
 
-A published revision is frozen. Restore copies that revision’s source into the draft through the same helper (restore does not move the published pointer).
+A published revision is frozen. Restore copies that revision’s source into the draft through the same helper with `coalesce=False` so a restore inside the 120s window inserts a new snapshot instead of overwriting the latest unpublished revision. Restore does not move the published pointer.
 
 ## APIs
 
