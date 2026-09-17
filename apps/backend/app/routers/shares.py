@@ -13,6 +13,7 @@ from app.deps import (
 from app.models import Resume, ResumeShare, User
 from app.schemas import PreviewPages, PublicShareOut, ShareState, ShareUpdate
 from app.services.og_image import compose_og_png, og_cache_get, og_cache_put, og_etag
+from app.services.revisions import build_share_state, pin_current_draft, published_source
 from app.services.typst_compile import compile_typst, compile_typst_pages
 
 router = APIRouter()
@@ -35,10 +36,7 @@ def _require_user_owned(resume: Resume, user: User) -> None:
 
 
 def _share_state(db: Session, resume: Resume) -> ShareState:
-    share = db.query(ResumeShare).filter(ResumeShare.resume_id == resume.id).one_or_none()
-    if share is None:
-        return ShareState(public=False, token=None)
-    return ShareState(public=True, token=share.token)
+    return build_share_state(db, resume)
 
 
 def _new_token(db: Session) -> str:
@@ -97,33 +95,44 @@ def put_share(
             share = ResumeShare(resume_id=resume.id, token=_new_token(db))
             db.add(share)
             db.flush()
-        token = share.token
+        if resume.published_revision_id is None:
+            pin_current_draft(db, resume)
+        out = _share_state(db, resume)
         db.commit()
-        return ShareState(public=True, token=token)
+        return out
     if share is not None:
         db.delete(share)
         db.flush()
+    out = _share_state(db, resume)
     db.commit()
-    return ShareState(public=False, token=None)
+    return out
+
+
+def _published_or_404(token: str, db: Session) -> tuple[Resume, str]:
+    resume = _resume_for_token(token, db)
+    source = published_source(db, resume)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    return resume, source
 
 
 @router.get("/v1/shares/{token}", response_model=PublicShareOut)
 def public_share(token: str, db: Session = Depends(get_db)):
-    resume = _resume_for_token(token, db)
+    resume, _source = _published_or_404(token, db)
     return PublicShareOut(title=resume.title, locale=resume.locale)
 
 
 @router.get("/v1/shares/{token}/preview", response_model=PreviewPages)
 def public_preview(token: str, db: Session = Depends(get_db)):
-    resume = _resume_for_token(token, db)
-    blobs = compile_typst_pages(resume.typst_source, "svg")
+    _resume, source = _published_or_404(token, db)
+    blobs = compile_typst_pages(source, "svg")
     return PreviewPages(pages=[blob.decode("utf-8") for blob in blobs])
 
 
 @router.get("/v1/shares/{token}/export")
 def public_export(token: str, db: Session = Depends(get_db)):
-    resume = _resume_for_token(token, db)
-    data = compile_typst(resume.typst_source, "pdf")
+    resume, source = _published_or_404(token, db)
+    data = compile_typst(source, "pdf")
     return RawResponse(
         content=data,
         media_type="application/pdf",
@@ -148,14 +157,14 @@ def _png_response(body: bytes, etag: str) -> RawResponse:
 
 @router.get("/v1/shares/{token}/og.png")
 def public_og(token: str, request: Request, db: Session = Depends(get_db)):
-    resume = _resume_for_token(token, db)
-    etag = og_etag(resume.typst_source)
+    _resume, source = _published_or_404(token, db)
+    etag = og_etag(source)
     if request.headers.get("if-none-match") == etag:
         return RawResponse(status_code=304, headers=_og_cache_headers(etag))
     cached = og_cache_get(token, etag)
     if cached is not None:
         return _png_response(cached, etag)
-    pages = compile_typst_pages(resume.typst_source, "png", pages="1", ppi=144)
+    pages = compile_typst_pages(source, "png", pages="1", ppi=144)
     body = compose_og_png(pages[0])
     og_cache_put(token, etag, body)
     return _png_response(body, etag)

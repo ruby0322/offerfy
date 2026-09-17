@@ -75,7 +75,8 @@ def test_user_share_public_keeps_token_until_private(client: TestClient, db_sess
 
     got = client.get(f"/v1/resumes/{resume_id}/share", cookies=cookies)
     assert got.status_code == 200
-    assert got.json() == {"public": True, "token": token}
+    assert got.json()["public"] is True
+    assert got.json()["token"] == token
 
     private = client.put(
         f"/v1/resumes/{resume_id}/share",
@@ -83,7 +84,8 @@ def test_user_share_public_keeps_token_until_private(client: TestClient, db_sess
         cookies=cookies,
     )
     assert private.status_code == 200
-    assert private.json() == {"public": False, "token": None}
+    assert private.json()["public"] is False
+    assert private.json()["token"] is None
 
     anon = TestClient(app)
     assert anon.get(f"/v1/shares/{token}").status_code == 404
@@ -256,7 +258,7 @@ def test_public_og_png_404_after_private(client, db_session, monkeypatch):
     assert anon.get(f"/v1/shares/{token}/og.png").status_code == 404
 
 
-def test_public_og_etag_changes_when_source_changes(client, db_session, monkeypatch):
+def test_public_og_etag_changes_when_published_source_changes(client, db_session, monkeypatch):
     og_cache_clear()
     monkeypatch.setattr(
         "app.routers.shares.compile_typst_pages",
@@ -280,5 +282,8 @@ def test_public_og_etag_changes_when_source_changes(client, db_session, monkeypa
         json={"typst_source": created["typst_source"] + "\n// changed\n"},
         cookies=cookies,
     )
+    draft = anon.get(f"/v1/shares/{token}/og.png").headers["etag"]
+    assert first == draft
+    client.post(f"/v1/resumes/{resume_id}/publish", cookies=cookies)
     second = anon.get(f"/v1/shares/{token}/og.png").headers["etag"]
     assert first != second

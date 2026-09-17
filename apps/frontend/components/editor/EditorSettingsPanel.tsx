@@ -30,6 +30,10 @@ type Props = {
   resumeLocale?: string;
   importStatus?: ImportStatus;
   onTitleChange: (title: string) => void;
+  onShareState?: (state: ShareState) => void;
+  unpublishedChanges?: boolean;
+  publishing?: boolean;
+  onPublish?: () => void;
 };
 
 function shareUrl(token: string): string {
@@ -44,6 +48,10 @@ export default function EditorSettingsPanel({
   resumeLocale,
   importStatus,
   onTitleChange,
+  onShareState,
+  unpublishedChanges,
+  publishing,
+  onPublish,
 }: Props) {
   const t = useTranslations("editor");
   const locale = useLocale();
@@ -71,7 +79,10 @@ export default function EditorSettingsPanel({
         if (!ok) return;
         try {
           const state = await getResumeShare(resumeId);
-          if (!cancelled) setShare(state);
+          if (!cancelled) {
+            setShare(state);
+            onShareState?.(state);
+          }
         } catch {
           if (!cancelled) setShare({ public: false, token: null });
         }
@@ -82,7 +93,7 @@ export default function EditorSettingsPanel({
     return () => {
       cancelled = true;
     };
-  }, [resumeId]);
+  }, [resumeId, onShareState]);
 
   async function onSaveName(event: FormEvent) {
     event.preventDefault();
@@ -111,6 +122,7 @@ export default function EditorSettingsPanel({
     try {
       const state = await putResumeShare(resumeId, isPublic);
       setShare(state);
+      onShareState?.(state);
     } catch {
       /* keep previous share state */
     } finally {
@@ -236,6 +248,19 @@ export default function EditorSettingsPanel({
                     />
                     <Button type="button" size="sm" onClick={onCopy}>
                       {copied ? t("settingsCopied") : t("settingsCopy")}
+                    </Button>
+                  </div>
+                ) : null}
+                {onPublish ? (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-xs text-muted-foreground">{t("settingsPublishHint")}</p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={publishing || !unpublishedChanges}
+                      onClick={onPublish}
+                    >
+                      {publishing ? t("publishing") : t("publish")}
                     </Button>
                   </div>
                 ) : null}

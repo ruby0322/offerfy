@@ -12,6 +12,7 @@ import sys
 
 from app.db import get_engine, get_session_factory
 from app.models import Resume
+from app.services.revisions import set_draft_source
 from app.typst_edit import apply_typst_edit
 
 
@@ -37,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
         if resume is None:
             print(f"resume not found: {args.resume_id}", file=sys.stderr)
             return 1
-        resume.typst_source = apply_typst_edit(resume.typst_source, patch)
+        set_draft_source(session, resume, apply_typst_edit(resume.typst_source, patch))
         session.commit()
     except ValueError as exc:
         session.rollback()

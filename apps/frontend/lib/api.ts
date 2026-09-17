@@ -98,6 +98,8 @@ export type Resume = {
   import_status?: ImportStatus;
   created_at?: string;
   updated_at?: string;
+  published_revision_id?: string | null;
+  unpublished_changes?: boolean;
 };
 
 export type ChatMessage = {
@@ -237,9 +239,23 @@ export async function exportPdf(id: string): Promise<Blob> {
   return apiBlob(`/api/v1/resumes/${id}/export`);
 }
 
-export type ShareState = { public: boolean; token: string | null };
+export type ShareState = {
+  public: boolean;
+  token: string | null;
+  published_revision_id?: string | null;
+  published_at?: string | null;
+  unpublished_changes?: boolean;
+};
 
-export type PublicShare = { title: string; locale: string };
+export type RevisionListItem = {
+  id: string;
+  created_at: string;
+  is_published: boolean;
+};
+
+export type RevisionDetail = RevisionListItem & {
+  typst_source: string;
+};
 
 export async function getResumeShare(id: string): Promise<ShareState> {
   return apiJson<ShareState>(`/api/v1/resumes/${id}/share`);
@@ -251,6 +267,29 @@ export async function putResumeShare(id: string, isPublic: boolean): Promise<Sha
     body: JSON.stringify({ public: isPublic }),
   });
 }
+
+export async function listResumeRevisions(id: string): Promise<RevisionListItem[]> {
+  const data = await apiJson<unknown>(`/api/v1/resumes/${id}/revisions`);
+  return Array.isArray(data) ? (data as RevisionListItem[]) : [];
+}
+
+export async function getResumeRevision(id: string, revisionId: string): Promise<RevisionDetail> {
+  return apiJson<RevisionDetail>(`/api/v1/resumes/${id}/revisions/${revisionId}`);
+}
+
+export async function restoreResumeRevision(id: string, revisionId: string): Promise<Resume> {
+  return asResume(
+    await apiJson<unknown>(`/api/v1/resumes/${id}/revisions/${revisionId}/restore`, {
+      method: "POST",
+    }),
+  );
+}
+
+export async function publishResume(id: string): Promise<ShareState> {
+  return apiJson<ShareState>(`/api/v1/resumes/${id}/publish`, { method: "POST" });
+}
+
+export type PublicShare = { title: string; locale: string };
 
 export async function getPublicShare(token: string): Promise<PublicShare> {
   return apiJson<PublicShare>(`/api/v1/shares/${encodeURIComponent(token)}`);
