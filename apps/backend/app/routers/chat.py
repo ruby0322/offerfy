@@ -13,6 +13,7 @@ from app.services.attachment import llm_content_for_upload, stored_user_message
 from app.services.extract import MAX_UPLOAD_BYTES, allowed_upload, extract_upload_text
 from app.services.llm import TEMPLATE_SWITCH_EXTRA, aiter_chat_edit, llm_configured
 from app.services.rate_limit import enforce_guest_rate
+from app.services.revisions import set_draft_source
 from app.services.s3 import put_object
 from app.services.templates import is_template_switch_message, parse_preview_spec, template_api_block
 from app.services.typst_compile import compile_status
@@ -181,7 +182,7 @@ async def chat(
                     )
                 elif kind == "source":
                     new_source = event["typst_source"]
-                    resume.typst_source = new_source
+                    set_draft_source(db, resume, new_source)
                     db.commit()
                     yield _sse(
                         {
@@ -251,7 +252,7 @@ async def chat(
                         )
                     elif kind == "source":
                         new_source = event["typst_source"]
-                        resume.typst_source = new_source
+                        set_draft_source(db, resume, new_source)
                         db.commit()
                         yield _sse(
                             {

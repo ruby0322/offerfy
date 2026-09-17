@@ -7,8 +7,8 @@ from fastapi.responses import Response as RawResponse
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.deps import get_current_user, load_resume_for_owner, owner_context
-from app.models import GuestSession, Resume, User
+from app.deps import get_current_user, load_resume_for_owner, owner_context, require_user
+from app.models import GuestSession, Resume, ResumeRevision, User
 from app.schemas import (
     AtsReport,
     CompileBody,
@@ -18,6 +18,9 @@ from app.schemas import (
     ResumeListItem,
     ResumeOut,
     ResumeUpdate,
+    RevisionDetail,
+    RevisionListItem,
+    ShareState,
 )
 from app.services.ats import analyze_pdf
 from app.services.extract import (
@@ -25,6 +28,12 @@ from app.services.extract import (
     allowed_upload,
 )
 from app.services.rate_limit import enforce_guest_rate
+from app.services.revisions import (
+    pin_current_draft,
+    set_draft_source,
+    unpublished_changes,
+    build_share_state,
+)
 from app.services.s3 import put_object
 from app.services.starter import default_title, generate_starter, title_from_filename
 from app.services.typst_compile import compile_typst, compile_typst_pages
@@ -47,7 +56,7 @@ def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat()
 
 
-def _to_out(resume: Resume) -> ResumeOut:
+def _to_out(db: Session, resume: Resume) -> ResumeOut:
     return ResumeOut(
         id=resume.id,
         title=resume.title,
@@ -58,6 +67,9 @@ def _to_out(resume: Resume) -> ResumeOut:
         upload_s3_key=resume.upload_s3_key,
         claimed_at=_iso(resume.claimed_at),
         created_at=_iso(resume.created_at) or "",
+        updated_at=_iso(resume.updated_at),
+        published_revision_id=resume.published_revision_id,
+        unpublished_changes=unpublished_changes(db, resume),
     )
 
 
@@ -87,6 +99,7 @@ def _new_resume(
         raise HTTPException(status_code=500, detail="Missing owner")
     db.add(resume)
     db.flush()
+    set_draft_source(db, resume, typst_source)
     return resume
 
 
@@ -112,7 +125,7 @@ def create_resume(
         source="create",
         typst_source=generate_starter(locale),
     )
-    out = _to_out(resume)
+    out = _to_out(db, resume)
     db.commit()
     return out
 
@@ -154,7 +167,7 @@ async def upload_resume(
     resume.upload_s3_key = stored
     db.commit()
     db.refresh(resume)
-    return _to_out(resume)
+    return _to_out(db, resume)
 
 
 @router.get("/v1/resumes", response_model=list[ResumeListItem])
@@ -201,7 +214,7 @@ def get_resume(
     user: User | None = Depends(get_current_user),
 ):
     resume = _owned_resume(resume_id, request, response, db, user)
-    return _to_out(resume)
+    return _to_out(db, resume)
 
 
 @router.put("/v1/resumes/{resume_id}", response_model=ResumeOut)
@@ -215,7 +228,7 @@ def put_resume(
 ):
     resume = _owned_resume(resume_id, request, response, db, user, ensure=True)
     if body.typst_source is not None:
-        resume.typst_source = body.typst_source
+        set_draft_source(db, resume, body.typst_source)
     if body.title is not None:
         stripped = body.title.strip()
         if not stripped:
@@ -224,7 +237,101 @@ def put_resume(
             raise HTTPException(status_code=400, detail="Title is too long")
         resume.title = stripped
     db.flush()
-    out = _to_out(resume)
+    out = _to_out(db, resume)
+    db.commit()
+    return out
+
+
+def _revision_or_404(db: Session, resume: Resume, revision_id: str) -> ResumeRevision:
+    row = db.get(ResumeRevision, revision_id)
+    if row is None or row.resume_id != resume.id:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    return row
+
+
+def _revision_list_item(resume: Resume, row: ResumeRevision) -> RevisionListItem:
+    return RevisionListItem(
+        id=row.id,
+        created_at=_iso(row.created_at) or "",
+        is_published=row.id == resume.published_revision_id,
+    )
+
+
+@router.get("/v1/resumes/{resume_id}/revisions", response_model=list[RevisionListItem])
+def list_revisions(
+    resume_id: str,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+):
+    resume = _owned_resume(resume_id, request, response, db, user)
+    rows = (
+        db.query(ResumeRevision)
+        .filter(ResumeRevision.resume_id == resume.id)
+        .order_by(ResumeRevision.created_at.desc(), ResumeRevision.id.desc())
+        .all()
+    )
+    return [_revision_list_item(resume, row) for row in rows]
+
+
+@router.get("/v1/resumes/{resume_id}/revisions/{revision_id}", response_model=RevisionDetail)
+def get_revision(
+    resume_id: str,
+    revision_id: str,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+):
+    resume = _owned_resume(resume_id, request, response, db, user)
+    row = _revision_or_404(db, resume, revision_id)
+    item = _revision_list_item(resume, row)
+    return RevisionDetail(
+        id=item.id,
+        created_at=item.created_at,
+        is_published=item.is_published,
+        typst_source=row.typst_source,
+    )
+
+
+@router.post(
+    "/v1/resumes/{resume_id}/revisions/{revision_id}/restore",
+    response_model=ResumeOut,
+)
+def restore_revision(
+    resume_id: str,
+    revision_id: str,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+):
+    resume = _owned_resume(resume_id, request, response, db, user, ensure=True)
+    row = _revision_or_404(db, resume, revision_id)
+    set_draft_source(db, resume, row.typst_source)
+    out = _to_out(db, resume)
+    db.commit()
+    return out
+
+
+def _require_user_owned(resume: Resume, user: User) -> None:
+    if resume.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Sign in required to share")
+
+
+@router.post("/v1/resumes/{resume_id}/publish", response_model=ShareState)
+def publish_resume(
+    resume_id: str,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    resume = _owned_resume(resume_id, request, response, db, user)
+    _require_user_owned(resume, user)
+    pin_current_draft(db, resume)
+    out = build_share_state(db, resume)
     db.commit()
     return out
 

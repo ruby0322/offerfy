@@ -24,6 +24,9 @@ class ResumeOut(BaseModel):
     upload_s3_key: str | None = None
     claimed_at: str | None = None
     created_at: str
+    updated_at: str | None = None
+    published_revision_id: str | None = None
+    unpublished_changes: bool = True
 
     model_config = {"from_attributes": True}
 
@@ -90,6 +93,22 @@ class ShareUpdate(BaseModel):
 class ShareState(BaseModel):
     public: bool
     token: str | None = None
+    published_revision_id: str | None = None
+    published_at: str | None = None
+    unpublished_changes: bool = True
+
+
+class RevisionListItem(BaseModel):
+    id: str
+    created_at: str
+    is_published: bool
+
+
+class RevisionDetail(BaseModel):
+    id: str
+    created_at: str
+    is_published: bool
+    typst_source: str
 
 
 class PublicShareOut(BaseModel):

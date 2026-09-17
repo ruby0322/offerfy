@@ -80,6 +80,19 @@ class Resume(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    published_revision_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey(
+            "resume_revisions.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_resumes_published_revision_id",
+        ),
+        nullable=True,
+    )
 
     guest_session: Mapped[GuestSession | None] = relationship(back_populates="resumes")
     user: Mapped[User | None] = relationship(back_populates="resumes")
@@ -88,6 +101,38 @@ class Resume(Base):
     )
     share: Mapped["ResumeShare | None"] = relationship(
         back_populates="resume", uselist=False, cascade="all, delete-orphan"
+    )
+    revisions: Mapped[list["ResumeRevision"]] = relationship(
+        back_populates="resume",
+        cascade="all, delete-orphan",
+        foreign_keys="ResumeRevision.resume_id",
+    )
+    published_revision: Mapped["ResumeRevision | None"] = relationship(
+        foreign_keys=[published_revision_id],
+        post_update=True,
+        uselist=False,
+    )
+
+
+class ResumeRevision(Base):
+    __tablename__ = "resume_revisions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    resume_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("resumes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    typst_source: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    resume: Mapped["Resume"] = relationship(
+        back_populates="revisions",
+        foreign_keys=[resume_id],
     )
 
 

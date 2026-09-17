@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 import CompileErrorDialog from "@/components/editor/CompileErrorDialog";
 import EditorChatPanel from "@/components/editor/EditorChatPanel";
 import EditorHeader from "@/components/editor/EditorHeader";
+import EditorHistoryPanel from "@/components/editor/EditorHistoryPanel";
 import EditorPreview from "@/components/editor/EditorPreview";
 import EditorSettingsPanel from "@/components/editor/EditorSettingsPanel";
 import EditorTemplatePanel from "@/components/editor/EditorTemplatePanel";
@@ -21,13 +22,16 @@ import {
   getMe,
   getPreviewPages,
   getResume,
+  publishResume,
   putResumeSource,
   sendChat,
   typstCompileDetail,
   type AtsReport,
   type ChatMessage,
   type ImportStatus,
+  type Resume,
   type ResumeSource,
+  type ShareState,
 } from "@/lib/api";
 import { formatUserAttachmentMessage } from "@/lib/chat-tools";
 import type { AtsCheckName } from "@/lib/ats-checks";
@@ -81,6 +85,9 @@ export default function EditorShell({ resumeId }: Props) {
     peekPendingUpload(resumeId) ? "chat" : "typst",
   );
   const [compileError, setCompileError] = useState<string | null>(null);
+  const [signedIn, setSignedIn] = useState(false);
+  const [unpublishedChanges, setUnpublishedChanges] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const skipTimers = useRef(true);
   const sendingRef = useRef(false);
   const previewObjectUrls = useRef<string[]>([]);
@@ -127,6 +134,7 @@ export default function EditorShell({ resumeId }: Props) {
         try {
           const me = await getMe();
           if (me) {
+            setSignedIn(true);
             try {
               await claimResumes();
             } catch {
@@ -144,6 +152,7 @@ export default function EditorShell({ resumeId }: Props) {
         setResumeLocale(resume.locale);
         setImportStatus(resume.import_status);
         setSource(resume.typst_source || "");
+        setUnpublishedChanges(resume.unpublished_changes ?? true);
         try {
           const history = await getChatMessages(resumeId);
           if (!cancelled) setMessages(history.map(withMessageId));
@@ -188,7 +197,10 @@ export default function EditorShell({ resumeId }: Props) {
     const handle = window.setTimeout(async () => {
       try {
         setStatus(t("saving"));
-        await putResumeSource(resumeId, { typst_source: source });
+        const saved = await putResumeSource(resumeId, { typst_source: source });
+        if (typeof saved.unpublished_changes === "boolean") {
+          setUnpublishedChanges(saved.unpublished_changes);
+        }
         await refreshPreview();
         try {
           await refreshAts();
@@ -288,6 +300,7 @@ export default function EditorShell({ resumeId }: Props) {
         if (event.type === "source") {
           skipTimers.current = true;
           setSource(event.typst_source);
+          setUnpublishedChanges(true);
           try {
             await refreshPreview();
             try {
@@ -383,6 +396,46 @@ export default function EditorShell({ resumeId }: Props) {
     void sendUserChat(prompt, null, { preferFullSource: true });
   }
 
+  async function onRestoreHistory(saved: Resume) {
+    skipTimers.current = true;
+    setSource(saved.typst_source || "");
+    if (typeof saved.unpublished_changes === "boolean") {
+      setUnpublishedChanges(saved.unpublished_changes);
+    }
+    try {
+      await refreshPreview();
+      try {
+        await compileResume(resumeId, "pdf");
+        await refreshAts();
+      } catch (err) {
+        failCompile(err, t("previewError"));
+      }
+    } catch (err) {
+      failCompile(err, t("previewError"));
+    } finally {
+      skipTimers.current = false;
+    }
+  }
+
+  async function onPublish() {
+    if (!signedIn || publishing) return;
+    setPublishing(true);
+    try {
+      const state = await publishResume(resumeId);
+      setUnpublishedChanges(state.unpublished_changes ?? false);
+    } catch {
+      /* keep unpublished */
+    } finally {
+      setPublishing(false);
+    }
+  }
+
+  const onShareState = useCallback((state: ShareState) => {
+    if (typeof state.unpublished_changes === "boolean") {
+      setUnpublishedChanges(state.unpublished_changes);
+    }
+  }, []);
+
   async function onRestoreEdit(previousSource: string) {
     if (sendingRef.current || previousSource === source) return;
     sendingRef.current = true;
@@ -390,7 +443,10 @@ export default function EditorShell({ resumeId }: Props) {
     skipTimers.current = true;
     setSource(previousSource);
     try {
-      await putResumeSource(resumeId, { typst_source: previousSource });
+      const saved = await putResumeSource(resumeId, { typst_source: previousSource });
+      if (typeof saved.unpublished_changes === "boolean") {
+        setUnpublishedChanges(saved.unpublished_changes);
+      }
       await refreshPreview();
       try {
         await compileResume(resumeId, "pdf");
@@ -450,7 +506,16 @@ export default function EditorShell({ resumeId }: Props) {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
-      <EditorHeader brand={tNav("brand")} title={title} status={status} />
+      <EditorHeader
+        brand={tNav("brand")}
+        title={title}
+        status={status}
+        publishLabel={t("publish")}
+        publishingLabel={t("publishing")}
+        unpublishedChanges={signedIn && unpublishedChanges}
+        publishing={publishing}
+        onPublish={signedIn ? onPublish : undefined}
+      />
       <div className="min-h-0 flex-1">
         <ResizablePanelGroup direction="horizontal" className="h-full">
           <ResizablePanel defaultSize={48} minSize={28} maxSize={65} className="h-full">
@@ -473,6 +538,9 @@ export default function EditorShell({ resumeId }: Props) {
                   </TabsTrigger>
                   <TabsTrigger value="settings" className="px-1.5 text-xs sm:px-2 sm:text-sm">
                     {t("tabSettings")}
+                  </TabsTrigger>
+                  <TabsTrigger value="history" className="px-1.5 text-xs sm:px-2 sm:text-sm">
+                    {t("tabHistory")}
                   </TabsTrigger>
                 </TabsList>
               </div>
@@ -531,6 +599,21 @@ export default function EditorShell({ resumeId }: Props) {
                   resumeLocale={resumeLocale}
                   importStatus={importStatus}
                   onTitleChange={setTitle}
+                  onShareState={onShareState}
+                  unpublishedChanges={unpublishedChanges}
+                  publishing={publishing}
+                  onPublish={signedIn ? onPublish : undefined}
+                />
+              </TabsContent>
+              <TabsContent
+                value="history"
+                forceMount
+                className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+              >
+                <EditorHistoryPanel
+                  resumeId={resumeId}
+                  reloadKey={`${unpublishedChanges}:${source.length}`}
+                  onRestored={onRestoreHistory}
                 />
               </TabsContent>
             </Tabs>
