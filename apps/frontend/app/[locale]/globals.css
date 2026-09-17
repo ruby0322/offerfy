@@ -1074,33 +1074,54 @@ textarea {
 
 .editor-tabs {
   display: flex;
-  gap: 0.15rem;
+  align-items: stretch;
+  gap: 0.2rem;
+  width: 100%;
   border-bottom: 1px solid var(--rule);
   background: var(--paper);
-  padding: 0 0.75rem;
+  padding: 0 0.65rem;
 }
 
-.editor-tab {
+.editor-tabs .editor-tab {
   position: relative;
-  padding: 0.85rem 0.9rem 0.75rem;
-  font-size: 0.875rem;
-  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: auto;
+  padding: 0.85rem 0.8rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: color-mix(in srgb, var(--muted) 78%, transparent);
+  background: transparent;
+  box-shadow: none;
+}
+
+.editor-tabs .editor-tab:hover {
   color: var(--muted);
 }
 
-.editor-tab[data-state="active"] {
+.editor-tabs .editor-tab[data-state="active"] {
   color: var(--ink);
+  background: transparent;
+  box-shadow: none;
 }
 
-.editor-tab[data-state="active"]::after {
+.editor-tabs .editor-tab[data-state="active"]::after {
   content: "";
   position: absolute;
-  left: 0.65rem;
-  right: 0.65rem;
+  left: 0.75rem;
+  right: 0.75rem;
   bottom: -1px;
   height: 2px;
-  background: var(--clay);
-  border-radius: 999px 999px 0 0;
+  background: var(--ink);
+  border-radius: 1px;
+}
+
+.editor-tabs .editor-tab svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  stroke-width: 1.7;
 }
 
 .typst-editor {

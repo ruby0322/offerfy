@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { AlignLeft, History, LayoutTemplate, MessageCircle, Settings } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import CompileErrorDialog from "@/components/editor/CompileErrorDialog";
 import EditorChatPanel from "@/components/editor/EditorChatPanel";
@@ -53,6 +54,9 @@ function newMessageId(): string {
 function withMessageId(message: ChatMessage): ChatMessage {
   return message.id ? message : { ...message, id: newMessageId() };
 }
+
+const editorTabClassName =
+  "editor-tab h-auto flex-none rounded-none border-0 bg-transparent shadow-none data-[state=active]:bg-transparent data-[state=active]:shadow-none";
 
 type Props = {
   resumeId: string;
@@ -532,21 +536,26 @@ export default function EditorShell({ resumeId }: Props) {
               onValueChange={setLeftTab}
               className="flex h-full min-h-0 flex-col gap-0"
             >
-              <div className="flex shrink-0 items-center overflow-x-auto border-b border-border bg-background px-2 py-2 sm:px-3">
-                <TabsList className="shrink-0">
-                  <TabsTrigger value="typst" className="px-1.5 text-xs sm:px-2 sm:text-sm">
+              <div className="flex shrink-0 items-center overflow-x-auto bg-background">
+                <TabsList className="editor-tabs h-auto w-full justify-start rounded-none bg-transparent p-0">
+                  <TabsTrigger value="typst" className={editorTabClassName}>
+                    <AlignLeft aria-hidden="true" />
                     {t("tabTypst")}
                   </TabsTrigger>
-                  <TabsTrigger value="chat" className="px-1.5 text-xs sm:px-2 sm:text-sm">
+                  <TabsTrigger value="chat" className={editorTabClassName}>
+                    <MessageCircle aria-hidden="true" />
                     {t("tabChat")}
                   </TabsTrigger>
-                  <TabsTrigger value="template" className="px-1.5 text-xs sm:px-2 sm:text-sm">
+                  <TabsTrigger value="template" className={editorTabClassName}>
+                    <LayoutTemplate aria-hidden="true" />
                     {t("tabTemplate")}
                   </TabsTrigger>
-                  <TabsTrigger value="settings" className="px-1.5 text-xs sm:px-2 sm:text-sm">
+                  <TabsTrigger value="settings" className={editorTabClassName}>
+                    <Settings aria-hidden="true" />
                     {t("tabSettings")}
                   </TabsTrigger>
-                  <TabsTrigger value="history" className="px-1.5 text-xs sm:px-2 sm:text-sm">
+                  <TabsTrigger value="history" className={editorTabClassName}>
+                    <History aria-hidden="true" />
                     {t("tabHistory")}
                   </TabsTrigger>
                 </TabsList>
