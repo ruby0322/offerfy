@@ -38,6 +38,14 @@ export default function Footer({ variant }: Props) {
           <Link href="/contact" className="text-sm font-medium">
             {t("contact")}
           </Link>
+          <a
+            href="https://x.com/offerfy"
+            className="text-sm font-medium"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {t("x")}
+          </a>
           <Link href="/terms" className="text-sm font-medium">
             {t("terms")}
           </Link>
