@@ -73,11 +73,19 @@ def admin_email_set() -> set[str]:
     return {part.strip().casefold() for part in raw.split(",") if part.strip()}
 
 
+def is_admin_user(user: User | None) -> bool:
+    if user is None:
+        return False
+    allowed = admin_email_set()
+    if not allowed:
+        return False
+    return (user.email or "").strip().casefold() in allowed
+
+
 def require_admin(user: User | None = Depends(get_current_user)) -> User:
     if user is None:
         raise HTTPException(status_code=401, detail="Sign in required")
-    allowed = admin_email_set()
-    if not allowed or (user.email or "").strip().casefold() not in allowed:
+    if not is_admin_user(user):
         raise HTTPException(status_code=404, detail="Not found")
     return user
 

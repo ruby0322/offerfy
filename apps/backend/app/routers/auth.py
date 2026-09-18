@@ -12,6 +12,7 @@ from app.db import get_db
 from app.deps import (
     clear_session_cookie,
     get_current_user,
+    is_admin_user,
     require_user,
     set_session_cookie,
 )
@@ -190,6 +191,7 @@ def me(user: User | None = Depends(get_current_user)):
             "email": user.email,
             "locale": user.locale,
             "picture": user.picture,
+            "is_admin": is_admin_user(user),
         },
         guest=False,
     )

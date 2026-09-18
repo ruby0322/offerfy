@@ -123,6 +123,7 @@ export type AuthUser = {
   email?: string | null;
   locale?: string | null;
   picture?: string | null;
+  is_admin?: boolean;
 };
 
 function asResume(data: unknown): Resume {

@@ -41,6 +41,38 @@ def test_me_returns_picture(client: TestClient, db_session):
     assert body["user"]["picture"] == "https://lh3.googleusercontent.com/a/test"
 
 
+def test_me_is_admin_true_for_allowlisted_email(client: TestClient, db_session, monkeypatch):
+    monkeypatch.setenv("ADMIN_EMAILS", "ops@example.com")
+    get_settings.cache_clear()
+    user = User(google_sub="sub-ops-me", email="ops@example.com", locale="en")
+    db_session.add(user)
+    db_session.commit()
+    token = _sign(user.id, get_settings().auth_token_secret)
+    body = client.get("/v1/auth/me", cookies={SESSION_COOKIE: token}).json()
+    assert body["guest"] is False
+    assert body["user"]["is_admin"] is True
+
+
+def test_me_is_admin_false_for_everyone_else(client: TestClient, db_session, monkeypatch):
+    monkeypatch.setenv("ADMIN_EMAILS", "ops@example.com")
+    get_settings.cache_clear()
+    user = User(google_sub="sub-user-me", email="ada@example.com", locale="en")
+    db_session.add(user)
+    db_session.commit()
+    token = _sign(user.id, get_settings().auth_token_secret)
+    body = client.get("/v1/auth/me", cookies={SESSION_COOKIE: token}).json()
+    assert body["user"]["is_admin"] is False
+
+    monkeypatch.setenv("ADMIN_EMAILS", "")
+    get_settings.cache_clear()
+    ops = User(google_sub="sub-ops-empty", email="ops@example.com", locale="en")
+    db_session.add(ops)
+    db_session.commit()
+    token = _sign(ops.id, get_settings().auth_token_secret)
+    body = client.get("/v1/auth/me", cookies={SESSION_COOKIE: token}).json()
+    assert body["user"]["is_admin"] is False
+
+
 class _FakeResp:
     def __init__(self, status: int, payload: dict):
         self.status_code = status

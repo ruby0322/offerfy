@@ -89,9 +89,16 @@ export default function Nav({ variant }: Props) {
         </div>
         <div className="flex items-center gap-1 sm:gap-3">
           {user ? (
-            <Link href="/dashboard" className="text-sm font-medium">
-              {t("dashboard")}
-            </Link>
+            <>
+              <Link href="/dashboard" className="text-sm font-medium">
+                {t("dashboard")}
+              </Link>
+              {user.is_admin ? (
+                <Link href="/admin" className="text-sm font-medium">
+                  {t("admin")}
+                </Link>
+              ) : null}
+            </>
           ) : null}
           <LocaleSwitcher />
           <ThemeSwitcher />
