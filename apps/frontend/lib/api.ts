@@ -89,6 +89,8 @@ export type ResumeSource = "create" | "upload";
 
 export type ImportStatus = "idle" | "pending" | "done" | "failed";
 
+export type ResumeKind = "master" | "tailor";
+
 export type Resume = {
   id: string;
   title?: string | null;
@@ -100,6 +102,33 @@ export type Resume = {
   updated_at?: string;
   published_revision_id?: string | null;
   unpublished_changes?: boolean;
+  kind?: ResumeKind;
+  parent_resume_id?: string | null;
+  target_label?: string | null;
+  target_context?: string | null;
+};
+
+export type FamilyMember = {
+  id: string;
+  title: string;
+  kind: ResumeKind;
+  target_label?: string | null;
+  updated_at?: string | null;
+};
+
+export type ResumeFamily = {
+  master: FamilyMember;
+  tailors: FamilyMember[];
+};
+
+export type MemoryStatus = "pending" | "accepted" | "dismissed";
+
+export type MemoryItem = {
+  id: string;
+  text: string;
+  status: MemoryStatus;
+  source_resume_id?: string | null;
+  created_at: string;
 };
 
 export type ChatMessage = {
@@ -205,6 +234,43 @@ export async function putResumeSource(
       body: JSON.stringify(payload),
     }),
   );
+}
+
+export async function createTailor(
+  id: string,
+  payload: { title: string; target_label?: string; target_context?: string },
+): Promise<Resume> {
+  return asResume(
+    await apiJson<unknown>(`/api/v1/resumes/${id}/tailors`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  );
+}
+
+export async function getResumeFamily(id: string): Promise<ResumeFamily> {
+  return apiJson<ResumeFamily>(`/api/v1/resumes/${id}/family`);
+}
+
+export async function listMemory(id: string): Promise<MemoryItem[]> {
+  const data = await apiJson<unknown>(`/api/v1/resumes/${id}/memory`);
+  return Array.isArray(data) ? (data as MemoryItem[]) : [];
+}
+
+export async function acceptMemory(itemId: string): Promise<MemoryItem> {
+  return apiJson<MemoryItem>(`/api/v1/memory/${itemId}/accept`, { method: "POST" });
+}
+
+export async function dismissMemory(itemId: string): Promise<MemoryItem> {
+  return apiJson<MemoryItem>(`/api/v1/memory/${itemId}/dismiss`, { method: "POST" });
+}
+
+export async function deleteMemory(itemId: string): Promise<void> {
+  const res = await apiFetch(`/api/v1/memory/${itemId}`, { method: "DELETE" });
+  if (!res.ok) {
+    const body = await parseBody(res);
+    throw new ApiError(errorMessage(body, res.statusText || "Request failed"), res.status, body);
+  }
 }
 
 export async function getPreviewPages(id: string): Promise<string[]> {
@@ -338,6 +404,7 @@ export type ChatStreamEvent =
   | { type: "tool"; message: ChatMessage }
   | { type: "source"; typst_source: string; applied: boolean }
   | { type: "assistant"; message: ChatMessage }
+  | { type: "tailor_created"; resume_id: string; title: string }
   | { type: "done"; typst_source: string; applied: boolean }
   | { type: "error"; detail: string; status: number };
 
