@@ -10,5 +10,5 @@ export default async function EditorPage({ params }: Props) {
   const { locale: localeParam, id } = await params;
   const locale = resolveLocale(localeParam);
   setRequestLocale(locale);
-  return <EditorShell resumeId={id} />;
+  return <EditorShell key={id} resumeId={id} />;
 }

@@ -194,6 +194,7 @@
     "familyTailor": "Tailored",
     "familyNewTailor": "New tailored version",
     "switchBlocked": "Wait for this turn to finish before switching.",
+    "switchSaveError": "Could not save this document, so it stayed open.",
     "tailorDialogTitle": "New tailored version from the master",
     "tailorDialogHint": "Copies the master's saved draft. The chat starts empty.",
     "tailorTitle": "Name",

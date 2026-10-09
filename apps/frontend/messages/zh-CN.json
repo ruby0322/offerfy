@@ -197,6 +197,7 @@
     "familyTailor": "定制版",
     "familyNewTailor": "新建定制版",
     "switchBlocked": "等这一轮结束再切换。",
+    "switchSaveError": "当前内容无法保存，暂不切换。",
     "tailorDialogTitle": "从主简历新建定制版",
     "tailorDialogHint": "会复制主简历当前已保存的内容，对话从空白开始。",
     "tailorTitle": "名称",

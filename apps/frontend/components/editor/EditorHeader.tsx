@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Link } from "@/i18n/navigation";
 import LocaleSwitcher from "@/components/LocaleSwitcher";
 import ThemeSwitcher from "@/components/ThemeSwitcher";
@@ -8,6 +9,8 @@ import { Button } from "@/components/ui/button";
 type Props = {
   brand: string;
   title: string;
+  familyMenu?: ReactNode;
+  actions?: ReactNode;
   status?: string;
   publishLabel?: string;
   publishingLabel?: string;
@@ -19,6 +22,8 @@ type Props = {
 export default function EditorHeader({
   brand,
   title,
+  familyMenu,
+  actions,
   status,
   publishLabel,
   publishingLabel,
@@ -36,12 +41,13 @@ export default function EditorHeader({
           >
             {brand}
           </Link>
-          <span className="truncate text-sm text-muted-foreground">{title}</span>
+          {familyMenu ?? <span className="truncate text-sm text-muted-foreground">{title}</span>}
           {status ? (
             <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">{status}</span>
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+          {actions}
           {onPublish && unpublishedChanges ? (
             <Button
               type="button"

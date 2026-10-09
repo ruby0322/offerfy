@@ -1,28 +1,33 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { AlignLeft, History, LayoutTemplate, MessageCircle, Settings } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import CompileErrorDialog from "@/components/editor/CompileErrorDialog";
+import CreateTailorDialog, { type TailorDraft } from "@/components/editor/CreateTailorDialog";
 import EditorChatPanel from "@/components/editor/EditorChatPanel";
 import EditorHeader from "@/components/editor/EditorHeader";
 import EditorHistoryPanel from "@/components/editor/EditorHistoryPanel";
 import EditorPreview from "@/components/editor/EditorPreview";
 import EditorSettingsPanel from "@/components/editor/EditorSettingsPanel";
 import EditorTemplatePanel from "@/components/editor/EditorTemplatePanel";
+import ResumeFamilyMenu from "@/components/editor/ResumeFamilyMenu";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useRouter } from "@/i18n/navigation";
 import {
   ApiError,
   claimResumes,
   compileResume,
+  createTailor,
   exportPdf,
   getAtsReport,
   getChatMessages,
   getMe,
   getPreviewPages,
   getResume,
+  getResumeFamily,
   publishResume,
   putResumeSource,
   sendChat,
@@ -31,6 +36,7 @@ import {
   type ChatMessage,
   type ImportStatus,
   type Resume,
+  type ResumeFamily,
   type ResumeSource,
   type ShareState,
 } from "@/lib/api";
@@ -53,6 +59,25 @@ function newMessageId(): string {
 
 function withMessageId(message: ChatMessage): ChatMessage {
   return message.id ? message : { ...message, id: newMessageId() };
+}
+
+const composerDraftKey = (id: string) => `offerfy:composer:${id}`;
+
+function loadComposerDraft(id: string): string {
+  try {
+    return sessionStorage.getItem(composerDraftKey(id)) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function saveComposerDraft(id: string, value: string) {
+  try {
+    if (value) sessionStorage.setItem(composerDraftKey(id), value);
+    else sessionStorage.removeItem(composerDraftKey(id));
+  } catch {
+    /* storage can be unavailable in private mode */
+  }
 }
 
 const editorTabClassName =
@@ -80,7 +105,7 @@ export default function EditorShell({ resumeId }: Props) {
   const [ats, setAts] = useState<AtsReport | null>(null);
   const [status, setStatus] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(() => loadComposerDraft(resumeId));
   const [attachment, setAttachment] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -93,8 +118,14 @@ export default function EditorShell({ resumeId }: Props) {
   const [unpublishedChanges, setUnpublishedChanges] = useState(false);
   const [updatedAt, setUpdatedAt] = useState("");
   const [publishing, setPublishing] = useState(false);
+  const [family, setFamily] = useState<ResumeFamily | null>(null);
+  const [tailorDialogOpen, setTailorDialogOpen] = useState(false);
+  const [creatingTailor, setCreatingTailor] = useState(false);
+  const [tailorError, setTailorError] = useState<string | null>(null);
+  const router = useRouter();
   const skipTimers = useRef(true);
   const sendingRef = useRef(false);
+  const pendingTailorRef = useRef<string | null>(null);
   const previewObjectUrls = useRef<string[]>([]);
 
   const setPreviewPages = useCallback((svgs: string[]) => {
@@ -159,6 +190,13 @@ export default function EditorShell({ resumeId }: Props) {
         setSource(resume.typst_source || "");
         setUpdatedAt(resume.updated_at || "");
         setUnpublishedChanges(resume.unpublished_changes ?? true);
+        void getResumeFamily(resumeId)
+          .then((next) => {
+            if (!cancelled) setFamily(next);
+          })
+          .catch(() => {
+            /* the family menu still offers a new tailor */
+          });
         try {
           const history = await getChatMessages(resumeId);
           if (!cancelled) setMessages(history.map(withMessageId));
@@ -305,6 +343,10 @@ export default function EditorShell({ resumeId }: Props) {
           setMessages((prev) => [...prev, withMessageId(event.message)]);
           return;
         }
+        if (event.type === "tailor_created") {
+          pendingTailorRef.current = event.resume_id;
+          return;
+        }
         if (event.type === "source") {
           skipTimers.current = true;
           setSource(event.typst_source);
@@ -369,9 +411,12 @@ export default function EditorShell({ resumeId }: Props) {
     } finally {
       sendingRef.current = false;
       setSending(false);
+      const nextTailor = pendingTailorRef.current;
+      pendingTailorRef.current = null;
+      if (nextTailor) router.push(`/editor/${nextTailor}`);
     }
     },
-    [failCompile, refreshAts, refreshPreview, resumeId, source, t],
+    [failCompile, refreshAts, refreshPreview, resumeId, router, source, t],
   );
   const sendUserChatRef = useRef(sendUserChat);
   useEffect(() => {
@@ -390,12 +435,64 @@ export default function EditorShell({ resumeId }: Props) {
     return () => window.clearTimeout(handle);
   }, [loaded, resumeId, t]);
 
+  function onDraftChange(value: string) {
+    setDraft(value);
+    saveComposerDraft(resumeId, value);
+  }
+
+  async function flushSave(): Promise<boolean> {
+    skipTimers.current = true;
+    try {
+      const saved = await putResumeSource(resumeId, { typst_source: source });
+      if (saved.updated_at) setUpdatedAt(saved.updated_at);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      skipTimers.current = false;
+    }
+  }
+
+  async function onSwitchResume(id: string) {
+    if (sendingRef.current || id === resumeId) return;
+    if (!(await flushSave())) {
+      setStatus(t("switchSaveError"));
+      return;
+    }
+    router.push(`/editor/${id}`);
+  }
+
+  function openTailorDialog() {
+    if (sendingRef.current) return;
+    setTailorError(null);
+    setTailorDialogOpen(true);
+  }
+
+  async function onCreateTailor(payload: TailorDraft) {
+    if (creatingTailor) return;
+    setCreatingTailor(true);
+    setTailorError(null);
+    try {
+      if (!(await flushSave())) {
+        setTailorError(t("switchSaveError"));
+        return;
+      }
+      const tailor = await createTailor(resumeId, payload);
+      setTailorDialogOpen(false);
+      router.push(`/editor/${tailor.id}`);
+    } catch (err) {
+      setTailorError(err instanceof ApiError && err.message ? err.message : t("tailorCreateError"));
+    } finally {
+      setCreatingTailor(false);
+    }
+  }
+
   async function onChat(event: FormEvent) {
     event.preventDefault();
     const text = draft.trim();
     const file = attachment;
     if ((!text && !file) || sendingRef.current) return;
-    setDraft("");
+    onDraftChange("");
     setAttachment(null);
     await sendUserChat(text, file);
   }
@@ -497,6 +594,13 @@ export default function EditorShell({ resumeId }: Props) {
     void sendUserChat(prompt);
   }
 
+  const familyView = useMemo<ResumeFamily | null>(() => {
+    if (!family || !title) return family;
+    const rename = <T extends { id: string; title: string }>(member: T): T =>
+      member.id === resumeId ? { ...member, title } : member;
+    return { master: rename(family.master), tailors: family.tailors.map(rename) };
+  }, [family, resumeId, title]);
+
   if (loadError) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground">
@@ -514,12 +618,31 @@ export default function EditorShell({ resumeId }: Props) {
   }
 
   const chatEmptyHint = chatUnavailable ? t("chatNotConfigured") : t("chatEmpty");
+  const masterTitle =
+    family && family.master.id !== resumeId ? family.master.title : title;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
       <EditorHeader
         brand={tNav("brand")}
         title={title}
+        familyMenu={
+          <ResumeFamilyMenu
+            family={familyView}
+            currentId={resumeId}
+            title={title}
+            disabled={sending}
+            onSelect={(id) => void onSwitchResume(id)}
+            onNewTailor={openTailorDialog}
+            labels={{
+              menu: t("familyMenu"),
+              master: t("familyMaster"),
+              tailor: t("familyTailor"),
+              newTailor: t("familyNewTailor"),
+              blocked: t("switchBlocked"),
+            }}
+          />
+        }
         status={status}
         publishLabel={t("publish")}
         publishingLabel={t("publishing")}
@@ -579,7 +702,7 @@ export default function EditorShell({ resumeId }: Props) {
                 <EditorChatPanel
                   messages={messages}
                   draft={draft}
-                  onDraftChange={setDraft}
+                  onDraftChange={onDraftChange}
                   attachment={attachment}
                   onAttachmentChange={setAttachment}
                   onSubmit={onChat}
@@ -664,6 +787,25 @@ export default function EditorShell({ resumeId }: Props) {
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
+      {tailorDialogOpen ? (
+        <CreateTailorDialog
+          defaultTitle={`${masterTitle} – `}
+          creating={creatingTailor}
+          error={tailorError}
+          onCreate={(payload) => void onCreateTailor(payload)}
+          onClose={() => setTailorDialogOpen(false)}
+          labels={{
+            title: t("tailorDialogTitle"),
+            hint: t("tailorDialogHint"),
+            name: t("tailorTitle"),
+            targetLabel: t("tailorTargetLabel"),
+            targetContext: t("tailorTargetContext"),
+            create: t("tailorCreate"),
+            creating: t("tailorCreating"),
+            cancel: t("tailorCancel"),
+          }}
+        />
+      ) : null}
     </div>
   );
 }
