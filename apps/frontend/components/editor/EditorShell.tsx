@@ -48,6 +48,7 @@ import {
   type ShareState,
 } from "@/lib/api";
 import { formatUserAttachmentMessage, parseToolPayload } from "@/lib/chat-tools";
+import { peekTailorKickstart, queueTailorKickstart, takeTailorKickstart } from "@/lib/pending-kickstart";
 import type { AtsCheckName } from "@/lib/ats-checks";
 import { peekPendingUpload, takePendingUpload } from "@/lib/pending-upload";
 
@@ -119,6 +120,8 @@ export default function EditorShell({ resumeId }: Props) {
   const tNav = useTranslations("nav");
   const locale = useLocale();
   const [title, setTitle] = useState("");
+  const [targetLabel, setTargetLabel] = useState("");
+  const [targetContext, setTargetContext] = useState("");
   const [createdAt, setCreatedAt] = useState<string | undefined>();
   const [resumeSource, setResumeSource] = useState<ResumeSource | undefined>();
   const [resumeLocale, setResumeLocale] = useState<string | undefined>();
@@ -221,6 +224,8 @@ export default function EditorShell({ resumeId }: Props) {
         const resume = await getResume(resumeId);
         if (cancelled) return;
         setTitle(resume.title || "");
+        setTargetLabel(resume.target_label?.trim() || "");
+        setTargetContext(resume.target_context?.trim() || "");
         setCreatedAt(resume.created_at);
         setResumeSource(resume.source);
         setResumeLocale(resume.locale);
@@ -467,6 +472,7 @@ export default function EditorShell({ resumeId }: Props) {
       const nextTailor = pendingTailorRef.current;
       pendingTailorRef.current = null;
       if (nextTailor) {
+        queueTailorKickstart(nextTailor);
         saveEditorTab(nextTailor, "chat");
         router.push(`/editor/${nextTailor}`);
       }
@@ -478,6 +484,25 @@ export default function EditorShell({ resumeId }: Props) {
   useEffect(() => {
     sendUserChatRef.current = sendUserChat;
   }, [sendUserChat]);
+
+  useEffect(() => {
+    if (!loaded || !peekTailorKickstart(resumeId)) return;
+    if (messages.length > 0) {
+      takeTailorKickstart(resumeId);
+      return;
+    }
+    const prompt = t("tailorKickstartPrompt", {
+      role: targetLabel || t("tailorKickstartRoleUnknown"),
+      context: targetContext || t("tailorKickstartContextUnknown"),
+    });
+    const handle = window.setTimeout(() => {
+      if (!takeTailorKickstart(resumeId)) return;
+      setLeftTab("chat");
+      saveEditorTab(resumeId, "chat");
+      void sendUserChatRef.current(prompt, null);
+    }, 0);
+    return () => window.clearTimeout(handle);
+  }, [loaded, messages.length, resumeId, t, targetContext, targetLabel]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -536,7 +561,8 @@ export default function EditorShell({ resumeId }: Props) {
       }
       const tailor = await createTailor(resumeId, payload);
       setTailorDialogOpen(false);
-      saveEditorTab(tailor.id, leftTab);
+      queueTailorKickstart(tailor.id);
+      saveEditorTab(tailor.id, "chat");
       router.push(`/editor/${tailor.id}`);
     } catch (err) {
       setTailorError(err instanceof ApiError && err.message ? err.message : t("tailorCreateError"));
