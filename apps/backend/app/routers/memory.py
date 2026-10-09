@@ -76,6 +76,7 @@ def accept(
         raise HTTPException(status_code=409, detail="Memory is full") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    db.commit()
     return _out(item)
 
 
@@ -89,6 +90,7 @@ def dismiss(
 ):
     item = _item_for_owner(item_id, request, response, db, user, user_only=False)
     dismiss_memory(db, item)
+    db.commit()
     return _out(item)
 
 
@@ -104,4 +106,5 @@ def delete(
     if item.status != "accepted":
         raise HTTPException(status_code=400, detail="Only accepted memory can be deleted")
     db.delete(item)
+    db.commit()
     return RawResponse(status_code=204)
