@@ -1245,6 +1245,8 @@ textarea {
 }
 
 .chat-md {
+  min-width: 0;
+  max-width: 100%;
   font-size: 0.875rem;
   line-height: 1.65;
   overflow-wrap: anywhere;
@@ -1340,21 +1342,41 @@ textarea {
   border-radius: 0.3rem;
   background: var(--hover);
   padding: 0.12em 0.35em;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .chat-md pre {
   margin: 0.65em 0;
+  min-width: 0;
+  max-width: 100%;
   overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   border-radius: var(--radius);
   background: var(--hover);
   padding: 0.75rem 0.9rem;
 }
 
 .chat-md pre code {
+  display: block;
   background: transparent;
   padding: 0;
   font-size: 0.8rem;
   line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Radix sizes the viewport child as display:table; min-width:100%, so a fenced
+   code block's longest line becomes the chat column's width and the block never wraps. */
+.chat-scroll [data-radix-scroll-area-viewport] > div {
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
 }
 
 .chat-md-table-wrap {

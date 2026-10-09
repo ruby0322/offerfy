@@ -343,7 +343,7 @@ export default function ChatMessageCard({ message, sending, currentSource, onRes
 
   if (!isUser) {
     return (
-      <div className="w-full max-w-none text-foreground">
+      <div className="w-full min-w-0 max-w-full text-foreground">
         <MarkdownBody text={message.content} />
       </div>
     );

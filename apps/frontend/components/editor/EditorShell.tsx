@@ -527,14 +527,14 @@ export default function EditorShell({ resumeId }: Props) {
         publishing={publishing}
         onPublish={signedIn ? onPublish : undefined}
       />
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 min-w-0 flex-1">
         <ResizablePanelGroup direction="horizontal" className="h-full">
-          <ResizablePanel defaultSize={48} minSize={28} maxSize={65} className="h-full">
-            <div className="relative h-full min-h-0">
+          <ResizablePanel defaultSize={48} minSize={28} maxSize={65} className="h-full min-w-0">
+            <div className="relative h-full min-h-0 min-w-0">
             <Tabs
               value={leftTab}
               onValueChange={setLeftTab}
-              className="flex h-full min-h-0 flex-col gap-0"
+              className="flex h-full min-h-0 min-w-0 flex-col gap-0"
             >
               <div className="flex shrink-0 items-center overflow-x-auto bg-background">
                 <TabsList className="editor-tabs h-auto w-full justify-start rounded-none bg-transparent p-0">
@@ -574,7 +574,7 @@ export default function EditorShell({ resumeId }: Props) {
               </TabsContent>
               <TabsContent
                 value="chat"
-                className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+                className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
               >
                 <EditorChatPanel
                   messages={messages}

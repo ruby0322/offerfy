@@ -131,7 +131,7 @@ export default function AdminResumeInspectPage({
   if (!resume) return <p className="text-sm text-muted-foreground">{t("loading")}</p>;
 
   return (
-    <div className="flex min-h-[70vh] flex-col gap-4">
+    <div className="flex min-h-[70vh] min-w-0 flex-col gap-4">
       <header className="sticky top-0 z-10 space-y-1 border-b border-border bg-paper pb-4">
         <h1 className="text-2xl font-semibold">{resume.title}</h1>
         <p className="text-sm text-muted-foreground">
@@ -170,7 +170,7 @@ export default function AdminResumeInspectPage({
             lang={resume.locale}
           />
         </TabsContent>
-        <TabsContent value="chat" className="space-y-3">
+        <TabsContent value="chat" className="min-w-0 space-y-3">
           {messages == null ? (
             <p className="text-sm text-muted-foreground">{t("loading")}</p>
           ) : messages.length === 0 ? (

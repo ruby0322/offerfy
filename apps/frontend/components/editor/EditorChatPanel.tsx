@@ -167,10 +167,10 @@ export default function EditorChatPanel({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="min-h-0 flex-1 overflow-hidden px-4">
-        <ScrollArea className="h-full" viewportRef={viewportRef}>
-          <div className="space-y-4 py-4">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
+      <div className="min-h-0 min-w-0 flex-1 overflow-hidden px-4">
+        <ScrollArea className="chat-scroll h-full min-w-0" viewportRef={viewportRef}>
+          <div className="min-w-0 space-y-4 py-4">
             {messages.length === 0 && !sending ? (
               <p className="text-sm text-muted-foreground">{emptyHint}</p>
             ) : null}
@@ -178,6 +178,7 @@ export default function EditorChatPanel({
               {messages.map((message, index) => (
                 <motion.div
                   key={message.id ?? `${message.role}-${index}-${message.timestamp ?? ""}`}
+                  className="min-w-0"
                   variants={messageVariants}
                   initial="hidden"
                   animate="visible"
