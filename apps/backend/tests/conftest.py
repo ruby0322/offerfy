@@ -58,7 +58,11 @@ def client():
     app.dependency_overrides.clear()
     if engine.dialect.name != "sqlite":
         raise RuntimeError("Refusing to drop_all on a non-sqlite test database")
-    Base.metadata.drop_all(engine)
+    # Self-referencing resume cascades make SQLite resolve resume_revisions after it is dropped.
+    with engine.connect() as conn:
+        conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        Base.metadata.drop_all(conn)
+        conn.commit()
     reset_engine()
 
 

@@ -60,6 +60,12 @@ class Resume(Base):
             "import_status IN ('idle', 'pending', 'done', 'failed')",
             name="resume_import_status_values",
         ),
+        CheckConstraint("kind IN ('master', 'tailor')", name="resume_kind_values"),
+        CheckConstraint(
+            "(kind = 'master' AND parent_resume_id IS NULL) "
+            "OR (kind = 'tailor' AND parent_resume_id IS NOT NULL)",
+            name="resume_kind_parent",
+        ),
         UniqueConstraint("id", name="resumes_id_key"),
     )
 
@@ -93,6 +99,24 @@ class Resume(Base):
         ),
         nullable=True,
     )
+    kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="master", server_default="master"
+    )
+    parent_resume_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("resumes.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    forked_from_revision_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey(
+            "resume_revisions.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_resumes_forked_from_revision_id",
+        ),
+        nullable=True,
+    )
+    target_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    target_context: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     guest_session: Mapped[GuestSession | None] = relationship(back_populates="resumes")
     user: Mapped[User | None] = relationship(back_populates="resumes")
@@ -111,6 +135,22 @@ class Resume(Base):
         foreign_keys=[published_revision_id],
         post_update=True,
         uselist=False,
+    )
+    parent: Mapped["Resume | None"] = relationship(
+        remote_side="Resume.id",
+        back_populates="tailors",
+        foreign_keys=[parent_resume_id],
+    )
+    tailors: Mapped[list["Resume"]] = relationship(
+        back_populates="parent",
+        cascade="all, delete-orphan",
+        foreign_keys="Resume.parent_resume_id",
+        order_by="Resume.created_at",
+    )
+    memory_items: Mapped[list["MemoryItem"]] = relationship(
+        back_populates="master",
+        cascade="all, delete-orphan",
+        foreign_keys="MemoryItem.master_resume_id",
     )
 
 
@@ -168,6 +208,34 @@ class ChatMessage(Base):
     )
 
     resume: Mapped[Resume] = relationship(back_populates="messages")
+
+
+class MemoryItem(Base):
+    __tablename__ = "memory_items"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'accepted', 'dismissed')",
+            name="memory_status_values",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    master_resume_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_resume_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("resumes.id", ondelete="SET NULL"), nullable=True
+    )
+    text: Mapped[str] = mapped_column(String(280), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    master: Mapped[Resume] = relationship(
+        back_populates="memory_items", foreign_keys=[master_resume_id]
+    )
 
 
 class RateEvent(Base):
