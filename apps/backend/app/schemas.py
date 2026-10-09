@@ -27,6 +27,10 @@ class ResumeOut(BaseModel):
     updated_at: str | None = None
     published_revision_id: str | None = None
     unpublished_changes: bool = True
+    kind: str = "master"
+    parent_resume_id: str | None = None
+    target_label: str | None = None
+    target_context: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -36,8 +40,30 @@ class ResumeListItem(BaseModel):
     title: str
     source: str
     locale: str
+    kind: str = "master"
+    parent_resume_id: str | None = None
+    updated_at: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class TailorCreate(BaseModel):
+    title: str
+    target_label: str | None = None
+    target_context: str | None = None
+
+
+class FamilyMember(BaseModel):
+    id: str
+    title: str
+    kind: str
+    target_label: str | None = None
+    updated_at: str | None = None
+
+
+class ResumeFamilyOut(BaseModel):
+    master: FamilyMember
+    tailors: list[FamilyMember]
 
 
 class CompileBody(BaseModel):

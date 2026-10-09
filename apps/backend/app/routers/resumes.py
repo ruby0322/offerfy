@@ -12,17 +12,21 @@ from app.models import GuestSession, Resume, ResumeRevision, User
 from app.schemas import (
     AtsReport,
     CompileBody,
+    FamilyMember,
     LOCALES,
     PreviewPages,
     ResumeCreate,
+    ResumeFamilyOut,
     ResumeListItem,
     ResumeOut,
     ResumeUpdate,
     RevisionDetail,
     RevisionListItem,
     ShareState,
+    TailorCreate,
 )
 from app.services.ats import analyze_pdf
+from app.services.family import create_tailor, family_master, family_tailors
 from app.services.extract import (
     MAX_UPLOAD_BYTES,
     allowed_upload,
@@ -70,6 +74,10 @@ def _to_out(db: Session, resume: Resume) -> ResumeOut:
         updated_at=_iso(resume.updated_at),
         published_revision_id=resume.published_revision_id,
         unpublished_changes=unpublished_changes(db, resume),
+        kind=resume.kind or "master",
+        parent_resume_id=resume.parent_resume_id,
+        target_label=resume.target_label,
+        target_context=resume.target_context,
     )
 
 
@@ -187,7 +195,15 @@ def list_resumes(
         return []
     rows = query.all()
     return [
-        ResumeListItem(id=r.id, title=r.title, source=r.source, locale=r.locale)
+        ResumeListItem(
+            id=r.id,
+            title=r.title,
+            source=r.source,
+            locale=r.locale,
+            kind=r.kind or "master",
+            parent_resume_id=r.parent_resume_id,
+            updated_at=_iso(r.updated_at),
+        )
         for r in rows
     ]
 
@@ -203,6 +219,57 @@ def _owned_resume(
 ) -> Resume:
     user, guest = owner_context(request, response, db, user, ensure=ensure)
     return load_resume_for_owner(resume_id, request, db, user, guest)
+
+
+def _member(r: Resume) -> FamilyMember:
+    return FamilyMember(
+        id=r.id,
+        title=r.title,
+        kind=r.kind or "master",
+        target_label=r.target_label,
+        updated_at=_iso(r.updated_at),
+    )
+
+
+@router.post("/v1/resumes/{resume_id}/tailors", response_model=ResumeOut, status_code=201)
+def create_tailor_route(
+    resume_id: str,
+    body: TailorCreate,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+):
+    member = _owned_resume(resume_id, request, response, db, user, ensure=True)
+    try:
+        tailor = create_tailor(
+            db,
+            member,
+            title=body.title,
+            target_label=body.target_label,
+            target_context=body.target_context,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    out = _to_out(db, tailor)
+    db.commit()
+    return out
+
+
+@router.get("/v1/resumes/{resume_id}/family", response_model=ResumeFamilyOut)
+def get_family(
+    resume_id: str,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+):
+    member = _owned_resume(resume_id, request, response, db, user)
+    master = family_master(db, member)
+    return ResumeFamilyOut(
+        master=_member(master),
+        tailors=[_member(r) for r in family_tailors(db, master)],
+    )
 
 
 @router.get("/v1/resumes/{resume_id}", response_model=ResumeOut)
