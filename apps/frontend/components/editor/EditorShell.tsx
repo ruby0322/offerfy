@@ -12,15 +12,20 @@ import EditorHistoryPanel from "@/components/editor/EditorHistoryPanel";
 import EditorPreview from "@/components/editor/EditorPreview";
 import EditorSettingsPanel from "@/components/editor/EditorSettingsPanel";
 import EditorTemplatePanel from "@/components/editor/EditorTemplatePanel";
+import MemoryPanel from "@/components/editor/MemoryPanel";
 import ResumeFamilyMenu from "@/components/editor/ResumeFamilyMenu";
+import type { FamilyCardActions } from "@/components/editor/ChatMessageCard";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useRouter } from "@/i18n/navigation";
 import {
   ApiError,
+  acceptMemory,
   claimResumes,
   compileResume,
   createTailor,
+  deleteMemory,
+  dismissMemory,
   exportPdf,
   getAtsReport,
   getChatMessages,
@@ -28,6 +33,7 @@ import {
   getPreviewPages,
   getResume,
   getResumeFamily,
+  listMemory,
   publishResume,
   putResumeSource,
   sendChat,
@@ -35,12 +41,13 @@ import {
   type AtsReport,
   type ChatMessage,
   type ImportStatus,
+  type MemoryItem,
   type Resume,
   type ResumeFamily,
   type ResumeSource,
   type ShareState,
 } from "@/lib/api";
-import { formatUserAttachmentMessage } from "@/lib/chat-tools";
+import { formatUserAttachmentMessage, parseToolPayload } from "@/lib/chat-tools";
 import type { AtsCheckName } from "@/lib/ats-checks";
 import { peekPendingUpload, takePendingUpload } from "@/lib/pending-upload";
 
@@ -122,6 +129,10 @@ export default function EditorShell({ resumeId }: Props) {
   const [tailorDialogOpen, setTailorDialogOpen] = useState(false);
   const [creatingTailor, setCreatingTailor] = useState(false);
   const [tailorError, setTailorError] = useState<string | null>(null);
+  const [memory, setMemory] = useState<MemoryItem[]>([]);
+  const [memoryLoaded, setMemoryLoaded] = useState(false);
+  const [busyMemoryId, setBusyMemoryId] = useState<string | null>(null);
+  const [memoryNotice, setMemoryNotice] = useState<string | null>(null);
   const router = useRouter();
   const skipTimers = useRef(true);
   const sendingRef = useRef(false);
@@ -142,6 +153,15 @@ export default function EditorShell({ resumeId }: Props) {
     setPreviewPages(pages);
     setCompileError(null);
   }, [resumeId, setPreviewPages]);
+
+  const refreshMemory = useCallback(async () => {
+    try {
+      setMemory(await listMemory(resumeId));
+      setMemoryLoaded(true);
+    } catch {
+      /* memory is optional; cards stay pending */
+    }
+  }, [resumeId]);
 
   const refreshAts = useCallback(async () => {
     const report = await getAtsReport(resumeId);
@@ -196,6 +216,15 @@ export default function EditorShell({ resumeId }: Props) {
           })
           .catch(() => {
             /* the family menu still offers a new tailor */
+          });
+        void listMemory(resumeId)
+          .then((items) => {
+            if (cancelled) return;
+            setMemory(items);
+            setMemoryLoaded(true);
+          })
+          .catch(() => {
+            /* memory is optional; cards stay pending */
           });
         try {
           const history = await getChatMessages(resumeId);
@@ -341,6 +370,12 @@ export default function EditorShell({ resumeId }: Props) {
         if (event.type === "tool" || event.type === "assistant") {
           setChatUnavailable(false);
           setMessages((prev) => [...prev, withMessageId(event.message)]);
+          if (
+            event.type === "tool" &&
+            parseToolPayload(event.message.content)?.name === "propose_memory"
+          ) {
+            void refreshMemory();
+          }
           return;
         }
         if (event.type === "tailor_created") {
@@ -416,7 +451,7 @@ export default function EditorShell({ resumeId }: Props) {
       if (nextTailor) router.push(`/editor/${nextTailor}`);
     }
     },
-    [failCompile, refreshAts, refreshPreview, resumeId, router, source, t],
+    [failCompile, refreshAts, refreshMemory, refreshPreview, resumeId, router, source, t],
   );
   const sendUserChatRef = useRef(sendUserChat);
   useEffect(() => {
@@ -594,6 +629,48 @@ export default function EditorShell({ resumeId }: Props) {
     void sendUserChat(prompt);
   }
 
+  const onSwitchResumeRef = useRef(onSwitchResume);
+  useEffect(() => {
+    onSwitchResumeRef.current = onSwitchResume;
+  });
+
+  const runMemoryAction = useCallback(
+    async (id: string, action: (itemId: string) => Promise<unknown>) => {
+      setBusyMemoryId(id);
+      setMemoryNotice(null);
+      try {
+        await action(id);
+      } catch (err) {
+        let notice = t("memoryError");
+        if (err instanceof ApiError && err.status === 409) notice = t("memoryFull");
+        if (err instanceof ApiError && err.status === 401) {
+          setSignedIn(false);
+          notice = t("memoryLogin");
+        }
+        setMemoryNotice(notice);
+        setStatus(notice);
+      } finally {
+        setBusyMemoryId(null);
+        await refreshMemory();
+      }
+    },
+    [refreshMemory, t],
+  );
+
+  const familyActions = useMemo<FamilyCardActions>(
+    () => ({
+      memoryById: Object.fromEntries(memory.map((item) => [item.id, item])),
+      memoryLoaded,
+      signedIn,
+      loginHref: `/login?next=/editor/${resumeId}`,
+      busyMemoryId,
+      onAcceptMemory: (id) => void runMemoryAction(id, acceptMemory),
+      onDismissMemory: (id) => void runMemoryAction(id, dismissMemory),
+      onOpenResume: (id) => void onSwitchResumeRef.current(id),
+    }),
+    [busyMemoryId, memory, memoryLoaded, resumeId, runMemoryAction, signedIn],
+  );
+
   const familyView = useMemo<ResumeFamily | null>(() => {
     if (!family || !title) return family;
     const rename = <T extends { id: string; title: string }>(member: T): T =>
@@ -641,6 +718,14 @@ export default function EditorShell({ resumeId }: Props) {
               newTailor: t("familyNewTailor"),
               blocked: t("switchBlocked"),
             }}
+          />
+        }
+        actions={
+          <MemoryPanel
+            items={memory}
+            notice={memoryNotice}
+            actions={familyActions}
+            onDeleteMemory={(id) => void runMemoryAction(id, deleteMemory)}
           />
         }
         status={status}
@@ -718,6 +803,7 @@ export default function EditorShell({ resumeId }: Props) {
                   attachTooLarge={t("attachTooLarge")}
                   currentSource={source}
                   onRestoreEdit={onRestoreEdit}
+                  familyActions={familyActions}
                 />
               </TabsContent>
               <TabsContent

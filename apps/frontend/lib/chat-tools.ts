@@ -31,6 +31,23 @@ function resultError(result: unknown): string | null {
   return null;
 }
 
+export function memoryProposal(
+  payload: ToolPayload | null,
+): { itemId: string; text: string } | null {
+  if (!payload || payload.name !== "propose_memory") return null;
+  const result = payload.result as { item_id?: unknown; text?: unknown } | null;
+  if (!result || typeof result !== "object") return null;
+  if (typeof result.item_id !== "string" || typeof result.text !== "string") return null;
+  return { itemId: result.item_id, text: result.text };
+}
+
+export function createdTailor(payload: ToolPayload | null): { id: string; title: string } | null {
+  if (!payload || payload.name !== "create_tailor") return null;
+  const result = payload.result as { tailor_id?: unknown; title?: unknown } | null;
+  if (!result || typeof result !== "object" || typeof result.tailor_id !== "string") return null;
+  return { id: result.tailor_id, title: typeof result.title === "string" ? result.title : "" };
+}
+
 export function isSuccessfulTypstEdit(payload: ToolPayload | null): boolean {
   if (!payload || payload.name !== "apply_typst_edit") return false;
   if (resultError(payload.result)) return false;

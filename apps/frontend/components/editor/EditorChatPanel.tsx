@@ -3,7 +3,7 @@
 import { DragEvent, FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, type Variants } from "framer-motion";
 import { Paperclip, Send, X } from "lucide-react";
-import ChatMessageCard from "@/components/editor/ChatMessageCard";
+import ChatMessageCard, { type FamilyCardActions } from "@/components/editor/ChatMessageCard";
 import LoadingMessage from "@/components/editor/LoadingMessage";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -59,6 +59,7 @@ type Props = {
   attachTooLarge: string;
   currentSource?: string;
   onRestoreEdit?: (source: string) => void;
+  familyActions?: FamilyCardActions;
 };
 
 export default function EditorChatPanel({
@@ -80,6 +81,7 @@ export default function EditorChatPanel({
   attachTooLarge,
   currentSource,
   onRestoreEdit,
+  familyActions,
 }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -189,6 +191,7 @@ export default function EditorChatPanel({
                     sending={sending}
                     currentSource={currentSource}
                     onRestoreEdit={onRestoreEdit}
+                    familyActions={familyActions}
                   />
                 </motion.div>
               ))}

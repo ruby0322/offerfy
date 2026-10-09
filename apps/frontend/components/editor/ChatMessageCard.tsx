@@ -1,14 +1,34 @@
 "use client";
 
 import { useLocale, useTranslations } from "next-intl";
-import { Check, ChevronDown, ClipboardList, FilePenLine, FileSearch, Globe, Paperclip, Redo2, Undo2, Wrench, X } from "lucide-react";
+import {
+  ArrowRight,
+  BookOpen,
+  BookmarkPlus,
+  Check,
+  ChevronDown,
+  ClipboardList,
+  FilePenLine,
+  FilePlus2,
+  FileSearch,
+  Globe,
+  LogIn,
+  Paperclip,
+  Redo2,
+  Undo2,
+  Wrench,
+  X,
+} from "lucide-react";
+import { Link } from "@/i18n/navigation";
 import { cn } from "@/lib/utils";
-import type { ChatMessage } from "@/lib/api";
+import type { ChatMessage, MemoryItem, MemoryStatus } from "@/lib/api";
 import MarkdownBody from "@/components/editor/MarkdownBody";
 import EditDiff from "@/components/editor/EditDiff";
 import {
   clipText,
+  createdTailor,
   editCheckpointAction,
+  memoryProposal,
   parseAttachedUserMessage,
   parseToolPayload,
   toolErrorMessage,
@@ -16,11 +36,23 @@ import {
 } from "@/lib/chat-tools";
 import { diffFromEditPayload } from "@/lib/edit-diff";
 
+export type FamilyCardActions = {
+  memoryById: Record<string, MemoryItem>;
+  memoryLoaded: boolean;
+  signedIn: boolean;
+  loginHref: string;
+  busyMemoryId: string | null;
+  onAcceptMemory: (id: string) => void;
+  onDismissMemory: (id: string) => void;
+  onOpenResume: (id: string) => void;
+};
+
 type Props = {
   message: ChatMessage;
   sending?: boolean;
   currentSource?: string;
   onRestoreEdit?: (source: string) => void;
+  familyActions?: FamilyCardActions;
 };
 
 function asString(value: unknown): string | null {
@@ -124,6 +156,27 @@ function toolHeadline(payload: ToolPayload | null, t: Translate): {
     }
     return { title: t("toolEdit"), detail: null, failed: false, showCheck: true };
   }
+  if (payload.name === "read_master") {
+    return { title: t("toolReadMaster"), detail: null, failed: Boolean(error), showCheck: !error };
+  }
+  if (payload.name === "create_tailor") {
+    const created = createdTailor(payload);
+    return {
+      title: t("toolCreateTailor"),
+      detail: error ?? created?.title ?? null,
+      failed: Boolean(error),
+      showCheck: Boolean(created),
+    };
+  }
+  if (payload.name === "propose_memory") {
+    const proposal = memoryProposal(payload);
+    return {
+      title: t("toolProposeMemory"),
+      detail: error ?? proposal?.text ?? null,
+      failed: Boolean(error),
+      showCheck: false,
+    };
+  }
   return {
     title: t("toolUnknown", { name: payload.name }),
     detail: error,
@@ -139,7 +192,119 @@ function ToolIcon({ name, failed }: { name: string; failed: boolean }) {
   if (name === "read_ats") return <ClipboardList className={className} aria-hidden="true" />;
   if (name === "web_search") return <Globe className={className} aria-hidden="true" />;
   if (name === "apply_typst_edit") return <FilePenLine className={className} aria-hidden="true" />;
+  if (name === "read_master") return <BookOpen className={className} aria-hidden="true" />;
+  if (name === "create_tailor") return <FilePlus2 className={className} aria-hidden="true" />;
+  if (name === "propose_memory") return <BookmarkPlus className={className} aria-hidden="true" />;
   return <Wrench className={className} aria-hidden="true" />;
+}
+
+const smallActionClassName =
+  "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium disabled:pointer-events-none disabled:opacity-50";
+
+export function memoryStatusFor(
+  itemId: string,
+  actions: Pick<FamilyCardActions, "memoryById" | "memoryLoaded">,
+): MemoryStatus {
+  const item = actions.memoryById[itemId];
+  if (item) return item.status;
+  return actions.memoryLoaded ? "dismissed" : "pending";
+}
+
+export function MemoryDecision({
+  itemId,
+  actions,
+}: {
+  itemId: string;
+  actions: FamilyCardActions;
+}) {
+  const t = useTranslations("editor");
+  const status = memoryStatusFor(itemId, actions);
+  const busy = actions.busyMemoryId === itemId;
+  if (status === "accepted") {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-success" data-testid="memory-accepted">
+        <Check className="size-3.5" aria-hidden="true" />
+        {t("memoryRemembered")}
+      </span>
+    );
+  }
+  if (status === "dismissed") {
+    return (
+      <span className="text-xs text-muted-foreground" data-testid="memory-dismissed">
+        {t("memoryDismissed")}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      {actions.signedIn ? (
+        <button
+          type="button"
+          data-testid="memory-accept"
+          disabled={busy}
+          className={cn(smallActionClassName, "bg-primary text-primary-foreground hover:bg-primary/90")}
+          onClick={() => actions.onAcceptMemory(itemId)}
+        >
+          <Check className="size-3.5" aria-hidden="true" />
+          {t("memoryRemember")}
+        </button>
+      ) : (
+        <Link
+          href={actions.loginHref}
+          data-testid="memory-login"
+          className={cn(smallActionClassName, "bg-primary text-primary-foreground hover:bg-primary/90")}
+        >
+          <LogIn className="size-3.5" aria-hidden="true" />
+          {t("memoryLogin")}
+        </Link>
+      )}
+      <button
+        type="button"
+        data-testid="memory-dismiss"
+        disabled={busy}
+        className={cn(smallActionClassName, "text-muted-foreground hover:bg-accent hover:text-foreground")}
+        onClick={() => actions.onDismissMemory(itemId)}
+      >
+        {t("memoryDismiss")}
+      </button>
+    </span>
+  );
+}
+
+function FamilyToolAction({
+  payload,
+  actions,
+}: {
+  payload: ToolPayload | null;
+  actions?: FamilyCardActions;
+}) {
+  const t = useTranslations("editor");
+  if (!actions) return null;
+  const proposal = memoryProposal(payload);
+  if (proposal) {
+    return (
+      <div className="mt-1.5 flex pl-8">
+        <MemoryDecision itemId={proposal.itemId} actions={actions} />
+      </div>
+    );
+  }
+  const tailor = createdTailor(payload);
+  if (tailor) {
+    return (
+      <div className="mt-1.5 flex pl-8">
+        <button
+          type="button"
+          data-testid="tool-open-tailor"
+          className={cn(smallActionClassName, "text-foreground hover:bg-accent")}
+          onClick={() => actions.onOpenResume(tailor.id)}
+        >
+          {t("toolCreateTailorOpen", { title: tailor.title })}
+          <ArrowRight className="size-3.5" aria-hidden="true" />
+        </button>
+      </div>
+    );
+  }
+  return null;
 }
 
 function sourceLinks(payload: ToolPayload): { url: string; title: string }[] {
@@ -239,11 +404,13 @@ function ToolCallCard({
   sending = false,
   currentSource = "",
   onRestoreEdit,
+  familyActions,
 }: {
   message: ChatMessage;
   sending?: boolean;
   currentSource?: string;
   onRestoreEdit?: (source: string) => void;
+  familyActions?: FamilyCardActions;
 }) {
   const t = useTranslations("editor");
   const payload = parseToolPayload(message.content);
@@ -311,6 +478,7 @@ function ToolCallCard({
             <div className="ml-auto">{actionButton}</div>
           </div>
         ) : null}
+        {!failed ? <FamilyToolAction payload={payload} actions={familyActions} /> : null}
         {showDetails && payload ? (
           <details className="group pl-8">
             <summary className="mt-1 flex cursor-pointer list-none items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground">
@@ -325,7 +493,13 @@ function ToolCallCard({
   );
 }
 
-export default function ChatMessageCard({ message, sending, currentSource, onRestoreEdit }: Props) {
+export default function ChatMessageCard({
+  message,
+  sending,
+  currentSource,
+  onRestoreEdit,
+  familyActions,
+}: Props) {
   const locale = useLocale();
   const isUser = message.role === "user";
   const time = message.timestamp ? new Date(message.timestamp) : null;
@@ -337,6 +511,7 @@ export default function ChatMessageCard({ message, sending, currentSource, onRes
         sending={sending}
         currentSource={currentSource}
         onRestoreEdit={onRestoreEdit}
+        familyActions={familyActions}
       />
     );
   }
