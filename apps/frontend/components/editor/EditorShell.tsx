@@ -87,6 +87,24 @@ function saveComposerDraft(id: string, value: string) {
   }
 }
 
+const editorTabKey = (id: string) => `offerfy:editor-tab:${id}`;
+
+function loadEditorTab(id: string): string | null {
+  try {
+    return sessionStorage.getItem(editorTabKey(id));
+  } catch {
+    return null;
+  }
+}
+
+function saveEditorTab(id: string, tab: string) {
+  try {
+    sessionStorage.setItem(editorTabKey(id), tab);
+  } catch {
+    /* storage can be unavailable in private mode */
+  }
+}
+
 const editorTabClassName =
   "editor-tab h-auto flex-none rounded-none border-0 bg-transparent shadow-none data-[state=active]:bg-transparent data-[state=active]:shadow-none";
 
@@ -118,7 +136,7 @@ export default function EditorShell({ resumeId }: Props) {
   const [downloading, setDownloading] = useState(false);
   const [chatUnavailable, setChatUnavailable] = useState(false);
   const [leftTab, setLeftTab] = useState(() =>
-    peekPendingUpload(resumeId) ? "chat" : "typst",
+    peekPendingUpload(resumeId) ? "chat" : (loadEditorTab(resumeId) ?? "typst"),
   );
   const [compileError, setCompileError] = useState<string | null>(null);
   const [signedIn, setSignedIn] = useState(false);
@@ -448,7 +466,10 @@ export default function EditorShell({ resumeId }: Props) {
       setSending(false);
       const nextTailor = pendingTailorRef.current;
       pendingTailorRef.current = null;
-      if (nextTailor) router.push(`/editor/${nextTailor}`);
+      if (nextTailor) {
+        saveEditorTab(nextTailor, "chat");
+        router.push(`/editor/${nextTailor}`);
+      }
     }
     },
     [failCompile, refreshAts, refreshMemory, refreshPreview, resumeId, router, source, t],
@@ -494,6 +515,7 @@ export default function EditorShell({ resumeId }: Props) {
       setStatus(t("switchSaveError"));
       return;
     }
+    saveEditorTab(id, leftTab);
     router.push(`/editor/${id}`);
   }
 
@@ -514,6 +536,7 @@ export default function EditorShell({ resumeId }: Props) {
       }
       const tailor = await createTailor(resumeId, payload);
       setTailorDialogOpen(false);
+      saveEditorTab(tailor.id, leftTab);
       router.push(`/editor/${tailor.id}`);
     } catch (err) {
       setTailorError(err instanceof ApiError && err.message ? err.message : t("tailorCreateError"));
@@ -741,7 +764,10 @@ export default function EditorShell({ resumeId }: Props) {
             <div className="relative h-full min-h-0 min-w-0">
             <Tabs
               value={leftTab}
-              onValueChange={setLeftTab}
+              onValueChange={(tab) => {
+                setLeftTab(tab);
+                saveEditorTab(resumeId, tab);
+              }}
               className="flex h-full min-h-0 min-w-0 flex-col gap-0"
             >
               <div className="flex shrink-0 items-center overflow-x-auto bg-background">
