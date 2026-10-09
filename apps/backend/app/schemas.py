@@ -66,6 +66,14 @@ class ResumeFamilyOut(BaseModel):
     tailors: list[FamilyMember]
 
 
+class MemoryItemOut(BaseModel):
+    id: str
+    text: str
+    status: str
+    source_resume_id: str | None = None
+    created_at: str
+
+
 class CompileBody(BaseModel):
     format: str = Field(pattern="^(svg|pdf)$")
 
