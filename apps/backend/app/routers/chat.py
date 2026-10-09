@@ -11,9 +11,15 @@ from app.models import ChatMessage, User
 from app.schemas import ChatMessageOut, ChatRequest
 from app.services.attachment import llm_content_for_upload, stored_user_message
 from app.services.extract import MAX_UPLOAD_BYTES, allowed_upload, extract_upload_text
+from app.services.family_tools import (
+    CREATE_TAILOR_TOOL,
+    family_tool_handlers,
+    family_tool_specs,
+)
 from app.services.llm import TEMPLATE_SWITCH_EXTRA, aiter_chat_edit, llm_configured
 from app.services.rate_limit import enforce_guest_rate
 from app.services.revisions import set_draft_source
+from app.services.role_card import build_role_card
 from app.services.s3 import put_object
 from app.services.templates import is_template_switch_message, parse_preview_spec, template_api_block
 from app.services.typst_compile import compile_status
@@ -82,6 +88,19 @@ def _persist_tool(db: Session, resume_id: str, trace: dict) -> ChatMessage:
     db.commit()
     db.refresh(row)
     return row
+
+
+def _tailor_created(trace: dict) -> dict | None:
+    if trace.get("name") != CREATE_TAILOR_TOOL:
+        return None
+    result = trace.get("result")
+    if isinstance(result, dict) and result.get("tailor_id"):
+        return {
+            "type": "tailor_created",
+            "resume_id": result["tailor_id"],
+            "title": result.get("title") or "",
+        }
+    return None
 
 
 def _persist_assistant(db: Session, resume_id: str, content: str) -> ChatMessage:
@@ -159,6 +178,9 @@ async def chat(
     spec = parse_preview_spec(message)
     if spec:
         extra += template_api_block(*spec)
+    extra += build_role_card(db, resume)
+    family_specs = family_tool_specs(resume)
+    family_handlers = family_tool_handlers(db, resume)
 
     async def generate():
         assistant_text = ""
@@ -170,6 +192,8 @@ async def chat(
                 prefer_full_source=prefer_full_source,
                 extra_system=extra,
                 verify_compile=True,
+                extra_tools=family_specs,
+                tool_handlers=family_handlers,
             ):
                 kind = event.get("kind")
                 if kind == "tool":
@@ -180,6 +204,9 @@ async def chat(
                             "message": _message_out(row).model_dump(),
                         }
                     )
+                    created = _tailor_created(event["trace"])
+                    if created:
+                        yield _sse(created)
                 elif kind == "source":
                     new_source = event["typst_source"]
                     set_draft_source(db, resume, new_source)
@@ -240,6 +267,8 @@ async def chat(
                     prefer_full_source=True,
                     extra_system=extra,
                     verify_compile=True,
+                    extra_tools=family_specs,
+                    tool_handlers=family_handlers,
                 ):
                     kind = event.get("kind")
                     if kind == "tool":
@@ -250,6 +279,9 @@ async def chat(
                                 "message": _message_out(row).model_dump(),
                             }
                         )
+                        created = _tailor_created(event["trace"])
+                        if created:
+                            yield _sse(created)
                     elif kind == "source":
                         new_source = event["typst_source"]
                         set_draft_source(db, resume, new_source)

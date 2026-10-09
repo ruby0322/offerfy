@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 from fastapi import HTTPException
@@ -32,7 +32,7 @@ SYSTEM_PROMPT = (
     "the whole file, including switching Typst Universe templates. "
     "Use web_search when you need current facts (companies, titles, dates, "
     "public profiles, job posts). "
-    "You may call only read_typst, apply_typst_edit, read_ats, and web_search. "
+    "Call only the tools you are given. "
     "The default starter uses @preview/basic-resume:0.2.9 with paper a4 and "
     'accent-color: "#26428b". Keep those unless the user asks to switch '
     "templates. "
@@ -325,6 +325,8 @@ async def aiter_llm_turn(
     max_rounds: int = 6,
     prefer_full_source: bool = False,
     verify_compile: bool = False,
+    extra_tools: list[dict] | None = None,
+    tool_handlers: dict[str, Callable[[dict], str]] | None = None,
 ):
     """Yield tool/source/assistant events. OpenAI waits on the event loop."""
     if not llm_configured():
@@ -350,7 +352,7 @@ async def aiter_llm_turn(
                 "model": model,
                 "instructions": SYSTEM_PROMPT + extra_system,
                 "input": input_items,
-                "tools": TOOLS,
+                "tools": TOOLS + list(extra_tools or []),
                 "tool_choice": "auto",
                 "include": ["web_search_call.action.sources"],
                 **completions_tool_extras(model),
@@ -422,15 +424,10 @@ async def aiter_llm_turn(
                                     ),
                                 }
                             )
+                    elif tool_handlers and name in tool_handlers:
+                        result = tool_handlers[name](args)
                     else:
-                        result = json.dumps(
-                            {
-                                "error": (
-                                    "only read_typst, apply_typst_edit, read_ats, "
-                                    "and web_search are allowed"
-                                )
-                            }
-                        )
+                        result = json.dumps({"error": f"unknown tool {name}"})
                     trace = _tool_trace(name or "unknown", args, result)
                     yield {"kind": "tool", "trace": trace}
                     parsed = trace.get("result")
@@ -473,6 +470,8 @@ async def aiter_chat_edit(
     prefer_full_source: bool = False,
     extra_system: str = "",
     verify_compile: bool = False,
+    extra_tools: list[dict] | None = None,
+    tool_handlers: dict[str, Callable[[dict], str]] | None = None,
 ):
     extra = (
         " Extracted upload text may appear as Typst comments. "
@@ -492,5 +491,7 @@ async def aiter_chat_edit(
         max_rounds=8 if (prefer_full_source or verify_compile) else 6,
         prefer_full_source=prefer_full_source,
         verify_compile=verify_compile,
+        extra_tools=extra_tools,
+        tool_handlers=tool_handlers,
     ):
         yield event
