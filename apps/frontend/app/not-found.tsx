@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { SITE_URL } from "@/lib/seo";
 
 export default function RootNotFound() {
@@ -7,7 +8,7 @@ export default function RootNotFound() {
       <p>This URL is not a page on Offerfy.</p>
       <ul>
         <li>
-          <a href="/en">Home</a>
+          <Link href="/en">Home</Link>
         </li>
         <li>
           <a href="/llms.txt">llms.txt</a>
@@ -16,10 +17,10 @@ export default function RootNotFound() {
           <a href={`${SITE_URL}/sitemap.xml`}>Sitemap</a>
         </li>
         <li>
-          <a href="/en/jobs">Jobs</a>
+          <Link href="/en/jobs">Jobs</Link>
         </li>
         <li>
-          <a href="/en/blog">Blog</a>
+          <Link href="/en/blog">Blog</Link>
         </li>
       </ul>
     </main>

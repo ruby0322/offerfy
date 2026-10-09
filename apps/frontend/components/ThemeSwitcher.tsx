@@ -11,18 +11,20 @@ import {
 import { Laptop, Moon, Sun } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 const ICON_SIZE = 16;
+
+const noopSubscribe = () => () => {};
 
 export default function ThemeSwitcher() {
   const t = useTranslations("theme");
   const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = useSyncExternalStore(
+    noopSubscribe,
+    () => true,
+    () => false,
+  );
 
   const icon =
     mounted && theme === "light" ? (

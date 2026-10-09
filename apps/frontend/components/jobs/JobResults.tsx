@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import type { AppLocale } from "@/i18n/routing";
@@ -23,11 +23,13 @@ export default function JobResults({ locale, query, initial }: Props) {
   const [items, setItems] = useState<JobListItem[]>(initial.items);
   const [cursor, setCursor] = useState<string | null>(initial.next_cursor);
   const [pending, startTransition] = useTransition();
+  const [seenInitial, setSeenInitial] = useState(initial);
 
-  useEffect(() => {
+  if (seenInitial !== initial) {
+    setSeenInitial(initial);
     setItems(initial.items);
     setCursor(initial.next_cursor);
-  }, [initial]);
+  }
 
   function loadMore() {
     if (!cursor || pending) return;
