@@ -31,11 +31,20 @@ type Props = {
   labels: Labels;
 };
 
-function KindTag({ kind, labels }: { kind: FamilyMember["kind"]; labels: Labels }) {
+function KindTag({
+  kind,
+  labels,
+  className,
+}: {
+  kind: FamilyMember["kind"];
+  labels: Labels;
+  className?: string;
+}) {
   return (
     <span
       className={cn(
         "shrink-0 rounded-sm border px-1.5 py-px text-[10px] font-medium uppercase tracking-wide",
+        className,
         kind === "master"
           ? "border-foreground/20 text-foreground/70"
           : "border-primary/40 text-primary",
@@ -100,7 +109,7 @@ export default function ResumeFamilyMenu({
       className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
     >
       <span className="truncate">{title}</span>
-      {family ? <KindTag kind={currentKind} labels={labels} /> : null}
+      {family ? <KindTag kind={currentKind} labels={labels} className="hidden sm:inline" /> : null}
       <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
     </button>
   );
