@@ -1,8 +1,11 @@
 """add resume_revisions and published_revision_id"""
 
+import hashlib
+import uuid
+from datetime import datetime, timezone
+
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.orm import Session
 
 revision = "008_resume_revisions"
 down_revision = "007_jobs_spotlight"
@@ -50,12 +53,52 @@ def upgrade() -> None:
             ondelete="SET NULL",
         )
 
-    from app.services.revisions import backfill_existing_resumes
+    _backfill_revisions(op.get_bind())
 
-    bind = op.get_bind()
-    session = Session(bind=bind)
-    backfill_existing_resumes(session)
-    session.commit()
+
+def _backfill_revisions(bind) -> None:
+    # Pin the columns that exist at this revision; the live ORM models gain
+    # columns in later migrations and would break a fresh upgrade.
+    resumes = sa.table(
+        "resumes",
+        sa.column("id", sa.String),
+        sa.column("typst_source", sa.Text),
+        sa.column("created_at", sa.DateTime(timezone=True)),
+        sa.column("published_revision_id", sa.String),
+    )
+    revisions = sa.table(
+        "resume_revisions",
+        sa.column("id", sa.String),
+        sa.column("resume_id", sa.String),
+        sa.column("typst_source", sa.Text),
+        sa.column("content_hash", sa.String),
+        sa.column("created_at", sa.DateTime(timezone=True)),
+    )
+    shares = sa.table("resume_shares", sa.column("resume_id", sa.String))
+
+    now = datetime.now(timezone.utc)
+    shared = {row.resume_id for row in bind.execute(sa.select(shares.c.resume_id))}
+    rows = bind.execute(
+        sa.select(resumes.c.id, resumes.c.typst_source, resumes.c.created_at)
+    ).all()
+    for row in rows:
+        source = row.typst_source or ""
+        revision_id = str(uuid.uuid4())
+        bind.execute(
+            revisions.insert().values(
+                id=revision_id,
+                resume_id=row.id,
+                typst_source=source,
+                content_hash=hashlib.sha256(source.encode("utf-8")).hexdigest(),
+                created_at=row.created_at or now,
+            )
+        )
+        if row.id in shared:
+            bind.execute(
+                resumes.update()
+                .where(resumes.c.id == row.id)
+                .values(published_revision_id=revision_id)
+            )
 
 
 def downgrade() -> None:
