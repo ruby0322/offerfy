@@ -44,11 +44,11 @@ import {
   type MemoryItem,
   type Resume,
   type ResumeFamily,
+  type ResumeKind,
   type ResumeSource,
   type ShareState,
 } from "@/lib/api";
 import { formatUserAttachmentMessage, parseToolPayload } from "@/lib/chat-tools";
-import { peekTailorKickstart, queueTailorKickstart, takeTailorKickstart } from "@/lib/pending-kickstart";
 import type { AtsCheckName } from "@/lib/ats-checks";
 import { peekPendingUpload, takePendingUpload } from "@/lib/pending-upload";
 
@@ -120,6 +120,7 @@ export default function EditorShell({ resumeId }: Props) {
   const tNav = useTranslations("nav");
   const locale = useLocale();
   const [title, setTitle] = useState("");
+  const [kind, setKind] = useState<ResumeKind | undefined>();
   const [targetLabel, setTargetLabel] = useState("");
   const [targetContext, setTargetContext] = useState("");
   const [createdAt, setCreatedAt] = useState<string | undefined>();
@@ -158,6 +159,7 @@ export default function EditorShell({ resumeId }: Props) {
   const skipTimers = useRef(true);
   const sendingRef = useRef(false);
   const pendingTailorRef = useRef<string | null>(null);
+  const kickstartedRef = useRef(false);
   const previewObjectUrls = useRef<string[]>([]);
 
   const setPreviewPages = useCallback((svgs: string[]) => {
@@ -224,6 +226,7 @@ export default function EditorShell({ resumeId }: Props) {
         const resume = await getResume(resumeId);
         if (cancelled) return;
         setTitle(resume.title || "");
+        setKind(resume.kind);
         setTargetLabel(resume.target_label?.trim() || "");
         setTargetContext(resume.target_context?.trim() || "");
         setCreatedAt(resume.created_at);
@@ -472,7 +475,6 @@ export default function EditorShell({ resumeId }: Props) {
       const nextTailor = pendingTailorRef.current;
       pendingTailorRef.current = null;
       if (nextTailor) {
-        queueTailorKickstart(nextTailor);
         saveEditorTab(nextTailor, "chat");
         router.push(`/editor/${nextTailor}`);
       }
@@ -485,24 +487,26 @@ export default function EditorShell({ resumeId }: Props) {
     sendUserChatRef.current = sendUserChat;
   }, [sendUserChat]);
 
+  // A tailor whose chat is still empty has never been scored against its target,
+  // however the user got here: the automatic hand-off, the card's open button, the
+  // family menu, or a reload. The empty chat is the flag, so this stays idempotent.
   useEffect(() => {
-    if (!loaded || !peekTailorKickstart(resumeId)) return;
-    if (messages.length > 0) {
-      takeTailorKickstart(resumeId);
-      return;
-    }
+    if (!loaded || kind !== "tailor") return;
+    if (messages.length > 0 || kickstartedRef.current) return;
+    if (peekPendingUpload(resumeId)) return;
     const prompt = t("tailorKickstartPrompt", {
       role: targetLabel || t("tailorKickstartRoleUnknown"),
       context: targetContext || t("tailorKickstartContextUnknown"),
     });
     const handle = window.setTimeout(() => {
-      if (!takeTailorKickstart(resumeId)) return;
+      if (kickstartedRef.current) return;
+      kickstartedRef.current = true;
       setLeftTab("chat");
       saveEditorTab(resumeId, "chat");
       void sendUserChatRef.current(prompt, null);
     }, 0);
     return () => window.clearTimeout(handle);
-  }, [loaded, messages.length, resumeId, t, targetContext, targetLabel]);
+  }, [kind, loaded, messages.length, resumeId, t, targetContext, targetLabel]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -561,7 +565,6 @@ export default function EditorShell({ resumeId }: Props) {
       }
       const tailor = await createTailor(resumeId, payload);
       setTailorDialogOpen(false);
-      queueTailorKickstart(tailor.id);
       saveEditorTab(tailor.id, "chat");
       router.push(`/editor/${tailor.id}`);
     } catch (err) {
