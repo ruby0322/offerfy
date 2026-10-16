@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { AlignLeft, History, LayoutTemplate, MessageCircle, Settings } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
+import { useToast } from "@/components/Toaster";
 import CompileErrorDialog from "@/components/editor/CompileErrorDialog";
 import CreateTailorDialog, { type TailorDraft } from "@/components/editor/CreateTailorDialog";
 import EditorChatPanel from "@/components/editor/EditorChatPanel";
@@ -121,6 +122,7 @@ export default function EditorShell({ resumeId }: Props) {
   const tCommon = useTranslations("common");
   const tNav = useTranslations("nav");
   const locale = useLocale();
+  const toast = useToast();
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState<ResumeKind | undefined>();
   const [targetLabel, setTargetLabel] = useState("");
@@ -596,6 +598,8 @@ export default function EditorShell({ resumeId }: Props) {
       saveComposerDraft(resumeId, "");
       const master = family && family.master.id !== resumeId ? family.master.id : null;
       router.replace(master ? `/editor/${master}` : signedIn ? "/dashboard" : "/");
+      // The provider lives in the layout, so this outlives the navigation.
+      toast(tCommon("deletedToast", { title }));
     } catch (err) {
       skipTimers.current = false;
       setDeleteError(err instanceof ApiError && err.message ? err.message : tCommon("deleteError"));

@@ -105,6 +105,7 @@
   --font-sans: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
   --animate-accordion-down: accordion-down 0.2s ease-out;
   --animate-accordion-up: accordion-up 0.2s ease-out;
+  --animate-toast-in: toast-in 0.18s ease-out;
 }
 
 @keyframes accordion-down {
@@ -122,6 +123,17 @@
   }
   to {
     height: 0;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 

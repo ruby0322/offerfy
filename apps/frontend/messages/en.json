@@ -344,7 +344,8 @@
     "deleteConfirm": "Delete",
     "deleting": "Deleting…",
     "deleteCancel": "Cancel",
-    "deleteError": "Could not delete this resume."
+    "deleteError": "Could not delete this resume.",
+    "deletedToast": "Deleted “{title}”."
   },
   "legal": {
     "termsLink": "Terms",

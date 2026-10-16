@@ -347,7 +347,8 @@
     "deleteConfirm": "刪除",
     "deleting": "刪除中…",
     "deleteCancel": "取消",
-    "deleteError": "無法刪除這份履歷。"
+    "deleteError": "無法刪除這份履歷。",
+    "deletedToast": "已刪除「{title}」。"
   },
   "legal": {
     "termsLink": "條款",

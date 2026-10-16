@@ -3,6 +3,7 @@ import { Fraunces, Source_Sans_3 } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages, getTranslations, setRequestLocale } from "next-intl/server";
 import ThemeProvider from "@/components/ThemeProvider";
+import ToastProvider from "@/components/Toaster";
 import { routing } from "@/i18n/routing";
 import { resolveLocale } from "@/lib/locale";
 import { pageMetadata, SITE_URL } from "@/lib/seo";
@@ -60,7 +61,7 @@ export default async function LocaleLayout({ children, params }: Props) {
       <body>
         <ThemeProvider>
           <NextIntlClientProvider locale={locale} messages={messages}>
-            {children}
+            <ToastProvider>{children}</ToastProvider>
           </NextIntlClientProvider>
         </ThemeProvider>
       </body>

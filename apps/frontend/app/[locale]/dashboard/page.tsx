@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
+import { useToast } from "@/components/Toaster";
 import { Link, useRouter } from "@/i18n/navigation";
 import {
   ApiError,
@@ -88,6 +89,7 @@ export default function DashboardPage() {
   const t = useTranslations("dashboard");
   const tCommon = useTranslations("common");
   const router = useRouter();
+  const toast = useToast();
   const [resumes, setResumes] = useState<Resume[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
@@ -141,7 +143,7 @@ export default function DashboardPage() {
 
   async function onConfirmDelete() {
     if (!doomed || deleting) return;
-    const { id } = doomed.resume;
+    const { id, title } = doomed.resume;
     setDeleting(true);
     setDeleteError(null);
     try {
@@ -151,6 +153,7 @@ export default function DashboardPage() {
         (prev ?? []).filter((r) => r.id !== id && r.parent_resume_id !== id),
       );
       setDoomed(null);
+      toast(tCommon("deletedToast", { title: title || id }));
     } catch (err) {
       setDeleteError(err instanceof ApiError && err.message ? err.message : tCommon("deleteError"));
     } finally {

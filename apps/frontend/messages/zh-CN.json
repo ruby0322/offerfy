@@ -347,7 +347,8 @@
     "deleteConfirm": "删除",
     "deleting": "删除中…",
     "deleteCancel": "取消",
-    "deleteError": "无法删除这份简历。"
+    "deleteError": "无法删除这份简历。",
+    "deletedToast": "已删除“{title}”。"
   },
   "legal": {
     "termsLink": "条款",
