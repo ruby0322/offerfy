@@ -281,7 +281,10 @@
     "settingsShareHint": "Anyone with the link can preview the last published version and download a PDF. Turning it private invalidates the current link.",
     "settingsPublishHint": "The public link stays on the last published version until you click Publish.",
     "settingsSignIn": "Sign in to share",
-    "settingsSignInHint": "Sharing is available after you sign in with Google."
+    "settingsSignInHint": "Sharing is available after you sign in with Google.",
+    "settingsDanger": "Danger zone",
+    "settingsDelete": "Delete this resume",
+    "settingsDeleteTailor": "Delete this tailored version"
   },
   "share": {
     "brand": "Offerfy",
@@ -333,7 +336,15 @@
   "common": {
     "loading": "Loading…",
     "error": "Something went wrong.",
-    "backHome": "Back to home"
+    "backHome": "Back to home",
+    "deleteTitle": "Delete “{title}”?",
+    "deleteMasterHint": "Its version history and chat go with it. This cannot be undone.",
+    "deleteMasterWithTailorsHint": "{count, plural, one {# tailored version} other {# tailored versions}} go with it, along with all version history and chat. This cannot be undone.",
+    "deleteTailorHint": "Its version history and chat go with it. The master is not affected. This cannot be undone.",
+    "deleteConfirm": "Delete",
+    "deleting": "Deleting…",
+    "deleteCancel": "Cancel",
+    "deleteError": "Could not delete this resume."
   },
   "legal": {
     "termsLink": "Terms",

@@ -37,3 +37,16 @@ def put_object(key: str, data: bytes, content_type: str) -> str | None:
         # Storage is optional for local; do not block resume creation.
         return None
     return key
+
+
+def delete_object(key: str) -> bool:
+    settings = get_settings()
+    client = _client()
+    if client is None:
+        return False
+    try:
+        client.delete_object(Bucket=settings.s3_bucket, Key=key)
+    except (BotoCoreError, ClientError):
+        # Storage is optional for local; a stale object must not fail a delete.
+        return False
+    return True

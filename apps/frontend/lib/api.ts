@@ -236,6 +236,14 @@ export async function putResumeSource(
   );
 }
 
+export async function deleteResume(id: string): Promise<void> {
+  const res = await apiFetch(`/api/v1/resumes/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const body = await parseBody(res);
+    throw new ApiError(errorMessage(body, res.statusText || "Request failed"), res.status, body);
+  }
+}
+
 export async function createTailor(
   id: string,
   payload: { title: string; target_label?: string; target_context?: string },

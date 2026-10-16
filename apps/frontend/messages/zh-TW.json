@@ -284,7 +284,10 @@
     "settingsShareHint": "有連結的人可以預覽上次發佈的版本並下載 PDF。改回私人後，目前的連結會失效。",
     "settingsPublishHint": "公開連結會停留在上次發佈的版本，直到你按發佈。",
     "settingsSignIn": "登入後即可分享",
-    "settingsSignInHint": "使用 Google 登入後才能設定公開分享。"
+    "settingsSignInHint": "使用 Google 登入後才能設定公開分享。",
+    "settingsDanger": "危險區域",
+    "settingsDelete": "刪除這份履歷",
+    "settingsDeleteTailor": "刪除這份客製版"
   },
   "share": {
     "brand": "Offerfy",
@@ -336,7 +339,15 @@
   "common": {
     "loading": "載入中…",
     "error": "出了點問題。",
-    "backHome": "返回首頁"
+    "backHome": "返回首頁",
+    "deleteTitle": "要刪除「{title}」嗎？",
+    "deleteMasterHint": "版本紀錄與對話都會一起刪除，無法復原。",
+    "deleteMasterWithTailorsHint": "底下 {count} 份客製版也會一起刪除，連同所有版本紀錄與對話，無法復原。",
+    "deleteTailorHint": "這份客製版的版本紀錄與對話都會刪除，主履歷不受影響，無法復原。",
+    "deleteConfirm": "刪除",
+    "deleting": "刪除中…",
+    "deleteCancel": "取消",
+    "deleteError": "無法刪除這份履歷。"
   },
   "legal": {
     "termsLink": "條款",

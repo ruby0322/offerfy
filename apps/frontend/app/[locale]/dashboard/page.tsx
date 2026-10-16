@@ -1,13 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
 import { Link, useRouter } from "@/i18n/navigation";
 import {
   ApiError,
   claimResumes,
+  deleteResume,
   getMe,
   listResumes,
   logout,
@@ -33,7 +36,34 @@ function groupResumes(resumes: Resume[]) {
   };
 }
 
-function TailorRow({ resume, openLabel, badge }: { resume: Resume; openLabel: string; badge: string }) {
+function DeleteButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      data-testid="dashboard-delete"
+      className="rr-btn rr-btn-ghost text-muted-foreground hover:text-destructive"
+      onClick={onClick}
+    >
+      <Trash2 aria-hidden="true" className="size-4" />
+    </button>
+  );
+}
+
+function TailorRow({
+  resume,
+  openLabel,
+  badge,
+  deleteLabel,
+  onDelete,
+}: {
+  resume: Resume;
+  openLabel: string;
+  badge: string;
+  deleteLabel: string;
+  onDelete: () => void;
+}) {
   return (
     <li className="flex items-center justify-between gap-4" data-testid="dashboard-tailor">
       <p className="flex min-w-0 items-center gap-2 text-sm">
@@ -42,12 +72,17 @@ function TailorRow({ resume, openLabel, badge }: { resume: Resume; openLabel: st
           {badge}
         </span>
       </p>
-      <Link href={`/editor/${resume.id}`} className="rr-btn rr-btn-ghost">
-        {openLabel}
-      </Link>
+      <div className="flex shrink-0 items-center gap-1">
+        <Link href={`/editor/${resume.id}`} className="rr-btn rr-btn-ghost">
+          {openLabel}
+        </Link>
+        <DeleteButton label={deleteLabel} onClick={onDelete} />
+      </div>
     </li>
   );
 }
+
+type Doomed = { resume: Resume; tailorCount: number };
 
 export default function DashboardPage() {
   const t = useTranslations("dashboard");
@@ -56,6 +91,9 @@ export default function DashboardPage() {
   const [resumes, setResumes] = useState<Resume[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
+  const [doomed, setDoomed] = useState<Doomed | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,6 +133,32 @@ export default function DashboardPage() {
       router.push("/");
     }
   }
+
+  function askDelete(resume: Resume, tailorCount: number) {
+    setDeleteError(null);
+    setDoomed({ resume, tailorCount });
+  }
+
+  async function onConfirmDelete() {
+    if (!doomed || deleting) return;
+    const { id } = doomed.resume;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteResume(id);
+      // The backend cascades a master's tailors, so drop them here too.
+      setResumes((prev) =>
+        (prev ?? []).filter((r) => r.id !== id && r.parent_resume_id !== id),
+      );
+      setDoomed(null);
+    } catch (err) {
+      setDeleteError(err instanceof ApiError && err.message ? err.message : tCommon("deleteError"));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  const doomedKind = doomed?.resume.kind ?? "master";
 
   return (
     <div className="rr-shell">
@@ -137,14 +201,27 @@ export default function DashboardPage() {
                       {tailors.length > 0 ? ` · ${t("tailorCount", { count: tailors.length })}` : ""}
                     </p>
                   </div>
-                  <Link href={`/editor/${master.id}`} className="rr-btn rr-btn-ghost">
-                    {t("open")}
-                  </Link>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Link href={`/editor/${master.id}`} className="rr-btn rr-btn-ghost">
+                      {t("open")}
+                    </Link>
+                    <DeleteButton
+                      label={tCommon("deleteConfirm")}
+                      onClick={() => askDelete(master, tailors.length)}
+                    />
+                  </div>
                 </div>
                 {tailors.length > 0 ? (
                   <ul className="mt-3 grid gap-2 border-l border-rule pl-4">
                     {tailors.map((tailor) => (
-                      <TailorRow key={tailor.id} resume={tailor} openLabel={t("open")} badge={t("tailorBadge")} />
+                      <TailorRow
+                        key={tailor.id}
+                        resume={tailor}
+                        openLabel={t("open")}
+                        badge={t("tailorBadge")}
+                        deleteLabel={tCommon("deleteConfirm")}
+                        onDelete={() => askDelete(tailor, 0)}
+                      />
                     ))}
                   </ul>
                 ) : null}
@@ -153,7 +230,13 @@ export default function DashboardPage() {
             {orphans.map((tailor) => (
               <li key={tailor.id} className="rr-card rr-row-card px-5 py-4">
                 <ul>
-                  <TailorRow resume={tailor} openLabel={t("open")} badge={t("tailorBadge")} />
+                  <TailorRow
+                    resume={tailor}
+                    openLabel={t("open")}
+                    badge={t("tailorBadge")}
+                    deleteLabel={tCommon("deleteConfirm")}
+                    onDelete={() => askDelete(tailor, 0)}
+                  />
                 </ul>
               </li>
             ))}
@@ -161,6 +244,27 @@ export default function DashboardPage() {
         ) : null}
       </main>
       <Footer variant="app" />
+      {doomed ? (
+        <ConfirmDeleteDialog
+          title={tCommon("deleteTitle", { title: doomed.resume.title || doomed.resume.id })}
+          description={
+            doomedKind === "tailor"
+              ? tCommon("deleteTailorHint")
+              : doomed.tailorCount > 0
+                ? tCommon("deleteMasterWithTailorsHint", { count: doomed.tailorCount })
+                : tCommon("deleteMasterHint")
+          }
+          busy={deleting}
+          error={deleteError}
+          onConfirm={() => void onConfirmDelete()}
+          onClose={() => setDoomed(null)}
+          labels={{
+            confirm: tCommon("deleteConfirm"),
+            confirming: tCommon("deleting"),
+            cancel: tCommon("deleteCancel"),
+          }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -284,7 +284,10 @@
     "settingsShareHint": "有链接的人可以预览上次发布的版本并下载 PDF。改回私人后，当前链接会失效。",
     "settingsPublishHint": "公开链接会停留在上次发布的版本，直到你点击发布。",
     "settingsSignIn": "登录后即可分享",
-    "settingsSignInHint": "使用 Google 登录后才能设置公开分享。"
+    "settingsSignInHint": "使用 Google 登录后才能设置公开分享。",
+    "settingsDanger": "危险区域",
+    "settingsDelete": "删除这份简历",
+    "settingsDeleteTailor": "删除这份定制版"
   },
   "share": {
     "brand": "Offerfy",
@@ -336,7 +339,15 @@
   "common": {
     "loading": "加载中…",
     "error": "出了点问题。",
-    "backHome": "返回首页"
+    "backHome": "返回首页",
+    "deleteTitle": "要删除“{title}”吗？",
+    "deleteMasterHint": "版本记录与对话都会一起删除，无法恢复。",
+    "deleteMasterWithTailorsHint": "下面 {count} 份定制版也会一起删除，连同所有版本记录与对话，无法恢复。",
+    "deleteTailorHint": "这份定制版的版本记录与对话都会删除，主简历不受影响，无法恢复。",
+    "deleteConfirm": "删除",
+    "deleting": "删除中…",
+    "deleteCancel": "取消",
+    "deleteError": "无法删除这份简历。"
   },
   "legal": {
     "termsLink": "条款",

@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import dynamic from "next/dynamic";
 import { AlignLeft, History, LayoutTemplate, MessageCircle, Settings } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
+import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import CompileErrorDialog from "@/components/editor/CompileErrorDialog";
 import CreateTailorDialog, { type TailorDraft } from "@/components/editor/CreateTailorDialog";
 import EditorChatPanel from "@/components/editor/EditorChatPanel";
@@ -25,6 +26,7 @@ import {
   compileResume,
   createTailor,
   deleteMemory,
+  deleteResume,
   dismissMemory,
   exportPdf,
   getAtsReport,
@@ -151,6 +153,9 @@ export default function EditorShell({ resumeId }: Props) {
   const [tailorDialogOpen, setTailorDialogOpen] = useState(false);
   const [creatingTailor, setCreatingTailor] = useState(false);
   const [tailorError, setTailorError] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletingResume, setDeletingResume] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [memory, setMemory] = useState<MemoryItem[]>([]);
   const [memoryLoaded, setMemoryLoaded] = useState(false);
   const [busyMemoryId, setBusyMemoryId] = useState<string | null>(null);
@@ -574,6 +579,30 @@ export default function EditorShell({ resumeId }: Props) {
     }
   }
 
+  function openDeleteDialog() {
+    if (sendingRef.current) return;
+    setDeleteError(null);
+    setDeleteDialogOpen(true);
+  }
+
+  async function onConfirmDelete() {
+    if (deletingResume) return;
+    setDeletingResume(true);
+    setDeleteError(null);
+    try {
+      // Nothing left to autosave once the row is gone.
+      skipTimers.current = true;
+      await deleteResume(resumeId);
+      saveComposerDraft(resumeId, "");
+      const master = family && family.master.id !== resumeId ? family.master.id : null;
+      router.replace(master ? `/editor/${master}` : signedIn ? "/dashboard" : "/");
+    } catch (err) {
+      skipTimers.current = false;
+      setDeleteError(err instanceof ApiError && err.message ? err.message : tCommon("deleteError"));
+      setDeletingResume(false);
+    }
+  }
+
   async function onChat(event: FormEvent) {
     event.preventDefault();
     const text = draft.trim();
@@ -749,6 +778,8 @@ export default function EditorShell({ resumeId }: Props) {
   const chatEmptyHint = chatUnavailable ? t("chatNotConfigured") : t("chatEmpty");
   const masterTitle =
     family && family.master.id !== resumeId ? family.master.title : title;
+  const tailorCount = family && family.master.id === resumeId ? family.tailors.length : 0;
+
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
@@ -883,6 +914,10 @@ export default function EditorShell({ resumeId }: Props) {
                   unpublishedChanges={unpublishedChanges}
                   publishing={publishing}
                   onPublish={signedIn ? onPublish : undefined}
+                  kind={kind}
+                  tailorCount={tailorCount}
+                  deleteDisabled={sending}
+                  onRequestDelete={openDeleteDialog}
                 />
               </TabsContent>
               <TabsContent
@@ -944,6 +979,27 @@ export default function EditorShell({ resumeId }: Props) {
             create: t("tailorCreate"),
             creating: t("tailorCreating"),
             cancel: t("tailorCancel"),
+          }}
+        />
+      ) : null}
+      {deleteDialogOpen ? (
+        <ConfirmDeleteDialog
+          title={tCommon("deleteTitle", { title })}
+          description={
+            kind === "tailor"
+              ? tCommon("deleteTailorHint")
+              : tailorCount > 0
+                ? tCommon("deleteMasterWithTailorsHint", { count: tailorCount })
+                : tCommon("deleteMasterHint")
+          }
+          busy={deletingResume}
+          error={deleteError}
+          onConfirm={() => void onConfirmDelete()}
+          onClose={() => setDeleteDialogOpen(false)}
+          labels={{
+            confirm: tCommon("deleteConfirm"),
+            confirming: tCommon("deleting"),
+            cancel: tCommon("deleteCancel"),
           }}
         />
       ) : null}

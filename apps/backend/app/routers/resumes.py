@@ -38,7 +38,7 @@ from app.services.revisions import (
     unpublished_changes,
     build_share_state,
 )
-from app.services.s3 import put_object
+from app.services.s3 import delete_object, put_object
 from app.services.starter import default_title, generate_starter, title_from_filename
 from app.services.typst_compile import compile_typst, compile_typst_pages
 
@@ -307,6 +307,27 @@ def put_resume(
     out = _to_out(db, resume)
     db.commit()
     return out
+
+
+@router.delete("/v1/resumes/{resume_id}", status_code=204)
+def delete_resume(
+    resume_id: str,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+):
+    resume = _owned_resume(resume_id, request, response, db, user)
+    # A master takes its tailored versions, revisions, chat, share and family
+    # memory with it; the ORM cascades handle every one of those. The uploads
+    # have no cascade, so collect their keys while the rows still exist.
+    doomed = [resume, *family_tailors(db, resume)]
+    upload_keys = [r.upload_s3_key for r in doomed if r.upload_s3_key]
+    db.delete(resume)
+    db.commit()
+    for key in upload_keys:
+        delete_object(key)
+    return RawResponse(status_code=204)
 
 
 def _revision_or_404(db: Session, resume: Resume, revision_id: str) -> ResumeRevision:

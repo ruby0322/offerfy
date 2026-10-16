@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ import {
   putResumeShare,
   putResumeSource,
   type ImportStatus,
+  type ResumeKind,
   type ResumeSource,
   type ShareState,
 } from "@/lib/api";
@@ -34,6 +36,10 @@ type Props = {
   unpublishedChanges?: boolean;
   publishing?: boolean;
   onPublish?: () => void;
+  kind?: ResumeKind;
+  tailorCount?: number;
+  deleteDisabled?: boolean;
+  onRequestDelete: () => void;
 };
 
 function shareUrl(token: string): string {
@@ -52,8 +58,13 @@ export default function EditorSettingsPanel({
   unpublishedChanges,
   publishing,
   onPublish,
+  kind,
+  tailorCount = 0,
+  deleteDisabled,
+  onRequestDelete,
 }: Props) {
   const t = useTranslations("editor");
+  const tCommon = useTranslations("common");
   const locale = useLocale();
   const [name, setName] = useState(title);
   const [prevTitle, setPrevTitle] = useState(title);
@@ -266,6 +277,32 @@ export default function EditorSettingsPanel({
                 ) : null}
               </div>
             ) : null}
+          </CardContent>
+        </Card>
+
+        <Card className="border-destructive/40">
+          <CardHeader>
+            <CardTitle className="text-destructive">{t("settingsDanger")}</CardTitle>
+            <CardDescription>
+              {kind === "tailor"
+                ? tCommon("deleteTailorHint")
+                : tailorCount > 0
+                  ? tCommon("deleteMasterWithTailorsHint", { count: tailorCount })
+                  : tCommon("deleteMasterHint")}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              data-testid="settings-delete"
+              disabled={deleteDisabled}
+              onClick={onRequestDelete}
+            >
+              <Trash2 aria-hidden="true" />
+              {kind === "tailor" ? t("settingsDeleteTailor") : t("settingsDelete")}
+            </Button>
           </CardContent>
         </Card>
       </div>
