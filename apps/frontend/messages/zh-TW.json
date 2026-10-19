@@ -128,22 +128,23 @@
     "badType": "不支援的檔案類型。"
   },
   "login": {
-    "title": "歡迎回來",
-    "lead": "使用 Google 登入，保存履歷紀錄。",
+    "title": "登入 Offerfy",
+    "lead": "履歷跟著帳號，不再只留在這個瀏覽器。",
     "google": "使用 Google 登入",
     "back": "返回首頁"
   },
   "dashboard": {
     "title": "我的履歷",
     "newResume": "新增履歷",
-    "empty": "還沒有履歷。從建立或上傳開始。",
+    "empty": "還沒有履歷，從這裡開始。",
     "open": "開啟",
     "needLogin": "請先使用 Google 登入。",
     "logout": "登出",
     "sourceCreate": "建立",
     "sourceUpload": "上傳",
     "tailorCount": "{count} 份客製版",
-    "tailorBadge": "客製版"
+    "tailorBadge": "客製版",
+    "tailorExplainer": "主履歷是你持續打磨的那一份；客製版是針對單一職缺的副本。"
   },
   "picker": {
     "title": "選擇開始方式",
@@ -181,7 +182,14 @@
     "attachTooLarge": "檔案超過 10 MiB。",
     "send": "送出",
     "sending": "送出中…",
-    "chatEmpty": "AI 為選用。可以直接編輯左側 Typst，不必開啟對話。",
+    "chatEmpty": "說出想改的地方，AI 就會直接改這份履歷。想自己動手，左側就是 Typst 原始碼。",
+    "suggestFillLabel": "幫我把履歷填起來",
+    "suggestFillPrompt": "幫我填寫這份履歷。需要什麼資訊就問我，一次問一項。",
+    "suggestBulletsLabel": "讓經歷條目更有力",
+    "suggestBulletsPrompt": "重寫經歷條目，開頭先講成果，內容撐得起來的地方就寫進具體數字。不要編造事實。",
+    "suggestAtsLabel": "修正 ATS 檢查",
+    "suggestAtsPrompt": "呼叫 read_ats，然後用 apply_typst_edit 修正所有未通過的檢查。保留模板套件、A4 紙張與主題色。",
+    "guestSaveNudge": "已下載。這份履歷只存在這個瀏覽器，登入才能保存。",
     "chatNotConfigured": "未設定 OpenAI",
     "importFillPrompt": "請用這份上傳的履歷填入 basic-resume 模板。先呼叫 read_typst，再用完整 source 呼叫 apply_typst_edit。對應姓名、email、學歷、工作、專案與技能。保留 basic-resume 套件、A4 紙張與 accent 顏色。",
     "loadError": "無法載入履歷。",
@@ -196,6 +204,7 @@
     "familyMaster": "主履歷",
     "familyTailor": "客製版",
     "familyNewTailor": "建立新的客製版",
+    "familyNewTailorHint": "針對單一職缺的副本，並依該職缺評分。主履歷不會被改動。",
     "switchBlocked": "等這一回合結束再切換。",
     "switchSaveError": "目前的內容無法儲存，先不切換。",
     "tailorDialogTitle": "從主履歷建立客製版",
@@ -313,7 +322,7 @@
     "summary": "{passed}/{total} 通過",
     "pass": "通過",
     "fail": "未通過",
-    "pending": "編譯後顯示",
+    "pending": "正在檢查 PDF…",
     "fixWithAi": "用 AI 修正",
     "fixPrompt": "ATS 檢查「{check}」（{name}）未通過。{meaning}\n\n請先呼叫 read_ats，再 apply_typst_edit 修正這項。保留套件、A4 紙張與 accent 顏色。",
     "checks": {

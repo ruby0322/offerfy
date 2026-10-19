@@ -6,6 +6,7 @@ import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
 import { useRouter } from "@/i18n/navigation";
 import { ApiError, createResume } from "@/lib/api";
+import { stashPendingCreate } from "@/lib/pending-create";
 
 export default function CreatePage() {
   const t = useTranslations("create");
@@ -24,6 +25,7 @@ export default function CreatePage() {
         title: title.trim() || undefined,
         locale,
       });
+      stashPendingCreate(resume.id);
       router.push(`/editor/${resume.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("error"));

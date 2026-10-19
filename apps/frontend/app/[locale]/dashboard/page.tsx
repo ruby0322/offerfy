@@ -88,6 +88,7 @@ type Doomed = { resume: Resume; tailorCount: number };
 export default function DashboardPage() {
   const t = useTranslations("dashboard");
   const tCommon = useTranslations("common");
+  const tPicker = useTranslations("picker");
   const router = useRouter();
   const toast = useToast();
   const [resumes, setResumes] = useState<Resume[] | null>(null);
@@ -127,6 +128,9 @@ export default function DashboardPage() {
   }, [router, t]);
 
   const { groups, orphans } = useMemo(() => groupResumes(resumes ?? []), [resumes]);
+  // The badges only need explaining to someone who has just grown their first
+  // tailored version, so the line appears then and stops being noise after.
+  const hasTailors = groups.some((group) => group.tailors.length > 0) || orphans.length > 0;
 
   async function onLogout() {
     try {
@@ -189,7 +193,27 @@ export default function DashboardPage() {
         ) : null}
 
         {resumes && resumes.length === 0 ? (
-          <div className="rr-card p-10 text-sm text-muted-foreground">{t("empty")}</div>
+          <div data-testid="dashboard-empty">
+            <p className="text-sm text-muted-foreground">{t("empty")}</p>
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              <Link href="/upload" className="rr-card rr-choice-card block p-7">
+                <h2 className="text-lg font-semibold tracking-tight">{tPicker("uploadTitle")}</h2>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  {tPicker("uploadBody")}
+                </p>
+              </Link>
+              <Link href="/create" className="rr-card rr-choice-card block p-7">
+                <h2 className="text-lg font-semibold tracking-tight">{tPicker("createTitle")}</h2>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  {tPicker("createBody")}
+                </p>
+              </Link>
+            </div>
+          </div>
+        ) : null}
+
+        {resumes && resumes.length > 0 && hasTailors ? (
+          <p className="mb-4 text-xs leading-5 text-muted-foreground">{t("tailorExplainer")}</p>
         ) : null}
 
         {resumes && resumes.length > 0 ? (

@@ -18,6 +18,7 @@ type Labels = {
   master: string;
   tailor: string;
   newTailor: string;
+  newTailorHint: string;
   blocked: string;
 };
 
@@ -162,9 +163,18 @@ export default function ResumeFamilyMenu({
             <DropdownMenuSeparator />
           </>
         ) : null}
-        <DropdownMenuItem data-testid="family-new-tailor" onSelect={onNewTailor}>
-          <Plus aria-hidden="true" />
-          {labels.newTailor}
+        <DropdownMenuItem
+          data-testid="family-new-tailor"
+          onSelect={onNewTailor}
+          className="items-start gap-2"
+        >
+          <Plus aria-hidden="true" className="mt-0.5 shrink-0" />
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span>{labels.newTailor}</span>
+            <span className="text-xs leading-4 text-muted-foreground">
+              {labels.newTailorHint}
+            </span>
+          </span>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

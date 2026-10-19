@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
   Accordion,
@@ -28,11 +29,30 @@ export default function AtsStrip({ report, onFix, fixing = false }: Props) {
   const passedCount = known.filter(Boolean).length;
   const summary =
     known.length > 0 ? t("summary", { passed: passedCount, total: ATS_CHECK_NAMES.length }) : t("pending");
+  const hasFailure = known.includes(false);
+
+  // Parseability is the thing worth knowing about, so a failing report opens the
+  // strip rather than hiding behind two clicks. Once the reader has collapsed it
+  // themselves, later reports leave it alone instead of fighting them.
+  const [open, setOpen] = useState("");
+  const userToggled = useRef(false);
+
+  useEffect(() => {
+    if (userToggled.current) return;
+    setOpen(hasFailure ? "ats" : "");
+  }, [hasFailure]);
+
+  function onOpenChange(next: string) {
+    userToggled.current = true;
+    setOpen(next);
+  }
 
   return (
     <Accordion
       type="single"
       collapsible
+      value={open}
+      onValueChange={onOpenChange}
       className="shrink-0 border-t border-border bg-background"
     >
       <AccordionItem value="ats" className="border-b-0">

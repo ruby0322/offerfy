@@ -125,22 +125,23 @@
     "badType": "Unsupported file type."
   },
   "login": {
-    "title": "Welcome back",
-    "lead": "Sign in with Google to keep your resume history.",
+    "title": "Sign in to Offerfy",
+    "lead": "Your resumes follow your account instead of this browser.",
     "google": "Continue with Google",
     "back": "Back to home"
   },
   "dashboard": {
     "title": "My resumes",
     "newResume": "New resume",
-    "empty": "No resumes yet. Create one or upload a file.",
+    "empty": "No resumes yet — start with one of these.",
     "open": "Open",
     "needLogin": "Please sign in with Google first.",
     "logout": "Log out",
     "sourceCreate": "Created",
     "sourceUpload": "Uploaded",
     "tailorCount": "{count, plural, one {# tailored version} other {# tailored versions}}",
-    "tailorBadge": "Tailored"
+    "tailorBadge": "Tailored",
+    "tailorExplainer": "Your master resume is the one you keep improving. A tailored version is a copy aimed at a single job."
   },
   "picker": {
     "title": "How do you want to start?",
@@ -178,7 +179,14 @@
     "attachTooLarge": "File is larger than 10 MiB.",
     "send": "Send",
     "sending": "Sending…",
-    "chatEmpty": "AI is optional. You can edit Typst on the left without ever opening chat.",
+    "chatEmpty": "Tell AI what to change and it edits this resume for you. Prefer to do it by hand? The Typst source is on the left.",
+    "suggestFillLabel": "Help me fill this in",
+    "suggestFillPrompt": "Help me fill in this resume. Ask me what you need to know, one thing at a time.",
+    "suggestBulletsLabel": "Make my bullets stronger",
+    "suggestBulletsPrompt": "Rewrite the experience bullets to lead with impact and include concrete numbers where my content supports it. Do not invent facts.",
+    "suggestAtsLabel": "Fix the ATS checks",
+    "suggestAtsPrompt": "Call read_ats, then use apply_typst_edit to fix every failing check. Keep the template package, A4 paper, and accent color.",
+    "guestSaveNudge": "Downloaded. This resume lives in this browser only — sign in to keep it.",
     "chatNotConfigured": "OpenAI is not configured",
     "importFillPrompt": "Fill the basic-resume template from this uploaded resume. Call read_typst, then apply_typst_edit with the full source. Map name, email, education, work, projects, and skills. Keep the basic-resume package, A4 paper, and accent color.",
     "loadError": "Could not load this resume.",
@@ -193,6 +201,7 @@
     "familyMaster": "Master",
     "familyTailor": "Tailored",
     "familyNewTailor": "New tailored version",
+    "familyNewTailorHint": "A copy aimed at one job, scored against that role. Your master stays untouched.",
     "switchBlocked": "Wait for this turn to finish before switching.",
     "switchSaveError": "Could not save this document, so it stayed open.",
     "tailorDialogTitle": "New tailored version from the master",
@@ -310,7 +319,7 @@
     "summary": "{passed}/{total} pass",
     "pass": "Pass",
     "fail": "Fail",
-    "pending": "Shown after compile",
+    "pending": "Checking your PDF…",
     "fixWithAi": "Fix with AI",
     "fixPrompt": "ATS check \"{check}\" ({name}) failed. {meaning}\n\nCall read_ats, then apply_typst_edit to fix this check. Keep the template package, A4 paper, and accent color.",
     "checks": {

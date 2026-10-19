@@ -40,6 +40,12 @@ const messageVariants: Variants = {
   },
 };
 
+export type ChatSuggestion = {
+  key: string;
+  label: string;
+  prompt: string;
+};
+
 type Props = {
   messages: ChatMessage[];
   draft: string;
@@ -60,6 +66,7 @@ type Props = {
   currentSource?: string;
   onRestoreEdit?: (source: string) => void;
   familyActions?: FamilyCardActions;
+  suggestions?: ChatSuggestion[];
 };
 
 export default function EditorChatPanel({
@@ -82,8 +89,10 @@ export default function EditorChatPanel({
   currentSource,
   onRestoreEdit,
   familyActions,
+  suggestions,
 }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const composingRef = useRef(false);
   const confirmEnterRef = useRef(false);
@@ -162,6 +171,17 @@ export default function EditorChatPanel({
     setDragging(false);
   }
 
+  // Fills the composer and hands the caret over. Deliberately does not submit:
+  // the user reads it, edits it, and sends it themselves.
+  function pickSuggestion(prompt: string) {
+    onDraftChange(prompt);
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.focus();
+    const end = prompt.length;
+    textarea.setSelectionRange(end, end);
+  }
+
   function onDrop(event: DragEvent) {
     event.preventDefault();
     setDragging(false);
@@ -174,7 +194,25 @@ export default function EditorChatPanel({
         <ScrollArea className="chat-scroll h-full min-w-0" viewportRef={viewportRef}>
           <div className="min-w-0 space-y-4 py-4">
             {messages.length === 0 && !sending ? (
-              <p className="text-sm text-muted-foreground">{emptyHint}</p>
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">{emptyHint}</p>
+                {suggestions && suggestions.length > 0 ? (
+                  <ul className="space-y-1.5">
+                    {suggestions.map((suggestion) => (
+                      <li key={suggestion.key}>
+                        <button
+                          type="button"
+                          data-testid={`chat-suggestion-${suggestion.key}`}
+                          className="w-full rounded-md border border-border px-3 py-2 text-left text-sm transition-colors hover:border-ring hover:bg-muted/50"
+                          onClick={() => pickSuggestion(suggestion.prompt)}
+                        >
+                          {suggestion.label}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
             ) : null}
             <AnimatePresence initial={false}>
               {messages.map((message, index) => (
@@ -250,6 +288,7 @@ export default function EditorChatPanel({
             }}
           />
           <Textarea
+            ref={textareaRef}
             value={draft}
             onChange={(event) => onDraftChange(event.target.value)}
             onCompositionStart={onCompositionStart}

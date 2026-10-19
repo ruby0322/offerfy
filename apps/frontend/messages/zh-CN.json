@@ -128,22 +128,23 @@
     "badType": "不支持的文件类型。"
   },
   "login": {
-    "title": "欢迎回来",
-    "lead": "使用 Google 登录，保存简历记录。",
+    "title": "登录 Offerfy",
+    "lead": "简历跟着账号，不再只留在这个浏览器。",
     "google": "使用 Google 登录",
     "back": "返回首页"
   },
   "dashboard": {
     "title": "我的简历",
     "newResume": "新增简历",
-    "empty": "还没有简历。从创建或上传开始。",
+    "empty": "还没有简历，从这里开始。",
     "open": "打开",
     "needLogin": "请先使用 Google 登录。",
     "logout": "退出",
     "sourceCreate": "创建",
     "sourceUpload": "上传",
     "tailorCount": "{count} 份定制版",
-    "tailorBadge": "定制版"
+    "tailorBadge": "定制版",
+    "tailorExplainer": "主简历是你持续打磨的那一份；定制版是针对单一职位的副本。"
   },
   "picker": {
     "title": "选择开始方式",
@@ -181,7 +182,14 @@
     "attachTooLarge": "文件超过 10 MiB。",
     "send": "发送",
     "sending": "发送中…",
-    "chatEmpty": "AI 为选用。可以直接编辑左侧 Typst，不必打开对话。",
+    "chatEmpty": "说出想改的地方，AI 就会直接改这份简历。想自己动手，左侧就是 Typst 源码。",
+    "suggestFillLabel": "帮我把简历填起来",
+    "suggestFillPrompt": "帮我填写这份简历。需要什么信息就问我，一次问一项。",
+    "suggestBulletsLabel": "让经历条目更有力",
+    "suggestBulletsPrompt": "重写经历条目，开头先讲成果，内容撑得起来的地方就写进具体数字。不要编造事实。",
+    "suggestAtsLabel": "修正 ATS 检查",
+    "suggestAtsPrompt": "调用 read_ats，然后用 apply_typst_edit 修正所有未通过的检查。保留模板包、A4 纸张与主题色。",
+    "guestSaveNudge": "已下载。这份简历只存在这个浏览器，登录才能保存。",
     "chatNotConfigured": "未设置 OpenAI",
     "importFillPrompt": "请用这份上传的简历填入 basic-resume 模板。先调用 read_typst，再用完整 source 调用 apply_typst_edit。对应姓名、email、学历、工作、项目与技能。保留 basic-resume 套件、A4 纸张与 accent 颜色。",
     "loadError": "无法加载简历。",
@@ -196,6 +204,7 @@
     "familyMaster": "主简历",
     "familyTailor": "定制版",
     "familyNewTailor": "新建定制版",
+    "familyNewTailorHint": "针对单一职位的副本，并按该职位评分。主简历不会被改动。",
     "switchBlocked": "等这一轮结束再切换。",
     "switchSaveError": "当前内容无法保存，暂不切换。",
     "tailorDialogTitle": "从主简历新建定制版",
@@ -313,7 +322,7 @@
     "summary": "{passed}/{total} 通过",
     "pass": "通过",
     "fail": "未通过",
-    "pending": "编译后显示",
+    "pending": "正在检查 PDF…",
     "fixWithAi": "用 AI 修正",
     "fixPrompt": "ATS 检查「{check}」（{name}）未通过。{meaning}\n\n请先调用 read_ats，再 apply_typst_edit 修正这项。保留套件、A4 纸张与 accent 颜色。",
     "checks": {

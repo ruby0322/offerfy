@@ -8,7 +8,7 @@ import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import { useToast } from "@/components/Toaster";
 import CompileErrorDialog from "@/components/editor/CompileErrorDialog";
 import CreateTailorDialog, { type TailorDraft } from "@/components/editor/CreateTailorDialog";
-import EditorChatPanel from "@/components/editor/EditorChatPanel";
+import EditorChatPanel, { type ChatSuggestion } from "@/components/editor/EditorChatPanel";
 import EditorHeader from "@/components/editor/EditorHeader";
 import EditorHistoryPanel from "@/components/editor/EditorHistoryPanel";
 import EditorPreview from "@/components/editor/EditorPreview";
@@ -53,6 +53,7 @@ import {
 } from "@/lib/api";
 import { formatUserAttachmentMessage, parseToolPayload } from "@/lib/chat-tools";
 import type { AtsCheckName } from "@/lib/ats-checks";
+import { peekPendingCreate, takePendingCreate } from "@/lib/pending-create";
 import { peekPendingUpload, takePendingUpload } from "@/lib/pending-upload";
 
 const TypstSourceEditor = dynamic(
@@ -144,7 +145,9 @@ export default function EditorShell({ resumeId }: Props) {
   const [downloading, setDownloading] = useState(false);
   const [chatUnavailable, setChatUnavailable] = useState(false);
   const [leftTab, setLeftTab] = useState(() =>
-    peekPendingUpload(resumeId) ? "chat" : (loadEditorTab(resumeId) ?? "typst"),
+    peekPendingUpload(resumeId) || peekPendingCreate(resumeId)
+      ? "chat"
+      : (loadEditorTab(resumeId) ?? "typst"),
   );
   const [compileError, setCompileError] = useState<string | null>(null);
   const [signedIn, setSignedIn] = useState(false);
@@ -167,6 +170,7 @@ export default function EditorShell({ resumeId }: Props) {
   const sendingRef = useRef(false);
   const pendingTailorRef = useRef<string | null>(null);
   const kickstartedRef = useRef(false);
+  const savePromptedRef = useRef(false);
   const previewObjectUrls = useRef<string[]>([]);
 
   const setPreviewPages = useCallback((svgs: string[]) => {
@@ -356,6 +360,17 @@ export default function EditorShell({ resumeId }: Props) {
         /* export still succeeded */
       }
       setCompileError(null);
+      // A guest who just downloaded a PDF has seen the product work, which is the
+      // honest moment to mention that the resume is only in this browser. Once per
+      // editor session, never for a signed-in user, and never before this point.
+      if (!signedIn && !savePromptedRef.current) {
+        savePromptedRef.current = true;
+        try {
+          toast(t("guestSaveNudge"));
+        } catch {
+          /* the download is what mattered */
+        }
+      }
     } catch (err) {
       failCompile(err, t("compileError"));
     } finally {
@@ -514,6 +529,15 @@ export default function EditorShell({ resumeId }: Props) {
     }, 0);
     return () => window.clearTimeout(handle);
   }, [kind, loaded, messages.length, resumeId, t, targetContext, targetLabel]);
+
+  // A resume created a moment ago opens on chat, so a first-timer meets the
+  // composer instead of the starter template's Typst markup. Persist that so a
+  // reload does not drop them back into the source; from here the user's own tab
+  // choice takes over, which is why the handoff marker is consumed.
+  useEffect(() => {
+    if (!takePendingCreate(resumeId)) return;
+    saveEditorTab(resumeId, "chat");
+  }, [resumeId]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -780,6 +804,17 @@ export default function EditorShell({ resumeId }: Props) {
   }
 
   const chatEmptyHint = chatUnavailable ? t("chatNotConfigured") : t("chatEmpty");
+  // Openers for a master whose chat has never been used. A tailor gets none: its
+  // kickstart already opens with a score against the target role. These fill the
+  // composer and stop there, so chat stays something the user chooses to use.
+  const chatSuggestions: ChatSuggestion[] | undefined =
+    chatUnavailable || kind === "tailor"
+      ? undefined
+      : [
+          { key: "fill", label: t("suggestFillLabel"), prompt: t("suggestFillPrompt") },
+          { key: "bullets", label: t("suggestBulletsLabel"), prompt: t("suggestBulletsPrompt") },
+          { key: "ats", label: t("suggestAtsLabel"), prompt: t("suggestAtsPrompt") },
+        ];
   const masterTitle =
     family && family.master.id !== resumeId ? family.master.title : title;
   const tailorCount = family && family.master.id === resumeId ? family.tailors.length : 0;
@@ -803,6 +838,7 @@ export default function EditorShell({ resumeId }: Props) {
               master: t("familyMaster"),
               tailor: t("familyTailor"),
               newTailor: t("familyNewTailor"),
+              newTailorHint: t("familyNewTailorHint"),
               blocked: t("switchBlocked"),
             }}
           />
@@ -894,6 +930,7 @@ export default function EditorShell({ resumeId }: Props) {
                   currentSource={source}
                   onRestoreEdit={onRestoreEdit}
                   familyActions={familyActions}
+                  suggestions={chatSuggestions}
                 />
               </TabsContent>
               <TabsContent
