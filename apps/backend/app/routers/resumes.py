@@ -248,6 +248,7 @@ def create_tailor_route(
             title=body.title,
             target_label=body.target_label,
             target_context=body.target_context,
+            fork_from=body.fork_from,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

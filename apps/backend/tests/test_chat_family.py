@@ -60,6 +60,75 @@ def test_create_tailor_from_tailor_chat_emits_event_and_keeps_chats_apart(
     assert any(row["role"] == "assistant" for row in first_rows)
 
 
+def test_create_tailor_tool_can_fork_the_open_tailor(client, openai_enabled, monkeypatch):
+    master = client.post("/v1/resumes", json={"locale": "en", "title": "M"}).json()
+    first = client.post(f"/v1/resumes/{master['id']}/tailors", json={"title": "A"}).json()
+    client.put(
+        f"/v1/resumes/{first['id']}",
+        json={"typst_source": first["typst_source"] + "\n// tailor-only"},
+    )
+    _patch(
+        monkeypatch,
+        [
+            llm_message(
+                tool_calls=[
+                    tool_call(
+                        "create_tailor",
+                        {"title": "Beta PM", "fork_from": "current"},
+                        "ct-1",
+                    )
+                ]
+            ),
+            llm_message(content="Created it from this version."),
+        ],
+    )
+    result = post_chat(client, first["id"], json={"message": "another one from this version"})
+    created = next(e for e in result["events"] if e["type"] == "tailor_created")
+    new = client.get(f"/v1/resumes/{created['resume_id']}").json()
+    assert "tailor-only" in new["typst_source"]
+    assert new["parent_resume_id"] == master["id"]
+    assert _tool_rows(client, first["id"])[0]["result"]["forked_from"] == "current"
+
+
+def test_create_tailor_tool_defaults_to_the_master(client, openai_enabled, monkeypatch):
+    master = client.post("/v1/resumes", json={"locale": "en", "title": "M"}).json()
+    first = client.post(f"/v1/resumes/{master['id']}/tailors", json={"title": "A"}).json()
+    client.put(
+        f"/v1/resumes/{first['id']}",
+        json={"typst_source": first["typst_source"] + "\n// tailor-only"},
+    )
+    _patch(
+        monkeypatch,
+        [
+            llm_message(tool_calls=[tool_call("create_tailor", {"title": "Beta PM"}, "ct-1")]),
+            llm_message(content="Created it."),
+        ],
+    )
+    result = post_chat(client, first["id"], json={"message": "one for Beta"})
+    created = next(e for e in result["events"] if e["type"] == "tailor_created")
+    new = client.get(f"/v1/resumes/{created['resume_id']}").json()
+    assert "tailor-only" not in new["typst_source"]
+    assert _tool_rows(client, first["id"])[0]["result"]["forked_from"] == "master"
+
+
+def test_create_tailor_rejects_unknown_fork_source(client, openai_enabled, monkeypatch):
+    master = client.post("/v1/resumes", json={"locale": "en", "title": "M"}).json()
+    _patch(
+        monkeypatch,
+        [
+            llm_message(
+                tool_calls=[
+                    tool_call("create_tailor", {"title": "X", "fork_from": "sibling"}, "ct-1")
+                ]
+            ),
+            llm_message(content="Could not."),
+        ],
+    )
+    result = post_chat(client, master["id"], json={"message": "make one"})
+    assert "tailor_created" not in [e["type"] for e in result["events"]]
+    assert "fork_from" in _tool_rows(client, master["id"])[0]["result"]["error"]
+
+
 def test_create_tailor_once_per_turn(client, openai_enabled, monkeypatch):
     master = client.post("/v1/resumes", json={"locale": "en"}).json()
     _patch(

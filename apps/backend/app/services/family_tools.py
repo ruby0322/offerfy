@@ -24,8 +24,10 @@ _CREATE_TAILOR = {
     "type": "function",
     "name": CREATE_TAILOR_TOOL,
     "description": (
-        "Create a new tailor resume copied from the master's saved draft. "
-        "At most once per turn. The new tailor opens after this turn."
+        "Create a new tailor resume. It copies the master's saved draft, or this "
+        "tailor's own current draft when fork_from is 'current'. The new tailor "
+        "always belongs to the master. At most once per turn. The new tailor "
+        "opens after this turn."
     ),
     "parameters": {
         "type": "object",
@@ -33,6 +35,15 @@ _CREATE_TAILOR = {
             "title": {"type": "string"},
             "target_label": {"type": "string"},
             "target_context": {"type": "string"},
+            "fork_from": {
+                "type": "string",
+                "enum": ["master", "current"],
+                "description": (
+                    "Which saved draft to copy. 'master' (the default) starts from the "
+                    "master resume. 'current' starts from the tailor open in this chat, "
+                    "for when the user wants a new version of what they are looking at."
+                ),
+            },
         },
         "required": ["title"],
         "additionalProperties": False,
@@ -83,6 +94,7 @@ def family_tool_handlers(db: Session, resume: Resume) -> dict[str, Callable[[dic
                 title=args.get("title"),
                 target_label=args.get("target_label"),
                 target_context=args.get("target_context"),
+                fork_from=str(args.get("fork_from") or "master"),
             )
         except ValueError as exc:
             return json.dumps({"error": str(exc)})
@@ -94,6 +106,7 @@ def family_tool_handlers(db: Session, resume: Resume) -> dict[str, Callable[[dic
                 "tailor_id": tailor.id,
                 "title": tailor.title,
                 "target_label": tailor.target_label,
+                "forked_from": "current" if args.get("fork_from") == "current" else "master",
             },
             ensure_ascii=False,
         )

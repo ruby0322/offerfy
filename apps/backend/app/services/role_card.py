@@ -23,13 +23,18 @@ def build_role_card(db: Session, resume: Resume) -> str:
             "- Call read_master to see the master resume. "
             "You cannot edit the master from here."
         )
+        lines.append(
+            "- create_tailor defaults to copying the master. Pass fork_from='current' "
+            "when the user wants the new tailor based on THIS tailor's draft, for "
+            "example 'make another one from this version'."
+        )
     else:
         lines.append(
             f"- You are editing the MASTER resume titled {resume.title!r}. Tailors fork from it."
         )
     lines += [
         "- apply_typst_edit changes only this document.",
-        "- create_tailor makes a new tailor from the master's saved draft. Call it at most "
+        "- create_tailor makes a new tailor from a saved draft. Call it at most "
         "once per turn. Ask for the job title or description first when it is unclear. "
         "Do not edit the new tailor in this turn; tell the user it will open next.",
         "- propose_memory only suggests a durable preference or fact about the person "

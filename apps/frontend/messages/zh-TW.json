@@ -209,6 +209,7 @@
     "tailorCreate": "建立",
     "tailorCreating": "建立中…",
     "tailorCancel": "取消",
+    "tailorForkCurrent": "以目前這份客製版為基礎，而不是主履歷",
     "tailorCreateError": "無法建立客製版。",
     "toolReadMaster": "讀取主履歷",
     "toolCreateTailor": "建立客製版",

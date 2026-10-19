@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -51,6 +53,7 @@ class TailorCreate(BaseModel):
     title: str
     target_label: str | None = None
     target_context: str | None = None
+    fork_from: Literal["master", "current"] = "master"
 
 
 class FamilyMember(BaseModel):

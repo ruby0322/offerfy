@@ -206,6 +206,7 @@
     "tailorCreate": "Create",
     "tailorCreating": "Creating…",
     "tailorCancel": "Cancel",
+    "tailorForkCurrent": "Start from this tailored version instead of the master",
     "tailorCreateError": "Could not create the tailored version.",
     "toolReadMaster": "Read the master resume",
     "toolCreateTailor": "Created a tailored version",

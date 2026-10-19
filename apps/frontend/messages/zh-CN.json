@@ -209,6 +209,7 @@
     "tailorCreate": "新建",
     "tailorCreating": "新建中…",
     "tailorCancel": "取消",
+    "tailorForkCurrent": "以当前这份定制版为基础，而不是主简历",
     "tailorCreateError": "无法新建定制版。",
     "toolReadMaster": "读取主简历",
     "toolCreateTailor": "新建定制版",

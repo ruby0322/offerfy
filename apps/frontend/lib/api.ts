@@ -246,7 +246,12 @@ export async function deleteResume(id: string): Promise<void> {
 
 export async function createTailor(
   id: string,
-  payload: { title: string; target_label?: string; target_context?: string },
+  payload: {
+    title: string;
+    target_label?: string;
+    target_context?: string;
+    fork_from?: "master" | "current";
+  },
 ): Promise<Resume> {
   return asResume(
     await apiJson<unknown>(`/api/v1/resumes/${id}/tailors`, {

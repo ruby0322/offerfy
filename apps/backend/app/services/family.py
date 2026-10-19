@@ -8,6 +8,7 @@ from app.services.revisions import latest_revision, set_draft_source
 TITLE_MAX = 255
 LABEL_MAX = 255
 CONTEXT_MAX = 8000
+FORK_SOURCES = ("master", "current")
 
 
 def family_master(db: Session, resume: Resume) -> Resume:
@@ -41,17 +42,24 @@ def create_tailor(
     title: str | None,
     target_label: str | None = None,
     target_context: str | None = None,
+    fork_from: str = "master",
 ) -> Resume:
     clean_title = (title or "").strip()
     if not clean_title:
         raise ValueError("Title is required")
     if len(clean_title) > TITLE_MAX:
         raise ValueError("Title is too long")
+    if fork_from not in FORK_SOURCES:
+        raise ValueError("fork_from must be 'master' or 'current'")
     master = family_master(db, member)
-    forked = latest_revision(db, master.id)
+    # The family stays one level deep: a tailor forked from another tailor still
+    # hangs off the master, and only the copied draft differs. The revision it
+    # forked from records the real origin.
+    origin = member if fork_from == "current" else master
+    forked = latest_revision(db, origin.id)
     tailor = Resume(
         title=clean_title,
-        typst_source=master.typst_source,
+        typst_source=origin.typst_source,
         source="create",
         locale=master.locale,
         user_id=master.user_id,
@@ -64,5 +72,5 @@ def create_tailor(
     )
     db.add(tailor)
     db.flush()
-    set_draft_source(db, tailor, master.typst_source)
+    set_draft_source(db, tailor, origin.typst_source)
     return tailor

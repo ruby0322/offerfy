@@ -970,6 +970,7 @@ export default function EditorShell({ resumeId }: Props) {
       {tailorDialogOpen ? (
         <CreateTailorDialog
           defaultTitle={`${masterTitle} – `}
+          canForkCurrent={kind === "tailor"}
           creating={creatingTailor}
           error={tailorError}
           onCreate={(payload) => void onCreateTailor(payload)}
@@ -983,6 +984,7 @@ export default function EditorShell({ resumeId }: Props) {
             create: t("tailorCreate"),
             creating: t("tailorCreating"),
             cancel: t("tailorCancel"),
+            forkCurrent: t("tailorForkCurrent"),
           }}
         />
       ) : null}

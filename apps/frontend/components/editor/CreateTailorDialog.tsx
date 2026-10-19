@@ -9,10 +9,13 @@ export type TailorDraft = {
   title: string;
   target_label?: string;
   target_context?: string;
+  fork_from?: "master" | "current";
 };
 
 type Props = {
   defaultTitle: string;
+  /** Offer the current tailor as the starting draft. Only a tailor has one. */
+  canForkCurrent?: boolean;
   creating: boolean;
   error: string | null;
   onCreate: (draft: TailorDraft) => void;
@@ -26,11 +29,13 @@ type Props = {
     create: string;
     creating: string;
     cancel: string;
+    forkCurrent: string;
   };
 };
 
 export default function CreateTailorDialog({
   defaultTitle,
+  canForkCurrent = false,
   creating,
   error,
   onCreate,
@@ -40,6 +45,7 @@ export default function CreateTailorDialog({
   const [name, setName] = useState(defaultTitle);
   const [targetLabel, setTargetLabel] = useState("");
   const [targetContext, setTargetContext] = useState("");
+  const [forkCurrent, setForkCurrent] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -63,6 +69,7 @@ export default function CreateTailorDialog({
       title,
       target_label: targetLabel.trim() || undefined,
       target_context: targetContext.trim() || undefined,
+      fork_from: canForkCurrent && forkCurrent ? "current" : undefined,
     });
   }
 
@@ -118,6 +125,18 @@ export default function CreateTailorDialog({
             onChange={(event) => setTargetContext(event.target.value)}
           />
         </label>
+        {canForkCurrent ? (
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="fork_current"
+              checked={forkCurrent}
+              onChange={(event) => setForkCurrent(event.target.checked)}
+              className="mt-0.5 size-4 shrink-0 accent-primary"
+            />
+            {labels.forkCurrent}
+          </label>
+        ) : null}
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="outline" size="sm" disabled={creating} onClick={onClose}>

@@ -69,6 +69,34 @@ def test_create_tailor_from_tailor_forks_master_not_tailor(client):
     assert "tailor-only" not in second["typst_source"]
 
 
+def test_create_tailor_from_current_copies_the_open_tailor(client):
+    master = _master(client)
+    first = client.post(f"/v1/resumes/{master['id']}/tailors", json={"title": "A"}).json()
+    client.put(
+        f"/v1/resumes/{first['id']}",
+        json={"typst_source": first["typst_source"] + "\n// tailor-only"},
+    )
+    second = client.post(
+        f"/v1/resumes/{first['id']}/tailors",
+        json={"title": "B", "fork_from": "current"},
+    ).json()
+    assert "tailor-only" in second["typst_source"]
+    # The family stays one level deep even when the draft came from a sibling.
+    assert second["parent_resume_id"] == master["id"]
+    body = client.get(f"/v1/resumes/{second['id']}/family").json()
+    assert body["master"]["id"] == master["id"]
+    assert {row["id"] for row in body["tailors"]} == {first["id"], second["id"]}
+
+
+def test_create_tailor_rejects_unknown_fork_source(client):
+    master = _master(client)
+    res = client.post(
+        f"/v1/resumes/{master['id']}/tailors",
+        json={"title": "B", "fork_from": "sibling"},
+    )
+    assert res.status_code == 422
+
+
 def test_create_tailor_requires_title(client):
     master = _master(client)
     res = client.post(f"/v1/resumes/{master['id']}/tailors", json={"title": "  "})
