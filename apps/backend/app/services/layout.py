@@ -1,21 +1,29 @@
 """Render-level facts about the compiled resume.
 
-Two kinds of question live here, and the split is the whole point.
+Geometry, always: how many pages, how full each one is, and every rendered item
+with the rows it occupies and the room left on its last line. All of it is
+bounding-box arithmetic over the PDF `pdfminer` already parses for `ats.py`, so
+it costs nothing, it cannot be imagined, and -- the property that matters -- it
+does not depend on the font, the language or the template.
 
-Geometry, always: how many pages, which text wrapped, what the page break cut
-in half, how full each page is. The PDF knows all of it exactly, pdfminer is
-already a dependency (`ats.py` parses the same bytes), and the answer costs
-nothing and cannot be imagined.
+Nothing here compares strings. An earlier version took quoted text and searched
+the page for it, and that single step dragged in everything the boxes were
+immune to: Typst renders `'` as a right single quote and `--` as an en dash, CJK
+has no word spaces to join rows on, a truncating fallback silently answered
+about a fragment. Five bugs, every one of them confident and wrong, none of them
+in the geometry. The interface was inverted instead: hand back every item and
+let the caller -- which holds the source -- do the association it is better at.
 
 Vision, only when asked: "does this page look crowded". No bounding box answers
-that, so `questions` go to the Decisions API over the rendered PNGs -- one call,
-images billed once however many questions ride along, input tokens only. A
-caller that asks no questions never rasterizes and never leaves the process.
+that, so `questions` and `scores` go to the Decisions API over the rendered
+PNGs -- one call, images billed once however many ride along, input tokens only.
+A caller that asks nothing never rasterizes and never leaves the process.
 
-Do not send the vision side something geometry can answer. gpt-6-luna is a
-compact model whose OCR is its weakest axis, so "did this bullet wrap" is both
-the question it is most likely to get wrong and the one the row table answers
-exactly.
+Measured, so that the split is not a matter of taste: on Latin text the vision
+model matches the row table on wrapping (4/4, confidence 0.99-1.0), but it read
+a two-row Chinese bullet as one (confidence 0.7). This product ships zh-TW and
+zh-CN, so geometry stays the primary answer and vision is what gets asked when
+geometry says it cannot measure.
 """
 
 from __future__ import annotations
@@ -35,6 +43,13 @@ from pdfminer.layout import LTChar, LTTextContainer, LTTextLine
 
 from app.config import get_settings
 
+# Thresholds shared with the ATS check so "substantial text" means one thing in
+# this codebase. The horizontal gap is NOT shared: `ats.py` asks for a gap of
+# 12% of the page width (71pt on A4) before calling a layout multi-column,
+# which a two-column grid with a 24pt gutter passes -- fine for an ATS parser
+# question, useless here, where a 24pt gutter already breaks the row model.
+from app.services.ats import COLUMN_Y_OVERLAP_FRAC, SUBSTANTIAL_CHARS
+
 logger = logging.getLogger(__name__)
 
 # Two lines belong to the same visual row when they overlap this much of the
@@ -52,15 +67,24 @@ OVERFLOW_EM = 0.6
 # A page holding less than this much of its text area reads as "nearly empty",
 # which for a resume usually means one line spilled and should be pulled back.
 SPARSE_PAGE_FILL = 0.25
-# Below this many words a prefix match means nothing, so a target that needs
-# more trimming than that is reported as not found instead of mismatched.
-MIN_TARGET_WORDS = 4
+ASK_VISION_HINT = (
+    "Geometry cannot answer this one. Ask the same thing through `questions` "
+    "instead: the vision model sees the rendered page directly."
+)
+# Two substantial lines at the same height with at least this much clear space
+# between them are side-by-side columns. Scaled to the body text: ~1.5em is far
+# more than word spacing or a split-up line of tabbed text, and far less than
+# any real gutter.
+COLUMN_GAP_EM = 1.5
+MIN_COLUMN_GAP_PT = 10.0
 
-MAX_TARGETS = 6
 MAX_QUESTIONS = 6
 MAX_SCORES = 2
 MAX_FINDINGS = 6
 TEXT_CLIP = 80
+# Items are listed in bulk, so their heads are shorter than a finding's text:
+# enough for the caller to recognise which of its own bullets this is.
+HEAD_CLIP = 44
 
 # A4 at 144 ppi is 1191x1684 px, which is ceil(1191/32) * ceil(1684/32) = 2,014
 # patches of 32px -- inside the 2,500-patch `high` budget, so the page is billed
@@ -147,56 +171,14 @@ VISION_PREAMBLE = (
     "alignment, and where things sit on the page."
 )
 
-_BULLET_PREFIX = re.compile(r"^[\s•‣◦·⁃−–—*+-]+")
 _WS = re.compile(r"\s+")
 
-# Typst rewrites punctuation on the way to the page: ' becomes a right single
-# quote, "..." become curly, -- becomes an en dash, ... becomes an ellipsis. A
-# target quoted from the source therefore never matches the rendering
-# character for character, so both sides fold back to ASCII before comparing.
-# Without this, one apostrophe in a bullet was enough to fail the exact match,
-# fall through to the prefix search, and return an answer about a fragment.
-_FOLD = str.maketrans(
-    {
-        "\u2018": "'",
-        "\u2019": "'",
-        "\u201a": "'",
-        "\u201b": "'",
-        "\u201c": '"',
-        "\u201d": '"',
-        "\u201e": '"',
-        "\u2032": "'",
-        "\u2033": '"',
-        "\u2013": "-",
-        "\u2014": "-",
-        "\u2212": "-",
-        "\u2026": "...",
-        "\u00a0": " ",
-    }
-)
-# Typst also collapses -- into an en dash and --- into an em dash, both of which
-# fold to a single "-" above. The quoted side still carries the literal runs, so
-# they collapse too.
-_DASH_RUN = re.compile(r"-{2,}")
-
-# Rows are joined with a space because a Latin line break falls between words.
-# CJK text has no word spaces, so the same space lands *inside* a word and the
-# target can never be found -- and the prefix fallback cannot rescue it either,
-# because that splits on spaces too. No space at a CJK boundary.
-_CJK_RANGES = (
-    (0x2E80, 0x303F),  # CJK radicals, Kangxi, CJK punctuation
-    (0x3040, 0x30FF),  # kana
-    (0x3400, 0x4DBF),  # ext A
-    (0x4E00, 0x9FFF),  # unified
-    (0xAC00, 0xD7AF),  # hangul
-    (0xF900, 0xFAFF),  # compatibility
-    (0xFF00, 0xFFEF),  # fullwidth forms
-)
-
-
-def _is_cjk(char: str) -> bool:
-    code = ord(char)
-    return any(low <= code <= high for low, high in _CJK_RANGES)
+# What Typst actually draws at the head of a list item: bullet, triangle, dash
+# for nesting levels one, two and three. The dash is kept separate because a
+# rendered line starting with a dash can equally be content, so the two are
+# told apart by whether the line above ran to the column edge.
+_RENDERED_MARKER = re.compile("^[\u2022\u2023\u25e6\u00b7\u2043]")
+_DASH_MARKER = re.compile("^[-\u2013\u2014\u2212]")
 
 
 # --- geometry ---------------------------------------------------------------
@@ -205,11 +187,6 @@ def _is_cjk(char: str) -> bool:
 def _clip(text: str, limit: int = TEXT_CLIP) -> str:
     flat = _WS.sub(" ", text or "").strip()
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
-
-
-def _normalize(text: str) -> str:
-    flat = _DASH_RUN.sub("-", (text or "").translate(_FOLD))
-    return _WS.sub(" ", flat).strip().casefold()
 
 
 def _text_lines(pdf_bytes: bytes) -> list[dict]:
@@ -294,6 +271,58 @@ def _rows(lines: list[dict]) -> list[dict]:
     return rows
 
 
+def _is_multi_column(lines: list[dict]) -> bool:
+    """Does the page put text side by side?
+
+    Everything else in this module reads the page as one column of rows running
+    top to bottom. Side-by-side text breaks that at the root: two columns at the
+    same height merge into a single row, their text interleaves, and a line that
+    filled its own narrow column still measures short against the page, so a
+    wrap cannot be seen at all. When this is true the row model is not wrong at
+    the margins -- it is answering about a document that does not exist.
+    """
+    # Conservative on purpose: it catches text set side by side in columns wide
+    # enough to hold sentences, and misses a narrow sidebar whose lines are all
+    # shorter than SUBSTANTIAL_CHARS (altacv's, for one). The miss is survivable
+    # because the escalation rule does not depend on this flag: the tool tells
+    # the caller to ask the vision model whenever a geometric answer is missing
+    # or doubted, and a sidebar whose rows are merged tends to produce exactly
+    # that -- a merged row whose item geometry is visibly nonsense.
+    by_page: dict[int, list[dict]] = {}
+    for line in lines:
+        by_page.setdefault(line["page"], []).append(line)
+    for page_lines in by_page.values():
+        size = max((line["size"] for line in page_lines), default=10.0)
+        gap_min = max(MIN_COLUMN_GAP_PT, size * COLUMN_GAP_EM)
+        # Character count only, unlike the ATS check, which also counts any box
+        # wider than a fifth of the page. That branch lets a right-aligned repo
+        # link or tech-stack line through, and a single-column template with
+        # one of those beside a bullet is still a single column. A real text
+        # column has long lines.
+        solid = [
+            line
+            for line in page_lines
+            if len(line["text"].strip()) >= SUBSTANTIAL_CHARS
+        ]
+        for index, left in enumerate(solid):
+            for right in solid[index + 1 :]:
+                overlap = min(left["y1"], right["y1"]) - max(left["y0"], right["y0"])
+                shortest = min(
+                    left["y1"] - left["y0"], right["y1"] - right["y0"]
+                ) or 1.0
+                if overlap < shortest * COLUMN_Y_OVERLAP_FRAC:
+                    continue
+                if left["x1"] <= right["x0"]:
+                    gap = right["x0"] - left["x1"]
+                elif right["x1"] <= left["x0"]:
+                    gap = left["x0"] - right["x1"]
+                else:
+                    continue
+                if gap > gap_min:
+                    return True
+    return False
+
+
 def _body_size(rows: list[dict]) -> float:
     """The most common size by text volume. Headings are rarer than body text."""
     weights: Counter[float] = Counter()
@@ -352,12 +381,21 @@ def _is_continuation(
     row = rows[index]
     if abs(row["size"] - body_size) >= 0.6:
         return False
-    # A new bullet starts an item; it never continues one.
-    if _BULLET_PREFIX.match(row["text"]) and row["x0"] <= body_left + 1:
+    text = row["text"].lstrip()
+    # A list marker always starts an item, nested or not. Testing the indent
+    # instead treated a sub-bullet as a continuation of its parent and merged a
+    # whole nested list into one item.
+    if _RENDERED_MARKER.match(text):
+        return False
+    previous_full = index > 0 and _row_is_full(rows[index - 1], body_left, body_size)
+    # A dash is both Typst's third-level marker and ordinary content. The line
+    # above settles it: if that line ran to the edge the text continued, so this
+    # dash is content; if it ended early, a new item started.
+    if _DASH_MARKER.match(text) and not previous_full:
         return False
     if row["x0"] > body_left + 1:
         return True
-    return index > 0 and _row_is_full(rows[index - 1], body_left, body_size)
+    return previous_full
 
 
 def _page_geometry(rows: list[dict]) -> tuple[list[int], list[float]]:
@@ -446,138 +484,59 @@ def _findings(rows: list[dict], fills: list[float]) -> list[dict]:
     return out[:MAX_FINDINGS] + [{"kind": "truncated", "dropped": len(out) - MAX_FINDINGS}]
 
 
-# --- target matching --------------------------------------------------------
+def _items(rows: list[dict], body_left: float, body_size: float) -> list[dict]:
+    """Every rendered item on the page, with the geometry of each.
 
+    This is the whole report, not a lookup. The earlier design took quoted text
+    and searched for it, which meant comparing strings -- and a string compare
+    is the one part of this module that fonts, languages and templates can
+    break. It cost five bugs (a smart apostrophe, an en dash, CJK word
+    spacing, a truncating fallback, duplicate phrases), every one of which
+    answered confidently and wrongly.
 
-def _haystack(rows: list[dict]) -> tuple[str, list[tuple[int, int, int]]]:
-    """One searchable string over the rows, plus each row's span inside it.
+    Handing back every item instead deletes that layer. The caller holds the
+    Typst source, so it can match `head` to what it wrote far better than
+    `str.find` ever did -- and when it matches the wrong one it can see that it
+    has, which was never true of a number returned from inside the search.
 
-    A row ending in a hyphen is joined to the next without a space: that hyphen
-    was inserted by the line breaker, and text copied from the source has no
-    hyphen in it.
+    Measured before choosing: 33 items is ~600 tokens, about a tenth of the
+    agent round that a failed lookup used to cost.
     """
-    buf = ""
-    spans: list[tuple[int, int, int]] = []
-    hyphenated = False
-    for index, row in enumerate(rows):
-        piece = _normalize(row["text"])
-        if not piece:
-            continue
-        # Only a real hyphen-minus ending the raw row is a line-break hyphen.
-        # An en dash folds to "-" above and must not be swallowed.
-        if hyphenated and buf.endswith("-"):
-            buf = buf[:-1]
-            start, _, previous = spans[-1]
-            spans[-1] = (start, len(buf), previous)
-        elif buf and not (_is_cjk(buf[-1]) or _is_cjk(piece[0])):
-            buf += " "
-        hyphenated = row["text"].rstrip().endswith("-")
-        start = len(buf)
-        buf += piece
-        spans.append((start, len(buf), index))
-    return buf, spans
+    items: list[dict] = []
+    current: list[int] = []
+    for index in range(len(rows)):
+        if index and not _is_continuation(rows, index, body_left, body_size):
+            items.append(current)
+            current = []
+        current.append(index)
+    if current:
+        items.append(current)
 
-
-def _rows_for(
-    buf: str, spans: list[tuple[int, int, int]], needle: str
-) -> list[int] | None:
-    at = buf.find(needle)
-    if at < 0:
-        return None
-    end = at + len(needle)
-    return [row for start, stop, row in spans if start < end and stop > at]
-
-
-def _item_bounds(
-    rows: list[dict], first: int, last: int, body_left: float, body_size: float
-) -> tuple[int, int]:
-    """Widen a matched span to the whole bullet or paragraph it sits in.
-
-    The question a caller asks is always about an item -- "does this bullet fit
-    on one line" -- but the text they quote is usually a fragment of it. Scoped
-    to the fragment, a quote that happens to end inside the first rendered line
-    answers "one row, not wrapped" about a bullet that plainly wraps. So the
-    span grows outward over continuation rows, in both directions, and the
-    numbers are reported for the item.
-    """
-    start = first
-    while start > 0 and _is_continuation(rows, start, body_left, body_size):
-        start -= 1
-    end = last
-    while end + 1 < len(rows) and _is_continuation(rows, end + 1, body_left, body_size):
-        end += 1
-    return start, end
-
-
-def _match_target(
-    rows: list[dict],
-    buf: str,
-    spans: list[tuple[int, int, int]],
-    raw: str,
-    body_left: float,
-    body_size: float,
-) -> dict:
-    needle = _normalize(_BULLET_PREFIX.sub("", raw))
-    hit = _rows_for(buf, spans, needle) if needle else None
-    found_needle = needle if hit else ""
-    match = "exact"
-    if hit is None and needle:
-        words = needle.split(" ")
-        while len(words) > MIN_TARGET_WORDS and hit is None:
-            words.pop()
-            found_needle = " ".join(words)
-            hit = _rows_for(buf, spans, found_needle)
-        match = "prefix"
-        if not hit:
-            found_needle = ""
-    if not hit:
-        return {
-            "text": _clip(raw),
-            "found": False,
-            "hint": "Nothing rendered matched. Quote the text as the PDF shows it.",
+    out: list[dict] = []
+    for group in items:
+        first = rows[group[0]]
+        last = rows[group[-1]]
+        limit = last["page_width"] - body_left
+        right = last["body_x1"] if last["body_x1"] is not None else last["x1"]
+        entry: dict[str, Any] = {
+            "page": first["page"],
+            "rows": len(group),
+            # Room left on the item's last line. The number to reason with:
+            # little room on a wrapped item means a word or two must go for it
+            # to fit on one line.
+            "spare_pt": round(limit - right),
+            "head": _clip(first["text"], HEAD_CLIP),
         }
-    # Everything below is reported for the whole item, not the quoted fragment.
-    start, end = _item_bounds(rows, hit[0], hit[-1], body_left, body_size)
-    first = rows[start]
-    last = rows[end]
-    count = end - start + 1
-    limit = last["page_width"] - body_left
-    right = last["body_x1"] if last["body_x1"] is not None else last["x1"]
-    span = limit - body_left
-    out: dict[str, Any] = {
-        "text": _clip(raw),
-        "found": True,
-        "page": first["page"],
-        "rows": count,
-        "wrapped": count > 1,
-        # Room left on the item's last line, in points and as a share of the
-        # column. This is the number to reason with: little room left on a
-        # wrapped item means a word or two must go for it to fit on one line.
-        "spare_pt": round(limit - right, 1),
-        "last_row_fill": round((right - body_left) / span, 2) if span > 0 else None,
-    }
-    if match != "exact":
-        # The quote did not match as given, so only a leading part of it was
-        # found. The item numbers above still hold; the quote may not.
-        out["match"] = match
-    # The answer is about the first occurrence. If there are others, say so
-    # rather than letting a confident number stand for the wrong one.
-    seen = buf.count(found_needle) if found_needle else 0
-    if seen > 1:
-        out["occurrences"] = seen
-        out["hint"] = (
-            f"This text appears {seen} times; the answer is about the first. "
-            "Quote more of the surrounding line to pick one."
-        )
-    if last["page"] != first["page"]:
-        out["split_across_pages"] = [first["page"], last["page"]]
+        if last["page"] != first["page"]:
+            entry["split_across_pages"] = [first["page"], last["page"]]
+        out.append(entry)
     return out
 
 
 # --- the geometry report ----------------------------------------------------
 
 
-def geometry_report(typst_source: str, targets: list[str] | None = None) -> dict:
+def geometry_report(typst_source: str) -> dict:
     """Compile the source and answer the questions the PDF can answer itself."""
     from app.services import typst_compile
 
@@ -586,12 +545,13 @@ def geometry_report(typst_source: str, targets: list[str] | None = None) -> dict
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else "Typst compile failed"
         return {"error": str(detail)[:2000]}
-    return report_from_pdf(pdf, targets)
+    return report_from_pdf(pdf)
 
 
-def report_from_pdf(pdf: bytes, targets: list[str] | None = None) -> dict:
+def report_from_pdf(pdf: bytes) -> dict:
     """The report, given bytes someone else already paid to compile."""
-    rows = _rows(_text_lines(pdf))
+    lines = _text_lines(pdf)
+    rows = _rows(lines)
     if not rows:
         return {
             "error": "The compiled PDF has no readable text lines.",
@@ -599,6 +559,7 @@ def report_from_pdf(pdf: bytes, targets: list[str] | None = None) -> dict:
         }
 
     counts, fills = _page_geometry(rows)
+    sideways = _is_multi_column(lines)
     report: dict[str, Any] = {
         "pages": len(counts),
         "page_size_pt": [round(rows[0]["page_width"]), round(rows[0]["page_height"])],
@@ -607,16 +568,21 @@ def report_from_pdf(pdf: bytes, targets: list[str] | None = None) -> dict:
         # a short last page is the usual reason a resume runs long by one line.
         "page_fill": fills,
         "font_sizes_pt": sorted({row["size"] for row in rows}),
-        "findings": _findings(rows, fills),
+        "findings": [] if sideways else _findings(rows, fills),
     }
-    if targets:
-        buf, spans = _haystack(rows)
+    if sideways:
+        # Page counts and fill survive side-by-side text; nothing that depends
+        # on reading one column top to bottom does.
+        report["geometry"] = "unreliable"
+        report["reason"] = (
+            "This page sets text side by side in columns. Rows merge across the "
+            "columns, so wrapping, line counts and remaining room cannot be "
+            "measured from geometry here."
+        )
+        report["hint"] = ASK_VISION_HINT
+    else:
         body_size = _body_size(rows)
-        body_left = _body_left(rows, body_size)
-        report["targets"] = [
-            _match_target(rows, buf, spans, target, body_left, body_size)
-            for target in targets
-        ]
+        report["items"] = _items(rows, _body_left(rows, body_size), body_size)
     return report
 
 
@@ -849,11 +815,6 @@ async def vision_report(
 async def read_layout_report(typst_source: str, args: dict | None = None) -> dict:
     """The `read_layout` tool. Geometry always; vision only if asked."""
     args = args or {}
-    targets = [
-        value
-        for value in (args.get("targets") or [])
-        if isinstance(value, str) and value.strip()
-    ][:MAX_TARGETS]
     questions = [
         value
         for value in (args.get("questions") or [])
@@ -869,7 +830,7 @@ async def read_layout_report(typst_source: str, args: dict | None = None) -> dic
         and not (value in seen or seen.add(value))
     ][:MAX_SCORES]
 
-    report = await asyncio.to_thread(geometry_report, typst_source, targets)
+    report = await asyncio.to_thread(geometry_report, typst_source)
     if "error" in report:
         return report
     if questions or rubrics:

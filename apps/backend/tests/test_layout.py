@@ -52,50 +52,11 @@ def test_starter_is_one_sparse_page_with_nothing_to_report():
     # it is how the model learns there is room without being shown the page.
     assert 0.1 < report["page_fill"][0] < 0.3
     assert report["findings"] == []
-    assert "targets" not in report
     assert "visual" not in report
-
-
-@needs_typst
-def test_target_reports_a_wrapped_bullet_as_two_rows():
-    report = geometry_report(starter() + f"\n- {WRAPPED_BULLET}\n", [WRAPPED_BULLET])
-    target = report["targets"][0]
-    assert target["found"] is True
-    assert target["wrapped"] is True
-    assert target["rows"] == 2
-    assert target["page"] == 1
-    # Three quarters of the second line is used, so trimming a few words is
-    # not enough to pull it back onto one.
-    assert 0.5 < target["last_row_fill"] < 1.0
-
-
-@needs_typst
-def test_target_reports_room_left_on_a_single_line_bullet():
-    report = geometry_report(starter(), ["Replace this bullet with an achievement"])
-    target = report["targets"][0]
-    assert target["found"] is True
-    assert target["wrapped"] is False
-    assert target["rows"] == 1
-    # Over half the column is still free, which is the answer to "can I say
-    # more here without it wrapping".
-    assert target["spare_pt"] > 200
-
-
-@needs_typst
-def test_target_accepts_the_bullet_marker_the_source_uses():
-    report = geometry_report(starter(), ["- Replace this bullet with an achievement"])
-    assert report["targets"][0]["found"] is True
-
-
-@needs_typst
-def test_target_that_is_not_in_the_document_says_so():
-    report = geometry_report(starter(), ["nowhere to be found in this document"])
-    target = report["targets"][0]
-    assert target["found"] is False
-    assert "hint" in target
-    assert "wrapped" not in target
-
-
+    # Every rendered item comes back, so nothing has to be looked up by text.
+    heads = [item["head"] for item in report["items"]]
+    assert "Your Name" in heads
+    assert all(item["rows"] == 1 for item in report["items"])
 @needs_typst
 def test_unbreakable_content_is_reported_as_right_margin_overflow():
     report = geometry_report(starter() + "\n- Tag: " + "A" * 200 + "\n")
@@ -382,12 +343,10 @@ async def test_read_layout_keeps_the_geometry_when_the_vision_call_fails(
     stub = StubDecisions({"error": {"message": "nope"}}, 500)
     monkeypatch.setattr("app.services.layout.httpx.AsyncClient", stub)
 
-    report = await read_layout_report(
-        starter(), {"targets": ["Replace this bullet"], "questions": ["Crowded?"]}
-    )
+    report = await read_layout_report(starter(), {"questions": ["Crowded?"]})
 
     assert report["pages"] == 1
-    assert report["targets"][0]["found"] is True
+    assert report["items"]
     assert report["visual"]["error"] == "nope"
 
 
@@ -401,27 +360,6 @@ async def test_read_layout_does_not_render_when_no_questions_are_asked(monkeypat
     report = await read_layout_report(starter(), {})
     assert report["pages"] == 1
     assert "visual" not in report
-
-
-@needs_typst
-@pytest.mark.anyio
-async def test_read_layout_caps_targets_and_questions(openai_enabled, monkeypatch):
-    stub = StubDecisions({"answers": []})
-    monkeypatch.setattr("app.services.layout.httpx.AsyncClient", stub)
-    monkeypatch.setattr("app.services.layout._render_pages", lambda source: [b"png"])
-
-    report = await read_layout_report(
-        starter(),
-        {
-            "targets": [f"target {i}" for i in range(12)],
-            "questions": [f"question {i}?" for i in range(12)],
-        },
-    )
-
-    assert len(report["targets"]) == 6
-    assert len(stub.calls[0]["body"]["questions"]) == 6
-
-
 # --- the digest an edit carries home ----------------------------------------
 
 
@@ -627,108 +565,6 @@ async def test_a_bogus_rubric_on_its_own_asks_nothing(openai_enabled, monkeypatc
     monkeypatch.setattr("app.services.layout._render_pages", fail)
     report = await read_layout_report(starter(), {"scores": ["vibes"]})
     assert "visual" not in report
-
-
-# --- what the quoted text is allowed to look like ---------------------------
-
-
-@needs_typst
-def test_a_target_quoted_from_the_source_matches_the_typeset_rendering():
-    # Typst turns ' into a right single quote on the page. A target copied from
-    # the source therefore differs from the rendering by one character, which
-    # used to fail the exact match, fall through to the prefix search, and
-    # return an answer about whatever fragment happened to fit one row.
-    bullet = "Shipped Offerfy's inspector -- it reads the page, not the source"
-    report = geometry_report(starter() + f"\n- {bullet}\n", [bullet])
-    target = report["targets"][0]
-    assert target["found"] is True
-    assert "match" not in target  # matched as given, no prefix fallback
-
-
-@needs_typst
-def test_a_quoted_fragment_answers_about_the_whole_bullet():
-    # The caller asks "does this bullet fit on one line" but quotes a fragment.
-    # Scoped to the fragment, a quote ending inside the first rendered line
-    # reported "1 row, not wrapped" about a bullet that plainly wraps.
-    report = geometry_report(
-        starter() + f"\n- {WRAPPED_BULLET}\n",
-        [
-            WRAPPED_BULLET,
-            "Built and shipped an end-to-end data platform",  # fits row 1 alone
-            "eleven minutes",  # sits in the middle of the item
-        ],
-    )
-    answers = report["targets"]
-    assert [t["found"] for t in answers] == [True, True, True]
-    # Every one of them is an answer about the same item, so they agree.
-    assert {t["rows"] for t in answers} == {2}
-    assert {t["wrapped"] for t in answers} == {True}
-    assert len({t["spare_pt"] for t in answers}) == 1
-
-
-@needs_typst
-def test_a_full_width_row_is_not_reported_as_a_fitting_line():
-    # A row that ran to the column edge and broke measures a few points past
-    # it, because pdfminer counts the advance of the last glyph before the
-    # break. That signature must not read as "fits, with no room left".
-    report = geometry_report(
-        starter() + f"\n- {WRAPPED_BULLET}\n", ["Built and shipped an end-to-end"]
-    )
-    target = report["targets"][0]
-    assert target["wrapped"] is True
-    assert target["spare_pt"] > 0  # room on the item's last row, not -3.3
-
-
-@needs_typst
-def test_a_cjk_target_spanning_a_line_break_is_found():
-    # Rows join with a space because a Latin break falls between words. CJK has
-    # no word spaces, so that space used to land inside a word and the target
-    # could never be found -- and the prefix fallback could not help, because it
-    # splits on spaces too.
-    bullet = (
-        "\u8ca0\u8cac\u5f8c\u7aef\u8207 agent \u5de5\u5177\u8a2d\u8a08\uff0c"
-        "\u628a\u6392\u7248\u5224\u65ad\u5f9e\u6a21\u578b\u624b\u4e0a\u62ff\u56de\u4f86"
-        "\u4ea4\u7d66\u5e7e\u4f55\u8a08\u7b97\uff0c\u6210\u672c\u5f9e\u6bcf\u6b21\u63a8"
-        "\u7406\u964d\u5230\u96f6\uff0c\u4e26\u4e14\u7b54\u6848\u662f\u7cbe\u78ba\u7684"
-        "\u800c\u4e0d\u662f\u6a5f\u7387\u7684"
-    )
-    report = geometry_report(starter() + f"\n- {bullet}\n", [bullet])
-    target = report["targets"][0]
-    assert target["found"] is True
-    assert target["wrapped"] is True
-    assert target["rows"] == 2
-
-
-@needs_typst
-def test_a_continuation_is_found_from_the_line_above_not_its_own_first_letter():
-    # A wrapped plain paragraph resumes at the left margin, so the indent test
-    # cannot see it, and every word here is capitalised, so a "starts
-    # lowercase" test cannot either. What settles it is that the row above ran
-    # to the right edge of the column.
-    para = " ".join(["Offerfy"] * 26) + "."
-    source = starter() + "\n\n" + para + "\n"
-    whole = geometry_report(source, [para])["targets"][0]
-    fragment = geometry_report(source, [" ".join(["Offerfy"] * 5)])["targets"][0]
-    assert whole["rows"] == 2 and whole["wrapped"] is True
-    # The fragment sits entirely inside the first row; the answer is still
-    # about the paragraph.
-    assert fragment["rows"] == whole["rows"]
-    assert fragment["wrapped"] is True
-
-
-@needs_typst
-def test_an_ambiguous_quote_says_how_many_places_it_matched():
-    phrase = "Shipped the layout inspector"
-    source = starter() + (
-        f"\n- {phrase} early and it fits"
-        f"\n- {phrase} again much later with a great deal more text after it so that "
-        "this one definitely wraps onto a second rendered line\n"
-    )
-    target = geometry_report(source, [phrase])["targets"][0]
-    assert target["occurrences"] == 2
-    assert "first" in target["hint"]
-
-
 def test_a_full_width_row_means_the_text_continues():
     # The unit behind the fix: a row reaching the column edge is a row whose
     # text did not finish, whatever the next row starts with.
@@ -737,3 +573,119 @@ def test_a_full_width_row_means_the_text_continues():
     capitalised = row(1, "Offerfy Offerfy", y0=688.0)
     assert _is_continuation([full, capitalised], 1, 36.0, 10.0) is True
     assert _is_continuation([short, capitalised], 1, 36.0, 10.0) is False
+# --- when geometry cannot answer, say so and point at the vision path -------
+
+TWO_COLUMN = """#set page(paper: "a4", margin: 36pt)
+#set text(size: 10pt)
+#grid(columns: (1fr, 1fr), gutter: 24pt,
+[Left column text that is long enough that it wraps onto a second rendered line inside its own narrow column],
+[Right column text that also runs long enough to wrap onto a second line of its own])
+"""
+
+
+# --- items: the whole report, with nothing looked up by text ----------------
+
+
+@needs_typst
+def test_every_item_is_listed_with_its_own_geometry():
+    source = starter().replace(
+        "- Replace this bullet with an achievement",
+        f"- Short one\n- {WRAPPED_BULLET}\n- Another short one",
+    )
+    items = geometry_report(source)["items"]
+    bullets = [item for item in items if item["head"].startswith("\u2022")]
+    assert [item["rows"] for item in bullets] == [1, 2, 1]
+    # The wrapped one reports the room left on its *last* line, which is what
+    # tells the caller how much to cut.
+    assert bullets[1]["spare_pt"] > 0
+    assert bullets[0]["spare_pt"] > bullets[1]["spare_pt"]
+    assert bullets[1]["head"].startswith("\u2022 Built and shipped")
+
+
+@needs_typst
+def test_a_nested_list_is_three_items_not_one():
+    # Typst draws a bullet, a triangle and a dash for nesting levels one, two
+    # and three, indenting each further. Reading the indent alone made every
+    # child a continuation of its parent and merged the list into one item.
+    source = starter().replace(
+        "- Replace this bullet with an achievement",
+        "- Parent bullet, short\n  - Child one\n    - Grandchild one",
+    )
+    items = geometry_report(source)["items"]
+    tail = [item for item in items if item["rows"] or True][-3:]
+    assert [item["rows"] for item in tail] == [1, 1, 1]
+    assert [item["head"][0] for item in tail] == ["\u2022", "\u2023", "\u2013"]
+
+
+@needs_typst
+def test_a_wrapped_item_after_a_nested_list_still_wraps():
+    # The guard against markers must not swallow real continuations: the second
+    # line of a wrapped item is indented exactly like a child bullet, and is
+    # told apart by having no marker of its own.
+    source = starter().replace(
+        "- Replace this bullet with an achievement",
+        f"- Parent bullet, short\n  - Child one\n- {WRAPPED_BULLET}",
+    )
+    items = geometry_report(source)["items"]
+    assert items[-1]["rows"] == 2
+    assert items[-1]["head"].startswith("\u2022 Built and shipped")
+
+
+@needs_typst
+def test_a_continuation_is_found_from_the_line_above_not_its_own_first_letter():
+    # A wrapped plain paragraph resumes at the left margin, so the indent says
+    # nothing, and every word here is capitalised, so "starts lowercase" says
+    # nothing either. What settles it is that the row above ran to the edge.
+    para = " ".join(["Offerfy"] * 26) + "."
+    items = geometry_report(starter() + "\n\n" + para + "\n")["items"]
+    assert items[-1]["rows"] == 2
+    assert items[-1]["head"].startswith("Offerfy Offerfy")
+
+
+@needs_typst
+def test_a_cjk_item_that_wraps_is_two_rows():
+    # No string is compared any more, so CJK needs no special handling at all.
+    bullet = (
+        "\u8ca0\u8cac\u5f8c\u7aef\u8207 agent \u5de5\u5177\u8a2d\u8a08\uff0c"
+        "\u628a\u6392\u7248\u5224\u65ad\u5f9e\u6a21\u578b\u624b\u4e0a\u62ff\u56de\u4f86"
+        "\u4ea4\u7d66\u5e7e\u4f55\u8a08\u7b97\uff0c\u6210\u672c\u5f9e\u6bcf\u6b21\u63a8"
+        "\u7406\u964d\u5230\u96f6\uff0c\u4e26\u4e14\u7b54\u6848\u662f\u7cbe\u78ba\u7684"
+        "\u800c\u4e0d\u662f\u6a5f\u7387\u7684"
+    )
+    items = geometry_report(starter() + f"\n- {bullet}\n")["items"]
+    assert items[-1]["rows"] == 2
+
+
+@needs_typst
+def test_an_item_split_by_a_page_break_says_which_pages():
+    long_para = (
+        "This is one long plain paragraph that must span many rendered lines so "
+        "that the page break has no choice but to fall somewhere inside it, and "
+        "it keeps going with more words about nothing in particular until it is "
+        "comfortably taller than the space that remains at the bottom of the "
+        "page, and then some more words after that for good measure. "
+    )
+    items = geometry_report(padded(38, "\n" + long_para * 24 + "\n"))["items"]
+    split = [item for item in items if "split_across_pages" in item]
+    assert split
+    assert split[0]["split_across_pages"][1] == split[0]["split_across_pages"][0] + 1
+
+
+@needs_typst
+def test_side_by_side_text_lists_no_items_instead_of_wrong_ones():
+    report = geometry_report(TWO_COLUMN)
+    assert report["geometry"] == "unreliable"
+    assert "side by side" in report["reason"]
+    assert "questions" in report["hint"]
+    assert "items" not in report
+    # Page-level facts survive; nothing that needs one column does.
+    assert report["pages"] == 1
+    assert report["findings"] == []
+
+
+@needs_typst
+def test_a_single_column_resume_lists_items_and_is_not_declared_unreliable():
+    for source in (starter(), starter() + f"\n- {WRAPPED_BULLET}\n", padded(36)):
+        report = geometry_report(source)
+        assert "geometry" not in report, source[:40]
+        assert report["items"]

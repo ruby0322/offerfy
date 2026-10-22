@@ -87,12 +87,32 @@ reader sees it. Each row keeps `body_x1` — the main column's own right edge �
 a row that reaches the right margin only because of its date does not read as a
 full-width line.
 
-**Targets.** `targets` are snippets of rendered text. Rows are joined into one
-searchable string with a span per row, so a snippet's match maps back to the rows
-it covers: one row means it fits, two means it wrapped, two pages means the break
-split it. A row ending in a hyphen joins without a space, since that hyphen came
-from the line breaker and is not in the source. An exact match is tried first,
-then successively shorter prefixes down to four words.
+**Items, not lookups.** The report lists every rendered item in order, each with
+its page, the rows it occupies, the points of room left on its last line, and a
+`head` of its rendered text. Rows group into items by walking the row list and
+breaking wherever a row is not a continuation of the one above.
+
+It did not start this way, and the first design is worth recording because the
+mistake was arithmetic, not taste. The tool used to take quoted text and search
+the page for it, which put a *string comparison* between the boxes and the
+answer — and that one step is the only part of this module that a font, a
+language or a template can break. It cost five bugs, every one of them confident
+and wrong: Typst renders `'` as a right single quote and `--` as an en dash, so a
+target copied from the source missed; a fallback then shortened the needle word
+by word until something matched, which was a prefix short enough to sit inside
+the first rendered line, and reported "one row, not wrapped" about a bullet that
+plainly wrapped; CJK has no word spaces, so joining rows with one put a phantom
+space inside a word and made every multi-row Chinese target unfindable; a
+repeated phrase silently answered about its first occurrence.
+
+The reason for the search was to keep the tool result small. That was never
+measured. It is 33 items and ~600 tokens for a one-page resume, about $0.0012
+where it rides, against ~$0.016 for the agent round a failed lookup costs — and
+the same 66x round-cost figure was already written down in this file, two
+sections up, for the edit digest. Handing back every item deletes the comparison
+layer outright (~200 lines), and the caller holds the Typst source, so it does
+the association better than `str.find` did and can see when it has matched the
+wrong item.
 
 **Findings** are computed, not asked for: `item_split_across_pages`,
 `heading_orphaned_at_page_end`, `right_margin_overflow`,
@@ -277,10 +297,27 @@ the patch arithmetic above. A second identical request was charged the same, wit
 - **PII.** Resume pages are personal data. The endpoint supports ZDR and HIPAA,
   and US / EEA+CH residency, but both need separate eligibility — confirm the
   org's configuration before relying on it in production.
-- **Continuation detection is script-dependent.** A wrapped CJK paragraph that
-  resumes at the left margin is indistinguishable from a new paragraph by
-  geometry. Passing the text as a `target` answers it exactly; the automatic
-  `item_split_across_pages` finding will miss it.
+- **Item segmentation rests on one rule.** A row continues the one above when
+  the row above reached the right edge of the text column. That is deliberately
+  the only general rule, because the alternatives tried first were worse: an
+  indent test missed a wrapped plain paragraph, which resumes at the left
+  margin, and treated a nested sub-bullet as a continuation of its parent; a
+  "starts lowercase" test missed any continuation beginning with a capital or
+  with a CJK character, which has no case. The known residual risk is the
+  converse: a row that exactly fills the column followed by a genuinely new,
+  unmarked, unindented paragraph would be merged into one item. Bulleted text
+  is excluded by its marker, so this is rare in a resume, and no case of it has
+  been produced.
+- **Side-by-side text is detected conservatively.** The check wants two lines of
+  at least 40 characters at the same height with more than ~1.5em between them.
+  It catches columns wide enough to hold sentences and misses a narrow sidebar
+  (altacv's). Loosening it to catch that one made a single-column template with
+  a right-aligned repo link read as two columns, which is worse: a false
+  positive withholds good geometry from an ordinary resume. The miss is
+  survivable because escalation does not depend on the flag — the tool tells
+  the caller to ask the vision model whenever a geometric answer is missing.
+  Note also that `ats.py`'s own `single_column` check wants a gap of 12% of the
+  page width (71pt on A4), so a two-column resume with a 24pt gutter passes it.
 
 ## Not done
 

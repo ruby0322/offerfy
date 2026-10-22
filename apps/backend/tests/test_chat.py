@@ -1454,15 +1454,7 @@ def test_chat_read_layout_reports_the_rendered_page(
     created = client.post("/v1/resumes", json={"locale": "en"}).json()
     scripted = ScriptedOpenAI(
         [
-            llm_message(
-                tool_calls=[
-                    tool_call(
-                        "read_layout",
-                        {"targets": ["Replace this bullet with an achievement"]},
-                        "layout-1",
-                    )
-                ]
-            ),
+            llm_message(tool_calls=[tool_call("read_layout", {}, "layout-1")]),
             llm_message(content="That bullet is on one line with room to spare."),
         ]
     )
@@ -1476,7 +1468,10 @@ def test_chat_read_layout_reports_the_rendered_page(
     assert [row["name"] for row in tools] == ["read_layout"]
     layout = tools[0]["result"]
     assert layout["pages"] == 1
-    assert layout["targets"][0]["wrapped"] is False
+    # The item list is the answer; nothing is looked up by quoting text.
+    heads = [item["head"] for item in layout["items"]]
+    assert any("Replace this bullet" in head for head in heads)
+    assert all(item["rows"] == 1 for item in layout["items"])
     # No questions were asked, so nothing was rendered and nothing was billed.
     assert "visual" not in layout
     tool_names = [

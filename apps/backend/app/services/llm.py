@@ -42,9 +42,16 @@ SYSTEM_PROMPT = (
     "on the current document, then apply_typst_edit to fix failed checks. "
     "For anything about the rendered page -- line breaks, page breaks, whether "
     "something fits on one line, how full a page is -- call read_layout instead "
-    "of reasoning about it from the source. Quote the rendered text you care "
-    "about in `targets`. Add `questions` only for what the geometry cannot "
-    "answer, such as whether a page looks crowded or unbalanced. "
+    "of reasoning about it from the source. It lists every rendered item with "
+    "the rows it takes and the room left on its last line; find yours by its "
+    "`head` and read the numbers off. "
+    "Add `questions` or `scores` for what those numbers cannot answer, such as "
+    "whether a page looks crowded or unbalanced. "
+    "If read_layout reports `geometry: unreliable`, or gives you no number for "
+    "what you asked, do not guess and do not report the missing answer as a "
+    "fact: ask the same question through `questions`, which goes to a model "
+    "that sees the page. Those answers are probabilities, so say so when you "
+    "pass one on. "
     "Every apply_typst_edit already returns a `layout` digest (page count, how "
     "full each page is, anything out of place); read it instead of calling "
     "read_layout again for the same facts. "
@@ -115,27 +122,24 @@ TOOLS = [
         "type": "function",
         "name": LAYOUT_TOOL,
         "description": (
-            "Inspect the rendered resume: page count, how full each page is, "
-            "text that wrapped onto another line, items the page break split, "
-            "and content past the right margin. Compiles the current document. "
-            "Use `targets` to ask about specific rendered text -- whether it "
-            "wrapped, which page it is on, how much room is left on its last "
-            "line. Use `questions` and `scores` only for what geometry cannot "
+            "Inspect the rendered resume. Compiles the current document and "
+            "returns page count, how full each page is, anything out of place, "
+            "and `items`: every rendered item in order, each with the number of "
+            "rows it occupies, the points of room left on its last line, and a "
+            "`head` of its rendered text. Find the item you mean by its head "
+            "and read the numbers -- `rows` above 1 means it wrapped, and "
+            "`spare_pt` is how much room is left before it would. "
+            "Use `questions` and `scores` for what those numbers cannot "
             "answer, such as how crowded, unbalanced or flat a page looks: a "
             "`question` is yes/no and comes back as a probability, a `score` is "
-            "a 0-3 rubric and comes back graded."
+            "a 0-3 rubric and comes back graded. The geometry reads the page as "
+            "one column running top to bottom; where that does not hold it says "
+            "`geometry: unreliable`, lists no items, and `questions` is then "
+            "the only way to get an answer."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "targets": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "Up to 6 snippets of rendered text, quoted as the page "
-                        "shows them."
-                    ),
-                },
                 "questions": {
                     "type": "array",
                     "items": {"type": "string"},
