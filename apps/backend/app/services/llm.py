@@ -150,10 +150,29 @@ def normalize_openai_model(name: str | None) -> str:
 
 
 def completions_tool_extras(model: str) -> dict:
-    """GPT-5.6 rejects custom tools unless reasoning is off."""
+    """Reasoning settings for the resume-editing loop.
+
+    `summary: detailed` is what makes the thinking visible, which is the point.
+    Over three runs each against the live API, `auto` surfaced a summary in only
+    2/3 at low effort while `detailed` managed 3/3, at the same length (~430
+    chars) and no extra latency -- so it buys reliability, not verbosity.
+
+    Effort is `low` because nothing measured justified more. The tempting theory
+    was that deliberation would pay for itself by avoiding the edit retries this
+    module already handles. It does not: on a real two-change edit request both
+    `low` and `medium` spent the entire tool-round budget (6/6 each), so effort
+    bought no efficiency, and in two runs apiece `medium` once gave up with "I
+    wasn't able to complete the update safely" where `low` finished both times.
+    Same visible thinking, fewer reasoning tokens, so `low` wins on this
+    evidence. Revisit with a larger sample before raising it.
+
+    The previous setting was `effort: "none"`, on the grounds that GPT-5.6
+    rejected custom tools otherwise. That no longer holds: `low` and `medium`
+    both return function calls against this module's TOOLS without complaint.
+    """
     slug = (model or "").lower()
     if slug.startswith("gpt-5.6"):
-        return {"reasoning": {"effort": "none"}}
+        return {"reasoning": {"effort": "low", "summary": "detailed"}}
     return {}
 
 
@@ -312,6 +331,9 @@ def _web_search_trace(item: dict, extra_sources: list[dict[str, str]] | None = N
 # event type is ignored on purpose, because OPENAI_BASE_URL may be a proxy that
 # adds or renames events we have never seen.
 TEXT_DELTA_EVENT = "response.output_text.delta"
+# The model's own summary of its thinking. Separate from answer text on purpose:
+# it is not what the assistant said, so it never joins the answer bubble.
+REASONING_DELTA_EVENT = "response.reasoning_summary_text.delta"
 COMPLETED_EVENT = "response.completed"
 # `incomplete` counts as a failure here on purpose: this turn applies edits to
 # the user's document, and acting on a knowingly truncated response risks
@@ -409,13 +431,18 @@ async def aiter_llm_turn(
     }
 
     async with httpx.AsyncClient(timeout=timeout) as client:
-        for _ in range(max_rounds):
+        # One round past the tool budget is reserved for the answer, with tools
+        # withheld. Without it, a turn that spends every round on tool calls ends
+        # on the canned fallback and the user is told nothing about what changed.
+        # Reasoning makes that more likely, because deliberating costs rounds.
+        for attempt in range(max_rounds + 1):
+            wrap_up = attempt == max_rounds
             body = {
                 "model": model,
                 "instructions": SYSTEM_PROMPT + extra_system,
                 "input": input_items,
                 "tools": TOOLS + list(extra_tools or []),
-                "tool_choice": "auto",
+                "tool_choice": "none" if wrap_up else "auto",
                 "include": ["web_search_call.action.sources"],
                 "stream": True,
                 **completions_tool_extras(model),
@@ -442,6 +469,10 @@ async def aiter_llm_turn(
                             chunk = event.get("delta")
                             if isinstance(chunk, str) and chunk:
                                 yield {"kind": "delta", "text": chunk}
+                        elif etype == REASONING_DELTA_EVENT:
+                            chunk = event.get("delta")
+                            if isinstance(chunk, str) and chunk:
+                                yield {"kind": "reasoning", "text": chunk}
                         elif etype == COMPLETED_EVENT:
                             # Lifecycle events nest the response object under
                             # "response"; tolerate a flat payload too so a
@@ -549,7 +580,9 @@ async def aiter_llm_turn(
                     )
                 continue
             assistant_text = _output_text(data, output)
-            if retry_nudge:
+            # The reserved round is always terminal: it exists to produce the
+            # answer, so a leftover nudge must not send it round again.
+            if retry_nudge and not wrap_up:
                 input_items.extend(output)
                 # Same reasoning as the tool branch: the nudge abandons this
                 # round, so its words are emitted now rather than dropped.

@@ -49,6 +49,8 @@ export type ChatSuggestion = {
 type Props = {
   messages: ChatMessage[];
   streamingText?: string | null;
+  reasoningText?: string | null;
+  thinkingLabel?: string;
   draft: string;
   onDraftChange: (value: string) => void;
   attachment: File | null;
@@ -73,6 +75,8 @@ type Props = {
 export default function EditorChatPanel({
   messages,
   streamingText,
+  reasoningText,
+  thinkingLabel,
   draft,
   onDraftChange,
   attachment,
@@ -249,6 +253,18 @@ export default function EditorChatPanel({
                 </motion.div>
               ))}
             </AnimatePresence>
+            {reasoningText ? (
+              <div className="min-w-0 rounded-md border border-dashed border-border/60 bg-muted/30 px-3 py-2">
+                {thinkingLabel ? (
+                  <p className="mb-1 text-[0.7rem] font-medium uppercase tracking-wide text-muted-foreground">
+                    {thinkingLabel}
+                  </p>
+                ) : null}
+                <p className="max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                  {reasoningText}
+                </p>
+              </div>
+            ) : null}
             {streamingText ? (
               <div className="min-w-0">
                 <ChatMessageCard
@@ -260,7 +276,7 @@ export default function EditorChatPanel({
                 />
               </div>
             ) : null}
-            {sending && !streamingText ? <LoadingMessage /> : null}
+            {sending && !streamingText && !reasoningText ? <LoadingMessage /> : null}
           </div>
         </ScrollArea>
       </div>

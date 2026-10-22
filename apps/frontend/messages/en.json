@@ -294,7 +294,8 @@
     "settingsSignInHint": "Sharing is available after you sign in with Google.",
     "settingsDanger": "Danger zone",
     "settingsDelete": "Delete this resume",
-    "settingsDeleteTailor": "Delete this tailored version"
+    "settingsDeleteTailor": "Delete this tailored version",
+    "thinking": "Thinking"
   },
   "share": {
     "brand": "Offerfy",

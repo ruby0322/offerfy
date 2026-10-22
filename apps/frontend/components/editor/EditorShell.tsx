@@ -142,6 +142,9 @@ export default function EditorShell({ resumeId }: Props) {
   // Text that has streamed in but not yet been finalized into a real message.
   // Deliberately outside `messages`: it carries no id and must never persist.
   const [streamingText, setStreamingText] = useState<string | null>(null);
+  // The model's summary of its own thinking. Shown while the turn runs, never
+  // persisted: it is not something the assistant said to the user.
+  const [reasoningText, setReasoningText] = useState<string | null>(null);
   const [draft, setDraft] = useState(() => loadComposerDraft(resumeId));
   const [attachment, setAttachment] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
@@ -177,6 +180,8 @@ export default function EditorShell({ resumeId }: Props) {
   const previewObjectUrls = useRef<string[]>([]);
   const deltaBufferRef = useRef("");
   const deltaTimerRef = useRef<number | null>(null);
+  const reasoningBufferRef = useRef("");
+  const reasoningTimerRef = useRef<number | null>(null);
 
   // Deltas arrive token by token; committing each one would re-parse the whole
   // markdown body per token. Batch them, but never leave a tail unflushed.
@@ -200,6 +205,35 @@ export default function EditorShell({ resumeId }: Props) {
     [flushDeltas],
   );
 
+  const flushReasoning = useCallback(() => {
+    if (reasoningTimerRef.current !== null) {
+      window.clearTimeout(reasoningTimerRef.current);
+      reasoningTimerRef.current = null;
+    }
+    const pending = reasoningBufferRef.current;
+    if (!pending) return;
+    reasoningBufferRef.current = "";
+    setReasoningText((prev) => (prev ?? "") + pending);
+  }, []);
+
+  const pushReasoning = useCallback(
+    (text: string) => {
+      reasoningBufferRef.current += text;
+      if (reasoningTimerRef.current !== null) return;
+      reasoningTimerRef.current = window.setTimeout(flushReasoning, 50);
+    },
+    [flushReasoning],
+  );
+
+  const clearReasoning = useCallback(() => {
+    if (reasoningTimerRef.current !== null) {
+      window.clearTimeout(reasoningTimerRef.current);
+      reasoningTimerRef.current = null;
+    }
+    reasoningBufferRef.current = "";
+    setReasoningText(null);
+  }, []);
+
   const clearStream = useCallback(() => {
     if (deltaTimerRef.current !== null) {
       window.clearTimeout(deltaTimerRef.current);
@@ -213,6 +247,7 @@ export default function EditorShell({ resumeId }: Props) {
   useEffect(
     () => () => {
       if (deltaTimerRef.current !== null) window.clearTimeout(deltaTimerRef.current);
+      if (reasoningTimerRef.current !== null) window.clearTimeout(reasoningTimerRef.current);
     },
     [],
   );
@@ -464,6 +499,11 @@ export default function EditorShell({ resumeId }: Props) {
           pushDelta(event.text);
           return;
         }
+        if (event.type === "reasoning") {
+          setChatUnavailable(false);
+          pushReasoning(event.text);
+          return;
+        }
         if (event.type === "tool" || event.type === "assistant") {
           setChatUnavailable(false);
           if (event.type === "assistant") {
@@ -487,6 +527,7 @@ export default function EditorShell({ resumeId }: Props) {
         if (event.type === "done") {
           // Safety net: a stream that ends mid-round must not strand a bubble.
           clearStream();
+          clearReasoning();
           return;
         }
         if (event.type === "tailor_created") {
@@ -515,6 +556,7 @@ export default function EditorShell({ resumeId }: Props) {
         }
         if (event.type === "error") {
           clearStream();
+          clearReasoning();
           if (event.status === 503) {
             setChatUnavailable(true);
             setMessages((prev) => [
@@ -560,6 +602,7 @@ export default function EditorShell({ resumeId }: Props) {
       setSending(false);
       // A thrown ApiError skips the `done` event, so clear here too.
       clearStream();
+      clearReasoning();
       const nextTailor = pendingTailorRef.current;
       pendingTailorRef.current = null;
       if (nextTailor) {
@@ -569,9 +612,11 @@ export default function EditorShell({ resumeId }: Props) {
     }
     },
     [
+      clearReasoning,
       clearStream,
       failCompile,
       pushDelta,
+      pushReasoning,
       refreshAts,
       refreshMemory,
       refreshPreview,
@@ -990,6 +1035,8 @@ export default function EditorShell({ resumeId }: Props) {
                 <EditorChatPanel
                   messages={messages}
                   streamingText={streamingText}
+                  reasoningText={reasoningText}
+                  thinkingLabel={t("thinking")}
                   draft={draft}
                   onDraftChange={onDraftChange}
                   attachment={attachment}

@@ -193,6 +193,11 @@ async def chat(
             if kind == "delta":
                 # Display only: nothing is persisted until the assistant event lands.
                 yield _sse({"type": "delta", "text": event["text"]})
+            elif kind == "reasoning":
+                # Thinking, not an answer. Never persisted: it would come back as
+                # an assistant row on the next turn and be fed to the model as
+                # though it had said it out loud.
+                yield _sse({"type": "reasoning", "text": event["text"]})
             elif kind == "tool":
                 row = _persist_tool(db, resume.id, event["trace"])
                 yield _sse(

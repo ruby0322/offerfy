@@ -33,6 +33,7 @@ def llm_message(
     content: str | None = None,
     tool_calls: list | None = None,
     web_search: dict | None = None,
+    reasoning: str | None = None,
 ) -> dict:
     output: list[dict] = []
     if web_search is not None:
@@ -56,7 +57,11 @@ def llm_message(
                 "content": [{"type": "output_text", "text": content}],
             }
         )
-    return {"output": output, "output_text": content or ""}
+    payload = {"output": output, "output_text": content or ""}
+    if reasoning:
+        # Test-only: stripped before the payload becomes the response object.
+        payload["_test_reasoning"] = reasoning
+    return payload
 
 
 def _payload_text(payload: dict) -> str:
@@ -75,7 +80,16 @@ def _payload_text(payload: dict) -> str:
 
 def sse_lines(payload: dict, chunk: int = 7) -> list[str]:
     """Serialize a scripted response the way the Responses API streams it."""
+    payload = dict(payload)
+    reasoning = payload.pop("_test_reasoning", None)
     lines: list[str] = []
+    if reasoning:
+        for start in range(0, len(reasoning), chunk):
+            frame = {
+                "type": "response.reasoning_summary_text.delta",
+                "delta": reasoning[start : start + chunk],
+            }
+            lines.extend([f"data: {json.dumps(frame)}", ""])
     text = _payload_text(payload)
     for start in range(0, len(text), chunk):
         frame = {"type": "response.output_text.delta", "delta": text[start : start + chunk]}

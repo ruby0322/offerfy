@@ -54,8 +54,13 @@ def post_chat(client: TestClient, resume_id: str, **kwargs) -> dict:
     return {
         "status": status,
         "events": events,
-        # Text deltas are display-only, so sequence assertions ignore them.
-        "kinds": [event.get("type") for event in events if event.get("type") != "delta"],
+        # Text deltas and reasoning are display-only, so sequence assertions
+        # ignore them: a client that drops both must see today's behavior.
+        "kinds": [
+            event.get("type")
+            for event in events
+            if event.get("type") not in {"delta", "reasoning"}
+        ],
         "deltas": "".join(
             event.get("text") or "" for event in events if event.get("type") == "delta"
         ),
@@ -88,9 +93,13 @@ def test_normalize_openai_model_maps_display_names():
     assert normalize_openai_model("") == "gpt-5.6-terra"
 
 
-def test_gpt56_chat_completions_disables_reasoning_for_tools():
-    assert completions_tool_extras("gpt-5.6-terra") == {"reasoning": {"effort": "none"}}
-    assert completions_tool_extras("gpt-5.6-sol") == {"reasoning": {"effort": "none"}}
+def test_gpt56_asks_for_visible_reasoning():
+    """Effort is low and the summary is detailed; see the docstring for why."""
+    expected = {"reasoning": {"effort": "low", "summary": "detailed"}}
+    assert completions_tool_extras("gpt-5.6-terra") == expected
+    assert completions_tool_extras("gpt-5.6-sol") == expected
+    # `detailed` is the part that makes thinking visible at all -- guard it.
+    assert completions_tool_extras("gpt-5.6-terra")["reasoning"]["summary"] == "detailed"
     assert completions_tool_extras("gpt-4o") == {}
 
 
@@ -192,7 +201,8 @@ def test_chat_read_then_search_replace_and_second_read(
     assert 'paper: "a4"' in body["typst_source"]
     assert 'accent-color: "#26428b"' in body["typst_source"]
     assert scripted.requests[0]["model"] == "gpt-5.6-terra"
-    assert scripted.requests[0]["reasoning"]["effort"] == "none"
+    assert scripted.requests[0]["reasoning"]["effort"] == "low"
+    assert scripted.requests[0]["reasoning"]["summary"] == "detailed"
     tool_types = [row.get("type") for row in scripted.requests[0].get("tools") or []]
     assert "web_search" in tool_types
 
@@ -1345,3 +1355,93 @@ def test_chat_ignores_unknown_stream_events(
     assert result["error"] is None
     assert result["deltas"] == "Done."
     assert result["json"]["message"]["content"] == "Done."
+
+
+def test_chat_streams_reasoning_without_persisting_it(
+    client: TestClient, openai_enabled, monkeypatch
+):
+    """Thinking is shown live but must never become a transcript row."""
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    scripted = ScriptedOpenAI(
+        [
+            llm_message(
+                reasoning="**Planning the rename**\nI should read the source first.",
+                tool_calls=[tool_call("read_typst", {}, "read-1")],
+            ),
+            llm_message(reasoning="Now I can answer.", content="Nothing needed changing."),
+        ]
+    )
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    result = post_chat(client, created["id"], json={"message": "Have a look"})
+    assert result["status"] == 200
+    reasoning = "".join(
+        e.get("text") or "" for e in result["events"] if e.get("type") == "reasoning"
+    )
+    assert "Planning the rename" in reasoning
+    assert "Now I can answer." in reasoning
+    assert result["kinds"] == ["tool", "assistant", "done"]
+    # Not in the transcript, so it cannot be replayed or fed back as speech.
+    listed = client.get(f"/v1/resumes/{created['id']}/messages").json()
+    assert [row["content"] for row in listed if row["role"] == "assistant"] == [
+        "Nothing needed changing."
+    ]
+    for row in listed:
+        assert "Planning the rename" not in row["content"]
+
+
+def test_chat_reserved_round_answers_when_tools_eat_the_budget(
+    client: TestClient, openai_enabled, monkeypatch
+):
+    """A turn that spends every round on tools still gets to say what it did."""
+    import app.services.llm as llm_module
+
+    scripted = ScriptedOpenAI(
+        [
+            llm_message(tool_calls=[tool_call("read_typst", {}, "r1")]),
+            llm_message(tool_calls=[tool_call("read_typst", {}, "r2")]),
+            # Only reachable on the reserved wrap-up round.
+            llm_message(content="Renamed you and tidied the dates."),
+        ]
+    )
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    async def collect():
+        out = []
+        async for ev in llm_module.aiter_llm_turn([{"role": "user", "content": "go"}], "SRC", max_rounds=2):
+            out.append(ev)
+        return out
+
+    import asyncio
+
+    events = asyncio.run(collect())
+    assistants = [e["content"] for e in events if e.get("kind") == "assistant"]
+    assert assistants == ["Renamed you and tidied the dates."]
+    assert assistants[-1] != "Updated the Typst source.", "should not fall back"
+    # Three requests: two tool rounds plus the reserved one, which withholds tools.
+    assert len(scripted.requests) == 3
+    assert [r.get("tool_choice") for r in scripted.requests] == ["auto", "auto", "none"]
+
+
+def test_chat_reserved_round_is_not_spent_when_the_turn_ends_early(
+    client: TestClient, openai_enabled, monkeypatch
+):
+    """The extra round costs nothing on a normal turn."""
+    import asyncio
+
+    import app.services.llm as llm_module
+
+    scripted = ScriptedOpenAI([llm_message(content="Done.")])
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    async def collect():
+        return [
+            ev
+            async for ev in llm_module.aiter_llm_turn(
+                [{"role": "user", "content": "go"}], "SRC", max_rounds=6
+            )
+        ]
+
+    events = asyncio.run(collect())
+    assert [e["content"] for e in events if e.get("kind") == "assistant"] == ["Done."]
+    assert len(scripted.requests) == 1

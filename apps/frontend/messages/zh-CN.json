@@ -297,7 +297,8 @@
     "settingsSignInHint": "使用 Google 登录后才能设置公开分享。",
     "settingsDanger": "危险区域",
     "settingsDelete": "删除这份简历",
-    "settingsDeleteTailor": "删除这份定制版"
+    "settingsDeleteTailor": "删除这份定制版",
+    "thinking": "思考中"
   },
   "share": {
     "brand": "Offerfy",

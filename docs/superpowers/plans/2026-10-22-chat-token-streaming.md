@@ -289,16 +289,20 @@ unnecessary against this provider. It is kept anyway: it costs two lines, it is
 covered by a test, and `OPENAI_BASE_URL` is configurable, so a proxy deployment
 may still differ.
 
+**Confirmed in the browser on 2026-10-22, after deploy.** The user ran a real
+turn on `https://offerfy.cc` and confirmed text arrives progressively, which
+closes the one item this record had left open at the wire level. Observed at the
+same time: only tool cards and the final round's text appeared, no narration.
+That is correct behavior, not a regression — under `reasoning.effort: "none"` the
+model emits no preamble text in tool rounds at all, so there was nothing to keep.
+See [2026-10-22-chat-reasoning-visibility-design.md](../specs/2026-10-22-chat-reasoning-visibility-design.md)
+for the probe data and the follow-up that makes thinking visible.
+
 **Not verified — needs the live provider and the full stack.** The scripted fake
 proves the parser against the documented wire format, but not against the actual
 bytes this deployment's `OPENAI_BASE_URL` returns. These remain open:
 
-1. Delta frames survive the *outbound* hop intact in a deployed environment.
-   The probes prove the provider streams incrementally into our parser, but not
-   that nginx and the Next.js rewrite pass the re-emitted SSE through unbuffered.
-   `X-Accel-Buffering: no` is already set and already carries `tool`/`source`
-   events today, so this is expected to hold — but it was not observed.
-2. The preamble → tool-card → final-answer sequence reads correctly in the
+1. The preamble → tool-card → final-answer sequence reads correctly in the
    editor, with nothing disappearing.
 3. The `delta` → `assistant` handoff shows no dropped tail, duplicated
    paragraph, or flash of empty bubble.

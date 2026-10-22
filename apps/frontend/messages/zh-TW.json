@@ -297,7 +297,8 @@
     "settingsSignInHint": "使用 Google 登入後才能設定公開分享。",
     "settingsDanger": "危險區域",
     "settingsDelete": "刪除這份履歷",
-    "settingsDeleteTailor": "刪除這份客製版"
+    "settingsDeleteTailor": "刪除這份客製版",
+    "thinking": "思考中"
   },
   "share": {
     "brand": "Offerfy",
