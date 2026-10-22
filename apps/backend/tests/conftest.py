@@ -9,6 +9,15 @@ os.environ.setdefault("OPENAI_MODEL", "gpt-5.6-terra")
 os.environ["OPENAI_API_KEY"] = ""
 os.environ["OFFERFY_SKIP_TEMPLATE_PREFETCH"] = "1"
 
+# Same reasoning as DATABASE_URL above, for object storage. Without these the
+# repo .env wins and every test run PUTs fixtures into the live offerfy-private
+# bucket (473 objects accumulated this way before 2026-10-22). Blanking the
+# endpoint makes s3_configured() false, so put_object/delete_object no-op.
+os.environ["S3_ENDPOINT"] = ""
+os.environ["S3_ACCESS_KEY"] = ""
+os.environ["S3_SECRET_KEY"] = ""
+os.environ["S3_BUCKET"] = "test-bucket-never-real"
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session

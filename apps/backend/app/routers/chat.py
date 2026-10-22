@@ -152,10 +152,13 @@ async def chat(
             filename, data, instruction=instruction, extracted=extracted
         )
         owner = user.id if user is not None else (guest.id if guest else "anon")
+        # Archival copy of the attachment: the reply is built from `data` and
+        # `extracted` above, so a storage failure must not fail the chat turn.
         put_object(
             f"uploads/{owner}/{resume.id}/chat/{filename}",
             data,
             "application/octet-stream",
+            required=False,
         )
 
     user_msg = ChatMessage(resume_id=resume.id, role="user", content=stored)

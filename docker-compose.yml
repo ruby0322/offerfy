@@ -12,7 +12,9 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${OFFERFY_POSTGRES_PASSWORD:-offerfy-local-dev-change-me}
     ports:
-      - "${OFFERFY_POSTGRES_PORT:-5432}:5432"
+      # Loopback-only: DB must not be reachable off-host. Use an SSH tunnel
+      # for remote access. In-stack consumers use docker DNS (postgres:5432).
+      - "127.0.0.1:${OFFERFY_POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -75,7 +77,10 @@ services:
       seaweedfs-filer:
         condition: service_healthy
     ports:
-      - "${OFFERFY_S3_PORT:-8333}:8333"
+      # Loopback-only: the object store holds private uploads and SeaweedFS S3
+      # runs without credentials here, so it must never be reachable off-host.
+      # In-cluster consumers use docker DNS (seaweedfs-s3:8333) and are unaffected.
+      - "127.0.0.1:${OFFERFY_S3_PORT:-8333}:8333"
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8333/ >/dev/null"]
       interval: 10s
@@ -111,7 +116,8 @@ services:
       UVICORN_WORKERS: ${UVICORN_WORKERS:-1}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-10}
     ports:
-      - "${OFFERFY_BACKEND_PORT:-8000}:8000"
+      # Loopback-only: public traffic arrives via the ingress, not this port.
+      - "127.0.0.1:${OFFERFY_BACKEND_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -136,7 +142,8 @@ services:
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-/api}
       BACKEND_INTERNAL_URL: http://backend:8000
     ports:
-      - "${OFFERFY_FRONTEND_PORT:-3100}:3000"
+      # Loopback-only: public traffic arrives via the ingress, not this port.
+      - "127.0.0.1:${OFFERFY_FRONTEND_PORT:-3100}:3000"
     depends_on:
       backend:
         condition: service_healthy
