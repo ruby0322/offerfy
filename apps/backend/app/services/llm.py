@@ -380,12 +380,19 @@ def _vision_usage_event(
     That call bills separately from the round that made it, and
     `vision_report` already parses its usage into the report -- so the round
     loop can hand it on without a second HTTP read or a Session.
+
+    A `visual` block that came back from the endpoint is the signal that the
+    call happened, so the token count does not decide whether there is an
+    event: unreadable or absent, it reads as "unknown", exactly like a chat
+    round whose response carried no `usage` at all. None means no call was
+    billed -- a geometry-only `read_layout`, or a `vision_report` that gave up
+    before reading a response (`skipped`, a render failure, a provider error),
+    which is the same silence a chat round keeps when its own request fails.
     """
     visual = report.get("visual") if isinstance(report, dict) else None
     if not isinstance(visual, dict):
         return None
-    tokens = _token_count(visual, "input_tokens")
-    if tokens is None:
+    if visual.get("skipped") is not None or visual.get("error") is not None:
         return None
     return {
         "kind": "usage",
@@ -394,7 +401,7 @@ def _vision_usage_event(
         "round_index": round_index,
         "prefer_full_source": prefer_full_source,
         "source_chars": source_chars,
-        "input_tokens": tokens,
+        "input_tokens": _token_count(visual, "input_tokens"),
         # Input tokens are the whole bill on the decisions endpoint.
         "cached_tokens": None,
         "output_tokens": None,

@@ -53,9 +53,13 @@ class AdminDayPoint(BaseModel):
     llm_cached_tokens: int
     llm_output_tokens: int
     llm_reasoning_tokens: int
-    # cached / input. None on a day that billed no input tokens, because that
-    # is "no data", not a 0% hit rate. This is the number that says whether
-    # prompt caching works at all through whatever sits in front of the model.
+    # cached / input, over the calls that reported both numbers -- which
+    # excludes every vision call and any proxy that drops
+    # `input_tokens_details`. None on a day where nothing reported both,
+    # because that is "no data", not a 0% hit rate. This is the number that
+    # says whether prompt caching works at all through whatever sits in front
+    # of the model, so a call whose cache status went unreported must not
+    # dilute it.
     llm_cache_hit_rate: float | None
 
 
