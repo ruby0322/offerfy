@@ -150,6 +150,54 @@ VISION_PREAMBLE = (
 _BULLET_PREFIX = re.compile(r"^[\s•‣◦·⁃−–—*+-]+")
 _WS = re.compile(r"\s+")
 
+# Typst rewrites punctuation on the way to the page: ' becomes a right single
+# quote, "..." become curly, -- becomes an en dash, ... becomes an ellipsis. A
+# target quoted from the source therefore never matches the rendering
+# character for character, so both sides fold back to ASCII before comparing.
+# Without this, one apostrophe in a bullet was enough to fail the exact match,
+# fall through to the prefix search, and return an answer about a fragment.
+_FOLD = str.maketrans(
+    {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201a": "'",
+        "\u201b": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u201e": '"',
+        "\u2032": "'",
+        "\u2033": '"',
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2212": "-",
+        "\u2026": "...",
+        "\u00a0": " ",
+    }
+)
+# Typst also collapses -- into an en dash and --- into an em dash, both of which
+# fold to a single "-" above. The quoted side still carries the literal runs, so
+# they collapse too.
+_DASH_RUN = re.compile(r"-{2,}")
+
+# Rows are joined with a space because a Latin line break falls between words.
+# CJK text has no word spaces, so the same space lands *inside* a word and the
+# target can never be found -- and the prefix fallback cannot rescue it either,
+# because that splits on spaces too. No space at a CJK boundary.
+_CJK_RANGES = (
+    (0x2E80, 0x303F),  # CJK radicals, Kangxi, CJK punctuation
+    (0x3040, 0x30FF),  # kana
+    (0x3400, 0x4DBF),  # ext A
+    (0x4E00, 0x9FFF),  # unified
+    (0xAC00, 0xD7AF),  # hangul
+    (0xF900, 0xFAFF),  # compatibility
+    (0xFF00, 0xFFEF),  # fullwidth forms
+)
+
+
+def _is_cjk(char: str) -> bool:
+    code = ord(char)
+    return any(low <= code <= high for low, high in _CJK_RANGES)
+
 
 # --- geometry ---------------------------------------------------------------
 
@@ -160,7 +208,8 @@ def _clip(text: str, limit: int = TEXT_CLIP) -> str:
 
 
 def _normalize(text: str) -> str:
-    return _WS.sub(" ", text or "").strip().casefold()
+    flat = _DASH_RUN.sub("-", (text or "").translate(_FOLD))
+    return _WS.sub(" ", flat).strip().casefold()
 
 
 def _text_lines(pdf_bytes: bytes) -> list[dict]:
@@ -268,24 +317,47 @@ def _is_heading(row: dict, body_size: float) -> bool:
     return row["size"] > body_size + 0.5
 
 
-def _is_continuation(row: dict, body_left: float, body_size: float) -> bool:
-    """Does this row look like the tail of something that started earlier?
+def _row_is_full(row: dict, body_left: float, body_size: float) -> bool:
+    """Did this row run to the right edge of the text column?
 
-    An indented row at body size with no bullet is a wrapped list item, which is
-    what the page break splits in practice. A wrapped plain paragraph resumes at
-    the left margin instead and is only guessable from its first character, so
-    the lowercase test backs the indent test up for Latin scripts. Neither test
-    can see a wrapped CJK paragraph that resumes at the margin -- pass that text
-    as a `target` and the row span answers it exactly.
+    The tolerance is the overflow tolerance for the same reason: pdfminer counts
+    the advance of the last glyph before a break, so a line that wrapped
+    measures a few points past the column rather than exactly at it.
     """
+    if row["body_x1"] is None:
+        return False
+    limit = row["page_width"] - body_left
+    return row["body_x1"] >= limit - max(2.0, body_size * OVERFLOW_EM)
+
+
+def _is_continuation(
+    rows: list[dict], index: int, body_left: float, body_size: float
+) -> bool:
+    """Is this row the tail of something that started on the row above?
+
+    The reliable signal is the *previous* row, not this one: a row that ran to
+    the right edge of the column is a row whose text did not finish, so what
+    follows continues it. That holds whatever the script and whatever the next
+    row's first character looks like.
+
+    The earlier version asked this row about itself -- indented, or starting
+    with a lowercase letter -- and was wrong twice over. A wrapped plain
+    paragraph resumes at the left margin, so the indent test missed it, and the
+    lowercase test missed any continuation beginning with a capital or with a
+    CJK character, which has no case at all.
+
+    The indent test is kept as a second sufficient condition: a wrapped list
+    item is indented to the text column even when the line above it was short.
+    """
+    row = rows[index]
     if abs(row["size"] - body_size) >= 0.6:
         return False
-    stripped = row["text"].lstrip()
+    # A new bullet starts an item; it never continues one.
     if _BULLET_PREFIX.match(row["text"]) and row["x0"] <= body_left + 1:
         return False
     if row["x0"] > body_left + 1:
         return True
-    return bool(stripped[:1].isalpha() and stripped[:1].islower())
+    return index > 0 and _row_is_full(rows[index - 1], body_left, body_size)
 
 
 def _page_geometry(rows: list[dict]) -> tuple[list[int], list[float]]:
@@ -314,13 +386,13 @@ def _findings(rows: list[dict], fills: list[float]) -> list[dict]:
     out: list[dict] = []
 
     for page in pages[1:]:
-        first = next((row for row in rows if row["page"] == page), None)
-        if first is not None and _is_continuation(first, body_left, body_size):
+        index = next((i for i, row in enumerate(rows) if row["page"] == page), None)
+        if index is not None and _is_continuation(rows, index, body_left, body_size):
             out.append(
                 {
                     "kind": "item_split_across_pages",
                     "page": page,
-                    "text": _clip(first["text"]),
+                    "text": _clip(rows[index]["text"]),
                 }
             )
 
@@ -386,16 +458,20 @@ def _haystack(rows: list[dict]) -> tuple[str, list[tuple[int, int, int]]]:
     """
     buf = ""
     spans: list[tuple[int, int, int]] = []
+    hyphenated = False
     for index, row in enumerate(rows):
         piece = _normalize(row["text"])
         if not piece:
             continue
-        if buf.endswith("-"):
+        # Only a real hyphen-minus ending the raw row is a line-break hyphen.
+        # An en dash folds to "-" above and must not be swallowed.
+        if hyphenated and buf.endswith("-"):
             buf = buf[:-1]
             start, _, previous = spans[-1]
             spans[-1] = (start, len(buf), previous)
-        elif buf:
+        elif buf and not (_is_cjk(buf[-1]) or _is_cjk(piece[0])):
             buf += " "
+        hyphenated = row["text"].rstrip().endswith("-")
         start = len(buf)
         buf += piece
         spans.append((start, len(buf), index))
@@ -412,26 +488,59 @@ def _rows_for(
     return [row for start, stop, row in spans if start < end and stop > at]
 
 
+def _item_bounds(
+    rows: list[dict], first: int, last: int, body_left: float, body_size: float
+) -> tuple[int, int]:
+    """Widen a matched span to the whole bullet or paragraph it sits in.
+
+    The question a caller asks is always about an item -- "does this bullet fit
+    on one line" -- but the text they quote is usually a fragment of it. Scoped
+    to the fragment, a quote that happens to end inside the first rendered line
+    answers "one row, not wrapped" about a bullet that plainly wraps. So the
+    span grows outward over continuation rows, in both directions, and the
+    numbers are reported for the item.
+    """
+    start = first
+    while start > 0 and _is_continuation(rows, start, body_left, body_size):
+        start -= 1
+    end = last
+    while end + 1 < len(rows) and _is_continuation(rows, end + 1, body_left, body_size):
+        end += 1
+    return start, end
+
+
 def _match_target(
-    rows: list[dict], buf: str, spans: list[tuple[int, int, int]], raw: str, body_left: float
+    rows: list[dict],
+    buf: str,
+    spans: list[tuple[int, int, int]],
+    raw: str,
+    body_left: float,
+    body_size: float,
 ) -> dict:
     needle = _normalize(_BULLET_PREFIX.sub("", raw))
     hit = _rows_for(buf, spans, needle) if needle else None
+    found_needle = needle if hit else ""
     match = "exact"
     if hit is None and needle:
         words = needle.split(" ")
         while len(words) > MIN_TARGET_WORDS and hit is None:
             words.pop()
-            hit = _rows_for(buf, spans, " ".join(words))
+            found_needle = " ".join(words)
+            hit = _rows_for(buf, spans, found_needle)
         match = "prefix"
+        if not hit:
+            found_needle = ""
     if not hit:
         return {
             "text": _clip(raw),
             "found": False,
             "hint": "Nothing rendered matched. Quote the text as the PDF shows it.",
         }
-    first = rows[hit[0]]
-    last = rows[hit[-1]]
+    # Everything below is reported for the whole item, not the quoted fragment.
+    start, end = _item_bounds(rows, hit[0], hit[-1], body_left, body_size)
+    first = rows[start]
+    last = rows[end]
+    count = end - start + 1
     limit = last["page_width"] - body_left
     right = last["body_x1"] if last["body_x1"] is not None else last["x1"]
     span = limit - body_left
@@ -439,16 +548,27 @@ def _match_target(
         "text": _clip(raw),
         "found": True,
         "page": first["page"],
-        "rows": len(hit),
-        "wrapped": len(hit) > 1,
-        # Room left on the final line, in points and as a share of the column.
-        # This is the number to reason with: negative-ish room means a word or
-        # two must go for it to fit on one line.
+        "rows": count,
+        "wrapped": count > 1,
+        # Room left on the item's last line, in points and as a share of the
+        # column. This is the number to reason with: little room left on a
+        # wrapped item means a word or two must go for it to fit on one line.
         "spare_pt": round(limit - right, 1),
         "last_row_fill": round((right - body_left) / span, 2) if span > 0 else None,
     }
     if match != "exact":
+        # The quote did not match as given, so only a leading part of it was
+        # found. The item numbers above still hold; the quote may not.
         out["match"] = match
+    # The answer is about the first occurrence. If there are others, say so
+    # rather than letting a confident number stand for the wrong one.
+    seen = buf.count(found_needle) if found_needle else 0
+    if seen > 1:
+        out["occurrences"] = seen
+        out["hint"] = (
+            f"This text appears {seen} times; the answer is about the first. "
+            "Quote more of the surrounding line to pick one."
+        )
     if last["page"] != first["page"]:
         out["split_across_pages"] = [first["page"], last["page"]]
     return out
@@ -491,9 +611,11 @@ def report_from_pdf(pdf: bytes, targets: list[str] | None = None) -> dict:
     }
     if targets:
         buf, spans = _haystack(rows)
-        body_left = _body_left(rows, _body_size(rows))
+        body_size = _body_size(rows)
+        body_left = _body_left(rows, body_size)
         report["targets"] = [
-            _match_target(rows, buf, spans, target, body_left) for target in targets
+            _match_target(rows, buf, spans, target, body_left, body_size)
+            for target in targets
         ]
     return report
 

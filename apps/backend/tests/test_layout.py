@@ -4,6 +4,7 @@ import pytest
 
 from app.services.layout import (
     MAX_SCORES,
+    _is_continuation,
     SCORE_RUBRICS,
     SPARSE_PAGE_FILL,
     _findings,
@@ -626,3 +627,113 @@ async def test_a_bogus_rubric_on_its_own_asks_nothing(openai_enabled, monkeypatc
     monkeypatch.setattr("app.services.layout._render_pages", fail)
     report = await read_layout_report(starter(), {"scores": ["vibes"]})
     assert "visual" not in report
+
+
+# --- what the quoted text is allowed to look like ---------------------------
+
+
+@needs_typst
+def test_a_target_quoted_from_the_source_matches_the_typeset_rendering():
+    # Typst turns ' into a right single quote on the page. A target copied from
+    # the source therefore differs from the rendering by one character, which
+    # used to fail the exact match, fall through to the prefix search, and
+    # return an answer about whatever fragment happened to fit one row.
+    bullet = "Shipped Offerfy's inspector -- it reads the page, not the source"
+    report = geometry_report(starter() + f"\n- {bullet}\n", [bullet])
+    target = report["targets"][0]
+    assert target["found"] is True
+    assert "match" not in target  # matched as given, no prefix fallback
+
+
+@needs_typst
+def test_a_quoted_fragment_answers_about_the_whole_bullet():
+    # The caller asks "does this bullet fit on one line" but quotes a fragment.
+    # Scoped to the fragment, a quote ending inside the first rendered line
+    # reported "1 row, not wrapped" about a bullet that plainly wraps.
+    report = geometry_report(
+        starter() + f"\n- {WRAPPED_BULLET}\n",
+        [
+            WRAPPED_BULLET,
+            "Built and shipped an end-to-end data platform",  # fits row 1 alone
+            "eleven minutes",  # sits in the middle of the item
+        ],
+    )
+    answers = report["targets"]
+    assert [t["found"] for t in answers] == [True, True, True]
+    # Every one of them is an answer about the same item, so they agree.
+    assert {t["rows"] for t in answers} == {2}
+    assert {t["wrapped"] for t in answers} == {True}
+    assert len({t["spare_pt"] for t in answers}) == 1
+
+
+@needs_typst
+def test_a_full_width_row_is_not_reported_as_a_fitting_line():
+    # A row that ran to the column edge and broke measures a few points past
+    # it, because pdfminer counts the advance of the last glyph before the
+    # break. That signature must not read as "fits, with no room left".
+    report = geometry_report(
+        starter() + f"\n- {WRAPPED_BULLET}\n", ["Built and shipped an end-to-end"]
+    )
+    target = report["targets"][0]
+    assert target["wrapped"] is True
+    assert target["spare_pt"] > 0  # room on the item's last row, not -3.3
+
+
+@needs_typst
+def test_a_cjk_target_spanning_a_line_break_is_found():
+    # Rows join with a space because a Latin break falls between words. CJK has
+    # no word spaces, so that space used to land inside a word and the target
+    # could never be found -- and the prefix fallback could not help, because it
+    # splits on spaces too.
+    bullet = (
+        "\u8ca0\u8cac\u5f8c\u7aef\u8207 agent \u5de5\u5177\u8a2d\u8a08\uff0c"
+        "\u628a\u6392\u7248\u5224\u65ad\u5f9e\u6a21\u578b\u624b\u4e0a\u62ff\u56de\u4f86"
+        "\u4ea4\u7d66\u5e7e\u4f55\u8a08\u7b97\uff0c\u6210\u672c\u5f9e\u6bcf\u6b21\u63a8"
+        "\u7406\u964d\u5230\u96f6\uff0c\u4e26\u4e14\u7b54\u6848\u662f\u7cbe\u78ba\u7684"
+        "\u800c\u4e0d\u662f\u6a5f\u7387\u7684"
+    )
+    report = geometry_report(starter() + f"\n- {bullet}\n", [bullet])
+    target = report["targets"][0]
+    assert target["found"] is True
+    assert target["wrapped"] is True
+    assert target["rows"] == 2
+
+
+@needs_typst
+def test_a_continuation_is_found_from_the_line_above_not_its_own_first_letter():
+    # A wrapped plain paragraph resumes at the left margin, so the indent test
+    # cannot see it, and every word here is capitalised, so a "starts
+    # lowercase" test cannot either. What settles it is that the row above ran
+    # to the right edge of the column.
+    para = " ".join(["Offerfy"] * 26) + "."
+    source = starter() + "\n\n" + para + "\n"
+    whole = geometry_report(source, [para])["targets"][0]
+    fragment = geometry_report(source, [" ".join(["Offerfy"] * 5)])["targets"][0]
+    assert whole["rows"] == 2 and whole["wrapped"] is True
+    # The fragment sits entirely inside the first row; the answer is still
+    # about the paragraph.
+    assert fragment["rows"] == whole["rows"]
+    assert fragment["wrapped"] is True
+
+
+@needs_typst
+def test_an_ambiguous_quote_says_how_many_places_it_matched():
+    phrase = "Shipped the layout inspector"
+    source = starter() + (
+        f"\n- {phrase} early and it fits"
+        f"\n- {phrase} again much later with a great deal more text after it so that "
+        "this one definitely wraps onto a second rendered line\n"
+    )
+    target = geometry_report(source, [phrase])["targets"][0]
+    assert target["occurrences"] == 2
+    assert "first" in target["hint"]
+
+
+def test_a_full_width_row_means_the_text_continues():
+    # The unit behind the fix: a row reaching the column edge is a row whose
+    # text did not finish, whatever the next row starts with.
+    full = row(1, "ends exactly at the column edge", body_x1=559.0)
+    short = row(1, "ends early", body_x1=200.0)
+    capitalised = row(1, "Offerfy Offerfy", y0=688.0)
+    assert _is_continuation([full, capitalised], 1, 36.0, 10.0) is True
+    assert _is_continuation([short, capitalised], 1, 36.0, 10.0) is False
