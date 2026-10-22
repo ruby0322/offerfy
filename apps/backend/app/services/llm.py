@@ -11,8 +11,8 @@ from fastapi import HTTPException
 
 from app.config import get_settings
 from app.services.edit_diff import edit_result_payload
+from app.services.layout import compile_digest, read_layout_report
 from app.typst_edit import apply_typst_edit
-from app.services.typst_compile import compile_status
 from app.services.typst_escape import sanitize_typst_source
 from app.services.ats import read_ats_report
 
@@ -22,6 +22,7 @@ READ_TOOL = "read_typst"
 EDIT_TOOL = "apply_typst_edit"
 SEARCH_TOOL = "web_search"
 ATS_TOOL = "read_ats"
+LAYOUT_TOOL = "read_layout"
 DEFAULT_MODEL = "gpt-5.6-terra"
 
 SYSTEM_PROMPT = (
@@ -39,6 +40,14 @@ SYSTEM_PROMPT = (
     "Use YYYY-MM or Present (or 至今/现在) for dates. "
     "If the user asks about ATS, parseability, or failed checks, call read_ats "
     "on the current document, then apply_typst_edit to fix failed checks. "
+    "For anything about the rendered page -- line breaks, page breaks, whether "
+    "something fits on one line, how full a page is -- call read_layout instead "
+    "of reasoning about it from the source. Quote the rendered text you care "
+    "about in `targets`. Add `questions` only for what the geometry cannot "
+    "answer, such as whether a page looks crowded or unbalanced. "
+    "Every apply_typst_edit already returns a `layout` digest (page count, how "
+    "full each page is, anything out of place); read it instead of calling "
+    "read_layout again for the same facts. "
     "If apply_typst_edit returns changed=false or an error, immediately "
     "call it again: copy an exact substring from the last read_typst, or "
     "write the full source. Do not ask the user to retry. "
@@ -99,6 +108,71 @@ TOOLS = [
         "parameters": {
             "type": "object",
             "properties": {},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": LAYOUT_TOOL,
+        "description": (
+            "Inspect the rendered resume: page count, how full each page is, "
+            "text that wrapped onto another line, items the page break split, "
+            "and content past the right margin. Compiles the current document. "
+            "Use `targets` to ask about specific rendered text -- whether it "
+            "wrapped, which page it is on, how much room is left on its last "
+            "line. Use `questions` and `scores` only for what geometry cannot "
+            "answer, such as how crowded, unbalanced or flat a page looks: a "
+            "`question` is yes/no and comes back as a probability, a `score` is "
+            "a 0-3 rubric and comes back graded."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "targets": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Up to 6 snippets of rendered text, quoted as the page "
+                        "shows them."
+                    ),
+                },
+                "questions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Up to 6 yes/no questions about how the rendered pages "
+                        "look."
+                    ),
+                },
+                "scores": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["density", "hierarchy"],
+                    },
+                    "description": (
+                        "Graded visual verdicts about the rendered pages, 0 to "
+                        "3, returned with the level labels so the number can be "
+                        "read. `density` runs Airy to Cramped, so the middle is "
+                        "good and both ends are faults. `hierarchy` runs Flat to "
+                        "Strong, where higher is better. Prefer a score over a "
+                        "yes/no question when "
+                        "you want a degree, or when you want to compare the "
+                        "same judgement before and after an edit."
+                    ),
+                },
+                "pages": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": (
+                        "Which pages the `questions` and `scores` are about, "
+                        "1-based. One "
+                        "request gives one answer per question about whatever "
+                        "it was shown, so on a multi-page resume name the page "
+                        "or the answer blends them. Defaults to all pages."
+                    ),
+                },
+            },
             "additionalProperties": False,
         },
     },
@@ -520,6 +594,9 @@ async def aiter_llm_turn(
                     elif name == ATS_TOOL:
                         report = await asyncio.to_thread(read_ats_report, source)
                         result = json.dumps(report, ensure_ascii=False)
+                    elif name == LAYOUT_TOOL:
+                        report = await read_layout_report(source, args)
+                        result = json.dumps(report, ensure_ascii=False)
                     elif name == EDIT_TOOL:
                         try:
                             before = source
@@ -533,9 +610,16 @@ async def aiter_llm_turn(
                             )
                             if verify_compile and source != before:
                                 payload = json.loads(result)
-                                payload["compile"] = await asyncio.to_thread(
-                                    compile_status, source
+                                # One compile answers both questions. The layout
+                                # digest rides home on the edit the agent just
+                                # made, so seeing what it did to the page costs
+                                # no extra round and no extra compile.
+                                digest = await asyncio.to_thread(
+                                    compile_digest, source
                                 )
+                                payload["compile"] = digest["compile"]
+                                if "layout" in digest:
+                                    payload["layout"] = digest["layout"]
                                 if payload["compile"].get("ok") is False:
                                     payload["hint"] = (
                                         "Typst compile failed. Escape special "

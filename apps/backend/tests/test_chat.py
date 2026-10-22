@@ -1034,7 +1034,7 @@ def test_chat_search_not_found_retries_instead_of_stopping(
     assert edits[-1]["result"]["changed"] is True
 
 
-def test_compile_status_runs_off_request_thread(
+def test_compile_digest_runs_off_request_thread(
     client: TestClient, openai_enabled, monkeypatch
 ):
     created = client.post("/v1/resumes", json={"locale": "en"}).json()
@@ -1043,9 +1043,9 @@ def test_compile_status_runs_off_request_thread(
 
     def wrapped(source: str):
         seen.append(threading.get_ident())
-        return {"ok": True}
+        return {"compile": {"ok": True}}
 
-    monkeypatch.setattr("app.services.llm.compile_status", wrapped)
+    monkeypatch.setattr("app.services.llm.compile_digest", wrapped)
     scripted = ScriptedOpenAI(
         [
             llm_message(tool_calls=[tool_call("read_typst", {}, "read-1")]),
@@ -1445,3 +1445,190 @@ def test_chat_reserved_round_is_not_spent_when_the_turn_ends_early(
     events = asyncio.run(collect())
     assert [e["content"] for e in events if e.get("kind") == "assistant"] == ["Done."]
     assert len(scripted.requests) == 1
+
+
+@pytest.mark.skipif(not typst_available(), reason="Typst CLI is required")
+def test_chat_read_layout_reports_the_rendered_page(
+    client: TestClient, openai_enabled, monkeypatch
+):
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    scripted = ScriptedOpenAI(
+        [
+            llm_message(
+                tool_calls=[
+                    tool_call(
+                        "read_layout",
+                        {"targets": ["Replace this bullet with an achievement"]},
+                        "layout-1",
+                    )
+                ]
+            ),
+            llm_message(content="That bullet is on one line with room to spare."),
+        ]
+    )
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    result = post_chat(client, created["id"], json={"message": "Does that bullet fit on one line?"})
+    assert result["status"] == 200
+    body = result["json"]
+    assert body["applied"] is False
+    tools = [json.loads(row["content"]) for row in body["messages"] if row["role"] == "tool"]
+    assert [row["name"] for row in tools] == ["read_layout"]
+    layout = tools[0]["result"]
+    assert layout["pages"] == 1
+    assert layout["targets"][0]["wrapped"] is False
+    # No questions were asked, so nothing was rendered and nothing was billed.
+    assert "visual" not in layout
+    tool_names = [
+        row.get("name")
+        for row in scripted.requests[0].get("tools") or []
+        if row.get("type") == "function"
+    ]
+    assert "read_layout" in tool_names
+    assert "read_layout" in _system_blobs(scripted.requests)
+
+
+@pytest.mark.skipif(not typst_available(), reason="Typst CLI is required")
+def test_chat_read_layout_vision_question_reaches_the_decisions_endpoint(
+    client: TestClient, openai_enabled, monkeypatch
+):
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    scripted = ScriptedOpenAI(
+        [
+            llm_message(
+                tool_calls=[
+                    tool_call(
+                        "read_layout",
+                        {"questions": ["Does the page look crowded?"]},
+                        "layout-1",
+                    )
+                ]
+            ),
+            llm_message(content="The page does not look crowded."),
+        ],
+        decisions={
+            "answers": [{"type": "predicate", "name": "q1", "probability": 0.12}],
+            "usage": {"input_tokens": 2521},
+        },
+    )
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    result = post_chat(client, created["id"], json={"message": "Does this look crowded?"})
+    assert result["status"] == 200
+    tools = [
+        json.loads(row["content"])
+        for row in result["json"]["messages"]
+        if row["role"] == "tool"
+    ]
+    visual = tools[0]["result"]["visual"]
+    assert visual["answers"] == [
+        {"question": "Does the page look crowded?", "probability": 0.12}
+    ]
+    assert visual["input_tokens"] == 2521
+    assert visual["pages_seen"] == [1]
+    posted = scripted.decision_requests[0]
+    assert posted["url"].endswith("/v1/decisions")
+    assert posted["body"]["model"] == "gpt-6-luna"
+    content = posted["body"]["input"][0]["content"]
+    images = [part for part in content if part["type"] == "input_image"]
+    assert len(images) == 1
+    assert images[0]["image_url"].startswith("data:image/png;base64,")
+
+
+@pytest.mark.skipif(not typst_available(), reason="Typst CLI is required")
+def test_chat_edit_carries_the_layout_digest_home(
+    client: TestClient, openai_enabled, monkeypatch
+):
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    # An edit that pushes the resume onto a second, nearly empty page -- the
+    # case this feature exists for. The agent must learn it from the edit result
+    # itself, with no read_layout round. (52 contiguous bullets, not 36: a list
+    # with no blank line before it packs tighter than a fresh block, which is
+    # exactly the kind of thing the source does not show you.)
+    spill = "\n".join(f"- Padding bullet {i}" for i in range(52))
+    scripted = ScriptedOpenAI(
+        [
+            llm_message(
+                tool_calls=[
+                    tool_call(
+                        "apply_typst_edit",
+                        {
+                            "search": "- Replace this bullet with an achievement",
+                            "replace": "- Replace this bullet with an achievement\n" + spill,
+                        },
+                        "edit-1",
+                    )
+                ]
+            ),
+            llm_message(content="Added them."),
+        ]
+    )
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    result = post_chat(client, created["id"], json={"message": "Add 36 bullets"})
+    assert result["status"] == 200
+    edit = _edit_results(result["json"])[0]["result"]
+    assert edit["changed"] is True
+    assert edit["compile"]["ok"] is True
+    layout = edit["layout"]
+    assert layout["pages"] == 2
+    assert layout["page_fill"][-1] < 0.25
+    assert [f["kind"] for f in layout["findings"]] == ["last_page_nearly_empty"]
+    # The tool round count is unchanged: no read_layout call was needed.
+    assert [row["name"] for row in [json.loads(r["content"]) for r in result["json"]["messages"] if r["role"] == "tool"]] == ["apply_typst_edit"]
+
+
+@pytest.mark.skipif(not typst_available(), reason="Typst CLI is required")
+def test_chat_read_layout_score_rubric_comes_back_graded(
+    client: TestClient, openai_enabled, monkeypatch
+):
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    scripted = ScriptedOpenAI(
+        [
+            llm_message(
+                tool_calls=[
+                    tool_call("read_layout", {"scores": ["density"]}, "layout-1")
+                ]
+            ),
+            llm_message(content="There is room for more on this page."),
+        ],
+        decisions={
+            "answers": [
+                {
+                    "type": "score",
+                    "name": "density",
+                    "score": 0.31,
+                    "confidence": 0.88,
+                    "probabilities": [
+                        {"value": 0, "label": "Airy", "probability": 0.71},
+                        {"value": 1, "label": "Comfortable", "probability": 0.27},
+                        {"value": 2, "label": "Dense", "probability": 0.02},
+                        {"value": 3, "label": "Cramped", "probability": 0.0},
+                    ],
+                }
+            ],
+            "usage": {"input_tokens": 2558},
+        },
+    )
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    result = post_chat(client, created["id"], json={"message": "How does the layout look?"})
+    assert result["status"] == 200
+    tools = [
+        json.loads(row["content"])
+        for row in result["json"]["messages"]
+        if row["role"] == "tool"
+    ]
+    answer = tools[0]["result"]["visual"]["answers"][0]
+    assert answer["rubric"] == "density"
+    assert answer["score"] == 0.31
+    # The scale rides back, because 0.31 alone says nothing.
+    assert answer["levels"][0] == {"label": "Airy", "probability": 0.71}
+    sent = scripted.decision_requests[0]["body"]["questions"]
+    assert sent[0]["type"] == "score"
+    assert [level["label"] for level in sent[0]["levels"]] == [
+        "Airy",
+        "Comfortable",
+        "Dense",
+        "Cramped",
+    ]

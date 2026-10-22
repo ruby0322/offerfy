@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_base_url: str | None = None
     openai_model: str = "gpt-5.6-terra"
+    # read_layout's vision questions. The Decisions endpoint takes this
+    # model only; it is a setting so a rename at GA is a config change.
+    openai_decisions_model: str = "gpt-6-luna"
     typst_package_path: str | None = None
     typst_font_paths: str | None = None
     auth_token_secret: str = "dev-insecure-change-me"

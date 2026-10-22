@@ -129,11 +129,23 @@ class ScriptedStream:
 
 
 class ScriptedOpenAI:
-    def __init__(self, script: list[dict], truncate: bool = False):
+    def __init__(
+        self,
+        script: list[dict],
+        truncate: bool = False,
+        decisions: dict | None = None,
+        decisions_status: int = 200,
+    ):
         self.script = list(script)
         self.requests: list[dict] = []
         # truncate=True drops the completed event, to exercise the 502 path.
         self.truncate = truncate
+        # read_layout's vision questions POST to /v1/decisions. Patching
+        # AsyncClient patches the httpx module itself, so one stub has to
+        # answer both endpoints or the second patch wins.
+        self.decisions = decisions
+        self.decisions_status = decisions_status
+        self.decision_requests: list[dict] = []
 
     def __call__(self, *args, **kwargs):
         return self
@@ -155,6 +167,11 @@ class ScriptedOpenAI:
         if not self.script:
             return llm_message(content="ok")
         return self.script.pop(0)
+
+    async def post(self, url, headers=None, json=None, **kwargs):
+        self.decision_requests.append({"url": url, "body": json or {}})
+        payload = self.decisions if self.decisions is not None else {"answers": []}
+        return ScriptedStream(payload, status_code=self.decisions_status)
 
     def stream(self, method, url, headers=None, json=None, **kwargs):
         payload = self._next_payload(json)

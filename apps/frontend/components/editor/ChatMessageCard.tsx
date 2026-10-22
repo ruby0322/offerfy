@@ -12,6 +12,7 @@ import {
   FilePlus2,
   FileSearch,
   Globe,
+  LayoutTemplate,
   LogIn,
   Paperclip,
   Redo2,
@@ -73,6 +74,20 @@ function atsCounts(result: unknown): { passed: number; total: number } | null {
   return { passed, total };
 }
 
+function layoutCounts(
+  result: unknown,
+): { pages: number; findings: number; asked: number } | null {
+  if (!result || typeof result !== "object") return null;
+  const rec = result as { pages?: unknown; findings?: unknown; visual?: unknown };
+  if (typeof rec.pages !== "number") return null;
+  const visual = rec.visual as { answers?: unknown } | undefined;
+  return {
+    pages: rec.pages,
+    findings: Array.isArray(rec.findings) ? rec.findings.length : 0,
+    asked: Array.isArray(visual?.answers) ? visual.answers.length : 0,
+  };
+}
+
 function sourceLength(result: unknown): number | null {
   if (!result || typeof result !== "object") return null;
   const source = (result as { source?: unknown }).source;
@@ -109,6 +124,22 @@ function toolHeadline(payload: ToolPayload | null, t: Translate): {
           ? t("toolAtsAllPass")
           : t("toolAtsHint", { passed: counts.passed, total: counts.total })
         : null,
+      failed: Boolean(error),
+      showCheck: !error,
+    };
+  }
+  if (payload.name === "read_layout") {
+    const counts = layoutCounts(payload.result);
+    const detail = !counts
+      ? null
+      : counts.findings > 0
+        ? t("toolLayoutHint", { pages: counts.pages, findings: counts.findings })
+        : counts.asked > 0
+          ? t("toolLayoutAsked", { pages: counts.pages, asked: counts.asked })
+          : t("toolLayoutClean", { pages: counts.pages });
+    return {
+      title: t("toolLayout"),
+      detail: error ?? detail,
       failed: Boolean(error),
       showCheck: !error,
     };
@@ -190,6 +221,7 @@ function ToolIcon({ name, failed }: { name: string; failed: boolean }) {
   if (failed) return <X className={className} aria-hidden="true" />;
   if (name === "read_typst") return <FileSearch className={className} aria-hidden="true" />;
   if (name === "read_ats") return <ClipboardList className={className} aria-hidden="true" />;
+  if (name === "read_layout") return <LayoutTemplate className={className} aria-hidden="true" />;
   if (name === "web_search") return <Globe className={className} aria-hidden="true" />;
   if (name === "apply_typst_edit") return <FilePenLine className={className} aria-hidden="true" />;
   if (name === "read_master") return <BookOpen className={className} aria-hidden="true" />;
