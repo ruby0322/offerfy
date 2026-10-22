@@ -244,16 +244,31 @@ def test_an_unexpected_usage_shape_is_read_for_what_it_has(
     assert rows[0].input_tokens in {4000, None}
 
 
+def _explode_on_construction(**kwargs):
+    """Telemetry that cannot even be built: the Session never sees the row."""
+    raise RuntimeError("llm_calls is on fire")
+
+
+def _explode_on_commit(**kwargs):
+    """Telemetry the database refuses once it is flushed.
+
+    The constructor and `db.add()` both succeed, so the failure lands inside
+    the transaction -- which is the case that leaves SQLAlchemy wanting a
+    rollback and would otherwise poison every write the rest of the turn makes
+    through the same Session. `purpose` is only checked by the CHECK
+    constraint, so this is the smallest insert the schema rejects.
+    """
+    return LlmCall(**{**kwargs, "purpose": "not-a-purpose"})
+
+
+@pytest.mark.parametrize("broken", [_explode_on_construction, _explode_on_commit])
 def test_a_broken_telemetry_insert_does_not_break_the_turn(
-    client: TestClient, db_session, openai_enabled, monkeypatch
+    client: TestClient, db_session, openai_enabled, monkeypatch, broken
 ):
     created = client.post("/v1/resumes", json={"locale": "en"}).json()
     _skip_real_compiles(monkeypatch)
 
-    def explode(**kwargs):
-        raise RuntimeError("llm_calls is on fire")
-
-    monkeypatch.setattr("app.routers.chat.LlmCall", explode)
+    monkeypatch.setattr("app.routers.chat.LlmCall", broken)
     scripted = ScriptedOpenAI(
         [
             llm_message(
@@ -342,6 +357,102 @@ def test_a_vision_answer_is_billed_separately_from_its_round(
     assert rows[0].input_tokens == 2000
 
 
+@pytest.mark.parametrize(
+    "visual, expected_tokens",
+    [
+        # The endpoint answered but reported no usage at all.
+        ({"model": "gpt-6-luna", "pages_seen": [1], "answers": []}, None),
+        # ...or reported it as a string, which the reader refuses to guess at.
+        (
+            {"model": "gpt-6-luna", "pages_seen": [1], "answers": [], "input_tokens": "2521"},
+            None,
+        ),
+        # ...or reported it readably, the ordinary case.
+        (
+            {"model": "gpt-6-luna", "pages_seen": [1], "answers": [], "input_tokens": 2521},
+            2521,
+        ),
+    ],
+)
+def test_a_vision_call_that_reported_nothing_still_records(
+    client: TestClient, db_session, openai_enabled, monkeypatch, visual, expected_tokens
+):
+    """The vision call ran, so it is countable even when its bill is unknown.
+
+    This is the same promise the chat rounds keep: a response that carried no
+    readable usage is a lost metric, not a lost call. A row with an unknown
+    input count is what tells the dashboard the spend is unmeasurable, instead
+    of quietly reporting the turn as one call cheaper than it was.
+    """
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+
+    async def stubbed_report(source, args):
+        return {"pages": 1, "visual": visual}
+
+    monkeypatch.setattr("app.services.llm.read_layout_report", stubbed_report)
+    scripted = ScriptedOpenAI(
+        [
+            llm_message(
+                tool_calls=[tool_call("read_layout", {"questions": ["Crowded?"]}, "layout-1")],
+                usage=llm_usage(input_tokens=2000),
+            ),
+            llm_message(content="It does not.", usage=llm_usage(input_tokens=4000)),
+        ]
+    )
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    result = post_chat(client, created["id"], json={"message": "Does this look crowded?"})
+    assert result["status"] == 200
+
+    rows = _calls(db_session)
+    assert [(row.purpose, row.round_index) for row in rows] == [
+        ("chat", 0),
+        ("chat", 1),
+        ("vision", 0),
+    ]
+    vision = rows[-1]
+    assert vision.input_tokens == expected_tokens
+    assert vision.model == "gpt-6-luna"
+
+
+@pytest.mark.parametrize(
+    "report",
+    [
+        # read_layout answered from geometry alone: no vision call was made.
+        {"pages": 1},
+        {"pages": 1, "visual": None},
+        # vision_report gave up before it had a response to read, so nothing
+        # was billed -- the same silence a failed chat request leaves behind.
+        {"pages": 1, "visual": {"skipped": "llm_not_configured"}},
+        {"pages": 1, "visual": {"error": "The resume rendered no pages."}},
+        {"pages": 1, "visual": {"error": "Decisions request failed", "model": "gpt-6-luna"}},
+    ],
+)
+def test_a_vision_call_that_never_happened_records_nothing(
+    client: TestClient, db_session, openai_enabled, monkeypatch, report
+):
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+
+    async def stubbed_report(source, args):
+        return report
+
+    monkeypatch.setattr("app.services.llm.read_layout_report", stubbed_report)
+    scripted = ScriptedOpenAI(
+        [
+            llm_message(
+                tool_calls=[tool_call("read_layout", {"questions": ["Crowded?"]}, "layout-1")],
+                usage=llm_usage(input_tokens=2000),
+            ),
+            llm_message(content="It does not.", usage=llm_usage(input_tokens=4000)),
+        ]
+    )
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    result = post_chat(client, created["id"], json={"message": "Does this look crowded?"})
+    assert result["status"] == 200
+    assert [row.purpose for row in _calls(db_session)] == ["chat", "chat"]
+
+
 @pytest.mark.skipif(not typst_available(), reason="Typst CLI is required")
 def test_the_read_layout_vision_call_records_as_vision(
     client: TestClient, db_session, openai_enabled, monkeypatch
@@ -418,6 +529,26 @@ def test_admin_overview_reports_daily_tokens_and_the_cache_hit_rate(
             # Reported nothing. It counts as a call and adds nothing to the
             # token totals, so it cannot drag the hit rate down either.
             LlmCall(purpose="chat", model="proxy", round_index=2, created_at=now),
+            # A proxy that bills input but never says how much of it was
+            # cached. Its tokens belong in the totals; counting them as a 0%
+            # hit would report broken caching off a number nobody measured.
+            LlmCall(
+                purpose="chat",
+                model="proxy",
+                round_index=3,
+                input_tokens=8000,
+                output_tokens=200,
+                created_at=now,
+            ),
+            # Same story for every vision call: the decisions endpoint reports
+            # input tokens and nothing else, by design.
+            LlmCall(
+                purpose="vision",
+                model="gpt-6-luna",
+                round_index=0,
+                input_tokens=2521,
+                created_at=now,
+            ),
             # Yesterday, so it must not land in today's bucket.
             LlmCall(
                 purpose="chat",
@@ -438,11 +569,15 @@ def test_admin_overview_reports_daily_tokens_and_the_cache_hit_rate(
     assert res.status_code == 200
     series = res.json()["series"]
     today = series[-1]
-    assert today["llm_calls"] == 3
-    assert today["llm_input_tokens"] == 4000
+    assert today["llm_calls"] == 5
+    assert today["llm_input_tokens"] == 14521
     assert today["llm_cached_tokens"] == 1000
-    assert today["llm_output_tokens"] == 500
+    assert today["llm_output_tokens"] == 700
     assert today["llm_reasoning_tokens"] == 60
+    # 1000 / 4000: only the two rows that reported both halves of the rate are
+    # in it. Over every row that billed input it would read 0.0689 -- a figure
+    # that says "caching is broken" about calls whose cache status was never
+    # reported.
     assert today["llm_cache_hit_rate"] == 0.25
 
     yesterday = series[-2]
@@ -454,3 +589,51 @@ def test_admin_overview_reports_daily_tokens_and_the_cache_hit_rate(
     assert quiet["llm_input_tokens"] == 0
     # No input tokens is no data, not a 0% hit rate.
     assert quiet["llm_cache_hit_rate"] is None
+
+
+def test_a_day_that_reported_no_cached_tokens_has_no_hit_rate(
+    client: TestClient, db_session, monkeypatch
+):
+    """Input billed, cache status never reported: still "no data", not 0%.
+
+    A day of vision-only traffic, or of traffic through a proxy that drops
+    `input_tokens_details`, is exactly the case the hit rate must stay silent
+    about -- 0% reads as "caching is broken".
+    """
+    monkeypatch.setenv("ADMIN_EMAILS", "ops@example.com")
+    get_settings.cache_clear()
+    ops = User(google_sub="sub-ops", email="ops@example.com", locale="en")
+    db_session.add(ops)
+    db_session.commit()
+    now = datetime.now(timezone.utc)
+    db_session.add_all(
+        [
+            LlmCall(
+                purpose="vision",
+                model="gpt-6-luna",
+                round_index=0,
+                input_tokens=2521,
+                created_at=now,
+            ),
+            LlmCall(
+                purpose="chat",
+                model="proxy",
+                round_index=0,
+                input_tokens=4000,
+                output_tokens=120,
+                created_at=now,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    res = client.get(
+        "/v1/admin/overview",
+        cookies={SESSION_COOKIE: _sign(ops.id, get_settings().auth_token_secret)},
+    )
+    assert res.status_code == 200
+    today = res.json()["series"][-1]
+    assert today["llm_calls"] == 2
+    assert today["llm_input_tokens"] == 6521
+    assert today["llm_cached_tokens"] == 0
+    assert today["llm_cache_hit_rate"] is None
