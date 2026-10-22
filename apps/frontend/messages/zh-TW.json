@@ -625,6 +625,7 @@
     "chartTokenReasoning": "推理",
     "chartCacheRate": "提示快取命中率",
     "chartCacheRateHint": "在同時回報兩個數字的呼叫中，快取輸入所佔的比例。沒有量到的日子留空，不畫成零。",
+    "chartCacheRateNoData": "還沒有任何呼叫同時回報輸入與快取 token，因此畫不出命中率。",
     "chartCacheRateSeries": "命中率 %",
     "chartLlmCalls": "模型呼叫",
     "chartLlmCallsHint": "每個 UTC 日的所有呼叫，含修復回合與 read_layout 的視覺呼叫。",

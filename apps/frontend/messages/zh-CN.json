@@ -625,6 +625,7 @@
     "chartTokenReasoning": "推理",
     "chartCacheRate": "提示缓存命中率",
     "chartCacheRateHint": "在同时回报两个数字的调用中，缓存输入所占的比例。没有测到的日子留空，不画成零。",
+    "chartCacheRateNoData": "还没有任何调用同时回报输入与缓存 token，因此画不出命中率。",
     "chartCacheRateSeries": "命中率 %",
     "chartLlmCalls": "模型调用",
     "chartLlmCallsHint": "每个 UTC 日的所有调用，含修复回合与 read_layout 的视觉调用。",

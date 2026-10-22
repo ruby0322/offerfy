@@ -15,6 +15,12 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
+import {
+  measuredRateDays,
+  toCacheRate,
+  toTokenStack,
+  totalTokens,
+} from "@/lib/admin-charts";
 import type { AdminCounts, AdminDayPoint } from "@/lib/api";
 import { useTranslations } from "next-intl";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, Pie, PieChart, XAxis, YAxis } from "recharts";
@@ -96,28 +102,17 @@ export default function AdminCharts({ series, counts }: Props) {
     guest_rate_export: row.guest_rate_export,
   }));
 
-  // `llm_cached_tokens` is a subset of `llm_input_tokens`, and
-  // `llm_reasoning_tokens` of `llm_output_tokens`. Stacking the raw fields
-  // would therefore count the cached and reasoning tokens twice, so the stack
-  // plots differences instead: four disjoint series summing to input + output.
-  // The clamps guard the one case that would invert a bar -- a proxy reporting
-  // more cached tokens than input, or more reasoning than output.
+  // Both mappings live in lib/admin-charts.ts and are covered there: the
+  // stack must stay disjoint, and an unmeasured rate must stay null rather
+  // than becoming a zero the chart would draw as a cache miss.
   const tokens = series.map((row) => ({
     date: shortDay(row.date),
-    cached_input: row.llm_cached_tokens,
-    fresh_input: Math.max(0, row.llm_input_tokens - row.llm_cached_tokens),
-    answer_output: Math.max(0, row.llm_output_tokens - row.llm_reasoning_tokens),
-    reasoning_output: row.llm_reasoning_tokens,
+    ...toTokenStack(row),
   }));
 
   const cacheRates = series.map((row) => ({
     date: shortDay(row.date),
-    // null, not 0: with connectNulls off this leaves a gap in the line, so a
-    // day nothing measured cannot be misread as a day the cache missed.
-    hit_rate:
-      row.llm_cache_hit_rate === null
-        ? null
-        : Math.round(row.llm_cache_hit_rate * 1000) / 10,
+    hit_rate: toCacheRate(row),
   }));
 
   const calls = series.map((row) => ({
@@ -137,15 +132,11 @@ export default function AdminCharts({ series, counts }: Props) {
   const activityTotal = activity.reduce((sum, row) => sum + row.users + row.resumes + row.chats, 0);
   const sourceTotal = sources.reduce((sum, row) => sum + row.resumes_create + row.resumes_upload, 0);
   const rateTotal = rates.reduce((sum, row) => sum + row.guest_rate_chat + row.guest_rate_export, 0);
-  const tokenTotal = series.reduce(
-    (sum, row) => sum + row.llm_input_tokens + row.llm_output_tokens,
-    0,
-  );
+  const tokenTotal = totalTokens(series);
   const callTotal = series.reduce((sum, row) => sum + row.llm_calls, 0);
-  // Calls can exist with no hit rate at all (a proxy that trims `usage`, or
-  // vision-only traffic), so this chart gets its own emptiness test rather
-  // than borrowing the call count.
-  const measuredRateDays = cacheRates.filter((row) => row.hit_rate !== null).length;
+  // Not the call count: vision calls bill input only and a proxy may drop
+  // `input_tokens_details`, so a window can hold calls and still have no rate.
+  const ratedDays = measuredRateDays(series);
   const ownerTotal = ownerMix.reduce((sum, row) => sum + row.value, 0);
   const sourceMixTotal = sourceMix.reduce((sum, row) => sum + row.value, 0);
 
@@ -268,8 +259,10 @@ export default function AdminCharts({ series, counts }: Props) {
           <CardDescription>{t("chartCacheRateHint")}</CardDescription>
         </CardHeader>
         <CardContent>
-          {measuredRateDays === 0 ? (
-            <p className="py-10 text-center text-sm text-muted-foreground">{t("chartNoData")}</p>
+          {ratedDays === 0 ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">
+              {t("chartCacheRateNoData")}
+            </p>
           ) : (
             <ChartContainer config={cacheConfig} className="aspect-[1.6/1] w-full">
               <LineChart data={cacheRates} margin={{ left: 4, right: 8, top: 8 }}>
@@ -284,12 +277,19 @@ export default function AdminCharts({ series, counts }: Props) {
                 />
                 <ChartTooltip content={<ChartTooltipContent />} />
                 <ChartLegend content={<ChartLegendContent />} />
+                {/*
+                  Dots are not decoration here. `connectNulls` is off and
+                  unmeasured days are null, so a measured day between two
+                  unmeasured ones has no segment to draw -- with dots off it
+                  would render as nothing at all. Recharts skips dots on null,
+                  so only the measured days get a mark.
+                */}
                 <Line
                   dataKey="hit_rate"
                   type="monotone"
                   stroke="var(--color-hit_rate)"
                   strokeWidth={2}
-                  dot={false}
+                  dot={{ r: 3 }}
                   connectNulls={false}
                 />
               </LineChart>
