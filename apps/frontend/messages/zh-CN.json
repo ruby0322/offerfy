@@ -616,6 +616,18 @@
     "chartRates": "访客额度",
     "chartRatesHint": "每个 UTC 日计入访客上限的对话与导出次数。",
     "chartRateChat": "对话",
-    "chartRateExport": "导出"
+    "chartRateExport": "导出",
+    "chartTokens": "LLM token 用量",
+    "chartTokensHint": "每个 UTC 日计费的 token，拆成互不重叠的四部分：缓存与未缓存的输入，以及回答与推理的输出。",
+    "chartTokenCached": "缓存输入",
+    "chartTokenFresh": "未缓存输入",
+    "chartTokenOutput": "输出",
+    "chartTokenReasoning": "推理",
+    "chartCacheRate": "提示缓存命中率",
+    "chartCacheRateHint": "在同时回报两个数字的调用中，缓存输入所占的比例。没有测到的日子留空，不画成零。",
+    "chartCacheRateSeries": "命中率 %",
+    "chartLlmCalls": "模型调用",
+    "chartLlmCallsHint": "每个 UTC 日的所有调用，含修复回合与 read_layout 的视觉调用。",
+    "chartLlmCallsSeries": "调用次数"
   }
 }
