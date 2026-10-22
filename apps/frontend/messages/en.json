@@ -613,6 +613,19 @@
     "chartRates": "Guest rate limits",
     "chartRatesHint": "Chat and export events counted toward guest caps, per UTC day.",
     "chartRateChat": "Chat",
-    "chartRateExport": "Export"
+    "chartRateExport": "Export",
+    "chartTokens": "LLM token spend",
+    "chartTokensHint": "Tokens billed per UTC day, split into four parts that do not overlap: cached and fresh input, then answer and reasoning output.",
+    "chartTokenCached": "Cached input",
+    "chartTokenFresh": "Fresh input",
+    "chartTokenOutput": "Output",
+    "chartTokenReasoning": "Reasoning",
+    "chartCacheRate": "Prompt cache hit rate",
+    "chartCacheRateHint": "Cached share of input, over the calls that reported both numbers. Days nothing measured are left blank rather than drawn as zero.",
+    "chartCacheRateNoData": "No call reported both input and cached tokens, so there is no hit rate to plot yet.",
+    "chartCacheRateSeries": "Hit rate %",
+    "chartLlmCalls": "Model calls",
+    "chartLlmCallsHint": "Every call per UTC day, including repair rounds and the vision calls read_layout makes.",
+    "chartLlmCallsSeries": "Calls"
   }
 }

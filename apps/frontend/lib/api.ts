@@ -603,6 +603,15 @@ export type AdminDayPoint = {
   chats: number;
   guest_rate_chat: number;
   guest_rate_export: number;
+  llm_calls: number;
+  llm_input_tokens: number;
+  llm_cached_tokens: number;
+  llm_output_tokens: number;
+  llm_reasoning_tokens: number;
+  // cached / input, over the calls that reported both halves. null on a day
+  // where none did, which is "not measured" rather than a 0% hit rate -- the
+  // distinction the whole token telemetry exists to make.
+  llm_cache_hit_rate: number | null;
 };
 
 export type AdminOverview = {

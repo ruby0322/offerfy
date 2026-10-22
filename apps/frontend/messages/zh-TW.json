@@ -616,6 +616,19 @@
     "chartRates": "訪客額度",
     "chartRatesHint": "每個 UTC 日計入訪客上限的對話與匯出次數。",
     "chartRateChat": "對話",
-    "chartRateExport": "匯出"
+    "chartRateExport": "匯出",
+    "chartTokens": "LLM token 用量",
+    "chartTokensHint": "每個 UTC 日計費的 token，拆成互不重疊的四部分：快取與未快取的輸入，以及回答與推理的輸出。",
+    "chartTokenCached": "快取輸入",
+    "chartTokenFresh": "未快取輸入",
+    "chartTokenOutput": "輸出",
+    "chartTokenReasoning": "推理",
+    "chartCacheRate": "提示快取命中率",
+    "chartCacheRateHint": "在同時回報兩個數字的呼叫中，快取輸入所佔的比例。沒有量到的日子留空，不畫成零。",
+    "chartCacheRateNoData": "還沒有任何呼叫同時回報輸入與快取 token，因此畫不出命中率。",
+    "chartCacheRateSeries": "命中率 %",
+    "chartLlmCalls": "模型呼叫",
+    "chartLlmCallsHint": "每個 UTC 日的所有呼叫，含修復回合與 read_layout 的視覺呼叫。",
+    "chartLlmCallsSeries": "呼叫次數"
   }
 }

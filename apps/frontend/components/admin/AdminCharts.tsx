@@ -15,6 +15,12 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
+import {
+  measuredRateDays,
+  toCacheRate,
+  toTokenStack,
+  totalTokens,
+} from "@/lib/admin-charts";
 import type { AdminCounts, AdminDayPoint } from "@/lib/api";
 import { useTranslations } from "next-intl";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, Pie, PieChart, XAxis, YAxis } from "recharts";
@@ -62,6 +68,21 @@ export default function AdminCharts({ series, counts }: Props) {
     guest_rate_export: { label: t("chartRateExport"), color: "var(--chart-5)" },
   } satisfies ChartConfig;
 
+  const tokenConfig = {
+    cached_input: { label: t("chartTokenCached"), color: "var(--chart-2)" },
+    fresh_input: { label: t("chartTokenFresh"), color: "var(--chart-1)" },
+    answer_output: { label: t("chartTokenOutput"), color: "var(--chart-4)" },
+    reasoning_output: { label: t("chartTokenReasoning"), color: "var(--chart-5)" },
+  } satisfies ChartConfig;
+
+  const cacheConfig = {
+    hit_rate: { label: t("chartCacheRateSeries"), color: "var(--chart-2)" },
+  } satisfies ChartConfig;
+
+  const callConfig = {
+    llm_calls: { label: t("chartLlmCallsSeries"), color: "var(--chart-3)" },
+  } satisfies ChartConfig;
+
   const activity = series.map((row) => ({
     date: shortDay(row.date),
     users: row.users,
@@ -81,6 +102,24 @@ export default function AdminCharts({ series, counts }: Props) {
     guest_rate_export: row.guest_rate_export,
   }));
 
+  // Both mappings live in lib/admin-charts.ts and are covered there: the
+  // stack must stay disjoint, and an unmeasured rate must stay null rather
+  // than becoming a zero the chart would draw as a cache miss.
+  const tokens = series.map((row) => ({
+    date: shortDay(row.date),
+    ...toTokenStack(row),
+  }));
+
+  const cacheRates = series.map((row) => ({
+    date: shortDay(row.date),
+    hit_rate: toCacheRate(row),
+  }));
+
+  const calls = series.map((row) => ({
+    date: shortDay(row.date),
+    llm_calls: row.llm_calls,
+  }));
+
   const ownerMix = [
     { key: "user", value: counts.resumes_user, fill: "var(--color-user)" },
     { key: "guest", value: counts.resumes_guest, fill: "var(--color-guest)" },
@@ -93,6 +132,11 @@ export default function AdminCharts({ series, counts }: Props) {
   const activityTotal = activity.reduce((sum, row) => sum + row.users + row.resumes + row.chats, 0);
   const sourceTotal = sources.reduce((sum, row) => sum + row.resumes_create + row.resumes_upload, 0);
   const rateTotal = rates.reduce((sum, row) => sum + row.guest_rate_chat + row.guest_rate_export, 0);
+  const tokenTotal = totalTokens(series);
+  const callTotal = series.reduce((sum, row) => sum + row.llm_calls, 0);
+  // Not the call count: vision calls bill input only and a proxy may drop
+  // `input_tokens_details`, so a window can hold calls and still have no rate.
+  const ratedDays = measuredRateDays(series);
   const ownerTotal = ownerMix.reduce((sum, row) => sum + row.value, 0);
   const sourceMixTotal = sourceMix.reduce((sum, row) => sum + row.value, 0);
 
@@ -178,6 +222,99 @@ export default function AdminCharts({ series, counts }: Props) {
                   dot={false}
                 />
               </LineChart>
+            </ChartContainer>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="lg:col-span-2">
+        <CardHeader>
+          <CardTitle>{t("chartTokens")}</CardTitle>
+          <CardDescription>{t("chartTokensHint")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {tokenTotal === 0 ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">{t("chartNoData")}</p>
+          ) : (
+            <ChartContainer config={tokenConfig} className="aspect-[2.2/1] w-full">
+              <BarChart data={tokens} margin={{ left: 4, right: 8, top: 8 }}>
+                <CartesianGrid vertical={false} />
+                <XAxis dataKey="date" {...axisProps()} />
+                <YAxis width={44} allowDecimals={false} tickLine={false} axisLine={false} />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                <ChartLegend content={<ChartLegendContent />} />
+                <Bar dataKey="cached_input" stackId="tok" fill="var(--color-cached_input)" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="fresh_input" stackId="tok" fill="var(--color-fresh_input)" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="answer_output" stackId="tok" fill="var(--color-answer_output)" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="reasoning_output" stackId="tok" fill="var(--color-reasoning_output)" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ChartContainer>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("chartCacheRate")}</CardTitle>
+          <CardDescription>{t("chartCacheRateHint")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {ratedDays === 0 ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">
+              {t("chartCacheRateNoData")}
+            </p>
+          ) : (
+            <ChartContainer config={cacheConfig} className="aspect-[1.6/1] w-full">
+              <LineChart data={cacheRates} margin={{ left: 4, right: 8, top: 8 }}>
+                <CartesianGrid vertical={false} />
+                <XAxis dataKey="date" {...axisProps()} />
+                <YAxis
+                  width={40}
+                  domain={[0, 100]}
+                  tickFormatter={(value) => `${value}%`}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                <ChartLegend content={<ChartLegendContent />} />
+                {/*
+                  Dots are not decoration here. `connectNulls` is off and
+                  unmeasured days are null, so a measured day between two
+                  unmeasured ones has no segment to draw -- with dots off it
+                  would render as nothing at all. Recharts skips dots on null,
+                  so only the measured days get a mark.
+                */}
+                <Line
+                  dataKey="hit_rate"
+                  type="monotone"
+                  stroke="var(--color-hit_rate)"
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                  connectNulls={false}
+                />
+              </LineChart>
+            </ChartContainer>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("chartLlmCalls")}</CardTitle>
+          <CardDescription>{t("chartLlmCallsHint")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {callTotal === 0 ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">{t("chartNoData")}</p>
+          ) : (
+            <ChartContainer config={callConfig} className="aspect-[1.6/1] w-full">
+              <BarChart data={calls} margin={{ left: 4, right: 8, top: 8 }}>
+                <CartesianGrid vertical={false} />
+                <XAxis dataKey="date" {...axisProps()} />
+                <YAxis width={28} allowDecimals={false} tickLine={false} axisLine={false} />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                <Bar dataKey="llm_calls" fill="var(--color-llm_calls)" radius={[4, 4, 0, 0]} />
+              </BarChart>
             </ChartContainer>
           )}
         </CardContent>
