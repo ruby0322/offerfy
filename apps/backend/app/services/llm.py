@@ -308,6 +308,67 @@ def _web_search_trace(item: dict, extra_sources: list[dict[str, str]] | None = N
     }
 
 
+# Responses API streaming. Only these two carry anything we act on; every other
+# event type is ignored on purpose, because OPENAI_BASE_URL may be a proxy that
+# adds or renames events we have never seen.
+TEXT_DELTA_EVENT = "response.output_text.delta"
+COMPLETED_EVENT = "response.completed"
+# `incomplete` counts as a failure here on purpose: this turn applies edits to
+# the user's document, and acting on a knowingly truncated response risks
+# writing a half-rewritten resume. An error the user can retry is better.
+STREAM_FAILURE_EVENTS = {"response.failed", "response.incomplete", "error"}
+
+
+async def _aiter_sse_payloads(resp: httpx.Response):
+    """Yield decoded JSON objects from a text/event-stream response body."""
+    data_lines: list[str] = []
+
+    def flush() -> dict | None:
+        nonlocal data_lines
+        if not data_lines:
+            return None
+        payload = "\n".join(data_lines)
+        data_lines = []
+        if payload.strip() in {"", "[DONE]"}:
+            return None
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
+    async for raw in resp.aiter_lines():
+        line = raw.rstrip("\r\n")
+        if not line:
+            event = flush()
+            if event is not None:
+                yield event
+            continue
+        if line.startswith(":"):
+            continue
+        if line.startswith("data:"):
+            data_lines.append(line[5:].lstrip())
+        # event:, id: and retry: carry nothing we need; the payload has its own type.
+    event = flush()
+    if event is not None:
+        yield event
+
+
+def _stream_failure_detail(event: dict) -> str:
+    for key in ("error", "response"):
+        section = event.get(key)
+        if isinstance(section, dict):
+            message = section.get("message")
+            if isinstance(message, str) and message.strip():
+                return message.strip()[:300]
+            nested = section.get("error")
+            if isinstance(nested, dict):
+                message = nested.get("message")
+                if isinstance(message, str) and message.strip():
+                    return message.strip()[:300]
+    return "Chat request failed"
+
+
 def _edit_needs_retry(name: str | None, parsed: Any) -> bool:
     if name != EDIT_TOOL or not isinstance(parsed, dict):
         return False
@@ -340,6 +401,7 @@ async def aiter_llm_turn(
     source = typst_source
     assistant_text = ""
     retry_nudge: str | None = None
+    emitted_assistant = False
 
     headers = {
         "Authorization": f"Bearer {settings.openai_api_key}",
@@ -355,20 +417,51 @@ async def aiter_llm_turn(
                 "tools": TOOLS + list(extra_tools or []),
                 "tool_choice": "auto",
                 "include": ["web_search_call.action.sources"],
+                "stream": True,
                 **completions_tool_extras(model),
             }
+            # Text deltas are a side channel: every decision below still runs on the
+            # terminal response.completed object, so the round logic is unchanged.
+            # The client's `read` timeout becomes a per-chunk budget once we stream,
+            # which is why `timeout` is still passed through as a plain float.
+            data: dict | None = None
             try:
-                resp = await client.post(url, headers=headers, json=body)
+                async with client.stream("POST", url, headers=headers, json=body) as resp:
+                    if resp.status_code >= 400:
+                        # client.stream does not read the body for us, and
+                        # _provider_error_detail calls resp.json().
+                        await resp.aread()
+                        detail = _provider_error_detail(resp)
+                        logger.warning(
+                            "openai chat failed status=%s detail=%s", resp.status_code, detail
+                        )
+                        raise HTTPException(status_code=502, detail=detail)
+                    async for event in _aiter_sse_payloads(resp):
+                        etype = event.get("type")
+                        if etype == TEXT_DELTA_EVENT:
+                            chunk = event.get("delta")
+                            if isinstance(chunk, str) and chunk:
+                                yield {"kind": "delta", "text": chunk}
+                        elif etype == COMPLETED_EVENT:
+                            # Lifecycle events nest the response object under
+                            # "response"; tolerate a flat payload too so a
+                            # proxy that unwraps it does not break the turn.
+                            payload = event.get("response")
+                            if not isinstance(payload, dict):
+                                payload = event if isinstance(event.get("output"), list) else None
+                            if isinstance(payload, dict):
+                                data = payload
+                        elif etype in STREAM_FAILURE_EVENTS:
+                            detail = _stream_failure_detail(event)
+                            logger.warning("openai chat stream failed detail=%s", detail)
+                            raise HTTPException(status_code=502, detail=detail)
             except httpx.HTTPError as exc:
                 logger.warning("openai chat transport failed: %s", exc.__class__.__name__)
                 raise HTTPException(status_code=502, detail="Chat request failed") from exc
-            if resp.status_code >= 400:
-                detail = _provider_error_detail(resp)
-                logger.warning("openai chat failed status=%s detail=%s", resp.status_code, detail)
-                raise HTTPException(status_code=502, detail=detail)
-            data = resp.json()
-            if not isinstance(data, dict):
-                data = {}
+            if data is None:
+                # A truncated stream must not read as an empty answer.
+                logger.warning("openai chat stream ended without %s", COMPLETED_EVENT)
+                raise HTTPException(status_code=502, detail="Chat request failed")
             output = data.get("output") if isinstance(data.get("output"), list) else []
             citations = _citation_sources(output)
             function_calls: list[dict] = []
@@ -381,6 +474,13 @@ async def aiter_llm_turn(
                     function_calls.append(item)
             if function_calls:
                 input_items.extend(output)
+                # This round's words would otherwise be overwritten by a later
+                # round. Promote them to a real message, above their own tool
+                # cards, instead of letting the user watch them vanish.
+                round_text = _output_text(data, output)
+                if round_text.strip():
+                    emitted_assistant = True
+                    yield {"kind": "assistant", "content": round_text}
                 for call in function_calls:
                     name = call.get("name")
                     args = _parse_args(call.get("arguments") or "{}")
@@ -447,20 +547,25 @@ async def aiter_llm_turn(
                             "output": _tool_output_for_model(result),
                         }
                     )
-                assistant_text = _output_text(data, output) or assistant_text
                 continue
             assistant_text = _output_text(data, output)
             if retry_nudge:
                 input_items.extend(output)
+                # Same reasoning as the tool branch: the nudge abandons this
+                # round, so its words are emitted now rather than dropped.
+                if assistant_text.strip():
+                    emitted_assistant = True
+                    yield {"kind": "assistant", "content": assistant_text}
+                    assistant_text = ""
                 input_items.append({"role": "user", "content": retry_nudge})
                 retry_nudge = None
                 continue
             break
-        else:
-            if not assistant_text:
-                assistant_text = "Updated the Typst source."
 
-    yield {"kind": "assistant", "content": assistant_text or "Updated the Typst source."}
+    if assistant_text.strip():
+        yield {"kind": "assistant", "content": assistant_text}
+    elif not emitted_assistant:
+        yield {"kind": "assistant", "content": "Updated the Typst source."}
 
 
 async def aiter_chat_edit(

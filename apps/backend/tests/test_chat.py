@@ -1,6 +1,5 @@
 from fastapi.testclient import TestClient
 from fastapi import HTTPException
-from types import SimpleNamespace
 import json
 import threading
 
@@ -9,7 +8,13 @@ import pytest
 from app.services.llm import completions_tool_extras, normalize_openai_model
 from app.services.templates import apply_prompt
 from app.services.typst_compile import typst_available
-from tests.openai_script import ScriptedOpenAI, llm_message, tool_call, web_search_call
+from tests.openai_script import (
+    ScriptedOpenAI,
+    ScriptedStream,
+    llm_message,
+    tool_call,
+    web_search_call,
+)
 
 
 def parse_sse(text: str) -> list[dict]:
@@ -49,6 +54,11 @@ def post_chat(client: TestClient, resume_id: str, **kwargs) -> dict:
     return {
         "status": status,
         "events": events,
+        # Text deltas are display-only, so sequence assertions ignore them.
+        "kinds": [event.get("type") for event in events if event.get("type") != "delta"],
+        "deltas": "".join(
+            event.get("text") or "" for event in events if event.get("type") == "delta"
+        ),
         "error": error,
         "json": {
             "messages": listed,
@@ -120,7 +130,7 @@ def test_chat_read_then_search_replace_and_second_read(
 
     result = post_chat(client, created["id"], json={"message": "Rename me to Ada Lovelace"})
     assert result["status"] == 200
-    assert [event.get("type") for event in result["events"]] == [
+    assert result["kinds"] == [
         "tool",
         "tool",
         "source",
@@ -457,9 +467,9 @@ def test_chat_surfaces_provider_error_message(
         async def __aexit__(self, *args):
             return False
 
-        async def post(self, url, headers=None, json=None):
+        def stream(self, method, url, headers=None, json=None, **kwargs):
             payload = {"error": {"message": "invalid model ID", "type": "invalid_request_error"}}
-            return SimpleNamespace(status_code=400, json=lambda: payload, text="bad")
+            return ScriptedStream(payload, status_code=400, lines=[])
 
     monkeypatch.setattr("app.services.llm.httpx.AsyncClient", FailingOpenAI)
     result = post_chat(client, created["id"], json={"message": "Rename me"})
@@ -1046,3 +1056,292 @@ def test_compile_status_runs_off_request_thread(
     assert result["status"] == 200
     assert seen
     assert all(ident != main_ident for ident in seen)
+
+
+def test_chat_streams_text_deltas_before_the_assistant_message(
+    client: TestClient, openai_enabled, monkeypatch
+):
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    scripted = ScriptedOpenAI([llm_message(content="Here is what I changed and why.")])
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    result = post_chat(client, created["id"], json={"message": "Explain yourself"})
+    assert result["status"] == 200
+    types = [event.get("type") for event in result["events"]]
+    assert types.count("delta") > 1, "text should arrive in more than one frame"
+    assert result["deltas"] == "Here is what I changed and why."
+    assert result["json"]["message"]["content"] == result["deltas"]
+    # Every delta precedes the assistant event that finalizes the same text.
+    assert types.index("assistant") > max(
+        index for index, kind in enumerate(types) if kind == "delta"
+    )
+    # Deltas are display-only: nothing extra lands in the transcript.
+    listed = client.get(f"/v1/resumes/{created['id']}/messages").json()
+    assistants = [row for row in listed if row["role"] == "assistant"]
+    assert len(assistants) == 1
+
+
+def test_chat_keeps_preamble_text_above_its_tool_card(
+    client: TestClient, openai_enabled, monkeypatch
+):
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    scripted = ScriptedOpenAI(
+        [
+            llm_message(
+                content="Let me read the document first.",
+                tool_calls=[tool_call("read_typst", {}, "read-1")],
+            ),
+            llm_message(content="Nothing needed changing."),
+        ]
+    )
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    result = post_chat(client, created["id"], json={"message": "Have a look"})
+    assert result["status"] == 200
+    # The preamble is a real message, and it sits before the tool it introduces.
+    assert result["kinds"] == ["assistant", "tool", "assistant", "done"]
+    assistants = [
+        event["message"]["content"]
+        for event in result["events"]
+        if event.get("type") == "assistant"
+    ]
+    assert assistants == ["Let me read the document first.", "Nothing needed changing."]
+    # Both rounds' words are persisted, in order, and replay on reload.
+    listed = client.get(f"/v1/resumes/{created['id']}/messages").json()
+    assert [row["content"] for row in listed if row["role"] == "assistant"] == assistants
+    # The last assistant event is still the final answer.
+    assert result["json"]["message"]["content"] == "Nothing needed changing."
+
+
+def test_chat_keeps_preamble_text_across_three_rounds(
+    client: TestClient, openai_enabled, monkeypatch
+):
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    scripted = ScriptedOpenAI(
+        [
+            llm_message(
+                content="Reading the resume.",
+                tool_calls=[tool_call("read_typst", {}, "read-1")],
+            ),
+            llm_message(
+                content="Renaming you now.",
+                tool_calls=[
+                    tool_call(
+                        "apply_typst_edit",
+                        {"search": "Your Name", "replace": "Ada Lovelace"},
+                        "edit-1",
+                    )
+                ],
+            ),
+            llm_message(content="Done — the name is updated."),
+        ]
+    )
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    result = post_chat(client, created["id"], json={"message": "Rename me to Ada Lovelace"})
+    assert result["status"] == 200
+    assert result["kinds"] == [
+        "assistant",
+        "tool",
+        "assistant",
+        "tool",
+        "source",
+        "assistant",
+        "done",
+    ]
+    assert result["deltas"] == (
+        "Reading the resume.Renaming you now.Done — the name is updated."
+    )
+    assert result["json"]["message"]["content"] == "Done — the name is updated."
+    assert "Ada Lovelace" in result["json"]["typst_source"]
+    listed = client.get(f"/v1/resumes/{created['id']}/messages").json()
+    assert [row["content"] for row in listed if row["role"] == "assistant"] == [
+        "Reading the resume.",
+        "Renaming you now.",
+        "Done — the name is updated.",
+    ]
+
+
+def test_chat_keeps_round_text_abandoned_by_the_retry_nudge(
+    client: TestClient, openai_enabled, monkeypatch
+):
+    """A failed edit nudges the model; that round's words must not be dropped."""
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    scripted = ScriptedOpenAI(
+        [
+            llm_message(
+                tool_calls=[
+                    tool_call(
+                        "apply_typst_edit",
+                        {"search": "not-in-the-document", "replace": "x"},
+                        "edit-miss",
+                    )
+                ]
+            ),
+            # No tool call, so this round ends on the nudge path.
+            llm_message(content="That did not apply. Let me try once more."),
+            llm_message(
+                tool_calls=[
+                    tool_call(
+                        "apply_typst_edit",
+                        {"search": "Your Name", "replace": "Ada Lovelace"},
+                        "edit-hit",
+                    )
+                ]
+            ),
+            llm_message(content="Renamed you."),
+        ]
+    )
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    result = post_chat(client, created["id"], json={"message": "Rename me to Ada Lovelace"})
+    assert result["status"] == 200
+    assistants = [row for row in result["json"]["messages"] if row["role"] == "assistant"]
+    contents = [row["content"] for row in assistants]
+    assert "That did not apply. Let me try once more." in contents
+    assert contents[-1] == "Renamed you."
+    assert "Ada Lovelace" in result["json"]["typst_source"]
+
+
+def test_chat_without_round_text_still_yields_one_assistant_message(
+    client: TestClient, openai_enabled, monkeypatch
+):
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    scripted = ScriptedOpenAI(
+        [
+            llm_message(tool_calls=[tool_call("read_typst", {}, "read-1")]),
+            llm_message(content=""),
+        ]
+    )
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    result = post_chat(client, created["id"], json={"message": "Just look"})
+    assert result["status"] == 200
+    assert result["deltas"] == ""
+    assert result["kinds"] == ["tool", "assistant", "done"]
+    assert result["json"]["message"]["content"] == "Updated the Typst source."
+
+
+def test_chat_truncated_stream_is_an_error_not_an_empty_answer(
+    client: TestClient, openai_enabled, monkeypatch
+):
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    scripted = ScriptedOpenAI([llm_message(content="half a thou")], truncate=True)
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    result = post_chat(client, created["id"], json={"message": "Say something"})
+    assert result["status"] == 200
+    assert result["error"] is not None
+    assert result["error"]["status"] == 502
+    # No assistant message is invented from a stream that never completed.
+    listed = client.get(f"/v1/resumes/{created['id']}/messages").json()
+    assert [row for row in listed if row["role"] == "assistant"] == []
+
+
+def test_chat_accepts_a_flat_completed_payload(
+    client: TestClient, openai_enabled, monkeypatch
+):
+    """A proxy that unwraps response.completed must not break the turn."""
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    payload = llm_message(content="Flat shape still works.")
+    flat = [
+        f"data: {json.dumps({'type': 'response.output_text.delta', 'delta': 'Flat shape '})}",
+        "",
+        f"data: {json.dumps({'type': 'response.output_text.delta', 'delta': 'still works.'})}",
+        "",
+        # No "response" wrapper: the response object sits at the top level.
+        f"data: {json.dumps({'type': 'response.completed', **payload})}",
+        "",
+    ]
+
+    class FlatOpenAI:
+        def stream(self, method, url, headers=None, json=None, **kwargs):
+            return ScriptedStream(payload, lines=flat)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: FlatOpenAI())
+    result = post_chat(client, created["id"], json={"message": "Say something"})
+    assert result["status"] == 200
+    assert result["error"] is None
+    assert result["deltas"] == "Flat shape still works."
+    assert result["json"]["message"]["content"] == "Flat shape still works."
+
+
+def test_chat_surfaces_a_stream_failure_event(
+    client: TestClient, openai_enabled, monkeypatch
+):
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    payload = llm_message(content="never finishes")
+    lines = [
+        f"data: {json.dumps({'type': 'response.output_text.delta', 'delta': 'part'})}",
+        "",
+        f"data: {json.dumps({'type': 'response.failed', 'response': {'error': {'message': 'model overloaded'}}})}",
+        "",
+    ]
+
+    class FailingStream:
+        def stream(self, method, url, headers=None, json=None, **kwargs):
+            return ScriptedStream(payload, lines=lines)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: FailingStream())
+    result = post_chat(client, created["id"], json={"message": "Say something"})
+    assert result["status"] == 200
+    assert result["error"] is not None
+    assert result["error"]["status"] == 502
+    assert result["error"]["detail"] == "model overloaded"
+    listed = client.get(f"/v1/resumes/{created['id']}/messages").json()
+    assert [row for row in listed if row["role"] == "assistant"] == []
+
+
+def test_chat_ignores_unknown_stream_events(
+    client: TestClient, openai_enabled, monkeypatch
+):
+    """Lifecycle noise and proxy-injected events must not be fatal."""
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    payload = llm_message(content="Done.")
+    lines = [
+        ": a comment line",
+        f"data: {json.dumps({'type': 'response.created', 'response': {}})}",
+        "",
+        "event: something",
+        f"data: {json.dumps({'type': 'response.output_item.added', 'item': {}})}",
+        "",
+        f"data: {json.dumps({'type': 'proxy.heartbeat'})}",
+        "",
+        f"data: {json.dumps({'type': 'response.output_text.delta', 'delta': 'Done.'})}",
+        "",
+        f"data: {json.dumps({'type': 'response.output_text.done', 'text': 'Done.'})}",
+        "",
+        f"data: {json.dumps({'type': 'response.completed', 'response': payload})}",
+        "",
+        "data: [DONE]",
+        "",
+    ]
+
+    class NoisyStream:
+        def stream(self, method, url, headers=None, json=None, **kwargs):
+            return ScriptedStream(payload, lines=lines)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: NoisyStream())
+    result = post_chat(client, created["id"], json={"message": "Say something"})
+    assert result["status"] == 200
+    assert result["error"] is None
+    assert result["deltas"] == "Done."
+    assert result["json"]["message"]["content"] == "Done."

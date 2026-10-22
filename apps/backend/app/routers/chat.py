@@ -185,6 +185,48 @@ async def chat(
     async def generate():
         assistant_text = ""
         new_source = original_source
+
+        async def relay(event: dict):
+            """Turn one LLM event into SSE frames. Shared by the turn and the repair loop."""
+            nonlocal assistant_text, new_source
+            kind = event.get("kind")
+            if kind == "delta":
+                # Display only: nothing is persisted until the assistant event lands.
+                yield _sse({"type": "delta", "text": event["text"]})
+            elif kind == "tool":
+                row = _persist_tool(db, resume.id, event["trace"])
+                yield _sse(
+                    {
+                        "type": "tool",
+                        "message": _message_out(row).model_dump(),
+                    }
+                )
+                created = _tailor_created(event["trace"])
+                if created:
+                    yield _sse(created)
+            elif kind == "source":
+                new_source = event["typst_source"]
+                set_draft_source(db, resume, new_source)
+                db.commit()
+                yield _sse(
+                    {
+                        "type": "source",
+                        "typst_source": new_source,
+                        "applied": True,
+                    }
+                )
+            elif kind == "assistant":
+                assistant_text = (
+                    event["content"] or assistant_text or "Updated the Typst source."
+                )
+                row = _persist_assistant(db, resume.id, assistant_text)
+                yield _sse(
+                    {
+                        "type": "assistant",
+                        "message": _message_out(row).model_dump(),
+                    }
+                )
+
         try:
             async for event in aiter_chat_edit(
                 messages,
@@ -195,38 +237,8 @@ async def chat(
                 extra_tools=family_specs,
                 tool_handlers=family_handlers,
             ):
-                kind = event.get("kind")
-                if kind == "tool":
-                    row = _persist_tool(db, resume.id, event["trace"])
-                    yield _sse(
-                        {
-                            "type": "tool",
-                            "message": _message_out(row).model_dump(),
-                        }
-                    )
-                    created = _tailor_created(event["trace"])
-                    if created:
-                        yield _sse(created)
-                elif kind == "source":
-                    new_source = event["typst_source"]
-                    set_draft_source(db, resume, new_source)
-                    db.commit()
-                    yield _sse(
-                        {
-                            "type": "source",
-                            "typst_source": new_source,
-                            "applied": True,
-                        }
-                    )
-                elif kind == "assistant":
-                    assistant_text = event["content"] or "Updated the Typst source."
-                    row = _persist_assistant(db, resume.id, assistant_text)
-                    yield _sse(
-                        {
-                            "type": "assistant",
-                            "message": _message_out(row).model_dump(),
-                        }
-                    )
+                async for frame in relay(event):
+                    yield frame
             repairs = 0
             while new_source != original_source and repairs < 3:
                 status = await asyncio.to_thread(compile_status, new_source)
@@ -270,38 +282,8 @@ async def chat(
                     extra_tools=family_specs,
                     tool_handlers=family_handlers,
                 ):
-                    kind = event.get("kind")
-                    if kind == "tool":
-                        row = _persist_tool(db, resume.id, event["trace"])
-                        yield _sse(
-                            {
-                                "type": "tool",
-                                "message": _message_out(row).model_dump(),
-                            }
-                        )
-                        created = _tailor_created(event["trace"])
-                        if created:
-                            yield _sse(created)
-                    elif kind == "source":
-                        new_source = event["typst_source"]
-                        set_draft_source(db, resume, new_source)
-                        db.commit()
-                        yield _sse(
-                            {
-                                "type": "source",
-                                "typst_source": new_source,
-                                "applied": True,
-                            }
-                        )
-                    elif kind == "assistant":
-                        assistant_text = event["content"] or assistant_text
-                        row = _persist_assistant(db, resume.id, assistant_text)
-                        yield _sse(
-                            {
-                                "type": "assistant",
-                                "message": _message_out(row).model_dump(),
-                            }
-                        )
+                    async for frame in relay(event):
+                        yield frame
             yield _sse(
                 {
                     "type": "done",

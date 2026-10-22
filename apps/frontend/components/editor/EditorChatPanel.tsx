@@ -48,6 +48,7 @@ export type ChatSuggestion = {
 
 type Props = {
   messages: ChatMessage[];
+  streamingText?: string | null;
   draft: string;
   onDraftChange: (value: string) => void;
   attachment: File | null;
@@ -71,6 +72,7 @@ type Props = {
 
 export default function EditorChatPanel({
   messages,
+  streamingText,
   draft,
   onDraftChange,
   attachment,
@@ -115,6 +117,19 @@ export default function EditorChatPanel({
       observer?.disconnect();
     };
   }, [messages, sending]);
+
+  // The effect above disconnects its observer after 700ms, so a long stream
+  // would stop following. This one is cheap enough to run on every flush.
+  // It yields to a reader who has scrolled up: the threshold absorbs the
+  // couple of lines a single 50ms flush can add without counting as scrolled.
+  useEffect(() => {
+    if (!streamingText) return;
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const fromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    if (fromBottom > 120) return;
+    viewport.scrollTop = viewport.scrollHeight;
+  }, [streamingText]);
 
   function acceptFile(file: File | undefined) {
     if (!file) return;
@@ -234,7 +249,18 @@ export default function EditorChatPanel({
                 </motion.div>
               ))}
             </AnimatePresence>
-            {sending ? <LoadingMessage /> : null}
+            {streamingText ? (
+              <div className="min-w-0">
+                <ChatMessageCard
+                  message={{ role: "assistant", content: streamingText }}
+                  sending={sending}
+                  currentSource={currentSource}
+                  onRestoreEdit={onRestoreEdit}
+                  familyActions={familyActions}
+                />
+              </div>
+            ) : null}
+            {sending && !streamingText ? <LoadingMessage /> : null}
           </div>
         </ScrollArea>
       </div>

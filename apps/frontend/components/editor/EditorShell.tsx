@@ -139,6 +139,9 @@ export default function EditorShell({ resumeId }: Props) {
   const [ats, setAts] = useState<AtsReport | null>(null);
   const [status, setStatus] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // Text that has streamed in but not yet been finalized into a real message.
+  // Deliberately outside `messages`: it carries no id and must never persist.
+  const [streamingText, setStreamingText] = useState<string | null>(null);
   const [draft, setDraft] = useState(() => loadComposerDraft(resumeId));
   const [attachment, setAttachment] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
@@ -172,6 +175,47 @@ export default function EditorShell({ resumeId }: Props) {
   const kickstartedRef = useRef(false);
   const savePromptedRef = useRef(false);
   const previewObjectUrls = useRef<string[]>([]);
+  const deltaBufferRef = useRef("");
+  const deltaTimerRef = useRef<number | null>(null);
+
+  // Deltas arrive token by token; committing each one would re-parse the whole
+  // markdown body per token. Batch them, but never leave a tail unflushed.
+  const flushDeltas = useCallback(() => {
+    if (deltaTimerRef.current !== null) {
+      window.clearTimeout(deltaTimerRef.current);
+      deltaTimerRef.current = null;
+    }
+    const pending = deltaBufferRef.current;
+    if (!pending) return;
+    deltaBufferRef.current = "";
+    setStreamingText((prev) => (prev ?? "") + pending);
+  }, []);
+
+  const pushDelta = useCallback(
+    (text: string) => {
+      deltaBufferRef.current += text;
+      if (deltaTimerRef.current !== null) return;
+      deltaTimerRef.current = window.setTimeout(flushDeltas, 50);
+    },
+    [flushDeltas],
+  );
+
+  const clearStream = useCallback(() => {
+    if (deltaTimerRef.current !== null) {
+      window.clearTimeout(deltaTimerRef.current);
+      deltaTimerRef.current = null;
+    }
+    deltaBufferRef.current = "";
+    setStreamingText(null);
+  }, []);
+
+  // Cancel a pending flush if the editor unmounts mid-stream.
+  useEffect(
+    () => () => {
+      if (deltaTimerRef.current !== null) window.clearTimeout(deltaTimerRef.current);
+    },
+    [],
+  );
 
   const setPreviewPages = useCallback((svgs: string[]) => {
     for (const url of previewObjectUrls.current) URL.revokeObjectURL(url);
@@ -415,8 +459,22 @@ export default function EditorShell({ resumeId }: Props) {
     }
     try {
       await sendChat(resumeId, trimmed, file, options, async (event) => {
+        if (event.type === "delta") {
+          setChatUnavailable(false);
+          pushDelta(event.text);
+          return;
+        }
         if (event.type === "tool" || event.type === "assistant") {
           setChatUnavailable(false);
+          if (event.type === "assistant") {
+            // The real message supersedes the provisional bubble. Clearing and
+            // appending in one invocation keeps it to a single paint, so the
+            // same text never shows twice. A `tool` event must NOT clear it:
+            // by then the round's words have already been finalized by their
+            // own assistant event, and clearing here would erase the next
+            // round's opening instead.
+            clearStream();
+          }
           setMessages((prev) => [...prev, withMessageId(event.message)]);
           if (
             event.type === "tool" &&
@@ -424,6 +482,11 @@ export default function EditorShell({ resumeId }: Props) {
           ) {
             void refreshMemory();
           }
+          return;
+        }
+        if (event.type === "done") {
+          // Safety net: a stream that ends mid-round must not strand a bubble.
+          clearStream();
           return;
         }
         if (event.type === "tailor_created") {
@@ -451,6 +514,7 @@ export default function EditorShell({ resumeId }: Props) {
           return;
         }
         if (event.type === "error") {
+          clearStream();
           if (event.status === 503) {
             setChatUnavailable(true);
             setMessages((prev) => [
@@ -494,6 +558,8 @@ export default function EditorShell({ resumeId }: Props) {
     } finally {
       sendingRef.current = false;
       setSending(false);
+      // A thrown ApiError skips the `done` event, so clear here too.
+      clearStream();
       const nextTailor = pendingTailorRef.current;
       pendingTailorRef.current = null;
       if (nextTailor) {
@@ -502,7 +568,18 @@ export default function EditorShell({ resumeId }: Props) {
       }
     }
     },
-    [failCompile, refreshAts, refreshMemory, refreshPreview, resumeId, router, source, t],
+    [
+      clearStream,
+      failCompile,
+      pushDelta,
+      refreshAts,
+      refreshMemory,
+      refreshPreview,
+      resumeId,
+      router,
+      source,
+      t,
+    ],
   );
   const sendUserChatRef = useRef(sendUserChat);
   useEffect(() => {
@@ -912,6 +989,7 @@ export default function EditorShell({ resumeId }: Props) {
               >
                 <EditorChatPanel
                   messages={messages}
+                  streamingText={streamingText}
                   draft={draft}
                   onDraftChange={onDraftChange}
                   attachment={attachment}

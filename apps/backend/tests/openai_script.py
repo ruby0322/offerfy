@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 
 
 def tool_call(name: str, arguments: dict | str, call_id: str = "call-1") -> dict:
@@ -60,10 +59,67 @@ def llm_message(
     return {"output": output, "output_text": content or ""}
 
 
+def _payload_text(payload: dict) -> str:
+    text = payload.get("output_text")
+    if isinstance(text, str) and text:
+        return text
+    parts: list[str] = []
+    for item in payload.get("output") or []:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        for block in item.get("content") or []:
+            if isinstance(block, dict) and isinstance(block.get("text"), str):
+                parts.append(block["text"])
+    return "".join(parts)
+
+
+def sse_lines(payload: dict, chunk: int = 7) -> list[str]:
+    """Serialize a scripted response the way the Responses API streams it."""
+    lines: list[str] = []
+    text = _payload_text(payload)
+    for start in range(0, len(text), chunk):
+        frame = {"type": "response.output_text.delta", "delta": text[start : start + chunk]}
+        lines.extend([f"data: {json.dumps(frame)}", ""])
+    lines.extend([f"data: {json.dumps({'type': 'response.completed', 'response': payload})}", ""])
+    lines.extend(["data: [DONE]", ""])
+    return lines
+
+
+class ScriptedStream:
+    """Stands in for the object httpx.AsyncClient.stream yields."""
+
+    def __init__(self, payload: dict, status_code: int = 200, lines: list[str] | None = None):
+        self.status_code = status_code
+        self._payload = payload
+        self._lines = sse_lines(payload) if lines is None else lines
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
+
+    async def aread(self) -> bytes:
+        return json.dumps(self._payload).encode("utf-8")
+
+    def json(self):
+        return self._payload
+
+    @property
+    def text(self) -> str:
+        return json.dumps(self._payload)
+
+
 class ScriptedOpenAI:
-    def __init__(self, script: list[dict]):
+    def __init__(self, script: list[dict], truncate: bool = False):
         self.script = list(script)
         self.requests: list[dict] = []
+        # truncate=True drops the completed event, to exercise the 502 path.
+        self.truncate = truncate
 
     def __call__(self, *args, **kwargs):
         return self
@@ -80,10 +136,16 @@ class ScriptedOpenAI:
     async def __aexit__(self, exc_type, exc, tb):
         return False
 
-    async def post(self, url, headers=None, json=None):
-        self.requests.append(json or {})
+    def _next_payload(self, body) -> dict:
+        self.requests.append(body or {})
         if not self.script:
-            payload = llm_message(content="ok")
-        else:
-            payload = self.script.pop(0)
-        return SimpleNamespace(status_code=200, json=lambda payload=payload: payload)
+            return llm_message(content="ok")
+        return self.script.pop(0)
+
+    def stream(self, method, url, headers=None, json=None, **kwargs):
+        payload = self._next_payload(json)
+        if self.truncate:
+            # Deltas, then the connection drops before response.completed.
+            lines = [line for line in sse_lines(payload) if "response.completed" not in line]
+            return ScriptedStream(payload, lines=lines)
+        return ScriptedStream(payload)

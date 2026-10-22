@@ -414,6 +414,7 @@ export async function listTemplates(): Promise<UniverseTemplate[]> {
 }
 
 export type ChatStreamEvent =
+  | { type: "delta"; text: string }
   | { type: "tool"; message: ChatMessage }
   | { type: "source"; typst_source: string; applied: boolean }
   | { type: "assistant"; message: ChatMessage }
