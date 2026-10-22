@@ -332,6 +332,76 @@ def _history_input(messages: list[dict]) -> list[dict]:
     return items
 
 
+def _token_count(section: Any, key: str) -> int | None:
+    value = section.get(key) if isinstance(section, dict) else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return int(value)
+
+
+def _usage_counts(data: dict) -> dict[str, int | None]:
+    """Read the Responses-API usage block off the terminal response object.
+
+    Every field is optional on purpose. OPENAI_BASE_URL may point at a proxy
+    that omits or renames parts of `usage`, and telemetry must never be the
+    reason a turn fails -- a shape we do not recognise reads as "unknown", not
+    as an error. `total_tokens` is skipped because it is just the sum.
+    """
+    empty: dict[str, int | None] = {
+        "input_tokens": None,
+        "cached_tokens": None,
+        "output_tokens": None,
+        "reasoning_tokens": None,
+    }
+    try:
+        usage = data.get("usage")
+        if not isinstance(usage, dict):
+            return empty
+        return {
+            "input_tokens": _token_count(usage, "input_tokens"),
+            "cached_tokens": _token_count(
+                usage.get("input_tokens_details"), "cached_tokens"
+            ),
+            "output_tokens": _token_count(usage, "output_tokens"),
+            "reasoning_tokens": _token_count(
+                usage.get("output_tokens_details"), "reasoning_tokens"
+            ),
+        }
+    except Exception:
+        logger.warning("openai usage read failed", exc_info=True)
+        return empty
+
+
+def _vision_usage_event(
+    report: Any, model: str, round_index: int, prefer_full_source: bool, source_chars: int
+) -> dict | None:
+    """Lift the `read_layout` vision call's own usage onto a usage event.
+
+    That call bills separately from the round that made it, and
+    `vision_report` already parses its usage into the report -- so the round
+    loop can hand it on without a second HTTP read or a Session.
+    """
+    visual = report.get("visual") if isinstance(report, dict) else None
+    if not isinstance(visual, dict):
+        return None
+    tokens = _token_count(visual, "input_tokens")
+    if tokens is None:
+        return None
+    return {
+        "kind": "usage",
+        "purpose": "vision",
+        "model": str(visual.get("model") or model),
+        "round_index": round_index,
+        "prefer_full_source": prefer_full_source,
+        "source_chars": source_chars,
+        "input_tokens": tokens,
+        # Input tokens are the whole bill on the decisions endpoint.
+        "cached_tokens": None,
+        "output_tokens": None,
+        "reasoning_tokens": None,
+    }
+
+
 def _output_text(data: dict, output: list) -> str:
     text = data.get("output_text")
     if isinstance(text, str) and text.strip():
@@ -571,6 +641,17 @@ async def aiter_llm_turn(
                 # A truncated stream must not read as an empty answer.
                 logger.warning("openai chat stream ended without %s", COMPLETED_EVENT)
                 raise HTTPException(status_code=502, detail="Chat request failed")
+            # Telemetry, not an answer: the router persists this and relays no
+            # frame for it. `source` is what entered this round, so the size it
+            # records is the size that was billed.
+            yield {
+                "kind": "usage",
+                "model": model,
+                "round_index": attempt,
+                "prefer_full_source": prefer_full_source,
+                "source_chars": len(source),
+                **_usage_counts(data),
+            }
             output = data.get("output") if isinstance(data.get("output"), list) else []
             citations = _citation_sources(output)
             function_calls: list[dict] = []
@@ -601,6 +682,11 @@ async def aiter_llm_turn(
                     elif name == LAYOUT_TOOL:
                         report = await read_layout_report(source, args)
                         result = json.dumps(report, ensure_ascii=False)
+                        vision_usage = _vision_usage_event(
+                            report, model, attempt, prefer_full_source, len(source)
+                        )
+                        if vision_usage is not None:
+                            yield vision_usage
                     elif name == EDIT_TOOL:
                         try:
                             before = source

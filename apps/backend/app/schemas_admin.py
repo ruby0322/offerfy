@@ -48,6 +48,15 @@ class AdminDayPoint(BaseModel):
     chats: int
     guest_rate_chat: int
     guest_rate_export: int
+    llm_calls: int
+    llm_input_tokens: int
+    llm_cached_tokens: int
+    llm_output_tokens: int
+    llm_reasoning_tokens: int
+    # cached / input. None on a day that billed no input tokens, because that
+    # is "no data", not a 0% hit rate. This is the number that says whether
+    # prompt caching works at all through whatever sits in front of the model.
+    llm_cache_hit_rate: float | None
 
 
 class AdminOverview(BaseModel):

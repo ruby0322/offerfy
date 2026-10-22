@@ -28,12 +28,40 @@ def web_search_call(
     }
 
 
+def llm_usage(
+    *,
+    input_tokens: int | None = None,
+    cached_tokens: int | None = None,
+    output_tokens: int | None = None,
+    reasoning_tokens: int | None = None,
+    total_tokens: int | None = None,
+) -> dict:
+    """A Responses-API `usage` block, nested the way the provider nests it.
+
+    Every argument is optional so a test can model a proxy that reports only
+    part of it -- which is the shape the telemetry has to survive.
+    """
+    usage: dict = {}
+    if input_tokens is not None:
+        usage["input_tokens"] = input_tokens
+    if cached_tokens is not None:
+        usage["input_tokens_details"] = {"cached_tokens": cached_tokens}
+    if output_tokens is not None:
+        usage["output_tokens"] = output_tokens
+    if reasoning_tokens is not None:
+        usage["output_tokens_details"] = {"reasoning_tokens": reasoning_tokens}
+    if total_tokens is not None:
+        usage["total_tokens"] = total_tokens
+    return usage
+
+
 def llm_message(
     *,
     content: str | None = None,
     tool_calls: list | None = None,
     web_search: dict | None = None,
     reasoning: str | None = None,
+    usage: dict | None = None,
 ) -> dict:
     output: list[dict] = []
     if web_search is not None:
@@ -58,6 +86,8 @@ def llm_message(
             }
         )
     payload = {"output": output, "output_text": content or ""}
+    if usage is not None:
+        payload["usage"] = usage
     if reasoning:
         # Test-only: stripped before the payload becomes the response object.
         payload["_test_reasoning"] = reasoning
