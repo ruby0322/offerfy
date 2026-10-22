@@ -7,7 +7,15 @@ from sqlalchemy.orm import Session, joinedload
 from app.config import get_settings
 from app.db import get_db
 from app.deps import load_resume_for_admin, require_admin
-from app.models import ChatMessage, GuestSession, JobIngestRun, RateEvent, Resume, User
+from app.models import (
+    ChatMessage,
+    GuestSession,
+    JobIngestRun,
+    LlmCall,
+    RateEvent,
+    Resume,
+    User,
+)
 from app.schemas import AtsReport, PreviewPages
 from app.schemas_admin import (
     AdminChatMessage,
@@ -93,6 +101,11 @@ def _day_points(db: Session, now: datetime) -> list[AdminDayPoint]:
             "chats": 0,
             "guest_rate_chat": 0,
             "guest_rate_export": 0,
+            "llm_calls": 0,
+            "llm_input_tokens": 0,
+            "llm_cached_tokens": 0,
+            "llm_output_tokens": 0,
+            "llm_reasoning_tokens": 0,
         }
         for key in keys
     }
@@ -116,8 +129,50 @@ def _day_points(db: Session, now: datetime) -> list[AdminDayPoint]:
         RateEvent.created_at >= start
     ):
         bump(created, "guest_rate_chat" if kind == "chat" else "guest_rate_export")
+    # The hit rate is read off a narrower set of rows than the totals, so it
+    # gets its own pair of running sums. Only a call that reported an input
+    # count *and* a cached count says anything about caching: a row with input
+    # tokens and a null `cached_tokens` -- every vision call, and any proxy
+    # that drops `input_tokens_details` -- would otherwise read as a 0% hit on
+    # tokens whose cache status was never measured.
+    rate_inputs = {key: 0 for key in keys}
+    rate_cached = {key: 0 for key in keys}
 
-    return [AdminDayPoint(date=key, **buckets[key]) for key in keys]
+    # Tokens are sums, not counts, so these rows cannot go through bump(). A
+    # null column means the provider did not report that number; it adds zero
+    # to the total while the call itself still counts.
+    for created, purpose, inputs, cached, outputs, reasoning in db.query(
+        LlmCall.created_at,
+        LlmCall.purpose,
+        LlmCall.input_tokens,
+        LlmCall.cached_tokens,
+        LlmCall.output_tokens,
+        LlmCall.reasoning_tokens,
+    ).filter(LlmCall.created_at >= start):
+        if created is None:
+            continue
+        key = _utc_day(created)
+        bucket = buckets.get(key)
+        if bucket is None:
+            continue
+        bucket["llm_calls"] += 1
+        bucket["llm_input_tokens"] += int(inputs or 0)
+        bucket["llm_cached_tokens"] += int(cached or 0)
+        bucket["llm_output_tokens"] += int(outputs or 0)
+        bucket["llm_reasoning_tokens"] += int(reasoning or 0)
+        # The decisions endpoint reports input tokens only, so a vision row
+        # can never contribute a cached count -- it stays out of the rate even
+        # if some proxy starts reporting one.
+        if purpose != "vision" and inputs is not None and cached is not None:
+            rate_inputs[key] += int(inputs)
+            rate_cached[key] += int(cached)
+
+    points: list[AdminDayPoint] = []
+    for key in keys:
+        measured = rate_inputs[key]
+        rate = round(rate_cached[key] / measured, 4) if measured else None
+        points.append(AdminDayPoint(date=key, llm_cache_hit_rate=rate, **buckets[key]))
+    return points
 
 
 def _resume_list_item(resume: Resume, message_count: int) -> AdminResumeListItem:
