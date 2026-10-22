@@ -307,3 +307,46 @@ class JobIngestRun(Base):
     expired_count: Mapped[int] = mapped_column(nullable=False, default=0)
     error_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")
+
+
+LLM_CALL_PURPOSES = ("chat", "repair", "vision")
+
+
+class LlmCall(Base):
+    """One model call, with what it billed.
+
+    Written from the chat router, never from the service that makes the call:
+    `aiter_llm_turn` has no Session and keeps it that way. A row is inserted per
+    round even when the provider reports no usage at all, because
+    OPENAI_BASE_URL may be a proxy that omits it -- and knowing the spend is
+    unmeasurable is itself the measurement.
+    """
+
+    __tablename__ = "llm_calls"
+    __table_args__ = (
+        CheckConstraint(
+            "purpose IN ('chat', 'repair', 'vision')", name="llm_call_purpose_values"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, index=True
+    )
+    resume_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("resumes.id", ondelete="SET NULL"), nullable=True
+    )
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False)
+    model: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    # 0-based round within one turn. The repair loop restarts the count, so a
+    # round_index only means something alongside its purpose.
+    round_index: Mapped[int] = mapped_column(nullable=False, default=0)
+    prefer_full_source: Mapped[bool] = mapped_column(nullable=False, default=False)
+    # Nullable on purpose: a proxy may report part of the usage block, or none.
+    input_tokens: Mapped[int | None] = mapped_column(nullable=True)
+    cached_tokens: Mapped[int | None] = mapped_column(nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(nullable=True)
+    reasoning_tokens: Mapped[int | None] = mapped_column(nullable=True)
+    # Length of the Typst source entering this round, to correlate cost with
+    # document size.
+    source_chars: Mapped[int] = mapped_column(nullable=False, default=0)

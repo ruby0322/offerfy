@@ -4,10 +4,11 @@ from sqlalchemy.orm import Session
 from pathlib import Path
 import asyncio
 import json
+import logging
 
 from app.db import get_db
 from app.deps import get_current_user, load_resume_for_owner, owner_context
-from app.models import ChatMessage, User
+from app.models import LLM_CALL_PURPOSES, ChatMessage, LlmCall, User
 from app.schemas import ChatMessageOut, ChatRequest
 from app.services.attachment import llm_content_for_upload, stored_user_message
 from app.services.extract import MAX_UPLOAD_BYTES, allowed_upload, extract_upload_text
@@ -23,6 +24,8 @@ from app.services.role_card import build_role_card
 from app.services.s3 import put_object
 from app.services.templates import is_template_switch_message, parse_preview_spec, template_api_block
 from app.services.typst_compile import compile_status
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -101,6 +104,41 @@ def _tailor_created(trace: dict) -> dict | None:
             "title": result.get("title") or "",
         }
     return None
+
+
+def _persist_usage(db: Session, resume_id: str, event: dict, purpose: str) -> None:
+    """Record what one model call billed.
+
+    Nothing here may fail a turn: a shape we did not expect or a database that
+    will not take the row is a warning and a lost metric, never a lost chat
+    response. The rollback matters as much as the log -- the same Session goes
+    on to persist tool traces and the draft source after this.
+    """
+    try:
+        kind = event.get("purpose") or purpose
+        if kind not in LLM_CALL_PURPOSES:
+            kind = purpose
+        db.add(
+            LlmCall(
+                resume_id=resume_id,
+                purpose=kind,
+                model=str(event.get("model") or "")[:128],
+                round_index=int(event.get("round_index") or 0),
+                prefer_full_source=bool(event.get("prefer_full_source")),
+                input_tokens=event.get("input_tokens"),
+                cached_tokens=event.get("cached_tokens"),
+                output_tokens=event.get("output_tokens"),
+                reasoning_tokens=event.get("reasoning_tokens"),
+                source_chars=int(event.get("source_chars") or 0),
+            )
+        )
+        db.commit()
+    except Exception:
+        logger.warning("llm usage telemetry failed", exc_info=True)
+        try:
+            db.rollback()
+        except Exception:
+            logger.warning("llm usage telemetry rollback failed", exc_info=True)
 
 
 def _persist_assistant(db: Session, resume_id: str, content: str) -> ChatMessage:
@@ -188,12 +226,22 @@ async def chat(
     async def generate():
         assistant_text = ""
         new_source = original_source
+        # Which half of the turn the rounds below belong to. The repair loop
+        # flips it, so its rounds are billed to `repair` rather than hiding in
+        # the chat total.
+        purpose = "chat"
 
         async def relay(event: dict):
             """Turn one LLM event into SSE frames. Shared by the turn and the repair loop."""
             nonlocal assistant_text, new_source
             kind = event.get("kind")
-            if kind == "delta":
+            if kind == "usage":
+                # Persisted and never relayed. The frontend dispatches on known
+                # `type` values only, so a usage frame would be inert there --
+                # but telemetry is not the client's business either way, and
+                # emitting nothing keeps the stream contract exactly as it was.
+                _persist_usage(db, resume.id, event, purpose)
+            elif kind == "delta":
                 # Display only: nothing is persisted until the assistant event lands.
                 yield _sse({"type": "delta", "text": event["text"]})
             elif kind == "reasoning":
@@ -253,6 +301,7 @@ async def chat(
                 if status.get("ok") is not False:
                     break
                 repairs += 1
+                purpose = "repair"
                 failed_after = (
                     "Typst compile failed after the template rewrite:\n"
                     if template_switch
