@@ -1096,17 +1096,6 @@ textarea {
   color: var(--ink);
 }
 
-.editor-header {
-  display: flex;
-  height: 3.5rem;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  border-bottom: 1px solid var(--rule);
-  background: var(--paper);
-  padding: 0 1rem;
-}
-
 .editor-tab-scroll {
   overflow-x: auto;
   scrollbar-width: none;
@@ -1210,89 +1199,6 @@ textarea {
 
 .typst-cm-host .cm-editor {
   height: 100%;
-}
-
-.preview-frame {
-  background: var(--paper);
-  overflow: auto;
-  min-height: 18rem;
-}
-
-.preview-paper {
-  background: var(--sheet);
-  border-radius: 0.35rem;
-  border: 1px solid var(--rule);
-  overflow: hidden;
-}
-
-.preview-frame img,
-.preview-frame svg {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-
-.ats-strip {
-  border-top: 1px solid var(--rule);
-  background: var(--paper);
-  padding: 0.9rem 1.1rem 1.1rem;
-}
-
-.ats-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-  font-size: 0.82rem;
-  padding: 0.28rem 0;
-  border-bottom: 1px solid var(--rule);
-}
-
-.ats-pass {
-  color: var(--success);
-  font-weight: 650;
-}
-
-.ats-fail {
-  color: var(--destructive);
-  font-weight: 650;
-}
-
-.chat-log {
-  flex: 1;
-  overflow: auto;
-  padding: 1.1rem 1.15rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.7rem;
-  background: var(--paper);
-}
-
-.chat-bubble {
-  max-width: 90%;
-  border-radius: var(--radius);
-  padding: 0.7rem 0.9rem;
-  font-size: 0.9rem;
-  line-height: 1.5;
-  white-space: pre-wrap;
-}
-
-.chat-bubble.user {
-  align-self: flex-end;
-  background: var(--cta);
-  color: var(--cta-ink);
-}
-
-.chat-bubble.assistant {
-  align-self: flex-start;
-  background: var(--sheet);
-  color: var(--ink);
-  border: 1px solid var(--rule);
-}
-
-.chat-bubble.error {
-  align-self: stretch;
-  background: color-mix(in srgb, var(--destructive) 12%, var(--paper));
-  color: var(--destructive);
 }
 
 /* One bounded field in the paper/rule language rather than three loose boxes:
