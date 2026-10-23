@@ -147,6 +147,10 @@ body {
   min-height: 100%;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   font-family: var(--font-sans);
   color: var(--ink);
@@ -166,6 +170,7 @@ textarea {
 
 .landing-page {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .font-display {
@@ -399,7 +404,25 @@ textarea {
   color: var(--ink);
   text-transform: none;
   letter-spacing: 0;
-  font-size: 0.95rem;
+  font-size: 1rem;
+}
+
+/* One filter per row rather than a 10rem field marooned in a wrapped line. */
+@media (max-width: 639px) {
+  .jobs-field,
+  .jobs-filters button {
+    width: 100%;
+  }
+
+  .jobs-field input,
+  .jobs-field select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .jobs-filters button {
+    padding: 0.6rem 0.9rem;
+  }
 }
 
 .jobs-filters button {
@@ -845,8 +868,14 @@ textarea {
 
 .landing-mock-body {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   min-height: 14rem;
+}
+
+@media (min-width: 640px) {
+  .landing-mock-body {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 .landing-mock-left,
@@ -855,7 +884,14 @@ textarea {
 }
 
 .landing-mock-left {
-  border-right: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+
+@media (min-width: 640px) {
+  .landing-mock-left {
+    border-right: 1px solid var(--rule);
+    border-bottom: 0;
+  }
 }
 
 .landing-mock-prompt {
@@ -924,6 +960,7 @@ textarea {
 
 .rr-shell {
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--paper);
   color: var(--ink);
 }
@@ -955,6 +992,7 @@ textarea {
 
 .rr-auth-main {
   min-height: calc(100vh - 8rem);
+  min-height: calc(100dvh - 8rem);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1058,14 +1096,6 @@ textarea {
   color: var(--ink);
 }
 
-.editor-page {
-  height: 100vh;
-  min-height: 100vh;
-  overflow: hidden;
-  background: var(--paper);
-  color: var(--ink);
-}
-
 .editor-header {
   display: flex;
   height: 3.5rem;
@@ -1077,11 +1107,15 @@ textarea {
   padding: 0 1rem;
 }
 
-.editor-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  height: calc(100vh - 3.5rem);
-  min-height: 0;
+.editor-tab-scroll {
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+.editor-tab-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 .editor-tabs {
@@ -1137,6 +1171,20 @@ textarea {
   stroke-width: 1.7;
 }
 
+/* 16px while the editor is the whole column: below that iOS zooms the page the
+   moment the source takes focus, and the zoom never comes back on its own. */
+.typst-cm-host,
+.typst-editor {
+  --typst-font-size: 1rem;
+}
+
+@media (min-width: 900px) {
+  .typst-cm-host,
+  .typst-editor {
+    --typst-font-size: 0.85rem;
+  }
+}
+
 .typst-editor {
   width: 100%;
   height: 100%;
@@ -1149,7 +1197,7 @@ textarea {
   caret-color: var(--ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
     "Courier New", monospace;
-  font-size: 0.85rem;
+  font-size: var(--typst-font-size, 0.85rem);
   line-height: 1.55;
   padding: 1.15rem 1.25rem;
 }
@@ -1247,13 +1295,126 @@ textarea {
   color: var(--destructive);
 }
 
+/* One bounded field in the paper/rule language rather than three loose boxes:
+   the textarea sits above its own tool row, and the whole thing takes the focus
+   ring the way .rr-input does. */
 .chat-composer {
-  display: flex;
   flex-shrink: 0;
-  gap: 0.55rem;
   border-top: 1px solid var(--rule);
   background: var(--paper);
-  padding: 0.85rem 0.95rem 1rem;
+  padding: 0.7rem 0.8rem 0.8rem;
+}
+
+.chat-composer-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--sheet);
+  padding: 0.3rem 0.35rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.chat-composer-field:focus-within {
+  border-color: var(--clay);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--clay) 28%, transparent);
+}
+
+.chat-composer-field[data-dragging="true"] {
+  border-color: var(--clay);
+  background: color-mix(in srgb, var(--clay) 8%, var(--sheet));
+}
+
+.chat-composer-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.chat-composer-tool,
+.chat-composer-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 0;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.chat-composer-tool {
+  color: var(--muted);
+  background: transparent;
+}
+
+.chat-composer-tool:hover:not(:disabled) {
+  color: var(--clay);
+  background: var(--hover);
+}
+
+.chat-composer-send {
+  margin-left: auto;
+  color: var(--cta-ink);
+  background: var(--cta);
+}
+
+.chat-composer-send:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.chat-composer-tool:disabled,
+.chat-composer-send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Thumbs, not cursors. */
+@media (max-width: 899px) {
+  .chat-composer-tool,
+  .chat-composer-send {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+}
+
+.chat-composer-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.15rem 0.1rem 0;
+  padding: 0.25rem 0.3rem 0.25rem 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+  font-size: 0.75rem;
+  color: var(--ink);
+}
+
+.chat-composer-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.chat-composer-chip-remove:hover {
+  color: var(--clay);
+  background: var(--hover);
+}
+
+.chat-composer-error {
+  margin: 0.15rem 0.35rem 0;
+  font-size: 0.75rem;
+  color: var(--destructive);
 }
 
 .chat-md {
@@ -1469,15 +1630,10 @@ textarea {
   color: var(--success);
 }
 
-@media (max-width: 900px) {
-  .editor-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
 .admin-shell {
   display: flex;
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .admin-sidebar {
@@ -1487,6 +1643,28 @@ textarea {
   flex-direction: column;
   background: #1a1f2e;
   color: #c9d1d9;
+}
+
+/* A 14rem rail leaves nothing for the tables, so on a phone the nav lies
+   down across the top and its links scroll sideways. */
+@media (max-width: 767px) {
+  .admin-shell {
+    flex-direction: column;
+  }
+
+  .admin-sidebar {
+    width: 100%;
+  }
+
+  .admin-sidebar nav {
+    flex-direction: row;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+  }
+
+  .admin-sidebar nav a {
+    white-space: nowrap;
+  }
 }
 
 .admin-sidebar a {

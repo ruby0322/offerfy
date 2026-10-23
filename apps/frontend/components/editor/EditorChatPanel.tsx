@@ -5,11 +5,9 @@ import { AnimatePresence, motion, type Variants } from "framer-motion";
 import { Paperclip, Send, X } from "lucide-react";
 import ChatMessageCard, { type FamilyCardActions } from "@/components/editor/ChatMessageCard";
 import LoadingMessage from "@/components/editor/LoadingMessage";
-import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import type { ChatMessage } from "@/lib/api";
-import { cn } from "@/lib/utils";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const ALLOWED_EXT = new Set(["pdf", "png", "jpg", "jpeg", "webp", "txt", "md"]);
@@ -70,6 +68,9 @@ type Props = {
   onRestoreEdit?: (source: string) => void;
   familyActions?: FamilyCardActions;
   suggestions?: ChatSuggestion[];
+  /** Bumped by the caller to put the caret in the composer, e.g. when a phone
+   *  raises the tool sheet straight into chat. */
+  focusKey?: number;
 };
 
 export default function EditorChatPanel({
@@ -96,6 +97,7 @@ export default function EditorChatPanel({
   onRestoreEdit,
   familyActions,
   suggestions,
+  focusKey,
 }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -134,6 +136,13 @@ export default function EditorChatPanel({
     if (fromBottom > 120) return;
     viewport.scrollTop = viewport.scrollHeight;
   }, [streamingText]);
+
+  // The caller raises this when it has just put the chat in front of the
+  // reader and the next thing they want is the keyboard.
+  useEffect(() => {
+    if (!focusKey) return;
+    textareaRef.current?.focus();
+  }, [focusKey]);
 
   function acceptFile(file: File | undefined) {
     if (!file) return;
@@ -281,54 +290,28 @@ export default function EditorChatPanel({
         </ScrollArea>
       </div>
       <form
-        className={cn(
-          "space-y-2 border-t border-border px-3 py-2",
-          dragging && "bg-hover",
-        )}
+        className="chat-composer"
         onSubmit={onSubmit}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
       >
-        {attachment ? (
-          <div className="flex items-center gap-2 rounded-lg border border-border bg-sheet px-2 py-1.5 text-xs text-foreground">
-            <Paperclip className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span className="min-w-0 flex-1 truncate">{attachment.name}</span>
-            <button
-              type="button"
-              className="rounded p-0.5 hover:bg-accent"
-              aria-label={attachRemoveLabel}
-              onClick={() => onAttachmentChange(null)}
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        ) : null}
-        {attachError ? <p className="text-xs text-destructive">{attachError}</p> : null}
-        <div className="flex items-end justify-center space-x-1">
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            disabled={sending}
-            aria-label={attachLabel}
-            title={`${attachLabel} · ${attachHint}`}
-            className="h-12 w-12 shrink-0 text-muted-foreground hover:text-clay"
-            onClick={() => fileRef.current?.click()}
-          >
-            <Paperclip className="h-5 w-5" />
-          </Button>
-          <input
-            ref={fileRef}
-            type="file"
-            className="hidden"
-            accept={ACCEPT}
-            disabled={sending}
-            onChange={(event) => {
-              acceptFile(event.target.files?.[0]);
-              event.target.value = "";
-            }}
-          />
+        <div className="chat-composer-field" data-dragging={dragging ? "true" : undefined}>
+          {attachment ? (
+            <div className="chat-composer-chip">
+              <Paperclip className="size-3.5 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate">{attachment.name}</span>
+              <button
+                type="button"
+                className="chat-composer-chip-remove"
+                aria-label={attachRemoveLabel}
+                onClick={() => onAttachmentChange(null)}
+              >
+                <X className="size-3.5" aria-hidden="true" />
+              </button>
+            </div>
+          ) : null}
+          {attachError ? <p className="chat-composer-error">{attachError}</p> : null}
           <Textarea
             ref={textareaRef}
             value={draft}
@@ -346,18 +329,41 @@ export default function EditorChatPanel({
             placeholder={placeholder}
             disabled={sending}
             aria-label={ariaLabel}
-            className="max-h-[120px] min-h-[48px] flex-1 resize-none px-2 text-sm transition-colors focus-visible:border-ring focus-visible:ring-ring/50"
+            className="max-h-[140px] min-h-[2.5rem] resize-none border-0 bg-transparent px-2 py-2 text-base shadow-none focus-visible:border-0 focus-visible:ring-0 md:text-sm"
             rows={1}
           />
-          <Button
-            type="submit"
-            size="icon"
-            disabled={!canSend()}
-            aria-label={sendLabel}
-            className="h-12 w-12 shrink-0 disabled:opacity-50"
-          >
-            <Send className="h-5 w-5" />
-          </Button>
+          <div className="chat-composer-row">
+            <button
+              type="button"
+              className="chat-composer-tool"
+              disabled={sending}
+              aria-label={attachLabel}
+              title={`${attachLabel} · ${attachHint}`}
+              onClick={() => fileRef.current?.click()}
+            >
+              <Paperclip className="size-[1.15rem]" aria-hidden="true" />
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              className="hidden"
+              accept={ACCEPT}
+              disabled={sending}
+              onChange={(event) => {
+                acceptFile(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+            <button
+              type="submit"
+              className="chat-composer-send"
+              disabled={!canSend()}
+              aria-label={sendLabel}
+              title={sendLabel}
+            >
+              <Send className="size-[1.15rem]" aria-hidden="true" />
+            </button>
+          </div>
         </div>
       </form>
     </div>

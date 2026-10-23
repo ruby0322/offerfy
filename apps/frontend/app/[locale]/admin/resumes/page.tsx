@@ -93,42 +93,44 @@ export default function AdminResumesPage() {
         <p className="text-sm text-muted-foreground">{t("empty")}</p>
       ) : null}
       {items.length > 0 ? (
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-border text-muted-foreground">
-              <th className="py-2 font-medium">{t("title")}</th>
-              <th className="py-2 font-medium">{t("owner")}</th>
-              <th className="py-2 font-medium">{t("source")}</th>
-              <th className="py-2 font-medium">{t("importStatus")}</th>
-              <th className="py-2 font-medium">{t("messages")}</th>
-              <th className="py-2 font-medium">{t("created")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((row) => (
-              <tr key={row.id} className="border-b border-border/70">
-                <td className="py-2">
-                  <Link href={`/admin/resumes/${row.id}`} className="underline">
-                    {row.title}
-                  </Link>
-                </td>
-                <td className="py-2">
-                  {row.owner_kind === "user" ? (
-                    <Link href={`/admin/users/${row.owner_id}`} className="underline">
-                      {row.owner_label}
-                    </Link>
-                  ) : (
-                    row.owner_label
-                  )}
-                </td>
-                <td className="py-2">{row.source}</td>
-                <td className="py-2">{row.import_status}</td>
-                <td className="py-2">{row.message_count}</td>
-                <td className="py-2">{stamp(row.created_at)}</td>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[34rem] text-left text-sm">
+            <thead>
+              <tr className="border-b border-border text-muted-foreground">
+                <th className="py-2 font-medium">{t("title")}</th>
+                <th className="py-2 font-medium">{t("owner")}</th>
+                <th className="py-2 font-medium">{t("source")}</th>
+                <th className="py-2 font-medium">{t("importStatus")}</th>
+                <th className="py-2 font-medium">{t("messages")}</th>
+                <th className="py-2 font-medium">{t("created")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {items.map((row) => (
+                <tr key={row.id} className="border-b border-border/70">
+                  <td className="py-2">
+                    <Link href={`/admin/resumes/${row.id}`} className="underline">
+                      {row.title}
+                    </Link>
+                  </td>
+                  <td className="py-2">
+                    {row.owner_kind === "user" ? (
+                      <Link href={`/admin/users/${row.owner_id}`} className="underline">
+                        {row.owner_label}
+                      </Link>
+                    ) : (
+                      row.owner_label
+                    )}
+                  </td>
+                  <td className="py-2">{row.source}</td>
+                  <td className="py-2">{row.import_status}</td>
+                  <td className="py-2">{row.message_count}</td>
+                  <td className="py-2">{stamp(row.created_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : null}
       <div className="flex gap-2 text-sm">
         <button

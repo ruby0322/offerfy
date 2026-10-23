@@ -68,30 +68,32 @@ export default function AdminOverviewPage() {
         {data.recent_users.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("empty")}</p>
         ) : (
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-border text-muted-foreground">
-                <th className="py-2 font-medium">{t("email")}</th>
-                <th className="py-2 font-medium">{t("locale")}</th>
-                <th className="py-2 font-medium">{t("resumeCount")}</th>
-                <th className="py-2 font-medium">{t("created")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.recent_users.map((row) => (
-                <tr key={row.id} className="border-b border-border/70">
-                  <td className="py-2">
-                    <Link href={`/admin/users/${row.id}`} className="underline">
-                      {row.email}
-                    </Link>
-                  </td>
-                  <td className="py-2">{row.locale}</td>
-                  <td className="py-2">{row.resume_count}</td>
-                  <td className="py-2">{stamp(row.created_at)}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[34rem] text-left text-sm">
+              <thead>
+                <tr className="border-b border-border text-muted-foreground">
+                  <th className="py-2 font-medium">{t("email")}</th>
+                  <th className="py-2 font-medium">{t("locale")}</th>
+                  <th className="py-2 font-medium">{t("resumeCount")}</th>
+                  <th className="py-2 font-medium">{t("created")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.recent_users.map((row) => (
+                  <tr key={row.id} className="border-b border-border/70">
+                    <td className="py-2">
+                      <Link href={`/admin/users/${row.id}`} className="underline">
+                        {row.email}
+                      </Link>
+                    </td>
+                    <td className="py-2">{row.locale}</td>
+                    <td className="py-2">{row.resume_count}</td>
+                    <td className="py-2">{stamp(row.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
       <section>
@@ -99,30 +101,32 @@ export default function AdminOverviewPage() {
         {data.recent_resumes.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("empty")}</p>
         ) : (
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-border text-muted-foreground">
-                <th className="py-2 font-medium">{t("title")}</th>
-                <th className="py-2 font-medium">{t("owner")}</th>
-                <th className="py-2 font-medium">{t("source")}</th>
-                <th className="py-2 font-medium">{t("created")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.recent_resumes.map((row) => (
-                <tr key={row.id} className="border-b border-border/70">
-                  <td className="py-2">
-                    <Link href={`/admin/resumes/${row.id}`} className="underline">
-                      {row.title}
-                    </Link>
-                  </td>
-                  <td className="py-2">{row.owner_label}</td>
-                  <td className="py-2">{row.source}</td>
-                  <td className="py-2">{stamp(row.created_at)}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[34rem] text-left text-sm">
+              <thead>
+                <tr className="border-b border-border text-muted-foreground">
+                  <th className="py-2 font-medium">{t("title")}</th>
+                  <th className="py-2 font-medium">{t("owner")}</th>
+                  <th className="py-2 font-medium">{t("source")}</th>
+                  <th className="py-2 font-medium">{t("created")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.recent_resumes.map((row) => (
+                  <tr key={row.id} className="border-b border-border/70">
+                    <td className="py-2">
+                      <Link href={`/admin/resumes/${row.id}`} className="underline">
+                        {row.title}
+                      </Link>
+                    </td>
+                    <td className="py-2">{row.owner_label}</td>
+                    <td className="py-2">{row.source}</td>
+                    <td className="py-2">{stamp(row.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </div>

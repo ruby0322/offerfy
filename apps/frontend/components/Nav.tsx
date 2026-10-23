@@ -64,37 +64,37 @@ export default function Nav({ variant }: Props) {
       <div
         className={
           landing
-            ? "mx-auto flex max-w-[72rem] items-center justify-between gap-4 px-5 py-3"
-            : "mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3"
+            ? "mx-auto flex max-w-[72rem] items-center justify-between gap-2 px-4 py-2 sm:gap-4 sm:px-5 sm:py-3"
+            : "mx-auto flex max-w-6xl items-center justify-between gap-2 px-4 py-2 sm:gap-4 sm:px-5 sm:py-3"
         }
       >
-        <div className="flex items-center gap-4">
+        <div className="flex min-w-0 items-center gap-3 sm:gap-4">
           <Link
             href="/"
-            className="flex items-center gap-2 text-lg font-semibold tracking-tight"
+            className="flex min-w-0 shrink-0 items-center gap-2 text-lg font-semibold tracking-tight"
           >
             <BrandMark />
             {t("brand")}
           </Link>
           {landing ? (
             <>
-              <Link href="/jobs" className="text-sm font-medium">
+              <Link href="/jobs" className="inline-flex min-h-9 items-center rounded-md px-1 text-sm font-medium">
                 {t("jobs")}
               </Link>
-              <Link href="/blog" className="text-sm font-medium">
+              <Link href="/blog" className="inline-flex min-h-9 items-center rounded-md px-1 text-sm font-medium">
                 {t("blog")}
               </Link>
             </>
           ) : null}
         </div>
-        <div className="flex items-center gap-1 sm:gap-3">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-3">
           {user ? (
             <>
-              <Link href="/dashboard" className="text-sm font-medium">
+              <Link href="/dashboard" className="inline-flex min-h-9 items-center rounded-md px-1 text-sm font-medium">
                 {t("dashboard")}
               </Link>
               {user.is_admin ? (
-                <Link href="/admin" className="text-sm font-medium">
+                <Link href="/admin" className="inline-flex min-h-9 items-center rounded-md px-1 text-sm font-medium">
                   {t("admin")}
                 </Link>
               ) : null}
@@ -133,7 +133,7 @@ export default function Nav({ variant }: Props) {
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <Link href="/login" className="text-sm font-medium">
+            <Link href="/login" className="inline-flex min-h-9 items-center rounded-md px-1 text-sm font-medium">
               {t("login")}
             </Link>
           )}

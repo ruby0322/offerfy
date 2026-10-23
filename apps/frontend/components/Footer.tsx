@@ -20,41 +20,41 @@ export default function Footer({ variant }: Props) {
       <div
         className={
           landing
-            ? "mx-auto flex max-w-[72rem] flex-wrap items-center justify-between gap-4 px-5 py-8"
-            : "mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-8"
+            ? "mx-auto flex max-w-[72rem] flex-wrap items-center justify-between gap-4 px-4 py-8 sm:px-5"
+            : "mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-8 sm:px-5"
         }
       >
         <p className="text-sm opacity-80">{t("tagline")}</p>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <Link href="/jobs" className="text-sm font-medium">
+          <Link href="/jobs" className="inline-flex min-h-9 items-center text-sm font-medium">
             {t("jobs")}
           </Link>
-          <Link href="/blog" className="text-sm font-medium">
+          <Link href="/blog" className="inline-flex min-h-9 items-center text-sm font-medium">
             {t("blog")}
           </Link>
-          <Link href="/about" className="text-sm font-medium">
+          <Link href="/about" className="inline-flex min-h-9 items-center text-sm font-medium">
             {t("about")}
           </Link>
-          <Link href="/contact" className="text-sm font-medium">
+          <Link href="/contact" className="inline-flex min-h-9 items-center text-sm font-medium">
             {t("contact")}
           </Link>
           <a
             href="https://x.com/offerfy"
-            className="text-sm font-medium"
+            className="inline-flex min-h-9 items-center text-sm font-medium"
             target="_blank"
             rel="noopener noreferrer"
           >
             {t("x")}
           </a>
-          <Link href="/terms" className="text-sm font-medium">
+          <Link href="/terms" className="inline-flex min-h-9 items-center text-sm font-medium">
             {t("terms")}
           </Link>
-          <Link href="/privacy" className="text-sm font-medium">
+          <Link href="/privacy" className="inline-flex min-h-9 items-center text-sm font-medium">
             {t("privacy")}
           </Link>
           <LocaleSwitcher />
           <ThemeSwitcher />
-          <Link href="/login" className="text-sm font-medium">
+          <Link href="/login" className="inline-flex min-h-9 items-center text-sm font-medium">
             {landing ? t("login") : t("google")}
           </Link>
         </div>

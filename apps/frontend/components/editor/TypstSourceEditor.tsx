@@ -8,6 +8,7 @@ import { EditorView, keymap } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { typst_lezer } from "codemirror-lang-typst/lezer";
 import { useTheme } from "next-themes";
+import { NARROW_SCREEN, useMediaQuery } from "@/lib/use-media-query";
 
 export type TypstSourceEditorProps = {
   value: string;
@@ -24,7 +25,7 @@ function editorTheme(dark: boolean) {
         height: "100%",
         backgroundColor: "var(--sheet)",
         color: "var(--ink)",
-        fontSize: "0.85rem",
+        fontSize: "var(--typst-font-size, 0.85rem)",
       },
       "&.cm-focused": { outline: "none" },
       ".cm-scroller": {
@@ -113,15 +114,25 @@ function TypstCodeMirror({ value, onChange, ariaLabel, lang, readOnly }: TypstSo
   const parentRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const themeCompartmentRef = useRef<Compartment | null>(null);
+  const wrapCompartmentRef = useRef<Compartment | null>(null);
   const onChangeRef = useRef(onChange);
   const [failed, setFailed] = useState(false);
   const [initialDoc] = useState(value);
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
+  // Sideways scrolling inside a one-column pane is worse than a wrapped line,
+  // so narrow screens wrap and wide ones keep the one-line-per-line view.
+  const wrap = useMediaQuery(NARROW_SCREEN);
+
+  const wrapRef = useRef(wrap);
 
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
+
+  useEffect(() => {
+    wrapRef.current = wrap;
+  }, [wrap]);
 
   useEffect(() => {
     const parent = parentRef.current;
@@ -132,6 +143,8 @@ function TypstCodeMirror({ value, onChange, ariaLabel, lang, readOnly }: TypstSo
     let failHandle = 0;
     const themeCompartment = new Compartment();
     themeCompartmentRef.current = themeCompartment;
+    const wrapCompartment = new Compartment();
+    wrapCompartmentRef.current = wrapCompartment;
 
     try {
       view = new EditorView({
@@ -144,6 +157,7 @@ function TypstCodeMirror({ value, onChange, ariaLabel, lang, readOnly }: TypstSo
             typst_lezer(),
             autocompletion(),
             themeCompartment.of(editorTheme(isDark)),
+            wrapCompartment.of(wrapRef.current ? EditorView.lineWrapping : []),
             EditorState.readOnly.of(Boolean(readOnly)),
             EditorView.contentAttributes.of({
               "aria-label": ariaLabel,
@@ -169,6 +183,7 @@ function TypstCodeMirror({ value, onChange, ariaLabel, lang, readOnly }: TypstSo
       view?.destroy();
       viewRef.current = null;
       themeCompartmentRef.current = null;
+      wrapCompartmentRef.current = null;
     };
     // Theme is reconfigured separately so the editor does not remount on toggle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -182,6 +197,17 @@ function TypstCodeMirror({ value, onChange, ariaLabel, lang, readOnly }: TypstSo
       effects: compartment.reconfigure(editorTheme(isDark)),
     });
   }, [isDark]);
+
+  // Reconfigured rather than passed as a dep of the setup effect: a remount here
+  // would rebuild the view from the doc it first opened with.
+  useEffect(() => {
+    const view = viewRef.current;
+    const compartment = wrapCompartmentRef.current;
+    if (!view || !compartment) return;
+    view.dispatch({
+      effects: compartment.reconfigure(wrap ? EditorView.lineWrapping : []),
+    });
+  }, [wrap]);
 
   useEffect(() => {
     const view = viewRef.current;
