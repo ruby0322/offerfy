@@ -526,6 +526,28 @@ export async function getMe(): Promise<AuthUser | null> {
   }
 }
 
+export type ConsentPurpose = "talent_introduction";
+
+export type ConsentState = {
+  consents: Partial<Record<ConsentPurpose, boolean>>;
+  policy_version: string;
+};
+
+export async function getConsents(): Promise<ConsentState> {
+  return apiJson("/api/v1/me/consents");
+}
+
+/** Appends a decision to the ledger; the backend never overwrites the last one. */
+export async function putConsent(
+  purpose: ConsentPurpose,
+  granted: boolean,
+): Promise<ConsentState> {
+  return apiJson(`/api/v1/me/consents/${purpose}`, {
+    method: "PUT",
+    body: JSON.stringify({ granted }),
+  });
+}
+
 export async function claimResumes(): Promise<void> {
   try {
     await apiJson("/api/v1/auth/claim", { method: "POST" });

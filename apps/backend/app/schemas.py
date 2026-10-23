@@ -151,3 +151,14 @@ class RevisionDetail(BaseModel):
 class PublicShareOut(BaseModel):
     title: str
     locale: str
+
+
+class ConsentUpdate(BaseModel):
+    granted: bool
+
+
+class ConsentState(BaseModel):
+    # One key per purpose the person controls themselves, so the settings page
+    # does not have to know the purpose list.
+    consents: dict[str, bool]
+    policy_version: str

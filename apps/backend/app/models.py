@@ -350,3 +350,70 @@ class LlmCall(Base):
     # Length of the Typst source entering this round, to correlate cost with
     # document size.
     source_chars: Mapped[int] = mapped_column(nullable=False, default=0)
+
+
+CONSENT_PURPOSES = ("service", "talent_introduction")
+CONSENT_ACTIONS = ("granted", "withdrawn")
+
+
+class ConsentEvent(Base):
+    """One consent decision, as the person it belongs to made it.
+
+    Append-only. A withdrawal is a new row with action='withdrawn', never an
+    UPDATE or a DELETE, because the question we have to be able to answer is
+    not "do they agree now" but "what did they agree to, when, and in which
+    language". Current state is the latest row per (subject, purpose) -- read
+    it through app.services.consent, never by querying this table directly.
+
+    There is deliberately no hash of the text they saw. The policy lives in the
+    frontend's message files, which this container cannot read, so storing one
+    would mean keeping a second copy of every version here. policy_version
+    plus the git history of messages/*.json answers the same question.
+
+    guest_session_id exists but is never written today: a guest sees no legal
+    notice anywhere in the product, so a 'granted' row for one would be
+    evidence of a consent that never happened. Guest work is processed as
+    necessary to the service they asked for, and the ledger picks them up at
+    /v1/auth/claim -- the moment the data first becomes identifiable.
+
+    Both subject columns are nullable and ON DELETE SET NULL, so erasing an
+    account leaves the consent record standing with no subject. That is the
+    point: we must be able to show consent for data we no longer hold.
+    """
+
+    __tablename__ = "consent_events"
+    __table_args__ = (
+        CheckConstraint(
+            "purpose IN ('service', 'talent_introduction')",
+            name="consent_purpose_values",
+        ),
+        CheckConstraint(
+            "action IN ('granted', 'withdrawn')",
+            name="consent_action_values",
+        ),
+        # Not an XOR: both NULL is the erased-subject case above. Only both
+        # set at once is nonsense.
+        CheckConstraint(
+            "NOT (user_id IS NOT NULL AND guest_session_id IS NOT NULL)",
+            name="consent_subject_not_both",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    guest_session_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("guest_sessions.id", ondelete="SET NULL"), nullable=True
+    )
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    # The language they actually read the notice in, not their current preference.
+    locale: Mapped[str] = mapped_column(String(16), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Human-readable context only, e.g. 'claimed=3'. Never parsed by code.
+    detail: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, index=True
+    )

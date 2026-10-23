@@ -18,6 +18,7 @@ from app.deps import (
 )
 from app.models import GuestSession, Resume, User
 from app.schemas import AuthMe, ClaimResponse
+from app.services.consent import record_consent
 from app.services.guest import GUEST_COOKIE, hash_guest_key
 
 router = APIRouter()
@@ -145,7 +146,21 @@ def google_callback(request: Request, code: str | None = None, db: Session = Dep
         user = User(google_sub=sub, email=email, locale="zh-TW", picture=picture)
         db.add(user)
         db.flush()
+        # The login page showed legal.loginAgree before this redirect, so the
+        # consent happened; this is the only place it gets recorded. Same
+        # session as the User insert, so the row and the account commit
+        # together -- an account can never exist without its consent.
+        record_consent(
+            db,
+            user=user,
+            purpose="service",
+            action="granted",
+            locale=user.locale,
+            source="signup",
+        )
     else:
+        # No backfill for accounts created under an earlier policy version.
+        # Their data is not covered by a purpose they were never shown.
         user.email = email
         user.picture = picture
 
@@ -177,6 +192,20 @@ def claim(
         resume.user_id = user.id
         resume.guest_session_id = None
         resume.claimed_at = now
+    if resumes:
+        # Anonymous work just became identifiable. Record that the account's
+        # consent now covers it -- this is where the chain of evidence breaks
+        # if nobody writes it down. Nothing is recorded against the guest
+        # session itself: a guest is shown no notice to consent to.
+        record_consent(
+            db,
+            user=user,
+            purpose="service",
+            action="granted",
+            locale=user.locale,
+            source="claim",
+            detail=f"claimed={len(resumes)}",
+        )
     db.flush()
     return ClaimResponse(claimed=len(resumes))
 

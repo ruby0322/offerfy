@@ -129,6 +129,9 @@ export default function Nav({ variant }: Props) {
                     <DropdownMenuSeparator />
                   </>
                 ) : null}
+                <DropdownMenuItem asChild>
+                  <Link href="/settings">{t("settings")}</Link>
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => void onLogout()}>{t("logout")}</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

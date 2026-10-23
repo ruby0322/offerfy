@@ -3,7 +3,18 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.db import ensure_schema
-from app.routers import admin, auth, chat, health, jobs, memory, resumes, shares, templates
+from app.routers import (
+    admin,
+    auth,
+    chat,
+    consent,
+    health,
+    jobs,
+    memory,
+    resumes,
+    shares,
+    templates,
+)
 from app.services.templates import start_template_prefetch
 
 
@@ -18,6 +29,7 @@ def create_app() -> FastAPI:
     application = FastAPI(title="Offerfy", lifespan=lifespan)
     application.include_router(health.router)
     application.include_router(auth.router)
+    application.include_router(consent.router)
     application.include_router(resumes.router)
     application.include_router(shares.router)
     application.include_router(jobs.router)

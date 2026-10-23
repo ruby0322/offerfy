@@ -7,6 +7,7 @@
     "brand": "Offerfy",
     "google": "Google",
     "dashboard": "Dashboard",
+    "settings": "Settings",
     "admin": "Admin",
     "login": "Log in",
     "logout": "Log out",
@@ -142,6 +143,18 @@
     "tailorCount": "{count, plural, one {# tailored version} other {# tailored versions}}",
     "tailorBadge": "Tailored",
     "tailorExplainer": "Your master resume is the one you keep improving. A tailored version is a copy aimed at a single job."
+  },
+  "settings": {
+    "title": "Settings",
+    "needLogin": "Please sign in with Google first.",
+    "matchingTitle": "Open to matching",
+    "matchingNotice": "Turn this on and we pass your resume data to hiring companies, or to recruiters acting for them, to introduce you to roles.",
+    "matchingDefault": "Off by default. Until you turn it on, we give your resume to no employer. You can turn it off at any time; we then stop passing it on and require anyone who already has it to stop using it.",
+    "statusOn": "Currently on",
+    "statusOff": "Currently off",
+    "turnOn": "Turn on",
+    "turnOff": "Turn off",
+    "error": "Could not save that. Please try again."
   },
   "picker": {
     "title": "How do you want to start?",
@@ -487,6 +500,13 @@
           "heading": "Why we use it",
           "paragraphs": [
             "We use this data to provide the editor, live preview, PDF export, ATS parseability checks, the public job catalog, authentication, guest rate limits, and the language you selected."
+          ]
+        },
+        {
+          "heading": "Talent introduction (only if you turn it on)",
+          "paragraphs": [
+            "If you explicitly turn on “Open to matching” in your settings, we pass your resume data to hiring companies, or to recruiters acting for them, to introduce you to roles.",
+            "This is off by default. Until you turn it on, we give your resume to no employer. You can turn it off at any time; we then stop passing it on and require anyone who already has it to stop using it."
           ]
         },
         {
