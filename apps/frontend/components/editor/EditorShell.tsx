@@ -11,6 +11,7 @@ import CreateTailorDialog, { type TailorDraft } from "@/components/editor/Create
 import EditorChatPanel, { type ChatSuggestion } from "@/components/editor/EditorChatPanel";
 import EditorHeader from "@/components/editor/EditorHeader";
 import EditorHistoryPanel from "@/components/editor/EditorHistoryPanel";
+import EditorMobileLayout from "@/components/editor/EditorMobileLayout";
 import EditorPreview from "@/components/editor/EditorPreview";
 import EditorSettingsPanel from "@/components/editor/EditorSettingsPanel";
 import EditorTemplatePanel from "@/components/editor/EditorTemplatePanel";
@@ -20,6 +21,7 @@ import type { FamilyCardActions } from "@/components/editor/ChatMessageCard";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useRouter } from "@/i18n/navigation";
+import { NARROW_SCREEN, useMediaQuery, useVisualViewportHeight } from "@/lib/use-media-query";
 import {
   ApiError,
   acceptMemory,
@@ -155,6 +157,14 @@ export default function EditorShell({ resumeId }: Props) {
       ? "chat"
       : (loadEditorTab(resumeId) ?? "typst"),
   );
+  // A phone cannot hold the source and the preview side by side. There the
+  // resume is the page and the tools ride in a sheet pulled up over it.
+  const narrow = useMediaQuery(NARROW_SCREEN);
+  // dvh does not shrink for the on-screen keyboard, so without this the
+  // composer the reader is typing into sits under it.
+  const visibleHeight = useVisualViewportHeight(narrow);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [chatFocusKey, setChatFocusKey] = useState(0);
   const [compileError, setCompileError] = useState<string | null>(null);
   const [signedIn, setSignedIn] = useState(false);
   const [unpublishedChanges, setUnpublishedChanges] = useState(false);
@@ -465,6 +475,10 @@ export default function EditorShell({ resumeId }: Props) {
     ) => {
     const trimmed = text.trim();
     if ((!trimmed && !file) || sendingRef.current) return;
+    // Every AI turn comes through here — kickstart, "fix with AI", the
+    // compile-error question, a template. On a phone the turn would stream out
+    // of sight unless the sheet comes up with it.
+    setSheetOpen(true);
     sendingRef.current = true;
     setSending(true);
     setMessages((prev) => [
@@ -902,6 +916,15 @@ export default function EditorShell({ resumeId }: Props) {
     [busyMemoryId, memory, memoryLoaded, resumeId, runMemoryAction, signedIn],
   );
 
+  // The dock's one affordance: raise the sheet on chat with the caret already
+  // in the composer, so asking for an edit is a single tap from the preview.
+  const askAi = useCallback(() => {
+    setLeftTab("chat");
+    saveEditorTab(resumeId, "chat");
+    setSheetOpen(true);
+    setChatFocusKey((key) => key + 1);
+  }, [resumeId]);
+
   const familyView = useMemo<ResumeFamily | null>(() => {
     if (!family || !title) return family;
     const rename = <T extends { id: string; title: string }>(member: T): T =>
@@ -941,9 +964,163 @@ export default function EditorShell({ resumeId }: Props) {
     family && family.master.id !== resumeId ? family.master.title : title;
   const tailorCount = family && family.master.id === resumeId ? family.tailors.length : 0;
 
+  // The preview keeps its own pane in both layouts and is never a tab; a
+  // "preview" left in storage by an older session would select nothing.
+  const activeTab = leftTab === "preview" ? "typst" : leftTab;
 
+  const previewPane = (
+    <EditorPreview
+      previewUrls={previewUrls}
+      previewAlt={t("preview")}
+      previewError={t("previewError")}
+      report={ats}
+      downloadLabel={downloading ? t("downloading") : t("download")}
+      downloading={downloading}
+      onDownload={onDownload}
+      onFixAts={onFixAts}
+      fixingAts={sending}
+      showAts={!(narrow && sheetOpen)}
+      overlay={
+        compileError ? (
+          <CompileErrorDialog
+            error={compileError}
+            copyLabel={t("compileErrorCopy")}
+            copiedLabel={t("compileErrorCopied")}
+            askLabel={t("compileErrorAskAi")}
+            asking={sending}
+            onCopy={onCopyCompileError}
+            onAsk={onAskCompileError}
+          />
+        ) : null
+      }
+    />
+  );
+
+  const editorPanes = (
+    <Tabs
+      value={activeTab}
+      onValueChange={(tab) => {
+        setLeftTab(tab);
+        saveEditorTab(resumeId, tab);
+      }}
+      className="flex h-full min-h-0 min-w-0 flex-col gap-0"
+    >
+      <div className="editor-tab-scroll flex shrink-0 items-center bg-background">
+        <TabsList className="editor-tabs h-auto w-full justify-start rounded-none bg-transparent p-0">
+          <TabsTrigger value="typst" className={editorTabClassName}>
+            <AlignLeft aria-hidden="true" />
+            {t("tabTypst")}
+          </TabsTrigger>
+          <TabsTrigger value="chat" className={editorTabClassName}>
+            <MessageCircle aria-hidden="true" />
+            {t("tabChat")}
+          </TabsTrigger>
+          <TabsTrigger value="template" className={editorTabClassName}>
+            <LayoutTemplate aria-hidden="true" />
+            {t("tabTemplate")}
+          </TabsTrigger>
+          <TabsTrigger value="settings" className={editorTabClassName}>
+            <Settings aria-hidden="true" />
+            {t("tabSettings")}
+          </TabsTrigger>
+          <TabsTrigger value="history" className={editorTabClassName}>
+            <History aria-hidden="true" />
+            {t("tabHistory")}
+          </TabsTrigger>
+        </TabsList>
+      </div>
+      <TabsContent
+        value="typst"
+        forceMount
+        className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+      >
+        <TypstSourceEditor
+          value={source}
+          onChange={setSource}
+          ariaLabel={t("tabTypst")}
+          lang={locale}
+        />
+      </TabsContent>
+      <TabsContent
+        value="chat"
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
+      >
+        <EditorChatPanel
+          messages={messages}
+          streamingText={streamingText}
+          reasoningText={reasoningText}
+          thinkingLabel={t("thinking")}
+          draft={draft}
+          onDraftChange={onDraftChange}
+          attachment={attachment}
+          onAttachmentChange={setAttachment}
+          onSubmit={onChat}
+          sending={sending}
+          placeholder={t("composerPlaceholder")}
+          sendLabel={sending ? t("sending") : t("send")}
+          emptyHint={chatEmptyHint}
+          ariaLabel={t("tabChat")}
+          attachLabel={t("attach")}
+          attachRemoveLabel={t("attachRemove")}
+          attachHint={t("attachHint")}
+          attachBadType={t("attachBadType")}
+          attachTooLarge={t("attachTooLarge")}
+          currentSource={source}
+          onRestoreEdit={onRestoreEdit}
+          familyActions={familyActions}
+          suggestions={chatSuggestions}
+          focusKey={chatFocusKey}
+        />
+      </TabsContent>
+      <TabsContent
+        value="template"
+        className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+      >
+        <EditorTemplatePanel sending={sending} onApply={onApplyTemplate} />
+      </TabsContent>
+      <TabsContent
+        value="settings"
+        className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+      >
+        <EditorSettingsPanel
+          resumeId={resumeId}
+          title={title}
+          createdAt={createdAt}
+          source={resumeSource}
+          resumeLocale={resumeLocale}
+          importStatus={importStatus}
+          onTitleChange={setTitle}
+          onShareState={onShareState}
+          unpublishedChanges={unpublishedChanges}
+          publishing={publishing}
+          onPublish={signedIn ? onPublish : undefined}
+          kind={kind}
+          tailorCount={tailorCount}
+          deleteDisabled={sending}
+          onRequestDelete={openDeleteDialog}
+        />
+      </TabsContent>
+      <TabsContent
+        value="history"
+        forceMount
+        className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+      >
+        <EditorHistoryPanel
+          resumeId={resumeId}
+          reloadKey={`${activeTab}:${updatedAt}`}
+          onRestored={onRestoreHistory}
+        />
+      </TabsContent>
+    </Tabs>
+  );
+
+  // h-dvh, not h-screen: on a phone the URL-bar-inclusive viewport would push
+  // the composer and the ATS strip under the browser chrome.
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background">
+    <div
+      className="flex h-dvh flex-col overflow-hidden bg-background"
+      style={visibleHeight ? { height: visibleHeight } : undefined}
+    >
       <EditorHeader
         brand={tNav("brand")}
         title={title}
@@ -981,153 +1158,33 @@ export default function EditorShell({ resumeId }: Props) {
         onPublish={signedIn ? onPublish : undefined}
       />
       <div className="min-h-0 min-w-0 flex-1">
-        <ResizablePanelGroup direction="horizontal" className="h-full">
-          <ResizablePanel defaultSize={48} minSize={28} maxSize={65} className="h-full min-w-0">
-            <div className="relative h-full min-h-0 min-w-0">
-            <Tabs
-              value={leftTab}
-              onValueChange={(tab) => {
-                setLeftTab(tab);
-                saveEditorTab(resumeId, tab);
-              }}
-              className="flex h-full min-h-0 min-w-0 flex-col gap-0"
-            >
-              <div className="flex shrink-0 items-center overflow-x-auto bg-background">
-                <TabsList className="editor-tabs h-auto w-full justify-start rounded-none bg-transparent p-0">
-                  <TabsTrigger value="typst" className={editorTabClassName}>
-                    <AlignLeft aria-hidden="true" />
-                    {t("tabTypst")}
-                  </TabsTrigger>
-                  <TabsTrigger value="chat" className={editorTabClassName}>
-                    <MessageCircle aria-hidden="true" />
-                    {t("tabChat")}
-                  </TabsTrigger>
-                  <TabsTrigger value="template" className={editorTabClassName}>
-                    <LayoutTemplate aria-hidden="true" />
-                    {t("tabTemplate")}
-                  </TabsTrigger>
-                  <TabsTrigger value="settings" className={editorTabClassName}>
-                    <Settings aria-hidden="true" />
-                    {t("tabSettings")}
-                  </TabsTrigger>
-                  <TabsTrigger value="history" className={editorTabClassName}>
-                    <History aria-hidden="true" />
-                    {t("tabHistory")}
-                  </TabsTrigger>
-                </TabsList>
-              </div>
-              <TabsContent
-                value="typst"
-                forceMount
-                className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
-              >
-                <TypstSourceEditor
-                  value={source}
-                  onChange={setSource}
-                  ariaLabel={t("tabTypst")}
-                  lang={locale}
-                />
-              </TabsContent>
-              <TabsContent
-                value="chat"
-                className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
-              >
-                <EditorChatPanel
-                  messages={messages}
-                  streamingText={streamingText}
-                  reasoningText={reasoningText}
-                  thinkingLabel={t("thinking")}
-                  draft={draft}
-                  onDraftChange={onDraftChange}
-                  attachment={attachment}
-                  onAttachmentChange={setAttachment}
-                  onSubmit={onChat}
-                  sending={sending}
-                  placeholder={t("composerPlaceholder")}
-                  sendLabel={sending ? t("sending") : t("send")}
-                  emptyHint={chatEmptyHint}
-                  ariaLabel={t("tabChat")}
-                  attachLabel={t("attach")}
-                  attachRemoveLabel={t("attachRemove")}
-                  attachHint={t("attachHint")}
-                  attachBadType={t("attachBadType")}
-                  attachTooLarge={t("attachTooLarge")}
-                  currentSource={source}
-                  onRestoreEdit={onRestoreEdit}
-                  familyActions={familyActions}
-                  suggestions={chatSuggestions}
-                />
-              </TabsContent>
-              <TabsContent
-                value="template"
-                className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
-              >
-                <EditorTemplatePanel sending={sending} onApply={onApplyTemplate} />
-              </TabsContent>
-              <TabsContent
-                value="settings"
-                className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
-              >
-                <EditorSettingsPanel
-                  resumeId={resumeId}
-                  title={title}
-                  createdAt={createdAt}
-                  source={resumeSource}
-                  resumeLocale={resumeLocale}
-                  importStatus={importStatus}
-                  onTitleChange={setTitle}
-                  onShareState={onShareState}
-                  unpublishedChanges={unpublishedChanges}
-                  publishing={publishing}
-                  onPublish={signedIn ? onPublish : undefined}
-                  kind={kind}
-                  tailorCount={tailorCount}
-                  deleteDisabled={sending}
-                  onRequestDelete={openDeleteDialog}
-                />
-              </TabsContent>
-              <TabsContent
-                value="history"
-                forceMount
-                className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
-              >
-                <EditorHistoryPanel
-                  resumeId={resumeId}
-                  reloadKey={`${leftTab}:${updatedAt}`}
-                  onRestored={onRestoreHistory}
-                />
-              </TabsContent>
-            </Tabs>
-            </div>
-          </ResizablePanel>
-          <ResizableHandle withHandle className="bg-rule" />
-          <ResizablePanel defaultSize={52} minSize={35} className="h-full">
-            <EditorPreview
-              previewUrls={previewUrls}
-              previewAlt={t("preview")}
-              previewError={t("previewError")}
-              report={ats}
-              downloadLabel={downloading ? t("downloading") : t("download")}
-              downloading={downloading}
-              onDownload={onDownload}
-              onFixAts={onFixAts}
-              fixingAts={sending}
-              overlay={
-                compileError ? (
-                  <CompileErrorDialog
-                    error={compileError}
-                    copyLabel={t("compileErrorCopy")}
-                    copiedLabel={t("compileErrorCopied")}
-                    askLabel={t("compileErrorAskAi")}
-                    asking={sending}
-                    onCopy={onCopyCompileError}
-                    onAsk={onAskCompileError}
-                  />
-                ) : null
-              }
-            />
-          </ResizablePanel>
-        </ResizablePanelGroup>
+        {narrow ? (
+          <EditorMobileLayout
+            preview={previewPane}
+            panel={editorPanes}
+            open={sheetOpen}
+            onOpenChange={setSheetOpen}
+            onAskAi={askAi}
+            labels={{
+              ask: t("mobileAsk"),
+              tools: t("mobileTools"),
+              close: t("mobileClose"),
+              expand: t("mobileExpand"),
+              collapse: t("mobileCollapse"),
+              resize: t("mobileResize"),
+            }}
+          />
+        ) : (
+          <ResizablePanelGroup direction="horizontal" className="h-full">
+            <ResizablePanel defaultSize={48} minSize={28} maxSize={65} className="h-full min-w-0">
+              <div className="relative h-full min-h-0 min-w-0">{editorPanes}</div>
+            </ResizablePanel>
+            <ResizableHandle withHandle className="bg-rule" />
+            <ResizablePanel defaultSize={52} minSize={35} className="h-full">
+              {previewPane}
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        )}
       </div>
       {tailorDialogOpen ? (
         <CreateTailorDialog

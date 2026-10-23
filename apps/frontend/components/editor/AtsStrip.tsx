@@ -11,6 +11,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ATS_CHECK_NAMES, type AtsCheckName } from "@/lib/ats-checks";
+import { NARROW_SCREEN, useMediaQuery } from "@/lib/use-media-query";
 import type { AtsReport } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -34,13 +35,16 @@ export default function AtsStrip({ report, onFix, fixing = false }: Props) {
   // Parseability is the thing worth knowing about, so a failing report opens the
   // strip rather than hiding behind two clicks. Once the reader has collapsed it
   // themselves, later reports leave it alone instead of fighting them.
+  // One column is the exception: eight open rows would bury the page the reader
+  // came to look at, so there the count in the header does the telling.
+  const narrow = useMediaQuery(NARROW_SCREEN);
   const [open, setOpen] = useState("");
   const userToggled = useRef(false);
 
   useEffect(() => {
     if (userToggled.current) return;
-    setOpen(hasFailure ? "ats" : "");
-  }, [hasFailure]);
+    setOpen(hasFailure && !narrow ? "ats" : "");
+  }, [hasFailure, narrow]);
 
   function onOpenChange(next: string) {
     userToggled.current = true;

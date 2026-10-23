@@ -66,7 +66,7 @@ function TailorRow({
   onDelete: () => void;
 }) {
   return (
-    <li className="flex items-center justify-between gap-4" data-testid="dashboard-tailor">
+    <li className="flex items-center justify-between gap-3" data-testid="dashboard-tailor">
       <p className="flex min-w-0 items-center gap-2 text-sm">
         <span className="truncate">{resume.title || resume.id}</span>
         <span className="shrink-0 rounded-sm border border-primary/40 px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-primary">
@@ -170,7 +170,7 @@ export default function DashboardPage() {
   return (
     <div className="rr-shell">
       <Nav variant="app" />
-      <main className="mx-auto max-w-4xl px-5 py-12">
+      <main className="mx-auto max-w-4xl px-4 py-10 sm:px-5 sm:py-12">
         <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="rr-page-title">{t("title")}</h1>
@@ -220,9 +220,9 @@ export default function DashboardPage() {
           <ul className="grid gap-3">
             {groups.map(({ master, tailors }) => (
               <li key={master.id} className="rr-card rr-row-card px-5 py-4" data-testid="dashboard-master">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="font-medium tracking-tight">{master.title || master.id}</p>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium tracking-tight">{master.title || master.id}</p>
                     <p className="mt-1 text-xs text-muted-foreground">
                       {master.source === "upload" ? t("sourceUpload") : t("sourceCreate")}
                       {tailors.length > 0 ? ` · ${t("tailorCount", { count: tailors.length })}` : ""}
