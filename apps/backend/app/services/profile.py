@@ -19,6 +19,7 @@ import hashlib
 import json
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -37,7 +38,7 @@ from app.schemas import (
     TalentProfilePayload,
     TalentProfileSummary,
 )
-from app.services.consent import has_consent
+from app.services.consent import has_consent, has_consent_many
 from app.services.family import family_master
 from app.services.llm import _responses_url, llm_configured, normalize_openai_model
 from app.services.memory import accepted_memory_texts
@@ -493,3 +494,49 @@ async def build_profile(db: Session, user: User) -> ProfileBuildResult:
     db.flush()
     result.profile = profile
     return result
+
+
+# --- the gated read path -----------------------------------------------------
+
+
+def readable_profiles_query(db: Session):
+    """Profiles whose source is still live. Gate 3 of three.
+
+    This is SQL only, and it is deliberately not the whole answer. It requires
+    that the owner still points at the resume this profile was built from and
+    that the resume still has a published revision -- so moving the pointer or
+    unpublishing takes someone out of results with no extra bookkeeping.
+
+    It cannot express "their newest consent answer is granted": that needs the
+    tie rule in services.consent, which a GROUP BY max(created_at) join cannot
+    reproduce. So the caller must filter the fetched page through
+    readable_profiles() rather than using this query on its own.
+    """
+    return (
+        db.query(TalentProfile)
+        .join(User, User.id == TalentProfile.user_id)
+        .join(Resume, Resume.id == TalentProfile.source_resume_id)
+        .filter(
+            User.profile_resume_id.isnot(None),
+            User.profile_resume_id == TalentProfile.source_resume_id,
+            Resume.published_revision_id.isnot(None),
+        )
+    )
+
+
+def readable_profiles(
+    db: Session, profiles: Sequence[TalentProfile]
+) -> list[TalentProfile]:
+    """Gate 2: drop anyone whose newest answer is not 'granted'.
+
+    One query for the page, through services.consent so "newest" keeps a
+    single definition. A page that comes back short is cosmetic; a page with a
+    withdrawn person in it is a breach, so this runs after the SQL above and
+    never instead of it.
+    """
+    if not profiles:
+        return []
+    allowed = has_consent_many(
+        db, [profile.user_id for profile in profiles], purpose="talent_introduction"
+    )
+    return [profile for profile in profiles if profile.user_id in allowed]

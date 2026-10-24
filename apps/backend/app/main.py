@@ -13,6 +13,7 @@ from app.routers import (
     memory,
     resumes,
     shares,
+    talent,
     talent_me,
     templates,
 )
@@ -38,6 +39,7 @@ def create_app() -> FastAPI:
     application.include_router(memory.router)
     application.include_router(templates.router)
     application.include_router(admin.router)
+    application.include_router(talent.router)
     application.include_router(talent_me.router)
     return application
 

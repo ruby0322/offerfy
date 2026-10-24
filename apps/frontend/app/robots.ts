@@ -23,7 +23,11 @@ export default function robots(): MetadataRoute.Robots {
     rules: {
       userAgent: "*",
       allow: "/",
-      disallow: DISALLOW_PATHS.flatMap(withLocales),
+      // The bare paths as well as the locale-prefixed ones. /api/* is not
+      // locale-prefixed -- the middleware excludes it -- so listing only
+      // /en/api left the real thing crawlable, including the OpenAPI
+      // document the backend serves at /api/openapi.json.
+      disallow: [...DISALLOW_PATHS, ...DISALLOW_PATHS.flatMap(withLocales)],
     },
     sitemap: [`${SITE_URL}/sitemap.xml`, `${SITE_URL}/jobs-sitemap.xml`],
   };
