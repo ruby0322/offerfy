@@ -597,7 +597,11 @@ def _ingest_health(db: Session, now: datetime, passes: list[AdminIngestPass]) ->
     age_hours = (now - freshest).total_seconds() / 3600 if freshest else None
     fresh_count = _count(db, Job, Job.is_active.is_(True), Job.last_seen_at >= cutoff)
     stale_count = _count(db, Job, Job.is_active.is_(True), Job.last_seen_at < cutoff)
-    last_failure = next((item.started_at for item in passes if item.status != "ok"), None)
+    # "failed" only, not "degraded". 63 of 118 boards fail on every single pass
+    # (companies that never used these ATS providers), so counting degraded here
+    # would pin a permanent red marker to a dashboard whose whole job is to be
+    # believed when it goes red.
+    last_failure = next((item.started_at for item in passes if item.status == "failed"), None)
     return AdminIngestHealth(
         freshest_last_seen_at=_iso(freshest),
         catalog_age_hours=age_hours,

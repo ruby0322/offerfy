@@ -448,6 +448,25 @@ def test_admin_jobs_ingest_marks_a_pass_that_refreshed_nothing_failed(
     assert body["health"]["last_failure_at"] is not None
 
 
+def test_admin_jobs_ingest_degraded_pass_is_not_a_failure(
+    client: TestClient, db_session, monkeypatch
+):
+    """A pass that lost some boards but refreshed the catalog is not a failure.
+
+    63 of 118 boards fail every pass, so if degraded counted here the dashboard
+    would show a permanent "last failed pass" and stop meaning anything.
+    """
+    _allow(monkeypatch, "ops@example.com")
+    ops = _ops(db_session)
+    _ingest_row(db_session, run_id="run-1", source="greenhouse", slug="a", status="ok", upserted=9)
+    _ingest_row(db_session, run_id="run-1", source="ashby", slug="dead", status="error", error="board not found")
+    db_session.commit()
+
+    body = client.get("/v1/admin/jobs/ingest", cookies=_session_cookie(ops)).json()
+    assert body["passes"][0]["status"] == "degraded"
+    assert body["health"]["last_failure_at"] is None
+
+
 def test_admin_jobs_ingest_health_splits_fresh_from_stale(
     client: TestClient, db_session, monkeypatch
 ):
