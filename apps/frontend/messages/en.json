@@ -46,7 +46,7 @@
     "title": "About",
     "paragraphs": [
       "Offerfy is a web resume editor at https://offerfy.cc. You keep a Typst source file in the browser. Chat can edit that same file. The PDF preview updates from the compile. This is not a generate-and-download product. You can start without creating an account.",
-      "We also publish a public job catalog from official employer ATS boards (Greenhouse, Lever, Ashby) and TaiwanJobs open data. Offerfy does not scrape 104 or LinkedIn. When you apply, you leave Offerfy and use the original posting. We do not match your resume to jobs, tailor a resume to a listing, or submit applications for you.",
+      "We also publish a public job catalog from official employer ATS boards: Greenhouse, Lever, Ashby, SmartRecruiters and Workday. Offerfy does not scrape 104 or LinkedIn. When you apply, you leave Offerfy and use the original posting. You can fork your master resume into a tailored version for one listing, paste in the job description, and have the model score the fit and suggest changes. We do not match your resume to jobs — there is no ranking and no recommendation — and we do not submit applications for you.",
       "The homepage sells the editor first. Featured listings are real open roles from that catalog. Contact is james@offerfy.cc. There is no public office address."
     ]
   },
@@ -57,12 +57,12 @@
     "paragraphs": [
       "Email james@offerfy.cc for product questions, privacy requests, and signed-in data deletion. There is no public office, no phone desk, and no in-app staff chat.",
       "Google sign-in is for people using the website. There is no self-serve API key, OAuth authorization server for machines, or agent sandbox. Guest use of the editor is rate-limited in production to protect compile and chat.",
-      "Questions about the public jobs catalog — what we ingest, and that apply happens on the source site — can go to the same address. We do not apply, match, or tailor on your behalf."
+      "Questions about the public jobs catalog — what we ingest, and that apply happens on the source site — can go to the same address. Tailoring a resume to a listing happens in the editor, when you ask for it; we do not apply or match on your behalf."
     ]
   },
   "blog": {
     "metaTitle": "Blog · Offerfy",
-    "metaDescription": "Notes and guides from Offerfy. The resume editor and a public job catalog are shipping; tailor and apply are on the way.",
+    "metaDescription": "Notes and guides from Offerfy. The resume editor, tailored versions, and a public job catalog are shipping; job matching and auto-apply are not.",
     "title": "Blog",
     "empty": "Nothing published yet.",
     "guide": "Guide",
@@ -72,16 +72,15 @@
   },
   "jobs": {
     "metaTitle": "Jobs · Offerfy",
-    "metaDescription": "Public job catalog from employer career boards and TaiwanJobs. Apply on the source site. Matching, tailor, and apply tracking are not included.",
+    "metaDescription": "Public job catalog from official employer career boards: Greenhouse, Lever, Ashby, SmartRecruiters and Workday. Apply on the source site. No matching, no apply tracking.",
     "title": "Jobs",
-    "lead": "Listings from official employer ATS boards and TaiwanJobs open data. Offerfy does not run 104 or LinkedIn. Apply on the original posting.",
+    "lead": "Listings from official employer ATS boards: Greenhouse, Lever, Ashby, SmartRecruiters and Workday. Offerfy does not run 104 or LinkedIn. Apply on the original posting.",
     "emptyFiltered": "No jobs match these filters.",
     "emptyCatalog": "No jobs in the catalog yet. Ingest may not have run.",
     "queryLabel": "Search",
     "queryPlaceholder": "Title, company, or location",
     "sourceLabel": "Source",
     "sourceAll": "All sources",
-    "sourceTaiwanjobs": "TaiwanJobs",
     "remoteLabel": "Remote",
     "remoteAll": "Any",
     "remoteYes": "Remote",
@@ -454,7 +453,7 @@
             "Offerfy is a web resume editor. You can create a resume from a starter template or upload a file, edit Typst source, preview a live compile, export a PDF, and check whether that compiled PDF can be parsed by applicant tracking systems (ATS).",
             "ATS checks parseability of the compiled PDF only. They do not predict hireability or job outcomes.",
             "You may use the editor without an account. Signing in with Google saves your resume history.",
-            "Offerfy also publishes a public job catalog collected from employer career-board APIs (Greenhouse, Lever, Ashby) and TaiwanJobs open data. Applying happens on the original posting. We do not operate 104 or LinkedIn. If you turn on “Open to matching” in your settings, we may introduce you to employers; the Privacy Policy explains what is passed on. We still do not score your resume against a posting, tailor it to one, or track your applications."
+            "Offerfy also publishes a public job catalog collected from employer career-board APIs: Greenhouse, Lever, Ashby, SmartRecruiters and Workday. Applying happens on the original posting. We do not operate 104 or LinkedIn. If you turn on “Open to matching” in your settings, we may introduce you to employers; the Privacy Policy explains what is passed on. When you ask for it, the editor can fork a resume into a tailored copy for a single posting and score how well it fits a job description you paste in. We still do not rank or recommend postings for you, submit applications, or track them."
           ]
         },
         {
@@ -542,7 +541,7 @@
             "Theme: light/dark preference is stored in the browser with localStorage. It is not a cookie.",
             "Resume data: title, Typst source, compiled SVG and PDF, ATS parseability report, and chat messages.",
             "Uploads: PDF, PNG, JPG, JPEG, WEBP, TXT, and MD files, up to 10 MiB, stored in object storage.",
-            "Job catalog: we store copies of public job postings from employer ATS board APIs and TaiwanJobs open data so we can show the catalog. These listings are not your personal data.",
+            "Job catalog: we store copies of public job postings from employer ATS board APIs so we can show the catalog. It also still holds archived postings from TaiwanJobs open data, a source we no longer ingest. These listings are not your personal data.",
             "Usage metering: for each model call we record what it billed — token counts, the model name and a cost figure — attached to your account or guest session, so the weekly allowance can be enforced. We also record when a request was refused for reaching a limit, with the tier and which limit it was. Neither record contains your resume, your uploads or your messages."
           ]
         },
