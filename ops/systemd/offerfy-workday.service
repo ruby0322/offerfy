@@ -1,0 +1,27 @@
+# systemd **user** unit — installs to ~/.config/systemd/user/, not /etc.
+# See offerfy-ingest.service for why these are user units.
+#
+# Separate from offerfy-ingest because Workday charges one HTTP request per
+# posting: a first pass over ~12k listings is 15-20 minutes, where the whole
+# 6-hourly ATS pass is 80 seconds. Steady-state passes are far cheaper, because
+# a posting already held is never re-fetched -- but the worst case still must
+# not be able to delay the fast pass.
+[Unit]
+Description=Offerfy job catalog ingest (Workday boards)
+Documentation=file:///home/ruby0322/offerfy/docs/deploy.md
+OnFailure=offerfy-ingest-failure.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ruby0322/offerfy/apps/backend
+EnvironmentFile=/home/ruby0322/offerfy/.env.production
+Environment=PATH=/home/ruby0322/offerfy/apps/backend/.tools:/home/ruby0322/offerfy/apps/backend/.venv/bin:/usr/local/bin:/usr/bin
+ExecStart=/home/ruby0322/offerfy/apps/backend/.venv/bin/python -m app.jobs.ingest_workday
+
+# The first pass over every board is the slow one; later passes only fetch new
+# listings. Generous so a cold start cannot be killed halfway.
+TimeoutStartSec=90min
+Nice=15
+
+# Shared host, and a long job. Stay out of everyone's way.
+IOSchedulingClass=idle

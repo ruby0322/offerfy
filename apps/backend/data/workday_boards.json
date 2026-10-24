@@ -1,0 +1,19 @@
+{
+  "_comment": "Workday boards. Separate from ats_boards.json because a Workday board needs host/tenant/site rather than a single slug, and because this source runs on its own slower timer -- every posting costs a detail request, so it cannot ride the 6-hourly pass. See AGENTS.md.",
+  "_verified": "All entries confirmed live 2026-10-24 by POSTing {tenant}/{site}/jobs and reading `total`. A wrong site slug returns 422 and a wrong tenant still returns 406 from the wildcard host, so a board MUST be confirmed by a 200 with a total -- do not add one on a guess.",
+  "_missing": "AMD, Qualcomm, Lam Research, Dell and Analog Devices have Workday tenants but none of the site slugs tried worked. TSMC and MediaTek are NOT on Workday: TSMC 403s all automation including robots.txt, and MediaTek runs a bespoke Strapi site with no public API.",
+  "boards": [
+    {"host": "nvidia.wd5.myworkdayjobs.com", "tenant": "nvidia", "site": "NVIDIAExternalCareerSite", "company": "NVIDIA"},
+    {"host": "micron.wd1.myworkdayjobs.com", "tenant": "micron", "site": "External", "company": "Micron"},
+    {"host": "amat.wd1.myworkdayjobs.com", "tenant": "amat", "site": "External", "company": "Applied Materials"},
+    {"host": "nxp.wd3.myworkdayjobs.com", "tenant": "nxp", "site": "careers", "company": "NXP"},
+    {"host": "intel.wd1.myworkdayjobs.com", "tenant": "intel", "site": "External", "company": "Intel"},
+    {"host": "marvell.wd1.myworkdayjobs.com", "tenant": "marvell", "site": "MarvellCareers", "company": "Marvell"},
+    {"host": "salesforce.wd12.myworkdayjobs.com", "tenant": "salesforce", "site": "External_Career_Site", "company": "Salesforce"},
+    {"host": "crowdstrike.wd5.myworkdayjobs.com", "tenant": "crowdstrike", "site": "crowdstrikecareers", "company": "CrowdStrike"},
+    {"host": "workday.wd5.myworkdayjobs.com", "tenant": "workday", "site": "Workday", "company": "Workday"},
+    {"host": "adobe.wd5.myworkdayjobs.com", "tenant": "adobe", "site": "external_experienced", "company": "Adobe"},
+    {"host": "redhat.wd5.myworkdayjobs.com", "tenant": "redhat", "site": "Jobs", "company": "Red Hat"},
+    {"host": "zendesk.wd1.myworkdayjobs.com", "tenant": "zendesk", "site": "zendesk", "company": "Zendesk"}
+  ]
+}

@@ -6,7 +6,14 @@ from datetime import datetime
 # "taiwanjobs" is retired -- nothing ingests it any more (see AGENTS.md) -- but
 # it stays here and in the jobs.job_source_values check constraint because
 # historical rows still carry it. Narrowing either would fail against them.
-JOB_SOURCES = ("greenhouse", "lever", "ashby", "smartrecruiters", "taiwanjobs")
+JOB_SOURCES = (
+    "greenhouse",
+    "lever",
+    "ashby",
+    "smartrecruiters",
+    "workday",
+    "taiwanjobs",
+)
 
 USER_AGENT = "OfferfyBot/1.0 (+https://offerfy.cc)"
 MAX_DESCRIPTION_CHARS = 200_000

@@ -7,6 +7,7 @@ export type JobSource =
   | "lever"
   | "ashby"
   | "smartrecruiters"
+  | "workday"
   | "taiwanjobs";
 
 export type JobListItem = {
@@ -126,5 +127,6 @@ export function sourceLabel(source: string, locale: AppLocale): string {
   if (source === "lever") return "Lever";
   if (source === "ashby") return "Ashby";
   if (source === "smartrecruiters") return "SmartRecruiters";
+  if (source === "workday") return "Workday";
   return source;
 }

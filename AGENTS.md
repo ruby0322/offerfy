@@ -242,6 +242,50 @@ Retune by editing the JSON, then **measure against the real catalogue before com
 run the predicate over live titles and read a sample of both sides. A deny-list written
 from imagination is how you lose "Infrastructure Security Engineer" to the word "security".
 
+## 8c. Workday is a second, slower pass
+
+Workday reaches the competitive semiconductor tier nothing else could — NVIDIA, Micron,
+Applied Materials, Intel, NXP, Marvell — plus CrowdStrike, Zendesk, Red Hat, Salesforce,
+Adobe and Workday itself. **12 boards, ~12k postings**, in
+`apps/backend/data/workday_boards.json`.
+
+**It is not TSMC or MediaTek, and it cannot be.** Checked 2026-10-24: TSMC returns 403 to
+every request including its own `robots.txt`, and MediaTek runs a bespoke Strapi site with
+no public jobs API. Both would need scraping, which this project does not do. Do not add a
+Workday row for either; they have no tenant.
+
+**Adding a board needs a confirmed 200, not a guess.** `*.myworkdayjobs.com` is a wildcard
+host, so a nonsense tenant like `mtk.wd1` still answers 406 — that is not evidence of
+anything. A wrong site slug returns 422. Only a `POST /wday/cxs/<tenant>/<site>/jobs` that
+returns 200 with an integer `total` proves a board exists. AMD, Qualcomm, Lam Research, Dell
+and Analog Devices all have tenants whose site slug we have not found yet.
+
+**Why it is a separate unit and a separate config file.** Workday's list endpoint is capped
+at 20 per call and carries no description, and `postedOn` is the English phrase *"Posted
+Yesterday"* rather than a date. Everything usable — description, `startDate`, apply url —
+is behind a per-posting detail call at ~0.7s. Fetching all 12k every pass is 20–36 minutes
+against 12,600 requests; the whole 6-hourly ATS pass is 80 seconds. So Workday gets
+`offerfy-workday.timer`, **daily at 03:40**, and `ingest_workday` rather than
+`ingest_board`.
+
+Two things make it affordable, and **both are load-bear**:
+
+1. **Scope from the free list metadata first**, so a posting we would not carry never costs
+   a detail call.
+2. **Skip the detail call for a posting already held.** `known_source_ids` reads what we
+   have, and the fetcher returns those ids as `still_live` instead of re-fetching. Steady
+   state therefore only pays for genuinely new listings.
+
+The trap in (2): a skipped posting still needs its freshness clock bumped, which is what
+`store.touch_jobs` is for. Miss it and the row ages out of `validThrough` and goes noindex
+while the job is still open — the same failure that took the catalogue dark in October.
+`WorkdayFetch.seen_ids` likewise unions new **and** still-live ids, because handing
+`expire_missing` only the new ones would deactivate the entire board on every pass. Both
+are covered by tests in `tests/test_jobs_workday.py`; do not simplify either away.
+
+Note also that `refreshed_nothing` means something different here: upserting zero is the
+normal steady state, so a Workday pass counts as failed only when **no board answered**.
+
 ## 9. Monitoring the ingest
 
 Three signals, most useful first:
