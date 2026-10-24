@@ -587,6 +587,8 @@ export type TalentProfileStatus = {
   built_at?: string | null;
   disclosure_count?: number;
   last_disclosed_at?: string | null;
+  /** Why the build this request attempted failed, if one did. Not persisted. */
+  build_error?: string | null;
 };
 
 export type TalentProfileDetail = {

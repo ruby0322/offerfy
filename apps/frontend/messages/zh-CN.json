@@ -173,7 +173,8 @@
     "profileDisclosures": "目前已被读取 {count} 次。",
     "profileNoDisclosures": "尚无人读取。",
     "profileDelete": "删除人才档案",
-    "profileError": "操作失败，请再试一次。"
+    "profileError": "操作失败，请再试一次。",
+    "profileBuildFailed": "目前无法用这份简历创建人才档案。请按“重新创建”再试一次。"
   },
   "picker": {
     "title": "选择开始方式",

@@ -25,22 +25,35 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import Resume, TalentProfile, User
+from app.models import TALENT_PROFILE_SCHEMA_VERSION, Resume, TalentProfile, User
 from app.schemas import (
     TALENT_EDUCATION_LIMIT,
+    TALENT_HEADLINE_CHARS,
+    TALENT_HIGHLIGHT_LIMIT,
+    TALENT_LANGUAGE_LIMIT,
+    TALENT_LOCATION_LIMIT,
+    TALENT_NAME_CHARS,
     TALENT_ROLE_LIMIT,
     TALENT_SKILL_LIMIT,
+    TALENT_SUMMARY_CHARS,
     TALENT_SUMMARY_SKILLS,
+    TALENT_YEARS_MAX,
     TalentProfileDetail,
     TalentProfilePayload,
     TalentProfileSummary,
 )
 from app.services.consent import has_consent, has_consent_many
 from app.services.family import family_master
-from app.services.llm import _responses_url, llm_configured, normalize_openai_model
+from app.services.llm import (
+    _output_text,
+    _responses_url,
+    llm_configured,
+    normalize_openai_model,
+)
 from app.services.memory import accepted_memory_texts
 from app.services.revisions import published_source
 
@@ -371,18 +384,38 @@ def _request_body(model: str, source: str, facts: list[str]) -> dict[str, Any]:
     }
 
 
-def _output_text(data: dict[str, Any]) -> str | None:
-    direct = data.get("output_text")
-    if isinstance(direct, str) and direct.strip():
-        return direct
-    for item in data.get("output") or []:
-        if not isinstance(item, dict):
-            continue
-        for part in item.get("content") or []:
-            if isinstance(part, dict) and isinstance(part.get("text"), str):
-                if part["text"].strip():
-                    return part["text"]
-    return None
+def _cut(value: str | None, limit: int) -> str | None:
+    if value is None:
+        return None
+    trimmed = value.strip()
+    return trimmed[:limit] or None
+
+
+def clamp_payload(payload: TalentProfilePayload) -> TalentProfilePayload:
+    """Bring the payload inside every cap, by truncating.
+
+    The caps bound what a single read hands over. They are deliberately not
+    pydantic constraints: a length constraint rejects, and rejecting means
+    throwing away an otherwise good profile because one role had a fifth
+    bullet point -- which is precisely what happened to the first real resume
+    this ran on. Truncating loses the fifth bullet. Rejecting loses the person.
+    """
+    payload.schema_version = TALENT_PROFILE_SCHEMA_VERSION
+    payload.display_name = _cut(payload.display_name, TALENT_NAME_CHARS)
+    payload.headline = _cut(payload.headline, TALENT_HEADLINE_CHARS)
+    payload.summary = _cut(payload.summary, TALENT_SUMMARY_CHARS)
+    if payload.years_experience is not None:
+        # The DB has a CHECK for this range, so a wild number must be clamped
+        # here or the insert fails.
+        payload.years_experience = max(0, min(TALENT_YEARS_MAX, payload.years_experience))
+    payload.locations = payload.locations[:TALENT_LOCATION_LIMIT]
+    payload.languages = payload.languages[:TALENT_LANGUAGE_LIMIT]
+    payload.skills = payload.skills[:TALENT_SKILL_LIMIT]
+    payload.education = payload.education[:TALENT_EDUCATION_LIMIT]
+    payload.roles = payload.roles[:TALENT_ROLE_LIMIT]
+    for role in payload.roles:
+        role.highlights = role.highlights[:TALENT_HIGHLIGHT_LIMIT]
+    return payload
 
 
 def _usage_of(data: dict[str, Any]) -> dict[str, Any]:
@@ -447,24 +480,34 @@ async def build_profile(db: Session, user: User) -> ProfileBuildResult:
         result.error = "unparseable"
         return result
     result.usage = _usage_of(data)
-    text = _output_text(data)
-    if not text:
-        result.error = "unparseable"
+    output = data.get("output") if isinstance(data.get("output"), list) else []
+    text = _output_text(data, output)
+    if not text.strip():
+        logger.warning("profile build returned no text status=%s", data.get("status"))
+        result.error = "no_output"
         return result
     try:
         payload = TalentProfilePayload.model_validate_json(text)
+    except ValidationError as exc:
+        # Log where it failed, never what it said: the content is personal
+        # data. Distinct from no_output so the two cannot be confused again.
+        logger.warning(
+            "profile payload rejected: %s",
+            "; ".join(".".join(str(part) for part in err["loc"]) for err in exc.errors()),
+        )
+        result.error = "invalid_payload"
+        return result
     except ValueError:
+        logger.warning("profile build output was not JSON")
         result.error = "unparseable"
         return result
 
-    payload = scrub_contacts(payload)
+    payload = clamp_payload(scrub_contacts(payload))
     # A name Google verified beats one a model read off a document.
     if user.name:
-        payload.display_name = user.name
-    payload.skills = payload.skills[:TALENT_SKILL_LIMIT]
-    payload.roles = payload.roles[:TALENT_ROLE_LIMIT]
-    payload.education = payload.education[:TALENT_EDUCATION_LIMIT]
+        payload.display_name = _cut(user.name, TALENT_NAME_CHARS)
     if _is_empty(payload):
+        logger.warning("profile build produced an empty payload")
         result.error = "empty"
         return result
 
@@ -485,7 +528,6 @@ async def build_profile(db: Session, user: User) -> ProfileBuildResult:
     profile.profile_json = blob
     profile.content_hash = hashlib.sha256(blob.encode("utf-8")).hexdigest()
     profile.model = model[:128]
-    profile.schema_version = payload.schema_version
     # Set on every write, not just the insert: built_at is what the owner and
     # the reader see as this payload's date.
     profile.built_at = _utcnow()

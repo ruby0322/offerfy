@@ -83,7 +83,9 @@ def _record_spend(db: Session, result) -> None:
         db.rollback()
 
 
-def _status(db: Session, user: User) -> TalentProfileStatus:
+def _status(
+    db: Session, user: User, *, build_error: str | None = None
+) -> TalentProfileStatus:
     resume = source_resume(db, user)
     profile = profile_for_user(db, user)
     published = bool(
@@ -105,6 +107,7 @@ def _status(db: Session, user: User) -> TalentProfileStatus:
         # still needs to see who already had the old one.
         disclosure_count=disclosure_count(db, user),
         last_disclosed_at=last.isoformat() if last else None,
+        build_error=build_error,
     )
 
 
@@ -134,16 +137,20 @@ async def put_talent_profile_source(
         delete_profile_for_user(db, user)
     db.commit()
 
-    if body.resume_id is not None:
-        # Opportunistic: a failure here shows up in the status, it does not
-        # refuse the choice they just made.
-        result = await build_profile(db, user)
-        if result.profile is not None:
-            db.commit()
-        else:
-            db.rollback()
-        _record_spend(db, result)
-    return _status(db, user)
+    if body.resume_id is None:
+        return _status(db, user)
+
+    # Opportunistic: a failure here is reported in the status, it does not
+    # refuse the choice they just made. It has to be reported, though --
+    # returning 200 with no profile and no reason is indistinguishable from
+    # never having tried, which is how the first real failure went unnoticed.
+    result = await build_profile(db, user)
+    if result.profile is not None:
+        db.commit()
+    else:
+        db.rollback()
+    _record_spend(db, result)
+    return _status(db, user, build_error=result.error)
 
 
 @router.post("/v1/me/talent-profile/refresh", response_model=TalentProfileDetail)

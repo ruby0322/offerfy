@@ -195,6 +195,13 @@ export default function SettingsPage() {
                 <p className="text-xs text-destructive">{t("profileNeedsPublish")}</p>
               ) : null}
 
+              {/* Choosing a resume builds opportunistically and still returns
+                  200 when that fails, so without this the card would say
+                  "no profile yet" and give no hint that anything went wrong. */}
+              {profile.build_error && !profile.profile ? (
+                <p className="text-xs text-destructive">{t("profileBuildFailed")}</p>
+              ) : null}
+
               <div className="flex flex-col gap-1 text-xs text-muted-foreground">
                 {profile.profile ? (
                   <>

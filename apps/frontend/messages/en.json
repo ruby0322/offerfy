@@ -170,7 +170,8 @@
     "profileDisclosures": "Read {count} times so far.",
     "profileNoDisclosures": "Nobody has read it yet.",
     "profileDelete": "Delete profile",
-    "profileError": "That did not work. Try again."
+    "profileError": "That did not work. Try again.",
+    "profileBuildFailed": "We could not build a profile from this resume just now. Try Rebuild."
   },
   "picker": {
     "title": "How do you want to start?",
