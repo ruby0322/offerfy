@@ -1,0 +1,25 @@
+# systemd **user** unit — installs to ~/.config/systemd/user/, not /etc.
+# Agent sessions on abbey have no passwordless sudo, and a user timer plus
+# `loginctl enable-linger ruby0322` needs none. See docs/deploy.md.
+[Unit]
+Description=Offerfy job catalog ingest (ATS boards + TaiwanJobs)
+Documentation=file:///home/ruby0322/offerfy/docs/deploy.md
+
+# No After=/Requires= on postgres: a user manager cannot order itself against
+# system or docker units. Persistent=true on the timer plus a non-zero exit
+# when nothing was refreshed means a run that lands before Postgres is up just
+# fails and the next slot picks it up.
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ruby0322/offerfy/apps/backend
+EnvironmentFile=/home/ruby0322/offerfy/.env.production
+Environment=PATH=/home/ruby0322/offerfy/apps/backend/.tools:/home/ruby0322/offerfy/apps/backend/.venv/bin:/usr/local/bin:/usr/bin
+ExecStart=/home/ruby0322/offerfy/apps/backend/.venv/bin/python -m app.jobs.ingest_catalog
+
+# Three external APIs and ~11k TaiwanJobs rows; a full pass is minutes.
+TimeoutStartSec=30min
+Nice=10
+
+# Shared host (pd-care and others). Stay polite.
+IOSchedulingClass=idle

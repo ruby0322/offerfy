@@ -7,7 +7,7 @@ import JobView from "@/components/jobs/JobView";
 import JsonLd from "@/components/seo/JsonLd";
 import { resolveLocale } from "@/lib/locale";
 import { excerpt, fetchJob } from "@/lib/jobs";
-import { jobPostingJsonLd, pageMetadata, SITE_NAME } from "@/lib/seo";
+import { isJobIndexable, jobPostingJsonLd, pageMetadata, SITE_NAME } from "@/lib/seo";
 
 type Props = {
   params: Promise<{ locale: string; id: string }>;
@@ -30,7 +30,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       title: `${job.title} · ${job.company} · ${SITE_NAME}`,
       description,
     }),
-    robots: job.is_active ? undefined : { index: false, follow: false },
+    robots:
+      job.is_active && isJobIndexable(job.last_seen_at)
+        ? undefined
+        : { index: false, follow: false },
   };
 }
 
@@ -43,7 +46,7 @@ export default async function JobDetailPage({ params }: Props) {
     notFound();
   }
   const href = `/jobs/${job.id}`;
-  const jsonLd = job.is_active
+  const jsonLd = job.is_active && isJobIndexable(job.last_seen_at)
     ? jobPostingJsonLd({
         locale,
         href,

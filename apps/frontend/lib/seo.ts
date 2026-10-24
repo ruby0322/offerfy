@@ -151,10 +151,35 @@ function jobDescriptionHtml(html: string, text: string, title: string): string {
   return `<p>${escapeHtml(body)}</p>`;
 }
 
+/**
+ * How long after we last confirmed a posting exists we are still willing to
+ * vouch for it. Keep in step with JOB_FRESHNESS_DAYS in
+ * apps/backend/app/routers/jobs.py, which uses it to drop stale rows from the
+ * jobs sitemap.
+ */
+export const JOB_FRESHNESS_DAYS = 30;
+
+const FRESHNESS_MS = JOB_FRESHNESS_DAYS * 24 * 60 * 60 * 1000;
+
 function validThroughIso(lastSeenAt: string): string {
   const stamp = new Date(lastSeenAt);
-  stamp.setUTCDate(stamp.getUTCDate() + 30);
+  stamp.setUTCDate(stamp.getUTCDate() + JOB_FRESHNESS_DAYS);
   return stamp.toISOString();
+}
+
+/**
+ * Whether a posting may still carry JobPosting markup and stay indexable.
+ *
+ * `is_active` on its own is not enough. It only flips when an ingest run sees
+ * the posting gone from its source, so a stalled ingest leaves every row
+ * active while its validThrough slides into the past — which is precisely the
+ * expired-posting markup Google drops from Google Jobs. Gating on last_seen_at
+ * means a dead ingest degrades to noindex rather than to 11k lies.
+ */
+export function isJobIndexable(lastSeenAt: string, now: Date = new Date()): boolean {
+  const seen = new Date(lastSeenAt);
+  if (Number.isNaN(seen.getTime())) return false;
+  return seen.getTime() + FRESHNESS_MS > now.getTime();
 }
 
 export function jobPostingJsonLd(input: {

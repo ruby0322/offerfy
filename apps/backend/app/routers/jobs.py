@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, func, nulls_last, or_
@@ -17,6 +17,24 @@ router = APIRouter()
 
 LIST_MAX = 100
 SITEMAP_PAGE_SIZE = 1000
+
+# How long after we last confirmed a posting exists we are still willing to
+# advertise it to crawlers. Keep in step with JOB_FRESHNESS_DAYS in
+# apps/frontend/lib/seo.ts, which derives JobPosting.validThrough from the same
+# window. A row older than this is noindex on the frontend, so listing it here
+# would only hand Google a sitemap full of URLs it has been told to drop.
+JOB_FRESHNESS_DAYS = 30
+
+
+def _sitemap_conditions():
+    """Rows eligible for the jobs sitemap.
+
+    is_active alone is not enough: it only flips when an ingest run sees the
+    posting gone, so a stalled ingest keeps every row active forever. Both the
+    count and the page query use this so they cannot drift apart.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=JOB_FRESHNESS_DAYS)
+    return (Job.is_active.is_(True), Job.last_seen_at >= cutoff)
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -148,17 +166,18 @@ def jobs_sitemap(
     page: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
+    conditions = _sitemap_conditions()
     total = (
         db.query(func.count())
         .select_from(Job)
-        .filter(Job.is_active.is_(True))
+        .filter(*conditions)
         .scalar()
         or 0
     )
     total_pages = max(1, (int(total) + SITEMAP_PAGE_SIZE - 1) // SITEMAP_PAGE_SIZE) if total else 0
     rows = (
         db.query(Job)
-        .filter(Job.is_active.is_(True))
+        .filter(*conditions)
         .order_by(Job.last_seen_at.desc(), Job.id.desc())
         .offset(page * SITEMAP_PAGE_SIZE)
         .limit(SITEMAP_PAGE_SIZE)
