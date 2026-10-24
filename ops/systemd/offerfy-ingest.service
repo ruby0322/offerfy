@@ -2,7 +2,7 @@
 # Agent sessions on abbey have no passwordless sudo, and a user timer plus
 # `loginctl enable-linger ruby0322` needs none. See docs/deploy.md.
 [Unit]
-Description=Offerfy job catalog ingest (ATS boards + TaiwanJobs)
+Description=Offerfy job catalog ingest (curated ATS boards)
 Documentation=file:///home/ruby0322/offerfy/docs/deploy.md
 
 # No After=/Requires= on postgres: a user manager cannot order itself against
