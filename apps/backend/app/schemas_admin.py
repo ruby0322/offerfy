@@ -61,6 +61,17 @@ class AdminDayPoint(BaseModel):
     # of the model, so a call whose cache status went unreported must not
     # dilute it.
     llm_cache_hit_rate: float | None
+    # What the day billed, in micro-USD, priced through
+    # app.services.usage.round_cost_uusd so this and enforcement can never
+    # disagree about what a round cost.
+    llm_cost_uusd: int
+    # Cache writes bill at 1.25x the uncached input rate and were invisible
+    # until migration 014, so rows written before it report none.
+    llm_cache_write_tokens: int
+    # Rounds the provider reported no usage for, charged at a fallback. Shown
+    # as a count rather than folded into the cost silently: if it climbs, the
+    # meter is guessing and nothing else would say so.
+    llm_unmeasured_calls: int
 
 
 class AdminOverview(BaseModel):
@@ -71,6 +82,99 @@ class AdminOverview(BaseModel):
     recent_resumes: list[AdminRecentResume]
 
 
+class AdminUsageSubject(BaseModel):
+    """One subject's spend inside the current window.
+
+    `subject_kind` is 'user', 'guest' or 'network'. `email` is set only for
+    users -- a guest has none, which is the point of a guest.
+    """
+
+    subject_kind: str
+    subject_id: str
+    email: str | None
+    tier: str
+    credits_used: float
+    uusd_used: int
+    turns_used: int
+    refusals: int
+    unmeasured_rounds: int
+    # Only meaningful for a cost-capped tier; null for a guest, who is capped
+    # on a count instead.
+    limit_credits: float | None
+    turn_limit: int | None
+    over_limit: bool
+
+
+class AdminUsageCeiling(BaseModel):
+    name: str
+    spent_uusd: int
+    ceiling_uusd: int | None
+    # Null when the ceiling is disabled (0), so the UI shows "off" rather than
+    # dividing by zero.
+    share: float | None
+
+
+class AdminUsageTier(BaseModel):
+    tier: str
+    subjects: int
+    uusd_used: int
+    credits_used: float
+    turns_used: int
+
+
+class AdminUsageRefusal(BaseModel):
+    tier: str
+    limit_kind: str
+    count: int
+
+
+class AdminUsageGap(BaseModel):
+    """A subject whose counter and whose llm_calls rows disagree.
+
+    Either telemetry was lost -- the chat router's insert is best-effort by
+    design -- or something billed without going through the meter. The second
+    is the failure a context-manager seam cannot rule out by construction, so
+    it has to be visible here.
+    """
+
+    subject_kind: str
+    subject_id: str
+    counter_uusd: int
+    llm_call_uusd: int
+
+
+class AdminUsageOverview(BaseModel):
+    window_start: str
+    window_end: str
+    enforced: bool
+    credit_uusd: int
+    ceilings: list[AdminUsageCeiling]
+    by_tier: list[AdminUsageTier]
+    top_subjects: list[AdminUsageSubject]
+    refusals: list[AdminUsageRefusal]
+    gaps: list[AdminUsageGap]
+    # Cost this window by purpose: chat, repair, vision, profile.
+    by_purpose: list[tuple[str, int]]
+
+
+class AdminUserUsage(BaseModel):
+    """One user's usage, for their detail page."""
+
+    tier: str
+    credits_used: float
+    limit_credits: float | None
+    turns_used: int
+    turn_limit: int | None
+    remaining_credits: float | None
+    reset_at: str
+    refusals: int
+    unmeasured_rounds: int
+    # All time, not just this window, so a detail page can show whether this
+    # week is typical for them.
+    lifetime_uusd: int
+    lifetime_turns: int
+
+
 class AdminUserListItem(BaseModel):
     id: str
     email: str
@@ -78,6 +182,11 @@ class AdminUserListItem(BaseModel):
     picture: str | None
     created_at: str
     resume_count: int
+    # This window's spend, so the list itself answers "who is costing the
+    # most" without a drill-down. Ordered by it when order='usage'.
+    tier: str
+    credits_used: float
+    turns_used: int
 
 
 class AdminUserList(BaseModel):
@@ -102,6 +211,7 @@ class AdminUserDetail(BaseModel):
     picture: str | None
     created_at: str
     resumes: list[AdminUserResume]
+    usage: AdminUserUsage
 
 
 class AdminResumeListItem(BaseModel):

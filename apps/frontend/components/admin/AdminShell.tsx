@@ -18,6 +18,7 @@ export default function AdminShell({ email, children }: Props) {
 
   const links = [
     { href: "/admin", label: t("overview"), exact: true },
+    { href: "/admin/usage", label: t("usageNav"), exact: false },
     { href: "/admin/users", label: t("users"), exact: false },
     { href: "/admin/resumes", label: t("resumes"), exact: false },
     { href: "/admin/jobs", label: t("jobs"), exact: false },

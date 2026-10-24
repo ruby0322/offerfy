@@ -791,6 +791,11 @@ export type AdminDayPoint = {
   // where none did, which is "not measured" rather than a 0% hit rate -- the
   // distinction the whole token telemetry exists to make.
   llm_cache_hit_rate: number | null;
+  // Priced through the same function enforcement uses, so a figure here can
+  // never disagree with the one someone was limited by.
+  llm_cost_uusd: number;
+  llm_cache_write_tokens: number;
+  llm_unmeasured_calls: number;
 };
 
 export type AdminOverview = {
@@ -808,6 +813,53 @@ export type AdminUserListItem = {
   picture: string | null;
   created_at: string;
   resume_count: number;
+  tier: string;
+  credits_used: number;
+  turns_used: number;
+};
+
+export type AdminUserUsage = {
+  tier: string;
+  credits_used: number;
+  limit_credits: number | null;
+  turns_used: number;
+  turn_limit: number | null;
+  remaining_credits: number | null;
+  reset_at: string;
+  refusals: number;
+  unmeasured_rounds: number;
+  lifetime_uusd: number;
+  lifetime_turns: number;
+};
+
+export type AdminUsageSubject = {
+  subject_kind: string;
+  subject_id: string;
+  /** Users only. A guest has no email, which is the point of a guest. */
+  email: string | null;
+  tier: string;
+  credits_used: number;
+  uusd_used: number;
+  turns_used: number;
+  refusals: number;
+  unmeasured_rounds: number;
+  limit_credits: number | null;
+  turn_limit: number | null;
+  over_limit: boolean;
+};
+
+export type AdminUsageOverview = {
+  window_start: string;
+  window_end: string;
+  enforced: boolean;
+  credit_uusd: number;
+  ceilings: { name: string; spent_uusd: number; ceiling_uusd: number | null; share: number | null }[];
+  by_tier: { tier: string; subjects: number; uusd_used: number; credits_used: number; turns_used: number }[];
+  top_subjects: AdminUsageSubject[];
+  refusals: { tier: string; limit_kind: string; count: number }[];
+  /** Counter and telemetry disagree: lost telemetry, or a path billing unmetered. */
+  gaps: { subject_kind: string; subject_id: string; counter_uusd: number; llm_call_uusd: number }[];
+  by_purpose: [string, number][];
 };
 
 export type AdminUserResume = {
@@ -827,6 +879,7 @@ export type AdminUserDetail = {
   picture: string | null;
   created_at: string;
   resumes: AdminUserResume[];
+  usage: AdminUserUsage;
 };
 
 export type AdminResumeListItem = {
@@ -912,10 +965,16 @@ export async function adminOverview(): Promise<AdminOverview> {
 
 export async function adminUsers(params: {
   q?: string;
+  /** "usage" orders by this window's spend, biggest first. */
+  order?: "created" | "usage";
   limit?: number;
   offset?: number;
 }): Promise<AdminPage<AdminUserListItem>> {
   return apiJson(`/api/v1/admin/users${adminQuery(params)}`);
+}
+
+export async function adminUsage(params: { top?: number } = {}): Promise<AdminUsageOverview> {
+  return apiJson(`/api/v1/admin/usage${adminQuery(params)}`);
 }
 
 export async function adminUser(id: string): Promise<AdminUserDetail> {

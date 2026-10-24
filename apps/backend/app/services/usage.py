@@ -283,49 +283,28 @@ def llm_call_cost(db: Session, *, since: datetime, **filters) -> tuple[int, int]
     recorded telemetry but never went through the meter becomes visible, which
     is the failure a context-manager seam cannot rule out by construction.
 
-    Aggregated in SQL and grouped by model, then priced in Python through
-    `price_uusd`, so this stays one query however many rounds are in the
-    window while still using the same rate table as `round_cost_uusd`.
-
-    The input/cached clamp happens on the group total rather than per row,
-    which differs from `round_cost_uusd` only for data that is already
-    nonsense (more cached tokens than input tokens).
+    Summed **per row** through `round_cost_uusd`, deliberately, even though a
+    GROUP BY would be one query instead of a scan. `price_uusd` truncates
+    integer micro-USD at the end, so pricing a per-model aggregate truncates
+    once where the meter truncated once per round -- a difference of up to one
+    µUSD per round. That is invisible in a cost report and fatal in a
+    reconciliation: it made every correctly metered subject show up as a gap,
+    which was caught by running the admin page against seeded data rather than
+    by any test. The counters and this must be computed the same way or the
+    comparison means nothing.
     """
-    query = db.query(
-        LlmCall.model,
-        func.sum(func.coalesce(LlmCall.input_tokens, 0)),
-        func.sum(func.coalesce(LlmCall.cached_tokens, 0)),
-        func.sum(func.coalesce(LlmCall.output_tokens, 0)),
-        func.sum(func.coalesce(LlmCall.cache_write_tokens, 0)),
-        func.count(LlmCall.id),
-    ).filter(LlmCall.created_at >= since)
+    query = db.query(LlmCall).filter(LlmCall.created_at >= since)
     query = _apply_subject(query, **filters)
     if query is None:
         return 0, 0
-
     total = 0
-    rows_seen = 0
-    for model, inp, cached, out, writes, count in query.group_by(LlmCall.model):
-        inp, cached = int(inp or 0), int(cached or 0)
-        cached = min(cached, inp)
-        total += price_uusd(
-            model,
-            fresh=inp - cached,
-            cached=cached,
-            output=int(out or 0),
-            cache_write=int(writes or 0),
-        )
-        rows_seen += int(count or 0)
-
-    # Rounds the provider told us nothing about, charged at the fallback. A
-    # second small query rather than a FILTER clause, which SQLite only learned
-    # in 3.30 and which this would be the only use of.
-    unmeasured_q = db.query(func.count(LlmCall.id)).filter(
-        LlmCall.created_at >= since, LlmCall.input_tokens.is_(None)
-    )
-    unmeasured_q = _apply_subject(unmeasured_q, **filters)
-    unmeasured = int(unmeasured_q.scalar() or 0) if unmeasured_q is not None else 0
-    return total + unmeasured * FALLBACK_ROUND_UUSD, unmeasured
+    unmeasured = 0
+    for row in query:
+        cost, measured = round_cost_uusd(row)
+        total += cost
+        if not measured:
+            unmeasured += 1
+    return total, unmeasured
 
 
 def _apply_subject(
