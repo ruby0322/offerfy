@@ -1067,6 +1067,7 @@ export default function EditorShell({ resumeId }: Props) {
             contextCut ? t("contextTrimmedHint", { count: contextCut.dropped }) : undefined
           }
           contextCutJumpLabel={t("contextTrimmedJump")}
+          scrollToLatestLabel={t("scrollToLatest")}
           streamingText={streamingText}
           reasoningText={reasoningText}
           thinkingLabel={t("thinking")}

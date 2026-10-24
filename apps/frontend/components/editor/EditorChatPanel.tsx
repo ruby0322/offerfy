@@ -2,12 +2,17 @@
 
 import { DragEvent, FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, type Variants } from "framer-motion";
-import { Paperclip, Send, X } from "lucide-react";
+import { ArrowDown, Paperclip, Send, X } from "lucide-react";
 import ChatMessageCard, { type FamilyCardActions } from "@/components/editor/ChatMessageCard";
 import LoadingMessage from "@/components/editor/LoadingMessage";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import type { ChatMessage } from "@/lib/api";
+
+// How far from the bottom counts as "the reader has scrolled away". Bigger
+// than the 120px the streaming follow uses, so a jump button does not blink in
+// and out while text flushes.
+const SCROLLED_UP_PX = 160;
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const ALLOWED_EXT = new Set(["pdf", "png", "jpg", "jpeg", "webp", "txt", "md"]);
@@ -51,6 +56,7 @@ type Props = {
   contextCutTitle?: string;
   contextCutDetail?: string;
   contextCutJumpLabel?: string;
+  scrollToLatestLabel?: string;
   streamingText?: string | null;
   reasoningText?: string | null;
   thinkingLabel?: string;
@@ -84,6 +90,7 @@ export default function EditorChatPanel({
   contextCutTitle,
   contextCutDetail,
   contextCutJumpLabel,
+  scrollToLatestLabel,
   streamingText,
   reasoningText,
   thinkingLabel,
@@ -110,14 +117,38 @@ export default function EditorChatPanel({
 }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // The standing notice below scrolls this into view. Only one message can
-  // match the cut, so a single ref is enough.
+  // The notice at the end of the transcript scrolls this into view. Only one
+  // message can match the cut, so a single ref is enough.
   const cutMarkerRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const composingRef = useRef(false);
   const confirmEnterRef = useRef(false);
   const [dragging, setDragging] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
+  const [scrolledUp, setScrolledUp] = useState(false);
+
+  // Whether to offer the jump back down. Watches the content box as well as
+  // the viewport: a turn that appends a long answer moves the bottom away from
+  // a reader who has not touched the scrollbar, and no scroll event fires.
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const update = () => {
+      const fromBottom =
+        viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      setScrolledUp(fromBottom > SCROLLED_UP_PX);
+    };
+    update();
+    viewport.addEventListener("scroll", update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(viewport);
+    const inner = viewport.firstElementChild;
+    if (inner) observer.observe(inner);
+    return () => {
+      viewport.removeEventListener("scroll", update);
+      observer.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -230,9 +261,9 @@ export default function EditorChatPanel({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
-      <div className="min-h-0 min-w-0 flex-1 overflow-hidden px-4">
+      <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden px-4">
         <ScrollArea className="chat-scroll h-full min-w-0" viewportRef={viewportRef}>
-          <div className="min-w-0 space-y-4 py-4">
+          <div className="min-w-0 space-y-4 pt-4 pb-10">
             {messages.length === 0 && !sending ? (
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">{emptyHint}</p>
@@ -316,32 +347,45 @@ export default function EditorChatPanel({
               </div>
             ) : null}
             {sending && !streamingText && !reasoningText ? <LoadingMessage /> : null}
+            {/* Last line of the transcript, because that is where the reader
+                is after every turn -- the divider that explains this sits
+                where the trim happens, which can be fifty messages up. */}
+            {contextCutMessageId ? (
+              <p className="flex flex-wrap items-baseline gap-x-1.5 pt-1 text-[0.7rem] leading-snug text-muted-foreground">
+                <span>{contextCutTitle}</span>
+                {contextCutJumpLabel ? (
+                  <button
+                    type="button"
+                    className="underline underline-offset-2 hover:text-foreground"
+                    onClick={() =>
+                      cutMarkerRef.current?.scrollIntoView({
+                        behavior: "smooth",
+                        block: "center",
+                      })
+                    }
+                  >
+                    {contextCutJumpLabel}
+                  </button>
+                ) : null}
+              </p>
+            ) : null}
           </div>
         </ScrollArea>
+        {scrolledUp ? (
+          <button
+            type="button"
+            aria-label={scrollToLatestLabel}
+            title={scrollToLatestLabel}
+            onClick={() => {
+              const viewport = viewportRef.current;
+              viewport?.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
+            }}
+            className="absolute bottom-3 right-6 z-10 flex size-8 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-md transition hover:text-foreground"
+          >
+            <ArrowDown className="size-4" aria-hidden="true" />
+          </button>
+        ) : null}
       </div>
-      {/* The divider inside the transcript explains the trim where it happens,
-          which is often far above the fold -- the user sending a message is at
-          the bottom and would never see it. This stays in view for as long as
-          the condition holds, which is permanently once it starts. */}
-      {contextCutMessageId ? (
-        <p className="flex flex-wrap items-baseline gap-x-1.5 px-3 pb-1 text-[0.7rem] leading-snug text-muted-foreground">
-          <span>{contextCutTitle}</span>
-          {contextCutJumpLabel ? (
-            <button
-              type="button"
-              className="underline underline-offset-2 hover:text-foreground"
-              onClick={() =>
-                cutMarkerRef.current?.scrollIntoView({
-                  behavior: "smooth",
-                  block: "center",
-                })
-              }
-            >
-              {contextCutJumpLabel}
-            </button>
-          ) : null}
-        </p>
-      ) : null}
       <form
         className="chat-composer"
         onSubmit={onSubmit}
