@@ -1,7 +1,15 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -356,6 +364,18 @@ class LlmCall(Base):
             "purpose IN ('chat', 'repair', 'vision', 'profile')",
             name="llm_call_purpose_values",
         ),
+        # Not an XOR: a row whose subject has been erased has neither, the same
+        # case ConsentEvent documents for its own two subject columns. Only both
+        # at once is nonsense.
+        CheckConstraint(
+            "NOT (user_id IS NOT NULL AND guest_session_id IS NOT NULL)",
+            name="llm_call_subject_not_both",
+        ),
+        # app.services.usage filters on (subject, created_at) together on every
+        # chat turn, so the composite is the index that matters; it also covers
+        # the leading column, which is why neither has index=True of its own.
+        Index("ix_llm_calls_user_window", "user_id", "created_at"),
+        Index("ix_llm_calls_guest_window", "guest_session_id", "created_at"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
@@ -364,6 +384,45 @@ class LlmCall(Base):
     )
     resume_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("resumes.id", ondelete="SET NULL"), nullable=True
+    )
+    # Who the spend belongs to, copied in at write time rather than reached
+    # through resume_id -- the same denormalisation DisclosureEvent makes for
+    # recipient_label, and for the same reason: the row has to still answer the
+    # question after the thing it pointed at has moved or gone. Here there are
+    # two concrete ways it moves, and both of them reset a cost quota:
+    #
+    #   (a) resume_id is ON DELETE SET NULL, and deleting a resume is a
+    #       supported one-click action. Spend joined through it disappears.
+    #   (b) /v1/auth/claim sets resume.user_id and clears guest_session_id, so
+    #       every round a guest already spent would retroactively join to the
+    #       account they just signed up with -- charging a new account for the
+    #       trial it converted from.
+    #
+    # Written by the chat router and the profile builder; nullable because a
+    # subject can be erased, and SET NULL so erasing one leaves the spend
+    # recorded with no owner.
+    #
+    # Both FKs are named, and the names must equal migration 014's. Postgres
+    # auto-names an unnamed one `llm_calls_user_id_fkey` while the migration
+    # writes `fk_llm_calls_user_id`, and ensure_schema() builds this table from
+    # these models in production -- so leaving them unnamed means a later
+    # drop_constraint finds nothing on exactly the databases that were never
+    # migrated. Same trap TalentProfile.__table_args__ already documents;
+    # caught here by diffing `\d llm_calls` between a migrated database and a
+    # create_all one.
+    user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL", name="fk_llm_calls_user_id"),
+        nullable=True,
+    )
+    guest_session_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey(
+            "guest_sessions.id",
+            ondelete="SET NULL",
+            name="fk_llm_calls_guest_session_id",
+        ),
+        nullable=True,
     )
     purpose: Mapped[str] = mapped_column(String(16), nullable=False)
     model: Mapped[str] = mapped_column(String(128), nullable=False, default="")
@@ -376,9 +435,166 @@ class LlmCall(Base):
     cached_tokens: Mapped[int | None] = mapped_column(nullable=True)
     output_tokens: Mapped[int | None] = mapped_column(nullable=True)
     reasoning_tokens: Mapped[int | None] = mapped_column(nullable=True)
+    # Billed separately, at 1.25x the uncached input rate on gpt-5.6-terra (the
+    # 30m TTL; 12h is 2.5x). Unlike cached_tokens and reasoning_tokens this is
+    # NOT a subset of anything else in this row -- it is its own charge on top
+    # of the read, and it measured 20-45% of a turn. Nullable like its
+    # siblings: a proxy may not report it.
+    cache_write_tokens: Mapped[int | None] = mapped_column(nullable=True)
     # Length of the Typst source entering this round, to correlate cost with
     # document size.
     source_chars: Mapped[int] = mapped_column(nullable=False, default=0)
+
+
+USAGE_SUBJECT_KINDS = ("user", "guest", "network")
+
+
+class UsageCounter(Base):
+    """One subject's spend inside one weekly window. The quota's source of truth.
+
+    Separate from LlmCall on purpose, and the reason is durability rather than
+    shape. `_persist_usage` in the chat router is wrapped in try/except by
+    design -- telemetry may be lost, the work may not -- which was right while
+    LlmCall was only telemetry and became a contradiction the moment a budget
+    read from it: a lost telemetry row would be a free turn. So LlmCall keeps
+    its best-effort writes and its per-round detail for admin and cost
+    analysis, and this table carries the number the limit is enforced against.
+
+    The two are reconciled rather than trusted. A persistent gap means either
+    telemetry was lost or something billed without going through the meter --
+    the second being the failure a context-manager seam cannot rule out by
+    construction, so it has to be observable instead.
+
+    Incremented with a single atomic INSERT .. ON CONFLICT DO UPDATE ..
+    RETURNING through app.services.metering, which is the only writer. The
+    RETURNING is not decoration: enforcement used to read-then-decide with no
+    lock, so two concurrent turns could each see the last credit.
+
+    No foreign key on subject_id, for three reasons: a counter has to outlive
+    an erased subject (the spend happened), it is pruned on its own schedule
+    rather than with the subject, and 'network' subjects -- the guest IP HMAC
+    that stops a cookie reset from minting a fresh allowance -- have no table
+    to point at.
+
+    Weekly only. The hourly burst guard still counts LlmCall rows: a per-week
+    counter cannot answer "turns in the last hour", and burst is an abuse guard
+    rather than an allowance, so best-effort is the right durability for it.
+    Do not try to unify them.
+    """
+
+    __tablename__ = "usage_counters"
+    __table_args__ = (
+        CheckConstraint(
+            "subject_kind IN ('user', 'guest', 'network')",
+            name="usage_counter_subject_kinds",
+        ),
+        CheckConstraint(
+            "uusd >= 0 AND turns >= 0 AND unmeasured >= 0",
+            name="usage_counter_non_negative",
+        ),
+        # The ceilings sum every subject for one window, so the window leads.
+        # The primary key already serves the per-subject lookup. Must match
+        # migration 015 by name: ensure_schema() builds this from here.
+        Index("ix_usage_counters_window", "window_start", "subject_kind"),
+    )
+
+    # Composite natural key. No surrogate id: the UPSERT conflict target *is*
+    # the identity, and a surrogate would let the same subject-window exist
+    # twice.
+    subject_kind: Mapped[str] = mapped_column(String(16), primary_key=True)
+    # 36 for a uuid subject, shorter for a truncated network HMAC.
+    subject_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # Monday 00:00 Asia/Taipei, stored as UTC. Derived from the clock by
+    # app.services.usage.window_start -- never written by a scheduled job.
+    window_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), primary_key=True
+    )
+
+    uusd: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+    # Chat turns started. Counted here rather than re-derived because the count
+    # is what caps a guest, and it must be as durable as the cost side.
+    turns: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+    # Rounds the provider reported no usage for, charged at a fallback. Carried
+    # so the meter can say when it is guessing.
+    unmeasured: Mapped[int] = mapped_column(
+        nullable=False, default=0, server_default="0"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+
+USAGE_LIMIT_KINDS = (
+    "weekly_turns",
+    "weekly_credits",
+    "burst",
+    "global_ceiling",
+    "guest_pool",
+)
+
+
+class UsageRefusal(Base):
+    """One time we told someone no, and which limit said so.
+
+    Append-only, like ConsentEvent and DisclosureEvent. Nothing was written
+    when a request was refused before this table, which left the only questions
+    that matter for sizing the tiers unanswerable:
+
+      - How often does a guest reach the wall? Is four edits the right number?
+      - Does a signed-in person reach 20 credits? **This one decides whether a
+        promise in the Terms is true.** The matching bonus is lawfully a
+        thank-you only while the signed-in tier is independently sufficient,
+        and that claim currently rests on an estimate of how many edits
+        polishing a page takes. If registered users are hitting the wall, the
+        claim is false and the tiers have to change.
+      - Which limit fires most? Each of the five implies a different fix.
+      - Is the hourly burst cap catching honest use? 15 an hour was a guess.
+
+    This is the one table in the usage work that exists purely to watch people
+    rather than to serve them, so it is kept to the minimum that answers those
+    questions: no message content, no resume content, no IP, no user agent. It
+    is named in the privacy policy and deleted after 90 days.
+
+    Deliberately NOT a per-person conversion funnel. "Did this guest sign in
+    after hitting the wall" would need a stored link from a guest session to
+    the account it became, and /v1/auth/claim destroys that link on purpose --
+    it nulls resumes.guest_session_id and records consent against the user
+    alone. Rebuilding it would mean adding personal-data linkage for an
+    analytics question. The rate of guest refusals against the rate of claims
+    over the same days answers it well enough to size a tier, and costs
+    nothing.
+
+    No foreign key on subject_id, for the reasons UsageCounter gives: it has to
+    outlive an erased subject, it is pruned on its own schedule, and a
+    'network' subject has no table to point at.
+    """
+
+    __tablename__ = "usage_refusals"
+    __table_args__ = (
+        CheckConstraint(
+            "subject_kind IN ('user', 'guest', 'network')",
+            name="usage_refusal_subject_kinds",
+        ),
+        CheckConstraint(
+            "limit_kind IN ('weekly_turns', 'weekly_credits', 'burst', "
+            "'global_ceiling', 'guest_pool')",
+            name="usage_refusal_limit_kinds",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, index=True
+    )
+    subject_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    subject_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    tier: Mapped[str] = mapped_column(String(16), nullable=False)
+    limit_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False)
+    # What they had spent when they were refused, so a refusal can be read
+    # without joining back to a counter that has since moved on or been pruned.
+    used_uusd: Mapped[int] = mapped_column(nullable=False, default=0)
+    turns_used: Mapped[int] = mapped_column(nullable=False, default=0)
 
 
 CONSENT_PURPOSES = ("service", "talent_introduction")

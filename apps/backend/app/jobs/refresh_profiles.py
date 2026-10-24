@@ -16,7 +16,8 @@ import sys
 from app.db import get_engine, get_session_factory
 from app.models import TalentProfile, User
 from app.services.consent import has_consent_many
-from app.services.profile import build_profile, is_stale
+from app.services.metering import metered, system_guard
+from app.services.profile import build_profile, is_stale, record_build_spend
 
 
 async def _run(session, *, limit: int, stale_only: bool) -> int:
@@ -41,13 +42,25 @@ async def _run(session, *, limit: int, stale_only: bool) -> int:
             continue
         if stale_only and not is_stale(session, user, profile):
             continue
-        result = await build_profile(session, user)
-        if result.profile is None:
-            session.rollback()
-            print(f"{user.id}: {result.error}", file=sys.stderr)
-            continue
-        session.commit()
-        built += 1
+        # system_guard, not preflight: nobody is waiting on an HTTP response
+        # here, so refusing would only mean this job 429s itself. It still
+        # records -- before this wrap, every build in this loop spent real
+        # money that was invisible to the telemetry, to the weekly budget and
+        # to the global ceiling alike.
+        guard = system_guard(
+            user=user,
+            purpose="profile",
+            reason="nightly stale-profile refresh; no HTTP caller to refuse",
+        )
+        async with metered(guard) as meter:
+            result = await build_profile(session, user)
+            if result.profile is None:
+                session.rollback()
+                print(f"{user.id}: {result.error}", file=sys.stderr)
+                continue
+            session.commit()
+            record_build_spend(session, user, result, meter)
+            built += 1
     return built
 
 

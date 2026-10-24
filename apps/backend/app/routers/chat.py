@@ -8,7 +8,7 @@ import logging
 
 from app.db import get_db
 from app.deps import get_current_user, load_resume_for_owner, owner_context
-from app.models import LLM_CALL_PURPOSES, ChatMessage, LlmCall, User
+from app.models import LLM_CALL_PURPOSES, ChatMessage, GuestSession, LlmCall, User
 from app.schemas import ChatMessageOut, ChatRequest
 from app.services.attachment import llm_content_for_upload, stored_user_message
 from app.services.extract import MAX_UPLOAD_BYTES, allowed_upload, extract_upload_text
@@ -18,12 +18,13 @@ from app.services.family_tools import (
     family_tool_specs,
 )
 from app.services.llm import TEMPLATE_SWITCH_EXTRA, aiter_chat_edit, llm_configured
-from app.services.rate_limit import enforce_guest_rate
 from app.services.revisions import set_draft_source
 from app.services.role_card import build_role_card
 from app.services.s3 import put_object
 from app.services.templates import is_template_switch_message, parse_preview_spec, template_api_block
 from app.services.typst_compile import compile_status
+from app.services.metering import metered, preflight
+from app.services.usage import approx_edits_left, balance, quota_event
 
 logger = logging.getLogger(__name__)
 
@@ -106,13 +107,26 @@ def _tailor_created(trace: dict) -> dict | None:
     return None
 
 
-def _persist_usage(db: Session, resume_id: str, event: dict, purpose: str) -> None:
-    """Record what one model call billed.
+def _persist_usage(
+    db: Session,
+    resume_id: str,
+    event: dict,
+    purpose: str,
+    *,
+    user: User | None,
+    guest: GuestSession | None,
+) -> None:
+    """Record what one model call billed, and who it billed to.
 
     Nothing here may fail a turn: a shape we did not expect or a database that
     will not take the row is a warning and a lost metric, never a lost chat
     response. The rollback matters as much as the log -- the same Session goes
     on to persist tool traces and the draft source after this.
+
+    The owner is written in rather than left to be joined through resume_id
+    later. Both routes from that column to an owner lose the attribution --
+    resume deletion nulls it, and /v1/auth/claim reassigns it -- and the quota
+    this feeds would reset with them. See models.LlmCall.user_id.
     """
     try:
         kind = event.get("purpose") or purpose
@@ -121,6 +135,8 @@ def _persist_usage(db: Session, resume_id: str, event: dict, purpose: str) -> No
         db.add(
             LlmCall(
                 resume_id=resume_id,
+                user_id=user.id if user is not None else None,
+                guest_session_id=guest.id if user is None and guest is not None else None,
                 purpose=kind,
                 model=str(event.get("model") or "")[:128],
                 round_index=int(event.get("round_index") or 0),
@@ -129,6 +145,7 @@ def _persist_usage(db: Session, resume_id: str, event: dict, purpose: str) -> No
                 cached_tokens=event.get("cached_tokens"),
                 output_tokens=event.get("output_tokens"),
                 reasoning_tokens=event.get("reasoning_tokens"),
+                cache_write_tokens=event.get("cache_write_tokens"),
                 source_chars=int(event.get("source_chars") or 0),
             )
         )
@@ -159,8 +176,12 @@ async def chat(
 ):
     user, guest = owner_context(request, response, db, user, ensure=True)
     resume = load_resume_for_owner(resume_id, request, db, user, guest)
-    if user is None and guest is not None:
-        enforce_guest_rate(db, guest.id, "chat")
+    # Once, before the turn starts, and never again inside it. Here rather
+    # than inside generate() so the refusal is an ordinary 429 JSON response:
+    # entering the meter inside the generator would turn it into an error frame
+    # on a stream that then has to end. The Guard it returns is the evidence
+    # the check passed, and the only thing `metered` accepts.
+    guard = preflight(db, user=user, guest=guest, purpose="chat")
 
     message, filename, data, prefer_full_source = await _parse_chat_input(request)
     message = (message or "").strip()
@@ -224,116 +245,84 @@ async def chat(
     family_handlers = family_tool_handlers(db, resume)
 
     async def generate():
-        assistant_text = ""
-        new_source = original_source
-        # Which half of the turn the rounds below belong to. The repair loop
-        # flips it, so its rounds are billed to `repair` rather than hiding in
-        # the chat total.
-        purpose = "chat"
+        # The whole generator is the billable region, so `relay` closes over
+        # `meter` the way it already closes over the session. Entering here
+        # rather than in the handler keeps the refusal above a plain 429.
+        async with metered(guard) as meter:
+            assistant_text = ""
+            new_source = original_source
+            # Which half of the turn the rounds below belong to. The repair loop
+            # flips it, so its rounds are billed to `repair` rather than hiding in
+            # the chat total.
+            purpose = "chat"
 
-        async def relay(event: dict):
-            """Turn one LLM event into SSE frames. Shared by the turn and the repair loop."""
-            nonlocal assistant_text, new_source
-            kind = event.get("kind")
-            if kind == "usage":
-                # Persisted and never relayed. The frontend dispatches on known
-                # `type` values only, so a usage frame would be inert there --
-                # but telemetry is not the client's business either way, and
-                # emitting nothing keeps the stream contract exactly as it was.
-                _persist_usage(db, resume.id, event, purpose)
-            elif kind == "delta":
-                # Display only: nothing is persisted until the assistant event lands.
-                yield _sse({"type": "delta", "text": event["text"]})
-            elif kind == "reasoning":
-                # Thinking, not an answer. Never persisted: it would come back as
-                # an assistant row on the next turn and be fed to the model as
-                # though it had said it out loud.
-                yield _sse({"type": "reasoning", "text": event["text"]})
-            elif kind == "tool":
-                row = _persist_tool(db, resume.id, event["trace"])
-                yield _sse(
-                    {
-                        "type": "tool",
-                        "message": _message_out(row).model_dump(),
-                    }
-                )
-                created = _tailor_created(event["trace"])
-                if created:
-                    yield _sse(created)
-            elif kind == "source":
-                new_source = event["typst_source"]
-                set_draft_source(db, resume, new_source)
-                db.commit()
-                yield _sse(
-                    {
-                        "type": "source",
-                        "typst_source": new_source,
-                        "applied": True,
-                    }
-                )
-            elif kind == "assistant":
-                assistant_text = (
-                    event["content"] or assistant_text or "Updated the Typst source."
-                )
-                row = _persist_assistant(db, resume.id, assistant_text)
-                yield _sse(
-                    {
-                        "type": "assistant",
-                        "message": _message_out(row).model_dump(),
-                    }
-                )
-
-        try:
-            async for event in aiter_chat_edit(
-                messages,
-                original_source,
-                prefer_full_source=prefer_full_source,
-                extra_system=extra,
-                verify_compile=True,
-                extra_tools=family_specs,
-                tool_handlers=family_handlers,
-            ):
-                async for frame in relay(event):
-                    yield frame
-            repairs = 0
-            while new_source != original_source and repairs < 3:
-                status = await asyncio.to_thread(compile_status, new_source)
-                if status.get("ok") is not False:
-                    break
-                repairs += 1
-                purpose = "repair"
-                failed_after = (
-                    "Typst compile failed after the template rewrite:\n"
-                    if template_switch
-                    else "Typst compile failed after the edit:\n"
-                )
-                fix_how = (
-                    "Fix it using the package example's real API. "
-                    "Call apply_typst_edit with only the full source."
-                    if template_switch
-                    else (
-                        "Fix the Typst source so it compiles. "
-                        "Escape special characters: in strings \\\" and \\\\ ; "
-                        "in markup \\$ \\@ \\* . "
-                        "Call read_typst first, then apply_typst_edit with only the full source."
+            async def relay(event: dict):
+                """Turn one LLM event into SSE frames. Shared by the turn and the repair loop."""
+                nonlocal assistant_text, new_source
+                kind = event.get("kind")
+                if kind == "usage":
+                    # Persisted and never relayed. The frontend dispatches on known
+                    # `type` values only, so a usage frame would be inert there --
+                    # but telemetry is not the client's business either way, and
+                    # emitting nothing keeps the stream contract exactly as it was.
+                    # The separate `quota` frame at the end of the turn is a
+                    # different thing with a different audience: what this person
+                    # has left, carrying none of these numbers.
+                    #
+                    # Two writes, two durabilities, on purpose: the LlmCall row is
+                    # telemetry and may be lost, while meter.record increments the
+                    # counter the limit is enforced against. Per round rather than
+                    # per turn, because the whole cost model is built on the
+                    # per-round token mix.
+                    _persist_usage(db, resume.id, event, purpose, user=user, guest=guest)
+                    meter.record(event)
+                elif kind == "delta":
+                    # Display only: nothing is persisted until the assistant event lands.
+                    yield _sse({"type": "delta", "text": event["text"]})
+                elif kind == "reasoning":
+                    # Thinking, not an answer. Never persisted: it would come back as
+                    # an assistant row on the next turn and be fed to the model as
+                    # though it had said it out loud.
+                    yield _sse({"type": "reasoning", "text": event["text"]})
+                elif kind == "tool":
+                    row = _persist_tool(db, resume.id, event["trace"])
+                    yield _sse(
+                        {
+                            "type": "tool",
+                            "message": _message_out(row).model_dump(),
+                        }
                     )
-                )
-                repair_messages = [
-                    *messages,
-                    {"role": "assistant", "content": assistant_text},
-                    {
-                        "role": "user",
-                        "content": (
-                            failed_after
-                            + f"{status.get('error') or 'compile error'}\n"
-                            + fix_how
-                        ),
-                    },
-                ]
+                    created = _tailor_created(event["trace"])
+                    if created:
+                        yield _sse(created)
+                elif kind == "source":
+                    new_source = event["typst_source"]
+                    set_draft_source(db, resume, new_source)
+                    db.commit()
+                    yield _sse(
+                        {
+                            "type": "source",
+                            "typst_source": new_source,
+                            "applied": True,
+                        }
+                    )
+                elif kind == "assistant":
+                    assistant_text = (
+                        event["content"] or assistant_text or "Updated the Typst source."
+                    )
+                    row = _persist_assistant(db, resume.id, assistant_text)
+                    yield _sse(
+                        {
+                            "type": "assistant",
+                            "message": _message_out(row).model_dump(),
+                        }
+                    )
+
+            try:
                 async for event in aiter_chat_edit(
-                    repair_messages,
-                    new_source,
-                    prefer_full_source=True,
+                    messages,
+                    original_source,
+                    prefer_full_source=prefer_full_source,
                     extra_system=extra,
                     verify_compile=True,
                     extra_tools=family_specs,
@@ -341,16 +330,71 @@ async def chat(
                 ):
                     async for frame in relay(event):
                         yield frame
-            yield _sse(
-                {
-                    "type": "done",
-                    "typst_source": new_source,
-                    "applied": new_source != original_source,
-                }
-            )
-        except HTTPException as exc:
-            detail = exc.detail if isinstance(exc.detail, str) else "Chat request failed"
-            yield _sse({"type": "error", "detail": detail, "status": exc.status_code})
+                repairs = 0
+                while new_source != original_source and repairs < 3:
+                    status = await asyncio.to_thread(compile_status, new_source)
+                    if status.get("ok") is not False:
+                        break
+                    repairs += 1
+                    purpose = "repair"
+                    failed_after = (
+                        "Typst compile failed after the template rewrite:\n"
+                        if template_switch
+                        else "Typst compile failed after the edit:\n"
+                    )
+                    fix_how = (
+                        "Fix it using the package example's real API. "
+                        "Call apply_typst_edit with only the full source."
+                        if template_switch
+                        else (
+                            "Fix the Typst source so it compiles. "
+                            "Escape special characters: in strings \\\" and \\\\ ; "
+                            "in markup \\$ \\@ \\* . "
+                            "Call read_typst first, then apply_typst_edit with only the full source."
+                        )
+                    )
+                    repair_messages = [
+                        *messages,
+                        {"role": "assistant", "content": assistant_text},
+                        {
+                            "role": "user",
+                            "content": (
+                                failed_after
+                                + f"{status.get('error') or 'compile error'}\n"
+                                + fix_how
+                            ),
+                        },
+                    ]
+                    async for event in aiter_chat_edit(
+                        repair_messages,
+                        new_source,
+                        prefer_full_source=True,
+                        extra_system=extra,
+                        verify_compile=True,
+                        extra_tools=family_specs,
+                        tool_handlers=family_handlers,
+                    ):
+                        async for frame in relay(event):
+                            yield frame
+                # After the last _persist_usage has committed, so the number the
+                # client is handed is the number in the database. Telemetry may be
+                # lost without costing an answer, and so may this.
+                try:
+                    bal = balance(db, user, guest)
+                    yield _sse(quota_event(bal, approx_edits_left(db, user, guest, bal)))
+                except Exception:
+                    logger.warning("quota frame failed", exc_info=True)
+                    db.rollback()
+                yield _sse(
+                    {
+                        "type": "done",
+                        "typst_source": new_source,
+                        "applied": new_source != original_source,
+                    }
+                )
+            except HTTPException as exc:
+                detail = exc.detail if isinstance(exc.detail, str) else "Chat request failed"
+                yield _sse({"type": "error", "detail": detail, "status": exc.status_code})
 
     return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
 

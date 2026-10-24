@@ -28,7 +28,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import Resume, TalentProfile, User
+from app.models import LlmCall, Resume, TalentProfile, User
 from app.schemas import (
     TALENT_EDUCATION_LIMIT,
     TALENT_ROLE_LIMIT,
@@ -204,6 +204,53 @@ def scrub_contacts(payload: TalentProfilePayload) -> TalentProfilePayload:
 def profile_for_user(db: Session, user: User) -> TalentProfile | None:
     return (
         db.query(TalentProfile).filter(TalentProfile.user_id == user.id).one_or_none()
+    )
+
+
+def record_build_spend(db: Session, user: User, result, meter) -> None:
+    """Record what one profile build billed.
+
+    Lives here rather than in a router because both callers need it and one of
+    them is a cron job -- app/jobs/refresh_profiles.py -- which has no business
+    importing from app/routers.
+
+    Profile builds are a billable path and belong in LlmCall like the rest.
+
+    Commits on its own, so callers must settle the build's own transaction
+    first -- commit a profile they are keeping, roll back one they are not --
+    or this commit would persist a write they had decided to discard.
+
+    try/except for the same reason the chat router wraps its own insert:
+    telemetry may be lost, the work may not.
+    """
+    if not result.model or result.resume_id is None:
+        return
+    try:
+        db.add(
+            LlmCall(
+                resume_id=result.resume_id,
+                user_id=user.id,
+                purpose="profile",
+                model=result.model[:128],
+                round_index=0,
+                input_tokens=result.usage.get("input_tokens"),
+                cached_tokens=result.usage.get("cached_tokens"),
+                output_tokens=result.usage.get("output_tokens"),
+                source_chars=result.source_chars,
+            )
+        )
+        db.commit()
+    except Exception:  # pragma: no cover - telemetry must never fail a build
+        db.rollback()
+    # Two writes, two durabilities: the row above is telemetry and may be lost,
+    # this increments the counter the limit is enforced against.
+    meter.record(
+        {
+            "model": result.model,
+            "purpose": "profile",
+            "round_index": 0,
+            **result.usage,
+        }
     )
 
 

@@ -37,6 +37,16 @@ class Settings(BaseSettings):
     app_env: str = "development"
     google_redirect_uri: str | None = None
     admin_emails: str = ""
+    # Weekly AI usage tiers (app.services.usage). None follows app_env, so
+    # production enforces and development does not; set it explicitly to
+    # exercise the limits on staging without pretending to be production.
+    usage_limits_enabled: bool | None = None
+    # Instance-wide weekly spend ceilings, micro-USD, 0 to disable. Derived
+    # from the exposure table in the usage-policy spec, not from a budget --
+    # revisit both against a real one. A ceiling nobody is told about is an
+    # outage, so both are surfaced on the admin overview.
+    global_weekly_ceiling_uusd: int = 150_000_000
+    guest_weekly_ceiling_uusd: int = 40_000_000
 
     def s3_configured(self) -> bool:
         return all(

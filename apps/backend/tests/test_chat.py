@@ -54,12 +54,15 @@ def post_chat(client: TestClient, resume_id: str, **kwargs) -> dict:
     return {
         "status": status,
         "events": events,
-        # Text deltas and reasoning are display-only, so sequence assertions
-        # ignore them: a client that drops both must see today's behavior.
+        # Text deltas, reasoning and the quota meter are display-only, so
+        # sequence assertions ignore them: a client that drops all three must
+        # see today's behavior. `quota` is covered on its own in
+        # tests/test_usage.py, including the assertion that it leaks no
+        # telemetry.
         "kinds": [
             event.get("type")
             for event in events
-            if event.get("type") not in {"delta", "reasoning"}
+            if event.get("type") not in {"delta", "reasoning", "quota"}
         ],
         "deltas": "".join(
             event.get("text") or "" for event in events if event.get("type") == "delta"
