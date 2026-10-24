@@ -26,7 +26,8 @@
     "contact": "Contact",
     "x": "X",
     "terms": "Terms",
-    "privacy": "Privacy"
+    "privacy": "Privacy",
+    "usage": "Usage"
   },
   "notFound": {
     "title": "Not found",
@@ -694,5 +695,76 @@
     "chartLlmCalls": "Model calls",
     "chartLlmCallsHint": "Every call per UTC day, including repair rounds and the vision calls read_layout makes.",
     "chartLlmCallsSeries": "Calls"
+  },
+  "usage": {
+    "metaTitle": "Usage — Offerfy",
+    "metaDescription": "What you get on Offerfy, what the AI limits are, and why they exist.",
+    "title": "How usage works",
+    "intro": "Offerfy is free. One part of it costs us real money every time you use it, so that one part has a weekly limit. This page explains exactly which part, how much you get, and why.",
+    "freeHeading": "What has no limit at all",
+    "freeIntro": "None of this is metered, at any tier, with or without an account:",
+    "freeItems": [
+      "Editing your resume's Typst source by hand, as much as you like.",
+      "The live preview, and recompiling as often as you want.",
+      "Exporting the PDF.",
+      "ATS parseability checks on the compiled PDF.",
+      "Browsing and searching the job catalog."
+    ],
+    "whyHeading": "Why the AI has a limit",
+    "whyBody": "When you ask the assistant to change your resume, it reads the document, makes the edit, recompiles it and checks the result. That is several calls to a language-model provider, and we pay for every one of them. A weekly limit is what keeps Offerfy free instead of asking you for a card.",
+    "tiersHeading": "What you get",
+    "colTier": "Tier",
+    "colAllowance": "AI edits per week",
+    "colPublish": "Can publish a resume",
+    "tier_guest": "No account",
+    "tier_registered": "Signed in",
+    "tier_matching": "Open to matching",
+    "allowanceEdits": "{count} edits, to try it out",
+    "allowanceCredits": "about {edits} edits",
+    "yes": "Yes",
+    "no": "No",
+    "tiersUnavailable": "We could not load the current numbers. Rather than print a figure that might not be the one we actually enforce, we would rather show nothing — please reload.",
+    "tiersNote": "Without an account you get enough to see the assistant work on your own resume, but not enough to finish polishing a page — and publishing needs an account in any case. Signing in is free and takes one click.",
+    "costlierHeading": "What makes one edit cost more than another",
+    "costlierIntro": "We count what each edit actually costs us, so a small question costs you less than a big rewrite. These are the things that make an edit expensive:",
+    "costlierItems": [
+      "A long resume. Every edit sends the whole document, so a three-page CV costs more per edit than a one-pager.",
+      "Switching templates, or uploading a file to import. Both rewrite the entire document rather than changing a few lines.",
+      "Questions about the rendered page — whether something wrapped, how crowded a page looks — because answering those means rendering it and looking.",
+      "An edit that produces a document which will not compile, because the assistant then has to repair it.",
+      "A long conversation on the same resume. The assistant is sent the history each time it acts."
+    ],
+    "sections": [
+      {
+        "heading": "How we count",
+        "paragraphs": [
+          "We add up what the model calls actually billed us — the tokens going in, the tokens coming out, and the discounts we get when parts of the request are reused. We do not charge you twice for the discounted parts.",
+          "Credits are our own unit, not a currency. One credit is about what a typical edit costs. We use a unit of our own so that the allowance we publish stays the same when a provider changes its prices.",
+          "Occasionally a provider does not tell us what a call cost. When that happens we record our best estimate rather than nothing, and your usage page says how many of those there were."
+        ]
+      },
+      {
+        "heading": "The week, and where to watch it",
+        "paragraphs": [
+          "The allowance resets every Monday at midnight, Taipei time. There is a meter above the chat box in the editor, and a fuller breakdown in your settings.",
+          "If you run out, nothing is lost. Your resumes, your edits and your published links all stay exactly as they are, and you can keep editing by hand and exporting PDFs until the week turns over."
+        ]
+      },
+      {
+        "heading": "Matching is a thank-you, not a toll",
+        "paragraphs": [
+          "Turning on “Open to matching” lets us introduce you to employers, and it comes with a larger weekly allowance as thanks.",
+          "It is not how you unlock the product. The signed-in allowance is meant to be enough on its own to polish a resume and tailor it for a role, and if it turns out not to be, we will raise it rather than leave matching as the only way to get real use out of Offerfy.",
+          "You can turn it off at any time, in one click, and we will not take back the allowance you have already used this week. Turning it off removes your profile from the index and does not touch anything you have made."
+        ]
+      },
+      {
+        "heading": "Abuse limits",
+        "paragraphs": [
+          "Separately from the weekly allowance there is a cap on how many edits can run in a single hour. It exists to stop one account or one script from spending the whole budget in a few minutes, and ordinary use does not come near it.",
+          "We also cap what the whole site can spend on AI in a week. If we ever reach it, AI editing pauses for everyone until the week turns over — and everything on the free list above keeps working. We would rather pause one feature honestly than quietly bill you for it."
+        ]
+      }
+    ]
   }
 }
