@@ -8,7 +8,7 @@ from app.models import Job
 from app.services.jobs.ashby import parse_ashby
 from app.services.jobs.boards import load_boards
 from app.services.jobs.greenhouse import parse_greenhouse
-from app.services.jobs.ingest import ingest_board
+from app.services.jobs.ingest import CatalogResult, SourceResult, ingest_board
 from app.services.jobs.lever import parse_lever
 from app.services.jobs.sanitize import sanitize_html
 from app.services.jobs.store import expire_missing, upsert_jobs
@@ -194,3 +194,45 @@ def test_failed_board_fetch_does_not_expire(db_session):
         .one()
     )
     assert row.is_active is True
+
+
+def test_failed_board_fetch_reports_an_error_result(db_session):
+    """A swallowed per-board failure still has to be visible to the caller."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"error": "not found"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result = ingest_board(db_session, client, Board("greenhouse", "stripe", "Stripe"))
+    assert result.status == "error"
+    assert result.upserted == 0
+
+
+def test_catalog_result_flags_a_pass_that_refreshed_nothing():
+    """The condition the systemd unit exits non-zero on.
+
+    All sources failing, or every source returning nothing, both leave the
+    catalog ageing towards expiry — which is the outage this guards.
+    """
+    all_failed = CatalogResult(
+        (
+            SourceResult("greenhouse", "stripe", "error", error="boom"),
+            SourceResult("taiwanjobs", None, "error", error="boom"),
+        )
+    )
+    assert all_failed.refreshed_nothing is True
+    assert len(all_failed.failed) == 2
+
+    ok_but_empty = CatalogResult((SourceResult("greenhouse", "stripe", "ok", upserted=0),))
+    assert ok_but_empty.refreshed_nothing is True
+
+    partial = CatalogResult(
+        (
+            SourceResult("greenhouse", "stripe", "ok", upserted=12),
+            SourceResult("taiwanjobs", None, "error", error="boom"),
+        )
+    )
+    # One dead board must not fail the whole run: the catalog did get refreshed.
+    assert partial.refreshed_nothing is False
+    assert partial.upserted == 12
+    assert len(partial.failed) == 1

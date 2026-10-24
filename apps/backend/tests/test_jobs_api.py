@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from app.models import Job
+from app.routers.jobs import JOB_FRESHNESS_DAYS
 
 
 def _add_job(db_session, **kwargs) -> Job:
@@ -172,13 +173,40 @@ def test_get_job_inactive_still_returns(client, db_session):
 
 
 def test_jobs_sitemap_active_only(client, db_session):
-    job = _add_job(db_session, source_id="stripe:1")
-    _add_job(db_session, source_id="stripe:2", is_active=False)
+    # last_seen_at is wall-clock relative here on purpose: the sitemap only
+    # lists rows inside JOB_FRESHNESS_DAYS, so the fixture's fixed default date
+    # would age out of the window and rot this test.
+    fresh = datetime.now(timezone.utc)
+    job = _add_job(db_session, source_id="stripe:1", last_seen_at=fresh)
+    _add_job(db_session, source_id="stripe:2", is_active=False, last_seen_at=fresh)
     response = client.get("/v1/jobs/sitemap")
     assert response.status_code == 200
     body = response.json()
     assert body["page"] == 0
     assert [row["id"] for row in body["items"]] == [job.id]
+
+
+def test_jobs_sitemap_excludes_rows_past_the_freshness_window(client, db_session):
+    """A stalled ingest must not keep handing crawlers expired postings.
+
+    is_active only flips when an ingest run sees the posting gone, so rows stay
+    active indefinitely once ingest stops. The frontend noindexes anything past
+    JOB_FRESHNESS_DAYS, and the sitemap has to agree.
+    """
+    now = datetime.now(timezone.utc)
+    fresh = _add_job(
+        db_session,
+        source_id="stripe:fresh",
+        last_seen_at=now - timedelta(days=JOB_FRESHNESS_DAYS - 1),
+    )
+    _add_job(
+        db_session,
+        source_id="stripe:stale",
+        last_seen_at=now - timedelta(days=JOB_FRESHNESS_DAYS + 1),
+    )
+    body = client.get("/v1/jobs/sitemap").json()
+    assert [row["id"] for row in body["items"]] == [fresh.id]
+    assert body["total_pages"] == 1
 
 
 def test_featured_jobs_skips_job_id_route(client, db_session):
