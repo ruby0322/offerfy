@@ -473,6 +473,13 @@ class TalentProfile(Base):
 
     __tablename__ = "talent_profiles"
     __table_args__ = (
+        # Named here rather than unique=True on the column, so that this and
+        # alembic produce the same object. unique=True plus index=True renders
+        # as one UNIQUE INDEX, while the migration writes a named UNIQUE
+        # constraint and a plain index -- and ensure_schema() builds from these
+        # models in production, so the two shapes have to agree or a later
+        # drop_constraint finds nothing.
+        UniqueConstraint("user_id", name="talent_profiles_user_id_key"),
         CheckConstraint(
             "years_experience IS NULL OR (years_experience >= 0 AND years_experience <= 60)",
             name="talent_profile_years_range",
@@ -486,7 +493,6 @@ class TalentProfile(Base):
     user_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("users.id", ondelete="CASCADE"),
-        unique=True,
         nullable=False,
         index=True,
     )
