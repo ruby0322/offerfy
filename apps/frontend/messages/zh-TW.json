@@ -173,7 +173,18 @@
     "profileDisclosures": "目前已被讀取 {count} 次。",
     "profileNoDisclosures": "尚無人讀取。",
     "profileDelete": "刪除人才檔案",
-    "profileError": "操作失敗，請再試一次。"
+    "profileError": "操作失敗，請再試一次。",
+    "usageTitle": "本週 AI 用量",
+    "usageNotice": "編輯、預覽、匯出 PDF 和 ATS 檢查都沒有限制，只有 AI 編輯會計量。",
+    "usageThisWeekEdits": "已使用 {used} / {limit} 次 AI 編輯",
+    "usageThisWeekCredits": "已使用 {used} / {limit} 點額度",
+    "usageTier_guest": "訪客",
+    "usageTier_registered": "已登入",
+    "usageTier_matching": "開放配對",
+    "usageTierLine": "你的方案：{tier}。",
+    "usageResetLine": "{date} 重置。",
+    "usageUnmeasured": "本週有 {count} 次模型呼叫未回報 token 數，因此這個數字有一部分是估算。",
+    "usageLearnMore": "用量說明"
   },
   "picker": {
     "title": "選擇開始方式",
@@ -337,7 +348,19 @@
     "settingsDanger": "危險區域",
     "settingsDelete": "刪除這份履歷",
     "settingsDeleteTailor": "刪除這份客製版",
-    "thinking": "思考中"
+    "thinking": "思考中",
+    "usageMeterEdits": "本週 AI 編輯 {used} / {limit} 次",
+    "usageMeterCredits": "本週額度 {used} / {limit}",
+    "usageEditsLeft": "大約還能編輯 {count} 次",
+    "usageResets": "週一重置",
+    "usageLimitTitle": "本週的 AI 編輯用完了",
+    "usageOfferSignIn": "登入後每週有 {credits} 點額度，足以把一頁履歷修到完成，也可以發布履歷。",
+    "usageOfferMatching": "開啟「開放配對」後每週提升到 {credits} 點。你隨時可以關掉，已經完成的內容不會消失。",
+    "usageLimitReset": "額度在週一早上重置。在那之前，編輯、預覽、匯出 PDF 和 ATS 檢查都照常可用。",
+    "usageSignIn": "使用 Google 登入",
+    "usageOpenSettings": "開啟設定",
+    "usageLearnMore": "用量說明",
+    "usageDismiss": "繼續編輯"
   },
   "share": {
     "brand": "Offerfy",

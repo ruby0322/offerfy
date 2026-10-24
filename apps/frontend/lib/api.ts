@@ -413,6 +413,65 @@ export async function listTemplates(): Promise<UniverseTemplate[]> {
   return [];
 }
 
+export type UsageTier = "guest" | "registered" | "matching";
+
+/** GET /v1/usage. Credits, never micro-USD — see the backend's UsageOut. */
+export type Usage = {
+  tier: UsageTier;
+  /** False in development, so the UI can stay quiet rather than draw an empty meter. */
+  enforced: boolean;
+  reset_at: string;
+  /** Null on a tier capped by a turn count instead of by cost. Exactly one side is set. */
+  limit_credits: number | null;
+  used_credits: number;
+  remaining_credits: number | null;
+  turn_limit: number | null;
+  turns_used: number;
+  turns_remaining: number | null;
+  turns_per_hour: number;
+  /** The number people actually read, from their own trailing cost per turn. */
+  approx_edits_left: number | null;
+  exhausted: boolean;
+  unmeasured_rounds: number;
+};
+
+/** The structured body of a 429 from the chat endpoint. */
+export type UsageRefusal = {
+  limit: "weekly_turns" | "weekly_credits" | "burst" | "global_ceiling" | "guest_pool";
+  detail: string;
+  tier: UsageTier;
+  reset_at: string;
+  used_credits: number;
+  limit_credits: number | null;
+  turns_used: number;
+  turn_limit: number | null;
+  next_tier: { name: UsageTier; credits: number | null; turns: number | null } | null;
+  /** Set when the guest pool ceiling fired: convert, do not just refuse. */
+  sign_in_required?: boolean;
+  retry_after_seconds?: number;
+};
+
+export async function fetchUsage(): Promise<Usage> {
+  return apiJson<Usage>("/api/v1/usage");
+}
+
+/**
+ * Pull the structured refusal out of an ApiError, or null if it is not one.
+ *
+ * FastAPI nests a dict detail under `detail`, and `errorMessage` has already
+ * flattened the human sentence onto `err.message` — this is for the parts a
+ * sentence cannot carry: which limit, when it clears, what the next tier gives.
+ */
+export function usageRefusalOf(err: unknown): UsageRefusal | null {
+  if (!(err instanceof ApiError) || err.status !== 429) return null;
+  const body = err.body as { detail?: unknown } | null;
+  const detail = body?.detail;
+  if (!detail || typeof detail !== "object") return null;
+  const rec = detail as Record<string, unknown>;
+  if (rec.error !== "usage_limit" || typeof rec.limit !== "string") return null;
+  return rec as unknown as UsageRefusal;
+}
+
 export type ChatStreamEvent =
   | { type: "delta"; text: string }
   | { type: "reasoning"; text: string }
@@ -420,6 +479,9 @@ export type ChatStreamEvent =
   | { type: "source"; typst_source: string; applied: boolean }
   | { type: "assistant"; message: ChatMessage }
   | { type: "tailor_created"; resume_id: string; title: string }
+  | { type: "quota"; tier: UsageTier; reset_at: string; used_credits: number;
+      limit_credits: number | null; turns_used: number; turn_limit: number | null;
+      approx_edits_left: number | null }
   | { type: "done"; typst_source: string; applied: boolean }
   | { type: "error"; detail: string; status: number };
 

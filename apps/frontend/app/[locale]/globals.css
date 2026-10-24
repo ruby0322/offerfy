@@ -1323,6 +1323,110 @@ textarea {
   color: var(--destructive);
 }
 
+/* --- weekly AI allowance ------------------------------------------------- */
+
+/* Shown from the start, not only at the wall: a meter that appears when it is
+   empty is a surprise, and transparency was the point. */
+.usage-meter {
+  margin: 0 0.35rem 0.55rem;
+}
+
+.usage-meter-track {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--rule) 70%, transparent);
+}
+
+.usage-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--muted-foreground);
+  transition: width 220ms ease;
+}
+
+/* The low and empty states change the bar and nothing else. They never block
+   and never interrupt. */
+.usage-meter[data-state="low"] .usage-meter-fill {
+  background: #b7791f;
+}
+
+.usage-meter[data-state="empty"] .usage-meter-fill {
+  background: var(--destructive);
+}
+
+.usage-meter-text {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.5rem;
+  margin: 0.3rem 0 0;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--muted-foreground);
+}
+
+.usage-meter-dim {
+  opacity: 0.72;
+}
+
+/* A card, not a toast: for a guest this is the sign-up moment and for everyone
+   else the matching moment, and a toast that fades wastes both. */
+.usage-limit-card {
+  flex-shrink: 0;
+  border-top: 1px solid var(--rule);
+  background: color-mix(in srgb, var(--cta) 6%, var(--paper));
+  padding: 0.85rem 0.9rem;
+}
+
+.usage-limit-title {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.usage-limit-detail,
+.usage-limit-offer,
+.usage-limit-reset {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.usage-limit-offer {
+  color: inherit;
+}
+
+.usage-limit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.7rem;
+}
+
+.usage-limit-primary {
+  border-radius: 7px;
+  background: var(--cta);
+  padding: 0.4rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--paper);
+}
+
+.usage-limit-secondary,
+.usage-limit-dismiss {
+  border: 0;
+  background: none;
+  padding: 0.4rem 0.2rem;
+  font-size: 0.78rem;
+  color: var(--muted-foreground);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
 .chat-md {
   min-width: 0;
   max-width: 100%;

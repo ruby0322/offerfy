@@ -170,7 +170,18 @@
     "profileDisclosures": "Read {count} times so far.",
     "profileNoDisclosures": "Nobody has read it yet.",
     "profileDelete": "Delete profile",
-    "profileError": "That did not work. Try again."
+    "profileError": "That did not work. Try again.",
+    "usageTitle": "AI usage this week",
+    "usageNotice": "Editing, preview, PDF export and ATS checks are unlimited. Only AI edits are metered.",
+    "usageThisWeekEdits": "{used} of {limit} AI edits used",
+    "usageThisWeekCredits": "{used} of {limit} credits used",
+    "usageTier_guest": "Guest",
+    "usageTier_registered": "Signed in",
+    "usageTier_matching": "Open to matching",
+    "usageTierLine": "Your plan: {tier}.",
+    "usageResetLine": "Resets {date}.",
+    "usageUnmeasured": "{count} model calls this week reported no token count, so part of this figure is an estimate.",
+    "usageLearnMore": "How usage works"
   },
   "picker": {
     "title": "How do you want to start?",
@@ -334,7 +345,19 @@
     "settingsDanger": "Danger zone",
     "settingsDelete": "Delete this resume",
     "settingsDeleteTailor": "Delete this tailored version",
-    "thinking": "Thinking"
+    "thinking": "Thinking",
+    "usageMeterEdits": "{used} of {limit} AI edits this week",
+    "usageMeterCredits": "{used} of {limit} credits this week",
+    "usageEditsLeft": "about {count} more edits",
+    "usageResets": "resets Monday",
+    "usageLimitTitle": "That's this week's AI editing",
+    "usageOfferSignIn": "Sign in and you get {credits} credits a week — enough to finish polishing a page — and you can publish your resume.",
+    "usageOfferMatching": "Turning on Open to matching raises it to {credits} credits a week. You can turn it off again whenever you like, and nothing you've made is lost.",
+    "usageLimitReset": "Your allowance resets Monday morning. Editing, preview, PDF export and ATS checks keep working in the meantime.",
+    "usageSignIn": "Sign in with Google",
+    "usageOpenSettings": "Open settings",
+    "usageLearnMore": "How usage works",
+    "usageDismiss": "Keep editing"
   },
   "share": {
     "brand": "Offerfy",

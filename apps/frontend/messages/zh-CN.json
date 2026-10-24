@@ -173,7 +173,18 @@
     "profileDisclosures": "目前已被读取 {count} 次。",
     "profileNoDisclosures": "尚无人读取。",
     "profileDelete": "删除人才档案",
-    "profileError": "操作失败，请再试一次。"
+    "profileError": "操作失败，请再试一次。",
+    "usageTitle": "本周 AI 用量",
+    "usageNotice": "编辑、预览、导出 PDF 和 ATS 检查都没有限制，只有 AI 编辑会计量。",
+    "usageThisWeekEdits": "已使用 {used} / {limit} 次 AI 编辑",
+    "usageThisWeekCredits": "已使用 {used} / {limit} 点额度",
+    "usageTier_guest": "访客",
+    "usageTier_registered": "已登录",
+    "usageTier_matching": "开放匹配",
+    "usageTierLine": "你的方案：{tier}。",
+    "usageResetLine": "{date} 重置。",
+    "usageUnmeasured": "本周有 {count} 次模型调用未报告 token 数，因此这个数字有一部分是估算。",
+    "usageLearnMore": "用量说明"
   },
   "picker": {
     "title": "选择开始方式",
@@ -337,7 +348,19 @@
     "settingsDanger": "危险区域",
     "settingsDelete": "删除这份简历",
     "settingsDeleteTailor": "删除这份定制版",
-    "thinking": "思考中"
+    "thinking": "思考中",
+    "usageMeterEdits": "本周 AI 编辑 {used} / {limit} 次",
+    "usageMeterCredits": "本周额度 {used} / {limit}",
+    "usageEditsLeft": "大约还能编辑 {count} 次",
+    "usageResets": "周一重置",
+    "usageLimitTitle": "本周的 AI 编辑用完了",
+    "usageOfferSignIn": "登录后每周有 {credits} 点额度，足以把一页简历改到完成，也可以发布简历。",
+    "usageOfferMatching": "开启「开放匹配」后每周提升到 {credits} 点。你随时可以关掉，已经完成的内容不会消失。",
+    "usageLimitReset": "额度在周一早上重置。在那之前，编辑、预览、导出 PDF 和 ATS 检查都照常可用。",
+    "usageSignIn": "使用 Google 登录",
+    "usageOpenSettings": "打开设置",
+    "usageLearnMore": "用量说明",
+    "usageDismiss": "继续编辑"
   },
   "share": {
     "brand": "Offerfy",
