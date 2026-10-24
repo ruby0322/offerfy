@@ -1,13 +1,15 @@
 import hashlib
 import hmac
+from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
-from app.models import GuestSession, Resume, User
+from app.models import GuestSession, Resume, TalentApiKey, User
 from app.services.guest import GUEST_COOKIE, ensure_guest, hash_guest_key
+from app.services.talent_keys import key_for_token
 
 SESSION_COOKIE = "offerfy_session"
 
@@ -137,3 +139,38 @@ def owner_context(
     if ensure:
         return None, ensure_guest(request, response, db)
     return None, None
+
+
+def require_talent_caller(
+    request: Request, db: Session = Depends(get_db)
+) -> TalentApiKey:
+    """An operator-issued credential, or nothing at all.
+
+    There is deliberately no fallthrough: a session cookie, a guest cookie and
+    an admin account all get 401 here. The only thing that opens this door is
+    a token minted by an operator, and no route mints one except the admin
+    endpoint -- apps/frontend/lib/agent-markdown.ts tells every agent that
+    reads it there is no public agent API, no machine OAuth server and no
+    self-serve API keys, and that must stay true.
+
+    Every failure is the same 401 with the same message. Which of missing,
+    malformed, unknown, revoked or expired it was is not the caller's
+    business, and saying would let someone sort valid-but-dead tokens from
+    invented ones.
+    """
+    unauthorized = HTTPException(
+        status_code=401,
+        detail="Credential required",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    header = request.headers.get("authorization") or ""
+    if not header.lower().startswith("bearer "):
+        raise unauthorized
+    key = key_for_token(db, header[7:].strip())
+    if key is None:
+        raise unauthorized
+    # A key nobody can see being used is a key nobody thinks to revoke. This
+    # makes every talent read a write, which it already was: the disclosure
+    # row is the point of the endpoint.
+    key.last_used_at = datetime.now(timezone.utc)
+    return key

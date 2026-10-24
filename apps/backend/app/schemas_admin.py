@@ -190,3 +190,32 @@ class AdminDisclosure(BaseModel):
 class AdminDisclosureList(BaseModel):
     items: list[AdminDisclosure]
     total: int
+
+
+class AdminTalentKeyCreate(BaseModel):
+    label: str
+    contact: str
+    expires_in_days: int | None = None
+
+
+class AdminTalentKey(BaseModel):
+    id: str
+    label: str
+    contact: str
+    created_by: str
+    created_at: str
+    expires_at: str | None = None
+    revoked_at: str | None = None
+    last_used_at: str | None = None
+    disclosure_count: int = 0
+
+
+class AdminTalentKeyCreated(AdminTalentKey):
+    """The only response that ever carries the raw token."""
+
+    token: str
+
+
+class AdminTalentKeyList(BaseModel):
+    items: list[AdminTalentKey]
+    total: int

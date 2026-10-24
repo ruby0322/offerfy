@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
@@ -5,7 +6,8 @@ from fastapi.testclient import TestClient
 
 from app.config import get_settings
 from app.deps import SESSION_COOKIE, _sign
-from app.models import ChatMessage, Resume, User
+from app.models import ChatMessage, Resume, TalentApiKey, User
+from app.services.talent_keys import hash_talent_key
 
 
 def _session_cookie(user: User) -> dict[str, str]:
@@ -244,3 +246,83 @@ def test_google_next_admin_nested_allowed(client, monkeypatch):
 
 def test_google_next_evil_ignored(client, monkeypatch):
     _safe_next_cases(client, monkeypatch, "https://evil.test", "/dashboard")
+
+
+def _admin_client(client, db_session, monkeypatch):
+    monkeypatch.setenv("ADMIN_EMAILS", "ops@example.com")
+    get_settings.cache_clear()
+    admin = User(google_sub="sub-ops-keys", email="ops@example.com", locale="en")
+    db_session.add(admin)
+    db_session.commit()
+    client.cookies.set(
+        SESSION_COOKIE, _sign(admin.id, get_settings().auth_token_secret)
+    )
+    return admin
+
+
+def test_mint_talent_key_returns_the_token_once(
+    client: TestClient, db_session, monkeypatch
+):
+    _admin_client(client, db_session, monkeypatch)
+    created = client.post(
+        "/v1/admin/talent/keys",
+        json={"label": "Acme Talent", "contact": "talent@acme.example"},
+    )
+    assert created.status_code == 200
+    body = created.json()
+    token = body["token"]
+    assert token.startswith("ofk_")
+    assert body["created_by"] == "ops@example.com"
+
+    # Only the hash is stored, so the raw token appears nowhere again.
+    key = db_session.query(TalentApiKey).one()
+    assert key.key_hash == hash_talent_key(token)
+    listed = client.get("/v1/admin/talent/keys").json()
+    assert listed["total"] == 1
+    assert "token" not in listed["items"][0]
+    assert token not in json.dumps(listed)
+
+
+def test_mint_talent_key_requires_a_label_and_contact(
+    client: TestClient, db_session, monkeypatch
+):
+    _admin_client(client, db_session, monkeypatch)
+    assert (
+        client.post(
+            "/v1/admin/talent/keys", json={"label": " ", "contact": "a@b.example"}
+        ).status_code
+        == 422
+    )
+
+
+def test_revoking_a_key_keeps_the_row(client: TestClient, db_session, monkeypatch):
+    _admin_client(client, db_session, monkeypatch)
+    key_id = client.post(
+        "/v1/admin/talent/keys",
+        json={"label": "Acme", "contact": "a@acme.example"},
+    ).json()["id"]
+
+    assert client.delete(f"/v1/admin/talent/keys/{key_id}").status_code == 204
+    db_session.expire_all()
+    key = db_session.query(TalentApiKey).one()
+    assert key.revoked_at is not None
+    assert client.delete("/v1/admin/talent/keys/nope").status_code == 404
+
+
+def test_talent_key_routes_are_invisible_to_everyone_else(
+    client: TestClient, db_session, monkeypatch
+):
+    monkeypatch.setenv("ADMIN_EMAILS", "ops@example.com")
+    get_settings.cache_clear()
+    user = User(google_sub="sub-plain", email="plain@example.com", locale="en")
+    db_session.add(user)
+    db_session.commit()
+    client.cookies.set(SESSION_COOKIE, _sign(user.id, get_settings().auth_token_secret))
+    assert client.get("/v1/admin/talent/keys").status_code == 404
+    assert (
+        client.post(
+            "/v1/admin/talent/keys",
+            json={"label": "Mine", "contact": "me@example.com"},
+        ).status_code
+        == 404
+    )

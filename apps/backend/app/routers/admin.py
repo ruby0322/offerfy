@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session, joinedload
 
@@ -15,6 +15,7 @@ from app.models import (
     LlmCall,
     RateEvent,
     Resume,
+    TalentApiKey,
     User,
 )
 from app.schemas import AtsReport, PreviewPages
@@ -34,6 +35,10 @@ from app.schemas_admin import (
     AdminResumeListItem,
     AdminStopUseNotice,
     AdminStopUseNoticeCreate,
+    AdminTalentKey,
+    AdminTalentKeyCreate,
+    AdminTalentKeyCreated,
+    AdminTalentKeyList,
     AdminTalentObligation,
     AdminTalentObligationList,
     AdminUserDetail,
@@ -44,6 +49,7 @@ from app.schemas_admin import (
 from app.schemas_jobs import AdminIngestRun, AdminIngestRunList
 from app.services.ats import analyze_pdf
 from app.services.disclosure import pending_obligations, record_stop_use_notice
+from app.services.talent_keys import mint_talent_key
 from app.services.typst_compile import compile_typst, compile_typst_pages
 
 router = APIRouter()
@@ -621,3 +627,96 @@ def admin_talent_disclosures(
         ],
         total=total,
     )
+
+
+def _talent_key_out(key: TalentApiKey, disclosures: int = 0) -> AdminTalentKey:
+    return AdminTalentKey(
+        id=key.id,
+        label=key.label,
+        contact=key.contact,
+        created_by=key.created_by,
+        created_at=key.created_at.isoformat(),
+        expires_at=_iso(key.expires_at),
+        revoked_at=_iso(key.revoked_at),
+        last_used_at=_iso(key.last_used_at),
+        disclosure_count=disclosures,
+    )
+
+
+@router.post(
+    "/v1/admin/talent/keys",
+    response_model=AdminTalentKeyCreated,
+    include_in_schema=False,
+)
+def admin_mint_talent_key(
+    body: AdminTalentKeyCreate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Issue one credential to one named organisation.
+
+    The raw token is in this response and nowhere else, ever: only its hash is
+    stored. Issuing is deliberately here and not self-serve.
+    """
+    label = (body.label or "").strip()
+    contact = (body.contact or "").strip()
+    if not label or not contact:
+        raise HTTPException(status_code=422, detail="label and contact are required")
+    if body.expires_in_days is not None and body.expires_in_days < 1:
+        raise HTTPException(status_code=422, detail="expires_in_days must be positive")
+    key, raw = mint_talent_key(
+        db,
+        label=label,
+        contact=contact,
+        created_by=admin.email,
+        expires_in_days=body.expires_in_days,
+    )
+    db.commit()
+    out = _talent_key_out(key)
+    return AdminTalentKeyCreated(**out.model_dump(), token=raw)
+
+
+@router.get(
+    "/v1/admin/talent/keys",
+    response_model=AdminTalentKeyList,
+    include_in_schema=False,
+)
+def admin_list_talent_keys(
+    db: Session = Depends(get_db), _admin: User = Depends(require_admin)
+):
+    keys = (
+        db.query(TalentApiKey)
+        .order_by(TalentApiKey.created_at.desc(), TalentApiKey.id.desc())
+        .all()
+    )
+    counts = dict(
+        db.query(DisclosureEvent.api_key_id, func.count(DisclosureEvent.id))
+        .group_by(DisclosureEvent.api_key_id)
+        .all()
+    )
+    return AdminTalentKeyList(
+        items=[_talent_key_out(key, counts.get(key.id, 0)) for key in keys],
+        total=len(keys),
+    )
+
+
+@router.delete(
+    "/v1/admin/talent/keys/{key_id}", status_code=204, include_in_schema=False
+)
+def admin_revoke_talent_key(
+    key_id: str,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Revoke, never delete.
+
+    disclosure_events.api_key_id has to keep pointing somewhere, and a revoked
+    key's past disclosures are still obligations we owe.
+    """
+    key = db.get(TalentApiKey, key_id)
+    if key is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    if key.revoked_at is None:
+        key.revoked_at = datetime.now(timezone.utc)
+        db.commit()
+    return Response(status_code=204)
