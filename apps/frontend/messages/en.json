@@ -335,7 +335,10 @@
     "settingsDanger": "Danger zone",
     "settingsDelete": "Delete this resume",
     "settingsDeleteTailor": "Delete this tailored version",
-    "thinking": "Thinking"
+    "thinking": "Thinking",
+    "contextTrimmed": "Earlier messages aren't sent to the assistant",
+    "contextTrimmedHint": "To keep each reply affordable, {count} messages above this line are left out of the request. The assistant still gets the start of this chat, everything from here down, and your resume itself — nothing has been deleted. If it seems to have forgotten something, say it again.",
+    "contextTrimmedJump": "Show where"
   },
   "share": {
     "brand": "Offerfy",

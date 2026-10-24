@@ -1627,3 +1627,158 @@ def test_chat_read_layout_score_rubric_comes_back_graded(
         "Dense",
         "Cramped",
     ]
+
+
+# --- The history bound -------------------------------------------------------
+#
+# `app/services/chat_window.py` owns the rules and tests/test_chat_window.py
+# owns them unit by unit. What these two check is the wiring: that the bound is
+# actually on the request that leaves the process, on both paths that build one,
+# and that nothing the user can see moved.
+
+
+def _seed_history(db_session, resume_id: str, rows: int) -> int:
+    """`rows` user/assistant messages plus a fat tool trace, oldest first.
+
+    `created_at` is explicit because `_history` orders by it and rows inserted
+    in one loop would otherwise tie.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.models import ChatMessage
+
+    base = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    for index in range(rows):
+        role = "user" if index % 2 == 0 else "assistant"
+        db_session.add(
+            ChatMessage(
+                resume_id=resume_id,
+                role=role,
+                content=f"<{role}-{index}> " + "word " * 74,
+                created_at=base + timedelta(seconds=index),
+            )
+        )
+        if index == 40:
+            db_session.add(
+                ChatMessage(
+                    resume_id=resume_id,
+                    role="tool",
+                    content=json.dumps({"name": "read_typst", "result": "T" * 80_000}),
+                    created_at=base + timedelta(seconds=index, microseconds=500),
+                )
+            )
+    db_session.commit()
+    return rows + 1
+
+
+def test_chat_bounds_the_history_it_sends_without_touching_the_transcript(
+    client: TestClient, db_session, openai_enabled, monkeypatch
+):
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    seeded = _seed_history(db_session, created["id"], 150)
+
+    scripted = ScriptedOpenAI([llm_message(content="Done.")])
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+    result = post_chat(client, created["id"], json={"message": "Tighten the summary"})
+    assert result["status"] == 200
+
+    sent = scripted.requests[0]["input"]
+    assert len(sent) < 80, "the whole 151-row transcript went to the provider"
+    # The opening is pinned, the newest turn is last, and the gap is declared.
+    assert sent[0]["content"].startswith("<user-0>")
+    assert sent[-1]["content"] == "Tighten the summary"
+    notes = [item for item in sent if "earlier messages in this conversation" in item["content"]]
+    assert len(notes) == 1
+    assert "read_typst" in notes[0]["content"]
+    # The 80,000-character tool trace was never in the request and is not now.
+    assert "T" * 100 not in json.dumps(scripted.requests)
+
+    # Nothing was erased: every seeded row is still there, plus this turn's two.
+    listed = client.get(f"/v1/resumes/{created['id']}/messages").json()
+    assert len(listed) == seeded + 2
+    assert listed[0]["content"].startswith("<user-0>")
+    assert [row["role"] for row in listed].count("tool") == 1
+
+
+def test_chat_repair_loop_history_is_bounded_too(
+    client: TestClient, db_session, openai_enabled, monkeypatch
+):
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    _seed_history(db_session, created["id"], 150)
+    edited = created["typst_source"].replace("Your Name", "Ada Lovelace", 1)
+
+    # The repair loop is driven by compile verdicts, not by the Typst CLI.
+    monkeypatch.setattr(
+        "app.services.llm.compile_digest", lambda source: {"compile": {"ok": True}}
+    )
+    verdicts = iter([{"ok": False, "error": "boom"}, {"ok": True}])
+    monkeypatch.setattr(
+        "app.routers.chat.compile_status", lambda source: next(verdicts, {"ok": True})
+    )
+    scripted = ScriptedOpenAI(
+        [
+            llm_message(
+                tool_calls=[
+                    tool_call("apply_typst_edit", {"source": edited}, "edit-1")
+                ]
+            ),
+            llm_message(content="Renamed."),
+            llm_message(content="Fixed it."),
+        ]
+    )
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+    result = post_chat(client, created["id"], json={"message": "Rename me to Ada Lovelace"})
+    assert result["status"] == 200
+
+    # The last request is the repair turn's: it carries the compile error, and
+    # it is windowed exactly like the first.
+    repair = scripted.requests[-1]["input"]
+    assert "Typst compile failed after the edit" in repair[-1]["content"]
+    assert len(repair) < 80
+    assert sum(1 for item in repair if "earlier messages" in str(item["content"])) == 1
+
+
+def test_chat_announces_the_trimmed_context_and_where_it_starts(
+    client: TestClient, db_session, openai_enabled, monkeypatch
+):
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    _seed_history(db_session, created["id"], 150)
+
+    scripted = ScriptedOpenAI([llm_message(content="Done.")])
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+    result = post_chat(client, created["id"], json={"message": "Tighten the summary"})
+    assert result["status"] == 200
+
+    # It is the first frame: the user learns about the trim as the turn starts.
+    notice = result["events"][0]
+    assert notice["type"] == "context"
+    assert notice["dropped"] > 0
+
+    # The id points at a real row, and at the one the window actually kept --
+    # a marker drawn anywhere else would be a lie about what the model saw.
+    listed = client.get(f"/v1/resumes/{created['id']}/messages").json()
+    kept = next(row for row in listed if row["id"] == notice["from_message_id"])
+    assert kept["role"] in {"user", "assistant"}
+    sent = scripted.requests[0]["input"]
+    assert kept["content"] in [item["content"] for item in sent]
+
+    # And the transcript endpoint says the same thing, so a reload redraws it.
+    response = client.get(f"/v1/resumes/{created['id']}/messages")
+    assert response.headers["X-Context-From"] == notice["from_message_id"]
+    assert int(response.headers["X-Context-Dropped"]) == notice["dropped"]
+
+
+def test_chat_says_nothing_about_context_when_nothing_is_trimmed(
+    client: TestClient, db_session, openai_enabled, monkeypatch
+):
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    _seed_history(db_session, created["id"], 20)
+
+    scripted = ScriptedOpenAI([llm_message(content="Done.")])
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+    result = post_chat(client, created["id"], json={"message": "Tighten the summary"})
+    assert result["status"] == 200
+    assert "context" not in result["kinds"]
+    response = client.get(f"/v1/resumes/{created['id']}/messages")
+    assert "X-Context-From" not in response.headers
+    assert "X-Context-Dropped" not in response.headers

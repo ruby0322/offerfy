@@ -11,6 +11,7 @@ from app.deps import get_current_user, load_resume_for_owner, owner_context
 from app.models import LLM_CALL_PURPOSES, ChatMessage, LlmCall, User
 from app.schemas import ChatMessageOut, ChatRequest
 from app.services.attachment import llm_content_for_upload, stored_user_message
+from app.services.chat_window import window_history
 from app.services.extract import MAX_UPLOAD_BYTES, allowed_upload, extract_upload_text
 from app.services.family_tools import (
     CREATE_TAILOR_TOOL,
@@ -45,12 +46,49 @@ def _sse(payload: dict) -> bytes:
 
 
 def _history(db: Session, resume_id: str) -> list[ChatMessage]:
+    """The rows that can go to the model, oldest first.
+
+    `tool` rows are excluded in SQL rather than in the caller. They were always
+    filtered out before being sent -- that is load-bearing, one production
+    resume holds 1.44M characters of tool traces against 55,000 of history --
+    but they were still read out of the database and discarded on every turn.
+    `GET /messages` is the endpoint that returns the whole transcript, and it
+    builds its own query.
+
+    What is sent is bounded again further down, at the provider boundary: see
+    `app.services.chat_window`.
+    """
     return (
         db.query(ChatMessage)
         .filter(ChatMessage.resume_id == resume_id)
+        .filter(ChatMessage.role.in_(("user", "assistant")))
         .order_by(ChatMessage.created_at.asc())
         .all()
     )
+
+
+def _context_notice(rows: list[ChatMessage]) -> dict | None:
+    """Where the model's view of this conversation starts, for the UI.
+
+    `rows` must be the user/assistant rows in order -- what `_history`
+    returns. The window is recomputed here rather than reported back from
+    `app.services.llm`, which has no Session and no message ids and keeps it
+    that way; it is a list slice over data already in hand, so computing it
+    twice costs nothing.
+
+    This exists because the bound is otherwise invisible. A turn that no longer
+    remembers something from a hundred messages ago looks like a broken
+    assistant unless the product says plainly that it was not sent. None of it
+    is a deletion: every row is still stored and still listed.
+    """
+    window = window_history([{"role": row.role, "content": row.content} for row in rows])
+    if not window.folded:
+        return None
+    return {
+        "type": "context",
+        "dropped": window.dropped,
+        "from_message_id": rows[window.cut].id,
+    }
 
 
 async def _parse_chat_input(request: Request) -> tuple[str, str | None, bytes | None, bool]:
@@ -204,11 +242,8 @@ async def chat(
     db.commit()
 
     history = _history(db, resume.id)
-    messages = [
-        {"role": m.role, "content": m.content}
-        for m in history
-        if m.role in {"user", "assistant"}
-    ]
+    messages = [{"role": m.role, "content": m.content} for m in history]
+    context_notice = _context_notice(history)
     if messages:
         messages[-1]["content"] = llm_content
     original_source = resume.typst_source
@@ -284,6 +319,11 @@ async def chat(
                 )
 
         try:
+            # First frame when it applies, so the trimming is part of the turn
+            # the user is watching rather than something they infer later from
+            # the assistant forgetting things.
+            if context_notice is not None:
+                yield _sse(context_notice)
             async for event in aiter_chat_edit(
                 messages,
                 original_source,
@@ -371,4 +411,12 @@ def list_messages(
         .order_by(ChatMessage.created_at.asc())
         .all()
     )
+    # Headers, not the body: this still returns the whole transcript, every
+    # role included, in the shape it always has. The pair says where the
+    # model's view of it begins, so a reload redraws the marker the chat
+    # stream drew. Absent means nothing is being left out.
+    notice = _context_notice([r for r in rows if r.role in ("user", "assistant")])
+    if notice is not None:
+        response.headers["X-Context-Dropped"] = str(notice["dropped"])
+        response.headers["X-Context-From"] = notice["from_message_id"]
     return [ChatMessageOut(id=r.id, role=r.role, content=r.content) for r in rows]
