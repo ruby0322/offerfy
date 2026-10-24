@@ -11,6 +11,7 @@ from app.services.consent import (
     consent_state,
     record_consent,
 )
+from app.services.profile import delete_profile_for_user
 
 router = APIRouter()
 
@@ -46,5 +47,11 @@ def put_consent(
         locale=user.locale,
         source="settings",
     )
+    if not body.granted and purpose == "talent_introduction":
+        # The first half of what the privacy policy promises a withdrawal does.
+        # The second half -- requiring whoever already has it to stop using it
+        # -- is derived from disclosure_events and discharged by an operator;
+        # see app.services.disclosure.pending_obligations.
+        delete_profile_for_user(db, user)
     db.flush()
     return _state(db, user)

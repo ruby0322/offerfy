@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -8,8 +9,13 @@ from sqlalchemy.exc import IntegrityError
 
 from app.config import get_settings
 from app.deps import SESSION_COOKIE, _sign
-from app.models import ConsentEvent, GuestSession, User
-from app.services.consent import POLICY_VERSION, has_consent, record_consent
+from app.models import ConsentEvent, GuestSession, Resume, TalentProfile, User
+from app.services.consent import (
+    POLICY_VERSION,
+    has_consent,
+    has_consent_many,
+    record_consent,
+)
 
 _FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
 
@@ -228,3 +234,132 @@ def test_every_locale_carries_the_same_legal_and_settings_keys(locale):
     reference, other = load("zh-TW"), load(locale)
     for namespace in ("legal", "settings"):
         assert set(flat(other[namespace])) == set(flat(reference[namespace])), namespace
+
+
+def _profile_for(db_session, user, *, title="Master"):
+    """A talent_profiles row, built by hand: step 2 has no builder yet."""
+    resume = Resume(
+        title=title,
+        typst_source="= CV",
+        source="create",
+        locale="en",
+        user_id=user.id,
+        kind="master",
+    )
+    db_session.add(resume)
+    db_session.flush()
+    user.profile_resume_id = resume.id
+    profile = TalentProfile(
+        user_id=user.id,
+        source_resume_id=resume.id,
+        source_revision_id="rev-1",
+        input_hash="h" * 64,
+        profile_json='{"display_name": "Chen Wei"}',
+        content_hash="c" * 64,
+        display_name="Chen Wei",
+        search_text="chen wei",
+        skills_text="|python|",
+    )
+    db_session.add(profile)
+    db_session.commit()
+    return profile
+
+
+def test_withdrawing_talent_introduction_deletes_the_profile(
+    client: TestClient, db_session
+):
+    """The policy says we stop passing it on. The cheapest way is to not hold it."""
+    user = _signed_in(client, db_session, sub="sub-withdraw-profile")
+    _profile_for(db_session, user)
+    client.put("/v1/me/consents/talent_introduction", json={"granted": True})
+    assert db_session.query(TalentProfile).count() == 1
+
+    response = client.put(
+        "/v1/me/consents/talent_introduction", json={"granted": False}
+    )
+    assert response.status_code == 200
+    assert response.json()["consents"]["talent_introduction"] is False
+    assert db_session.query(TalentProfile).count() == 0
+
+
+def test_granting_again_does_not_resurrect_the_old_profile(
+    client: TestClient, db_session
+):
+    user = _signed_in(client, db_session, sub="sub-regrant")
+    _profile_for(db_session, user)
+    client.put("/v1/me/consents/talent_introduction", json={"granted": False})
+    client.put("/v1/me/consents/talent_introduction", json={"granted": True})
+    assert db_session.query(TalentProfile).count() == 0
+    # The pointer survives, so turning it back on costs one rebuild and not a
+    # second decision about which resume represents them.
+    db_session.refresh(user)
+    assert user.profile_resume_id is not None
+
+
+def test_withdrawing_keeps_the_consent_rows_that_came_before(
+    client: TestClient, db_session
+):
+    user = _signed_in(client, db_session, sub="sub-ledger-intact")
+    _profile_for(db_session, user)
+    client.put("/v1/me/consents/talent_introduction", json={"granted": True})
+    client.put("/v1/me/consents/talent_introduction", json={"granted": False})
+    actions = [
+        row.action for row in _events(db_session, purpose="talent_introduction")
+    ]
+    assert actions == ["granted", "withdrawn"]
+
+
+def test_has_consent_many_reads_the_latest_row_per_user(client: TestClient, db_session):
+    granted = _signed_in(client, db_session, sub="sub-many-granted")
+    withdrawn = _signed_in(client, db_session, sub="sub-many-withdrawn")
+    silent = _signed_in(client, db_session, sub="sub-many-silent")
+    for user, actions in ((granted, ["granted"]), (withdrawn, ["granted", "withdrawn"])):
+        for action in actions:
+            record_consent(
+                db_session,
+                user=user,
+                purpose="talent_introduction",
+                action=action,
+                locale="en",
+                source="settings",
+            )
+            db_session.commit()
+
+    allowed = has_consent_many(
+        db_session,
+        [granted.id, withdrawn.id, silent.id],
+        purpose="talent_introduction",
+    )
+    assert allowed == {granted.id}
+    assert has_consent_many(db_session, [], purpose="talent_introduction") == set()
+
+
+def test_has_consent_many_prefers_the_withdrawal_when_timestamps_tie(
+    client: TestClient, db_session
+):
+    """Two rows can land in one transaction with identical created_at.
+
+    A SQL max(created_at) join cannot break that tie and would read the
+    withdrawal as a grant, which is the one mistake that cannot be taken back.
+    """
+    user = _signed_in(client, db_session, sub="sub-tie")
+    same = datetime(2026, 10, 24, 12, 0, 0, tzinfo=timezone.utc)
+    for action in ("granted", "withdrawn"):
+        db_session.add(
+            ConsentEvent(
+                user_id=user.id,
+                purpose="talent_introduction",
+                action=action,
+                policy_version=POLICY_VERSION,
+                locale="en",
+                source="settings",
+                created_at=same,
+            )
+        )
+        db_session.flush()
+    db_session.commit()
+
+    assert has_consent(db_session, user=user, purpose="talent_introduction") is False
+    assert (
+        has_consent_many(db_session, [user.id], purpose="talent_introduction") == set()
+    )

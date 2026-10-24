@@ -8,6 +8,9 @@ append-only.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
+from sqlalchemy import case
 from sqlalchemy.orm import Session
 
 from app.models import CONSENT_ACTIONS, CONSENT_PURPOSES, ConsentEvent, GuestSession, User
@@ -21,6 +24,21 @@ POLICY_VERSION = "2026-10-24"
 # not here: withdrawing it means closing the account, which is the job of
 # account deletion, not of a toggle.
 SELF_SERVE_PURPOSES = ("talent_introduction",)
+
+
+# How "newest" is ordered, for every reader in this module.
+#
+# created_at alone ties when two rows land in the same transaction, which the
+# settings endpoint can do. id does not break that tie meaningfully -- _uuid()
+# is random, so ordering by it is deterministic but arbitrary, and an arbitrary
+# winner means a withdrawal can lose to a grant it arrived with. So a tie is
+# resolved towards 'withdrawn': when we cannot tell which answer came last, the
+# answer is no. id stays last so the row chosen is still stable.
+_LATEST_FIRST = (
+    ConsentEvent.created_at.desc(),
+    case((ConsentEvent.action == "withdrawn", 0), else_=1).asc(),
+    ConsentEvent.id.desc(),
+)
 
 
 def record_consent(
@@ -75,9 +93,7 @@ def latest_event(
         query = query.filter(ConsentEvent.guest_session_id == guest.id)
     else:
         raise ValueError("latest_event needs one of user or guest")
-    # created_at alone ties when two rows land in the same transaction, which
-    # the settings endpoint can do; id breaks the tie deterministically.
-    return query.order_by(ConsentEvent.created_at.desc(), ConsentEvent.id.desc()).first()
+    return query.order_by(*_LATEST_FIRST).first()
 
 
 def has_consent(
@@ -95,6 +111,39 @@ def has_consent(
     return event is not None and event.action == "granted"
 
 
+def has_consent_many(
+    db: Session, user_ids: Iterable[str], *, purpose: str
+) -> set[str]:
+    """Which of these users' newest answer for this purpose was 'granted'.
+
+    One query instead of N, ordered by exactly the _LATEST_FIRST that
+    latest_event uses, then reduced to the first row per user in Python.
+
+    Deliberately not a SQL `GROUP BY user_id HAVING max(created_at)` join: that
+    cannot express the tie rule above, so it would sometimes read a withdrawal
+    as a grant. Handing a withdrawn person to an employer is the one failure
+    here that cannot be taken back, so the slower definition is the only one.
+    """
+    ids = list(user_ids)
+    if not ids:
+        return set()
+    rows = (
+        db.query(ConsentEvent)
+        .filter(ConsentEvent.purpose == purpose, ConsentEvent.user_id.in_(ids))
+        .order_by(*_LATEST_FIRST)
+        .all()
+    )
+    seen: set[str] = set()
+    granted: set[str] = set()
+    for row in rows:
+        if row.user_id is None or row.user_id in seen:
+            continue
+        seen.add(row.user_id)
+        if row.action == "granted":
+            granted.add(row.user_id)
+    return granted
+
+
 def consent_state(db: Session, user: User) -> dict[str, bool]:
     """Their current answer for every purpose they control themselves."""
     return {
@@ -103,7 +152,16 @@ def consent_state(db: Session, user: User) -> dict[str, bool]:
     }
 
 
-# TODO: once a talent pool exists, a 'withdrawn' row for talent_introduction
-# must also (a) drop them from the searchable index and (b) notify everyone who
-# already received their profile -- see the DisclosureEvent table in the plan.
-# Today neither exists, so appending the row is the whole of the withdrawal.
+# A 'withdrawn' row for talent_introduction is no longer the whole of the
+# withdrawal. Both halves of the obligation now have a mechanism:
+#
+#   (a) drop them from the searchable index -- routers/consent.py deletes the
+#       talent_profiles row, and app.services.profile.readable_profiles_query
+#       requires live consent through has_consent_many on every read, so
+#       neither path can serve a withdrawn person.
+#   (b) notify everyone who already received their profile --
+#       app.services.disclosure.pending_obligations derives who they are from
+#       disclosure_events, and record_stop_use_notice records the discharge.
+#
+# Nothing here calls either one: this module answers what someone agreed to and
+# nothing else.
