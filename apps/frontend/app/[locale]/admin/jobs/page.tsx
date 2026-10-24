@@ -93,6 +93,7 @@ export default function AdminJobsIngestPage() {
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">{t("ingestPasses")}</h2>
         <p className="text-sm text-muted-foreground">{t("ingestPassesHint")}</p>
+        <p className="text-sm text-muted-foreground">{t("ingestScopeHint")}</p>
         {passes.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("ingestNoPasses")}</p>
         ) : (
@@ -104,7 +105,9 @@ export default function AdminJobsIngestPage() {
                   <th className="py-2 font-medium">{t("ingestDuration")}</th>
                   <th className="py-2 font-medium">{t("ingestSourcesOk")}</th>
                   <th className="py-2 font-medium">{t("ingestSourcesFailed")}</th>
+                  <th className="py-2 font-medium">{t("ingestFetched")}</th>
                   <th className="py-2 font-medium">{t("ingestUpserted")}</th>
+                  <th className="py-2 font-medium">{t("ingestOutOfScope")}</th>
                   <th className="py-2 font-medium">{t("ingestStatus")}</th>
                 </tr>
               </thead>
@@ -117,7 +120,11 @@ export default function AdminJobsIngestPage() {
                     <td className={cn("py-2", row.sources_failed > 0 && "text-destructive")}>
                       {row.sources_failed}
                     </td>
+                    <td className="py-2">{row.fetched}</td>
                     <td className="py-2">{row.upserted}</td>
+                    <td className="py-2 text-muted-foreground">
+                      {Math.max(row.fetched - row.upserted, 0)}
+                    </td>
                     <td
                       className={cn("py-2", row.status !== "ok" && "text-destructive")}
                     >

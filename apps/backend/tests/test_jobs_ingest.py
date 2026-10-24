@@ -6,16 +6,16 @@ import httpx
 
 from app.models import Job, JobIngestRun
 from app.services.jobs.ashby import parse_ashby
-from app.services.jobs.boards import load_boards
+from app.services.jobs.boards import boards_path, load_boards
 from app.services.jobs.greenhouse import parse_greenhouse
 from app.services.jobs.ingest import CatalogResult, SourceResult, ingest_board
 from app.services.jobs.lever import parse_lever
 from app.services.jobs.sanitize import sanitize_html
 from app.services.jobs.store import expire_missing, record_run, upsert_jobs
-from app.services.jobs.taiwanjobs import parse_taiwanjobs
-from app.services.jobs.types import Board, NormalizedJob
+from app.services.jobs.types import JOB_SOURCES, Board, NormalizedJob
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "jobs"
+BACKEND_DATA = Path(__file__).resolve().parents[1] / "data"
 
 
 def test_sanitize_strips_script_and_javascript_href():
@@ -69,24 +69,32 @@ def test_parse_lever_and_ashby_fixtures():
     assert ashby[0].remote is False
 
 
-def test_parse_taiwanjobs_strips_fullwidth_tag_annotations():
-    raw = (FIXTURES / "taiwanjobs.xml").read_text(encoding="utf-8")
-    jobs = parse_taiwanjobs(raw)
-    assert len(jobs) == 1
-    job = jobs[0]
-    assert job.source == "taiwanjobs"
-    assert job.title == "軟體工程師"
-    assert job.company == "範例科技"
-    assert job.remote is True
-    assert job.source_id == "tw-1"
-
-
 def test_load_boards_skips_duplicates():
     boards = load_boards()
     keys = {(b.source, b.slug) for b in boards}
     assert len(keys) == len(boards)
     assert ("greenhouse", "stripe") in keys
     assert ("ashby", "openai") in keys
+
+
+def test_shipped_board_list_is_curated():
+    """Every row must name a provider we can actually fetch.
+
+    The list once carried 64 boards that 404ed on every pass -- companies that
+    had moved ATS or never used one of these -- which buried the real failures.
+    Liveness itself is checked by /admin/jobs rather than here: probing 77 boards
+    over the network would make this suite slow and flaky.
+    """
+    raw = json.loads((BACKEND_DATA / "ats_boards.json").read_text(encoding="utf-8"))
+    rows = raw["boards"]
+    assert len(rows) == len(load_boards()), "a row was dropped by load_boards"
+    for row in rows:
+        assert set(row) == {"source", "slug", "company"}, row
+        assert row["source"] in JOB_SOURCES, row
+        # taiwanjobs is retired; load_boards drops it, so a row here is a mistake.
+        assert row["source"] != "taiwanjobs", row
+        assert row["slug"] and row["slug"].strip() == row["slug"], row
+        assert row["company"] and row["company"].strip() == row["company"], row
 
 
 def test_upsert_and_expire_per_board(db_session):
@@ -272,3 +280,48 @@ def test_record_run_without_a_run_id_is_still_allowed(db_session):
     db_session.commit()
     row = db_session.query(JobIngestRun).one()
     assert row.run_id is None
+
+
+def test_out_of_scope_postings_are_not_stored_and_get_expired(db_session):
+    """The scope filter must run before seen_ids.
+
+    A posting we stop carrying has to drop out of seen_ids so expire_missing
+    deactivates it on this same pass. If it were filtered afterwards, every
+    out-of-scope page we ever ingested would stay indexed forever.
+    """
+    now = datetime(2026, 10, 24, tzinfo=timezone.utc)
+    upsert_jobs(
+        db_session,
+        [
+            NormalizedJob(
+                source="greenhouse", source_id="stripe:1", company="Stripe",
+                title="Enterprise Account Executive", location="NYC", remote=None,
+                apply_url="https://example.com/a", source_url="https://example.com/a",
+                description_html="", description_text="a", posted_at=None,
+            )
+        ],
+        now=now,
+    )
+    db_session.commit()
+
+    payload = {"jobs": [
+        {"id": 1, "title": "Enterprise Account Executive", "absolute_url": "https://example.com/a",
+         "content": "sell things", "location": {"name": "NYC"}},
+        {"id": 2, "title": "Staff Software Engineer", "absolute_url": "https://example.com/b",
+         "content": "build things", "location": {"name": "Remote"}},
+    ]}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result = ingest_board(db_session, client, Board("greenhouse", "stripe", "Stripe"))
+
+    titles = {j.title: j.is_active for j in db_session.query(Job).all()}
+    assert titles["Staff Software Engineer"] is True
+    # Still present as a row, but deactivated -- so it noindexes and leaves the sitemap.
+    assert titles["Enterprise Account Executive"] is False
+
+    # ok_count stays the pre-filter count so admin can show fetched vs kept.
+    assert result.fetched == 2
+    assert result.upserted == 1

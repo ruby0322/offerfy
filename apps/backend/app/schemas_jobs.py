@@ -2,7 +2,8 @@ from datetime import datetime, timezone
 
 from pydantic import BaseModel
 
-JOB_SOURCES = ("greenhouse", "lever", "ashby", "taiwanjobs")
+# Imported, not redeclared: two copies of this tuple silently drift.
+from app.services.jobs.types import JOB_SOURCES
 
 
 class JobListItem(BaseModel):
@@ -76,6 +77,15 @@ class AdminIngestPass(BaseModel):
     duration_seconds: float | None = None
     sources_ok: int
     sources_failed: int
+    # What the boards handed us. fetched - upserted is how many the scope rules
+    # dropped, which is worth being able to see: a filter that quietly eats a
+    # whole board should not take weeks to spot.
+    #
+    # Caveat: smartrecruiters scopes itself on the list payload before fetching
+    # each posting's description -- it has to, that is one request per posting --
+    # so for that source fetched is already post-filter and the difference
+    # undercounts. Every other source reports the raw board count.
+    fetched: int
     upserted: int
     expired: int
     # "ok" | "degraded" | "failed". Mirrors CatalogResult.refreshed_nothing so
