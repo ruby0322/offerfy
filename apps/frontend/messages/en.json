@@ -812,7 +812,7 @@
     "yes": "Yes",
     "no": "No",
     "tiersUnavailable": "We could not load the current numbers. Rather than print a figure that might not be the one we actually enforce, we would rather show nothing — please reload.",
-    "tiersNote": "Without an account you get enough to see the assistant work on your own resume, but not enough to finish polishing a page — and publishing needs an account in any case. Signing in is free and takes one click.",
+    "tiersNote": "Without an account you get enough to see the assistant work on your own resume and get a good way through it — a long or fussy one will outlast the allowance. Publishing needs an account either way. Signing in is free and takes one click.",
     "costlierHeading": "What makes one edit cost more than another",
     "costlierIntro": "We count what each edit actually costs us, so a small question costs you less than a big rewrite. These are the things that make an edit expensive:",
     "costlierItems": [

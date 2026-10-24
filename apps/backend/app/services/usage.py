@@ -92,11 +92,33 @@ _FALLBACK_MODEL = max(PRICES, key=lambda name: PRICES[name]["input"])
 # docstring already says knowing the spend is unmeasurable is the measurement.
 FALLBACK_ROUND_UUSD = 25_000
 
-# One reference edit: the measured mean turn, 2026-10-24 (median was $0.045,
-# p90 $0.121). The published allowances are denominated in this rather than in
-# dollars so that a provider price change lowers our bill without silently
-# re-denominating what someone was promised.
+# The unit the allowances are denominated in. Deliberately NOT re-pegged when
+# the measured cost of an edit falls: a credit is what someone was promised, and
+# cutting it to track a cost reduction would quietly take the saving back off
+# them instead of handing it over. Changing this changes what people get, so it
+# changes only on purpose.
 CREDIT_UUSD = 70_000
+
+# What one turn actually bills. Measured off usage_counters on 2026-10-25 --
+# the meter's own arithmetic over 13 real turns, not an estimate: $0.3252 for 13
+# turns. Per round the mix was 2,352 fresh input, 9,375 cached, 2,349 cache
+# write and 141 output = $0.0141, at 1.77 rounds a turn.
+#
+# It fell from ~$0.07 because 4db08d1 bounded the chat history: input per round
+# went 26,038 -> 11,727 tokens. Cache writes are now the largest single line
+# item at 41% of a round, which is why migration 017 had to record them.
+#
+# This is what converts an allowance into "about N edits". It is a *measurement*
+# and moves when the product does; CREDIT_UUSD above is a *promise* and does
+# not. Keeping them apart is the whole point -- collapsing them would mean every
+# efficiency gain silently shrank the allowance.
+#
+# 36_000 rather than the measured 25_000 on purpose: 1.77 rounds a turn is a
+# small, light sample, and the earlier pre-trim mean was 2.57. At 2.57 rounds
+# the same per-round mix gives $0.0364. Quoting the heavier figure makes the
+# published "about N" hold up when turns get more complex, and under-promising
+# an allowance costs nothing.
+EDIT_UUSD = 36_000
 
 # --------------------------------------------------------------------------
 # Tiers
@@ -131,12 +153,21 @@ class Tier:
 
 
 TIERS: dict[str, Tier] = {
-    # 4 turns is about a third of a first polish (8-15 turns) and most of one
-    # tailoring pass (3-6). The wall lands mid-polish, with a visibly better
-    # resume on screen -- and publishing already needs an account, so the
-    # prompt answers a question they have just started asking.
+    # 8 turns, doubled from 4 on 2026-10-25. A first polish measures 8-15 turns
+    # and a tailoring pass 3-6, so this is now most of a simple polish rather
+    # than a third of one -- the wall still lands before a long or fussy resume
+    # is done, but a short one may just make it. The stricter 4 was sized when
+    # a turn was thought to cost $0.07; at the measured $0.025 eight turns bill
+    # about $0.13 a week, so the per-session cost of being generous here is
+    # small. What bounds cookie-reset farming is the guest pool ceiling, not
+    # this number.
+    #
+    # turns_per_hour matches turns deliberately: with a lower hourly cap the
+    # weekly allowance could not be spent in one sitting, which is exactly what
+    # a trial user does. For a guest the weekly count is the guard; the hourly
+    # one does nothing, by design.
     GUEST: Tier(
-        GUEST, credits=None, turns=4, turns_per_hour=4, profile_builds_per_hour=0
+        GUEST, credits=None, turns=8, turns_per_hour=8, profile_builds_per_hour=0
     ),
     # Has to cover the whole advertised job on its own -- finish polishing one
     # page, or tailor for one role. That is a legal constraint as much as a
@@ -553,7 +584,10 @@ def approx_edits_left(
         return max(bal.turns_remaining, 0)
     if bal.remaining_uusd is None:
         return None
-    per_turn = CREDIT_UUSD
+    # EDIT_UUSD, not CREDIT_UUSD: before someone has history we have to guess
+    # what *their* turn will cost, and the measured cost of a turn is the guess.
+    # Using the credit here understated by ~3x once the history trim landed.
+    per_turn = EDIT_UUSD
     if bal.turns_used >= 3 and bal.used_uusd > 0:
         per_turn = max(bal.used_uusd // bal.turns_used, 1)
     return max(bal.remaining_uusd, 0) // per_turn

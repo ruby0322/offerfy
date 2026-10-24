@@ -8,6 +8,8 @@ from app.deps import get_current_user, owner_context
 from app.models import User
 from app.schemas import UsageOut, UsageTierOut, UsageTiersOut
 from app.services.usage import (
+    CREDIT_UUSD,
+    EDIT_UUSD,
     GUEST,
     TIERS,
     approx_edits_left,
@@ -72,10 +74,21 @@ def read_tiers():
     tiers = []
     for name in _TIER_ORDER:
         tier = TIERS[name]
-        # What the allowance is worth in edits, at the reference edit. The
-        # editor shows each person their own trailing rate instead; a public
-        # page has no person to be specific about, so it says "about".
-        approx = tier.turns if tier.turns is not None else (tier.credits or 0)
+        # What the allowance is worth in edits, at the measured cost of one.
+        # Deliberately not `tier.credits`: that was only ever equal by accident
+        # of the original peg, and once the history trim cut a turn to a third
+        # of its old cost it understated by ~3x -- the page said "about 20"
+        # where the budget bought about 55.
+        #
+        # Rounded to the nearest 5, because "about 39" is not an "about" and
+        # the number is a blend over people whose turns differ by nearly 2x.
+        # The editor shows each person their own trailing rate instead; a
+        # public page has no person to be specific about.
+        if tier.turns is not None:
+            approx = tier.turns
+        else:
+            exact = (tier.credits or 0) * CREDIT_UUSD / EDIT_UUSD
+            approx = max(5, int(round(exact / 5) * 5))
         tiers.append(
             UsageTierOut(
                 name=name,

@@ -837,3 +837,70 @@ def test_prune_respects_the_retention_the_policy_states(
     db_session.commit()
     assert usage.prune_refusals(db_session) == 1
     assert len(_refusals(db_session)) == 1
+
+
+def test_published_edits_come_from_the_measured_cost_not_the_credit(
+    client: TestClient,
+):
+    """The two constants mean different things and must not be conflated.
+
+    CREDIT_UUSD is what someone was promised; EDIT_UUSD is what a turn
+    measurably bills. They were equal only by accident of the original peg, and
+    once the history trim cut a turn to a third of its old cost, publishing
+    `credits` as the edit count understated by ~3x -- the page said "about 20"
+    where the budget bought about 55.
+    """
+    rows = {r["name"]: r for r in client.get("/v1/usage/tiers").json()["tiers"]}
+
+    # A guest is capped on a count, so the count is the answer exactly.
+    assert rows["guest"]["approx_edits"] == usage.TIERS[usage.GUEST].turns
+
+    for name in ("registered", "matching"):
+        tier = usage.TIERS[name]
+        exact = tier.credits * usage.CREDIT_UUSD / usage.EDIT_UUSD
+        published = rows[name]["approx_edits"]
+        # Rounded to the nearest 5 and never zero.
+        assert published % 5 == 0 and published >= 5
+        assert abs(published - exact) <= 2.5
+        # The bug this guards: it must not simply echo the credit count.
+        assert published > tier.credits, (
+            f"{name}: published {published} edits for {tier.credits} credits -- "
+            "approx_edits has fallen back to echoing credits"
+        )
+
+
+def test_a_guest_gets_eight_edits_and_can_spend_them_in_one_sitting(
+    client: TestClient, db_session, enforced
+):
+    """Doubled from 4 on 2026-10-25.
+
+    turns_per_hour matches turns on purpose: a lower hourly cap would stop the
+    weekly allowance being spent in one sitting, which is exactly what someone
+    trying the product does.
+    """
+    guest = GuestSession(key_hash="w" * 64)
+    db_session.add(guest)
+    db_session.commit()
+    tier = usage.TIERS[usage.GUEST]
+    assert tier.turns == 8
+    assert tier.turns_per_hour >= tier.turns, "the hourly cap would bind first"
+
+    _spend(db_session, guest=guest, turns=tier.turns, input_tokens=10)
+    with pytest.raises(Exception) as caught:
+        usage.enforce_usage(db_session, None, guest)
+    # The weekly count is what refuses, not the burst guard.
+    assert caught.value.detail["limit"] == "weekly_turns"
+
+
+def test_the_edits_left_estimate_falls_back_to_a_measured_turn(
+    client: TestClient, db_session
+):
+    """Before someone has history we must guess what *their* turn costs, and
+    the measured cost of a turn is the guess. Using the credit understated by
+    ~3x once the trim landed."""
+    user = _signed_in(client, db_session, sub="sub-fallback")
+    body = client.get("/v1/usage").json()
+    tier = usage.TIERS[usage.REGISTERED]
+    expected = tier.credits * usage.CREDIT_UUSD // usage.EDIT_UUSD
+    assert body["approx_edits_left"] == expected > tier.credits
+    assert user is not None

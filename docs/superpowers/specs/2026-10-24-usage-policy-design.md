@@ -150,6 +150,64 @@ The two subtleties that are still the only correctness risk in the arithmetic:
 
 ## What one edit actually costs — measured, 2026-10-24
 
+### Re-measured 2026-10-25, after the history fix shipped
+
+The section below predicted a round would fall to ~16,400 input tokens and a
+turn to ~$0.045. **Both were still too high.** Measured off `usage_counters` --
+the meter's own arithmetic over 13 real turns, so not an estimate at all:
+
+| | pre-trim | measured now |
+| --- | --- | --- |
+| input tokens / round | 26,038 | **11,727** |
+| per round | $0.020–0.038 | **$0.0141** |
+| rounds / turn | 2.57 | 1.77 |
+| **per turn** | $0.065 | **$0.0250** |
+
+`$0.3252 over 13 turns = $0.0250`, and the per-round mix reconciles it exactly:
+2,352 fresh input, 9,375 cached, 2,349 cache write, 141 output.
+
+**Cache writes are now the single largest line item**, 41% of a round -- which
+is why recording them was worth a migration. The 0.8x-of-fresh guess for them
+was nearly exact: 2,349 measured against 2,352 fresh, so 1:1.
+
+**`CREDIT_UUSD` was deliberately NOT re-pegged.** A credit is what someone was
+promised; cutting it to 25,000 to track the cost reduction would have taken the
+saving back off them -- the weekly budget would have fallen from $1.40 to $0.50.
+Instead a second constant carries the measurement:
+
+- `CREDIT_UUSD = 70_000` — the promise. Changes only on purpose.
+- `EDIT_UUSD = 36_000` — what a turn bills. Moves when the product does.
+
+Collapsing the two would mean every efficiency gain silently shrank the
+allowance. `EDIT_UUSD` is 36,000 rather than the measured 25,000 because 1.77
+rounds a turn is a small, light sample against the earlier 2.57; at 2.57 the
+same per-round mix gives $0.0364. Quoting the heavier figure keeps the published
+"about N" true when turns get complex, and under-promising an allowance costs
+nothing.
+
+**So the published equivalence, at unchanged budgets:**
+
+| tier | weekly budget | published |
+| --- | --- | --- |
+| no account | — | **8 edits**, counted |
+| signed in | 20 credits = $1.40 | **~40 edits** (was "about 20") |
+| open to matching | 100 credits = $7.00 | **~195 edits** (was "about 100") |
+
+The old figures came from `approx_edits = credits`, which was only ever equal by
+accident of the original peg and understated by ~3x once the trim landed.
+
+**The guest tier doubled from 4 turns to 8** on the same day. Four was sized
+when a turn was thought to cost $0.07; at $0.025 eight turns bill about $0.13 a
+week. `turns_per_hour` matches `turns` so the weekly allowance can be spent in
+one sitting, which is what someone trying the product does — for a guest the
+weekly count is the guard and the hourly one does nothing by design. What bounds
+cookie-reset farming is still the guest pool ceiling, not this number.
+
+One honest consequence: at 8 edits the claim that a guest cannot finish
+polishing a page no longer reliably holds — a short resume may just make it. The
+public copy now says they will get a good way through and that a long or fussy
+resume will outlast the allowance, which is what is actually true.
+
 ### Read this first: these numbers predate the history fix
 
 **Every cost figure below was measured before `4db08d1` landed on `main`**, and
