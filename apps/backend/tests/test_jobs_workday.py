@@ -193,3 +193,77 @@ def test_a_pass_does_not_deactivate_the_postings_it_skipped(db_session):
     rows = db_session.query(Job).filter(Job.source == "workday").all()
     assert len(rows) == 2
     assert all(r.is_active for r in rows), "a skipped posting was deactivated"
+
+
+# Intel's real shape: promoted postings carry the words "Spotlight Job" in
+# bulletFields instead of a requisition id, and the same requisition can be
+# listed twice under slightly different paths.
+INTEL_LISTING = {
+    "total": 4,
+    "jobPostings": [
+        # Intel's real shape: the label comes first, the requisition id second.
+        {"title": "Senior Software Development Engineer", "externalPath": "/job/US-AZ-Phoenix/SWE_JR0287775",
+         "locationsText": "US, Arizona, Phoenix", "bulletFields": ["Spotlight Job", "JR0287775"]},
+        # And the degenerate case with no id at all, which must fall back to the path.
+        {"title": "Yield Product Development Engineer", "externalPath": "/job/US-OR-Hillsboro/Yield_JR0288027",
+         "locationsText": "US, Oregon, Hillsboro", "bulletFields": ["Spotlight Job"]},
+        {"title": "Defect Metrology Engineer", "externalPath": "/job/Ireland-Leixlip/DefMet_JR0284843",
+         "locationsText": "Ireland, Leixlip", "bulletFields": ["JR0284843"]},
+        {"title": "Defect Metrology Engineer", "externalPath": "/job/Ireland-Leixlip/DefMet_JR0284843-1",
+         "locationsText": "Ireland, Leixlip", "bulletFields": ["JR0284843"]},
+    ],
+}
+
+INTEL = WorkdayBoard(
+    host="intel.wd1.myworkdayjobs.com", tenant="intel", site="External", company="Intel"
+)
+
+
+def _intel_client() -> httpx.Client:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/jobs") and request.method == "POST":
+            return httpx.Response(200, json=INTEL_LISTING)
+        return httpx.Response(200, json={
+            "jobPostingInfo": {
+                "title": "T", "jobDescription": "<p>d</p>",
+                "externalUrl": f"https://intel.wd1.myworkdayjobs.com{request.url.path}",
+                "location": "US", "startDate": "2026-10-21",
+            }
+        })
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def test_a_bulletfield_that_is_not_a_requisition_id_is_rejected():
+    """The bug that failed the first production run.
+
+    Intel labels promoted postings "Spotlight Job" in bulletFields -- 21 of its
+    first 100 -- so trusting that field collapsed them all onto one source_id
+    and violated the unique constraint mid-pass.
+    """
+    result = fetch_workday(_intel_client(), INTEL)
+    assert result is not None
+    ids = [j.source_id for j in result.new]
+    assert len(ids) == len(set(ids)), f"duplicate source_id: {ids}"
+    assert not any("Spotlight" in i for i in ids)
+    # The first finds its real requisition id further down bulletFields; the
+    # second has none at all and falls back to its (distinct) path.
+    assert f"{INTEL.slug}:JR0287775" in ids
+    assert any(i.startswith(f"{INTEL.slug}:/job/") and "JR0288027" in i for i in ids)
+
+
+def test_the_same_requisition_listed_twice_is_only_taken_once():
+    """upsert_jobs adds per row, so a repeat inside one batch would violate the
+    unique constraint before a second pass ever ran."""
+    result = fetch_workday(_intel_client(), INTEL)
+    assert result is not None
+    assert sum(1 for j in result.new if j.source_id.endswith("JR0284843")) == 1
+
+
+def test_an_intel_style_board_survives_a_real_upsert(db_session):
+    """End to end against the payload that actually broke: it must now persist."""
+    first = ingest_workday_board(db_session, _intel_client(), INTEL)
+    assert first.status == "ok", first.error
+    rows = db_session.query(Job).filter(Job.source == "workday").all()
+    assert len(rows) == 3  # 4 listed, two of which are one requisition
+    assert len({r.source_id for r in rows}) == 3
