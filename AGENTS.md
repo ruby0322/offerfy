@@ -121,9 +121,13 @@ chunk filename does not mean matching content.
   additionally binds to `visualViewport` so the keyboard cannot cover the composer.
 - **There is no frontend test runner wired up**, but a few pure modules do have
   `*.test.ts` beside them (`lib/seo.test.ts`, `lib/blog/*`). Run them by hand:
-  `./node_modules/.bin/tsx --test lib/seo.test.ts`. Otherwise `npm run lint` and
-  `npm run build:public` are the only automated gates, so verify UI changes by
-  actually running the app. A stub serving
+  `./node_modules/.bin/tsx --test lib/seo.test.ts`.
+- **`npm run build:public` is the real gate** — it typechecks. **`npm run lint` is not
+  usable as one**: bare `eslint` with no path walks generated and vendored files and
+  reports ~121k problems (9k of them errors) on a clean tree, so a real error in your
+  change is invisible in the noise and the exit code is meaningless. Lint the files you
+  touched instead: `./node_modules/.bin/eslint path/to/file.tsx`. Beyond that, verify UI
+  changes by actually running the app. A stub serving
   `/v1/resumes/<id>`, `/preview`, `/ats` and `/messages` is enough to drive the editor
   without the real backend; point `next dev` at it with `BACKEND_INTERNAL_URL`.
 
