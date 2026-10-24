@@ -40,7 +40,7 @@ todos:
     status: pending
   - id: t9-admin
     content: "Task 9: Cost and ceilings on the admin dashboard"
-    status: pending
+    status: completed
   - id: t10-tests
     content: "Task 10: Tests — cost arithmetic, attribution holes, tier transitions, overrun, refusal shape"
     status: in_progress
@@ -801,7 +801,7 @@ should not ship much later.
 
 ---
 
-## Task 9: Cost and ceilings on the admin dashboard
+## Task 9: Cost and ceilings on the admin dashboard — DONE 2026-10-24
 
 - [ ] Add cost to the existing `AdminDayPoint` series: `llm_cost_uusd`, and the
       same split by `purpose`. The token sums and the cache hit rate are already
@@ -821,8 +821,37 @@ should not ship much later.
       inventory test cannot see.
 - [ ] **Refusal rate by tier** (Task 14). The number the tier sizes should be
       tuned from.
-- [ ] **Grant a quota entitlement** (Task 13), `reason` required, and list the
-      live grants.
+- [ ] ~~Grant a quota entitlement~~ — Task 13 is in the backlog, so the page
+      leaves room for it rather than stubbing it.
+
+**Done 2026-10-24.** 557 backend tests pass (1 pre-existing environmental
+failure); `tsc` and `eslint` clean apart from main's own `admin-ingest.test.ts`
+error; the endpoints and the Next `/api` rewrite exercised against a seeded
+database.
+
+`GET /v1/admin/usage` plus a `/admin/usage` page: spend against both ceilings,
+top spenders, the split by tier and by purpose, refusals by tier and limit, and
+the counter-vs-telemetry reconciliation. Everything read off `usage_counters`
+and priced through `services.usage.round_cost_uusd`, so no figure on the page
+can disagree with the one someone was limited by.
+
+**Per-user tracking, which was the explicit ask**, in two places: the user list
+grows tier / credits / edits for the window plus an `order=usage` that puts the
+biggest spenders first, and the detail page shows this week against their tier
+alongside an all-time total. The ordering is an **OUTER** join — a user who
+spent nothing has no counter row, and an inner join would have made "sort by
+usage" quietly also mean "hide everyone who was idle". There is a test for
+exactly that.
+
+**A real bug, found by running the page against seeded data rather than by any
+test.** `price_uusd` truncates integer micro-USD at the end, so pricing a
+per-model SQL aggregate truncated once where the meter truncated once per
+round — up to one µUSD per round. Invisible in a cost report and fatal in a
+reconciliation: **every correctly metered subject showed up as a gap.**
+`llm_call_cost` now sums per row, the same way the counter accumulated, with a
+regression test. A reconciliation that cries wolf is worse than none, and this
+is the second time this work has been saved by actually running the thing
+rather than trusting a green suite.
 
 ---
 
