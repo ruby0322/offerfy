@@ -94,6 +94,11 @@ def fetch_workday(
 
     new: list[NormalizedJob] = []
     still_live: set[str] = set()
+    # Workday can list the same requisition more than once (two locations, or a
+    # "-1" variant of the same path). upsert_jobs adds per row, so a repeat
+    # inside one batch violates the unique constraint before it ever reaches a
+    # second pass.
+    batch_ids: set[str] = set()
     for raw in summaries:
         title = str(raw.get("title") or "").strip()
         path = str(raw.get("externalPath") or "").strip()
@@ -103,6 +108,9 @@ def fetch_workday(
         if not title_in_scope(title, rules):
             continue
         source_id = f"{board.slug}:{_req_id(raw) or path}"
+        if source_id in batch_ids:
+            continue
+        batch_ids.add(source_id)
         if source_id in known:
             still_live.add(source_id)
             continue
@@ -153,14 +161,25 @@ def _postings(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _req_id(raw: dict[str, Any]) -> str | None:
-    """Workday puts the requisition id in bulletFields. Preferred over the path,
-    which contains the title and therefore changes if the title is edited."""
+    """The requisition id from bulletFields, if there is actually one in there.
+
+    Preferred over externalPath, which embeds the title and so changes whenever
+    the title is edited. But bulletFields is a list of display labels, not an id
+    field. Intel prefixes promoted postings with the literal "Spotlight Job" --
+    `['Spotlight Job', 'JR0287775']` -- so taking element 0 collapsed 21 of its
+    first 100 postings onto one source_id and failed the first production run on
+    the unique constraint.
+
+    So scan for the first entry that actually looks like an id: no whitespace,
+    at least one digit. That finds the requisition number wherever it sits.
+    """
     bullets = raw.get("bulletFields")
-    if isinstance(bullets, list):
-        for item in bullets:
-            text = str(item or "").strip()
-            if text:
-                return text
+    if not isinstance(bullets, list):
+        return None
+    for item in bullets:
+        text = str(item or "").strip()
+        if text and not any(c.isspace() for c in text) and any(c.isdigit() for c in text):
+            return text
     return None
 
 
