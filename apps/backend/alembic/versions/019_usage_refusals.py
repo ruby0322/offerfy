@@ -12,8 +12,8 @@ See models.UsageRefusal for what is deliberately not recorded.
 from alembic import op
 import sqlalchemy as sa
 
-revision = "016_usage_refusals"
-down_revision = "015_usage_counters"
+revision = "019_usage_refusals"
+down_revision = "018_usage_counters"
 branch_labels = None
 depends_on = None
 

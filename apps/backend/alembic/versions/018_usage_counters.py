@@ -13,8 +13,8 @@ See models.UsageCounter for why there is no foreign key and no surrogate id.
 from alembic import op
 import sqlalchemy as sa
 
-revision = "015_usage_counters"
-down_revision = "014_llm_call_owner"
+revision = "018_usage_counters"
+down_revision = "017_llm_call_owner"
 branch_labels = None
 depends_on = None
 

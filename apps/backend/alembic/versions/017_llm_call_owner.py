@@ -17,8 +17,8 @@ was invisible.
 from alembic import op
 import sqlalchemy as sa
 
-revision = "014_llm_call_owner"
-down_revision = "013_talent_disclosure"
+revision = "017_llm_call_owner"
+down_revision = "016_workday_source"
 branch_labels = None
 depends_on = None
 
