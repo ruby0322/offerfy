@@ -485,7 +485,7 @@
             "Model output can be wrong or incomplete. You must review any AI-edited resume before you use it.",
             "AI editing has a weekly allowance, which depends on whether you have an account and whether you have turned on “Open to matching”. Editing Typst by hand, the live preview, PDF export and ATS checks are not limited at any tier. The current figures are at offerfy.cc/usage, linked below.",
             "Turning on “Open to matching” comes with a larger weekly allowance as thanks. It is not required in order to use Offerfy: the signed-in allowance is intended to be sufficient on its own. You may turn matching off at any time, we will not reclaim allowance you have already used, and nothing you have created is affected.",
-            "There is also an hourly cap to prevent one account from spending the service's budget at once, and a cap on what Offerfy as a whole spends on AI each week. If the latter is reached, AI editing pauses for everyone until the week resets; everything else keeps working."
+            "There is also a cap on what Offerfy as a whole spends on AI each week. If it is reached, AI editing pauses for everyone until the week resets; everything else keeps working."
           ]
         },
         {
@@ -847,9 +847,9 @@
         ]
       },
       {
-        "heading": "Abuse limits",
+        "heading": "The site-wide limit",
         "paragraphs": [
-          "Separately from the weekly allowance there is a cap on how many edits can run in a single hour. It exists to stop one account or one script from spending the whole budget in a few minutes, and ordinary use does not come near it.",
+          "Your weekly allowance is yours to spend however fast you like — there is no hourly limit, so a long focused session is fine.",
           "We also cap what the whole site can spend on AI in a week. If we ever reach it, AI editing pauses for everyone until the week turns over — and everything on the free list above keeps working. We would rather pause one feature honestly than quietly bill you for it."
         ]
       }
@@ -870,7 +870,6 @@
     "allowanceCredits": "About {edits} AI edits a week",
     "canPublish": "Publish a resume at a shareable link",
     "cannotPublish": "Publishing needs an account",
-    "burst": "Up to {count} AI edits in an hour",
     "everythingElse": "Everything on the list below, unlimited",
     "how_guest": "Just open the editor.",
     "how_registered": "Sign in with Google. One click, no form.",

@@ -138,13 +138,19 @@ class Tier:
     credits: int | None
     # Weekly ceiling on chat turns. None means this tier is not count-capped.
     turns: int | None
-    # Burst guards, all tiers. A weekly budget does not stop 100 credits
-    # leaving in ten minutes, which is the cost-spike risk; these do. One per
-    # billable purpose, so "too much" stops having a separate definition per
-    # router -- routers/talent_me.py carried its own REFRESH_LIMIT_PER_HOUR
-    # before this field existed.
-    turns_per_hour: int
-    # Only a matching-tier person can have a talent profile at all:
+    # There is deliberately no hourly cap on chat. Removed 2026-10-25: the
+    # weekly budget is the real guard, and an hourly cap on top of it only
+    # decided *when* someone could spend an allowance that was already theirs.
+    # For a guest it had become a no-op anyway once turns_per_hour was raised to
+    # match turns, and for an account it mostly punished a long focused session
+    # -- which is the session worth having. The instance is still bounded by the
+    # global and guest-pool ceilings, which is where a cost spike actually has
+    # to be caught.
+    #
+    # The profile cap below is NOT that limit: it predates this work as
+    # routers/talent_me.REFRESH_LIMIT_PER_HOUR, guards a different endpoint, and
+    # was only moved here. Only a matching-tier person can have a talent
+    # profile at all:
     # services.profile.build_profile refuses without a live
     # talent_introduction grant, and withdrawing deletes the profile. So the
     # guest and registered values are unreachable by construction, and 0 says
@@ -162,25 +168,21 @@ TIERS: dict[str, Tier] = {
     # small. What bounds cookie-reset farming is the guest pool ceiling, not
     # this number.
     #
-    # turns_per_hour matches turns deliberately: with a lower hourly cap the
-    # weekly allowance could not be spent in one sitting, which is exactly what
-    # a trial user does. For a guest the weekly count is the guard; the hourly
-    # one does nothing, by design.
+    # The weekly count is the only thing guarding a guest now, which is what it
+    # had effectively become anyway.
     GUEST: Tier(
-        GUEST, credits=None, turns=8, turns_per_hour=8, profile_builds_per_hour=0
+        GUEST, credits=None, turns=8, profile_builds_per_hour=0
     ),
     # Has to cover the whole advertised job on its own -- finish polishing one
     # page, or tailor for one role. That is a legal constraint as much as a
     # product one: the matching bonus below is only lawfully a thank-you if the
     # service is genuinely usable without it. See the spec.
     REGISTERED: Tier(
-        REGISTERED, credits=20, turns=None, turns_per_hour=15,
-        profile_builds_per_hour=0,
+        REGISTERED, credits=20, turns=None, profile_builds_per_hour=0,
     ),
     # 5/hour is what routers/talent_me.py enforced before this moved here.
     MATCHING: Tier(
-        MATCHING, credits=100, turns=None, turns_per_hour=15,
-        profile_builds_per_hour=5,
+        MATCHING, credits=100, turns=None, profile_builds_per_hour=5,
     ),
 }
 
@@ -371,13 +373,15 @@ def _apply_subject(
 def _row_count(
     db: Session, *, since: datetime, purpose: str = "chat", **filters
 ) -> int:
-    """Chat turns started since `since`. **The hourly burst guard only.**
+    """Rows of one purpose started since `since`. **Hourly limits only.**
 
-    The weekly count lives in usage_counters, which a durable budget needs. A
-    per-week counter cannot answer "turns in the last hour" though, and burst
-    is an abuse guard rather than an allowance -- so it keeps counting rows,
-    where best-effort is the right durability and one indexed COUNT is the
-    right cost. Do not try to unify the two.
+    The weekly figures live in usage_counters, which a durable budget needs. A
+    per-week counter cannot answer "how many in the last hour" though, and an
+    hourly limit is an abuse guard rather than an allowance -- so it keeps
+    counting rows, where best-effort is the right durability and one indexed
+    COUNT is the right cost. Do not try to unify the two.
+
+    Only the profile-build limit uses this now; chat has no hourly cap.
 
     `purpose='chat' AND round_index=0` is exactly one row per turn: `purpose`
     starts at 'chat' in the router and the compile-repair loop flips it to
@@ -693,9 +697,9 @@ def _refusal(
     return HTTPException(status_code=429, detail=payload)
 
 
-# Per-purpose burst limit and the noun a refusal uses for it.
+# Per-purpose hourly limit and the noun a refusal uses for it. A purpose absent
+# from here has no hourly limit at all, which is the case for 'chat'.
 _BURST = {
-    "chat": (lambda tier: tier.turns_per_hour, "AI edits"),
     "profile": (lambda tier: tier.profile_builds_per_hour, "profile rebuilds"),
 }
 
@@ -749,20 +753,25 @@ def enforce_usage(
             **refuse,
         )
 
-    limit_of, noun = _BURST.get(purpose, _BURST["chat"])
-    burst_limit = limit_of(tier)
-    burst_since = (now or datetime.now(timezone.utc)) - BURST_WINDOW
-    burst = _row_count(
-        db, since=burst_since, purpose=purpose, user=user, guest=guest
-    )
-    if burst >= burst_limit:
-        raise _refusal(
-            "burst",
-            bal,
-            detail=f"More than {burst_limit} {noun} in an hour",
-            retry_after_seconds=int(BURST_WINDOW.total_seconds()),
-            **refuse,
+    # Only for purposes that have one. Chat does not -- see the comment on
+    # Tier -- so a chat turn goes straight from the weekly check to the
+    # ceilings.
+    hourly = _BURST.get(purpose)
+    if hourly is not None:
+        limit_of, noun = hourly
+        burst_limit = limit_of(tier)
+        burst_since = (now or datetime.now(timezone.utc)) - BURST_WINDOW
+        burst = _row_count(
+            db, since=burst_since, purpose=purpose, user=user, guest=guest
         )
+        if burst >= burst_limit:
+            raise _refusal(
+                "burst",
+                bal,
+                detail=f"More than {burst_limit} {noun} in an hour",
+                retry_after_seconds=int(BURST_WINDOW.total_seconds()),
+                **refuse,
+            )
 
     settings = get_settings()
     global_ceiling = _ceiling_uusd(settings.global_weekly_ceiling_uusd)

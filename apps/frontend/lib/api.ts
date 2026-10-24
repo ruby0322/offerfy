@@ -431,7 +431,6 @@ export type Usage = {
   turn_limit: number | null;
   turns_used: number;
   turns_remaining: number | null;
-  turns_per_hour: number;
   /** The number people actually read, from their own trailing cost per turn. */
   approx_edits_left: number | null;
   exhausted: boolean;
@@ -451,6 +450,7 @@ export type UsageRefusal = {
   next_tier: { name: UsageTier; credits: number | null; turns: number | null } | null;
   /** Set when the guest pool ceiling fired: convert, do not just refuse. */
   sign_in_required?: boolean;
+  /** Only the profile-build limit is hourly now; chat has no hourly cap. */
   retry_after_seconds?: number;
 };
 

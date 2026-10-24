@@ -17,7 +17,6 @@ export type UsageTierRow = {
   name: "guest" | "registered" | "matching";
   credits: number | null;
   turns: number | null;
-  turns_per_hour: number;
   approx_edits: number;
   can_publish: boolean;
 };

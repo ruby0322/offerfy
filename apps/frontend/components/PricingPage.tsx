@@ -66,7 +66,6 @@ export default async function PricingPage() {
                   <p className="pricing-card-allowance">{allowance(row)}</p>
                   <ul className="pricing-card-list">
                     <li>{row.can_publish ? t("canPublish") : t("cannotPublish")}</li>
-                    <li>{t("burst", { count: row.turns_per_hour })}</li>
                     <li>{t("everythingElse")}</li>
                   </ul>
                   <p className="pricing-card-how">{t(howKey(row.name))}</p>

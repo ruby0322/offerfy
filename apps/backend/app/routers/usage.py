@@ -51,7 +51,6 @@ def read_usage(
         turn_limit=bal.turn_limit,
         turns_used=bal.turns_used,
         turns_remaining=bal.turns_remaining,
-        turns_per_hour=tier.turns_per_hour,
         approx_edits_left=approx_edits_left(db, user, guest, bal),
         exhausted=bal.exhausted,
         unmeasured_rounds=bal.unmeasured_rounds,
@@ -94,7 +93,6 @@ def read_tiers():
                 name=name,
                 credits=tier.credits,
                 turns=tier.turns,
-                turns_per_hour=tier.turns_per_hour,
                 approx_edits=approx,
                 # Already true before any of this existed: POST
                 # /v1/resumes/{id}/publish and PUT /v1/resumes/{id}/share both

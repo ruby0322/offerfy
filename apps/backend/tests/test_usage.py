@@ -451,20 +451,57 @@ def test_the_window_reset_clears_the_debt(client: TestClient, db_session, enforc
     assert not bal.exhausted
 
 
-def test_the_burst_cap_applies_to_signed_in_people_too(
+def test_a_long_session_is_not_refused_for_being_fast(
     client: TestClient, db_session, enforced
 ):
-    """A weekly budget does not stop it all leaving in ten minutes."""
-    user = _signed_in(client, db_session)
-    tier = usage.TIERS[usage.REGISTERED]
-    # Cheap turns, so the weekly cost ceiling is nowhere near reached.
-    _spend(db_session, user=user, turns=tier.turns_per_hour, input_tokens=10)
-    assert usage.balance(db_session, user, None).remaining_uusd > 0
+    """There is no hourly cap on chat. Removed 2026-10-25.
 
+    An hourly cap on top of a weekly budget only decided *when* someone could
+    spend an allowance that was already theirs, and what it mostly caught was a
+    long focused session -- the session worth having. The weekly budget is the
+    guard; the instance is bounded by the ceilings.
+    """
+    user = _signed_in(client, db_session)
+    # Far more turns in the last hour than any previous hourly cap allowed,
+    # kept cheap so the weekly budget is nowhere near spent.
+    _spend(db_session, user=user, turns=60, input_tokens=10)
+    assert usage.balance(db_session, user, None).remaining_uusd > 0
+    # Must not raise.
+    bal = usage.enforce_usage(db_session, user, None)
+    assert not bal.exhausted
+    assert _refusals(db_session) == []
+
+
+def test_the_profile_build_limit_is_still_hourly(
+    client: TestClient, db_session, enforced
+):
+    """The one hourly limit that stays, because it is not the one that was
+    removed: it predates this work as REFRESH_LIMIT_PER_HOUR and guards a
+    different endpoint."""
+    user = _signed_in(client, db_session, sub="sub-profile-hourly")
+    record_consent(
+        db_session,
+        user=user,
+        purpose="talent_introduction",
+        action="granted",
+        locale="en",
+        source="settings",
+    )
+    db_session.commit()
+    tier = usage.TIERS[usage.MATCHING]
+    assert tier.profile_builds_per_hour > 0
+    _spend(
+        db_session,
+        user=user,
+        turns=tier.profile_builds_per_hour,
+        purpose="profile",
+        input_tokens=10,
+    )
     with pytest.raises(Exception) as caught:
-        usage.enforce_usage(db_session, user, None)
+        usage.enforce_usage(db_session, user, None, purpose="profile")
     assert caught.value.detail["limit"] == "burst"
-    assert caught.value.detail["retry_after_seconds"] == 3600
+    # And chat is unaffected by having spent the profile allowance.
+    usage.enforce_usage(db_session, user, None, purpose="chat")
 
 
 def test_the_guest_pool_ceiling_converts_rather_than_refusing(
@@ -680,7 +717,6 @@ def test_published_tiers_equal_the_enforced_ones(client: TestClient):
         tier = usage.TIERS[row["name"]]
         assert row["credits"] == tier.credits
         assert row["turns"] == tier.turns
-        assert row["turns_per_hour"] == tier.turns_per_hour
         # Exactly one side of a tier is capped.
         assert (row["credits"] is None) != (row["turns"] is None)
     assert body["reset_at"] == usage.window_end().isoformat()
@@ -753,18 +789,14 @@ def test_the_guest_wall_and_the_burst_cap_are_distinguishable(
     with pytest.raises(Exception):
         usage.enforce_usage(db_session, None, guest)
 
-    user = _signed_in(client, db_session, sub="sub-burst")
-    _spend(
-        db_session,
-        user=user,
-        turns=usage.TIERS[usage.REGISTERED].turns_per_hour,
-        input_tokens=10,
-    )
+    user = _signed_in(client, db_session, sub="sub-credits")
+    tier = usage.TIERS[usage.REGISTERED]
+    _spend(db_session, user=user, turns=1, input_tokens=tier.credits * usage.CREDIT_UUSD)
     with pytest.raises(Exception):
         usage.enforce_usage(db_session, user, None)
 
     kinds = {(r.subject_kind, r.limit_kind) for r in _refusals(db_session)}
-    assert kinds == {("guest", "weekly_turns"), ("user", "burst")}
+    assert kinds == {("guest", "weekly_turns"), ("user", "weekly_credits")}
 
 
 def test_a_refusal_row_survives_the_rejected_request(
@@ -872,18 +904,12 @@ def test_published_edits_come_from_the_measured_cost_not_the_credit(
 def test_a_guest_gets_eight_edits_and_can_spend_them_in_one_sitting(
     client: TestClient, db_session, enforced
 ):
-    """Doubled from 4 on 2026-10-25.
-
-    turns_per_hour matches turns on purpose: a lower hourly cap would stop the
-    weekly allowance being spent in one sitting, which is exactly what someone
-    trying the product does.
-    """
+    """Doubled from 4 on 2026-10-25, with no hourly cap to bind first."""
     guest = GuestSession(key_hash="w" * 64)
     db_session.add(guest)
     db_session.commit()
     tier = usage.TIERS[usage.GUEST]
     assert tier.turns == 8
-    assert tier.turns_per_hour >= tier.turns, "the hourly cap would bind first"
 
     _spend(db_session, guest=guest, turns=tier.turns, input_tokens=10)
     with pytest.raises(Exception) as caught:

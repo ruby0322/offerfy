@@ -415,11 +415,25 @@ that starts; carry the overrun as debt into the same window.** A turn that ends
 until the window resets. Nothing is clawed back and nothing is hidden — the meter
 shows the overrun, because it happened.
 
-**The hourly burst cap is a separate, simpler limit, and it applies to every
-tier.** A weekly budget does not stop 100 credits going out in ten minutes, which
-is the cost-spike and thundering-herd risk. This is the existing `RateEvent`
-mechanism, with the guest-only condition removed and `chat` raised. It stays a
-count, because it is an abuse guard and not an allowance.
+~~**The hourly burst cap is a separate, simpler limit, and it applies to every
+tier.**~~ **Removed 2026-10-25, for chat.** The argument for it was the
+cost-spike risk -- a weekly budget does not stop 100 credits going out in ten
+minutes. What it actually did was decide *when* someone could spend an
+allowance that was already theirs, and the case it caught in practice was a long
+focused session, which is the session worth having. The total was never at risk:
+the weekly budget bounds the person and the global and guest-pool ceilings bound
+the instance, which is where a spike has to be caught anyway.
+
+For a guest it had already become a no-op when `turns_per_hour` was raised to
+match `turns` so the week could be spent in one sitting -- at which point the
+honest move was to drop it rather than keep a field that did nothing.
+
+**The profile-build limit stays hourly**, and is not the limit that was removed:
+it predates this work as `routers/talent_me.REFRESH_LIMIT_PER_HOUR`, guards a
+different endpoint, and was only moved onto `Tier`. `_BURST` is now keyed by
+purpose with no `chat` entry, so a purpose absent from it has no hourly limit at
+all; `'burst'` stays permitted in `usage_refusals`' check constraint because
+that limit still produces one.
 
 **Refusals carry structure, not just a 429.** Today the client gets
 `detail: "Too many requests"` and nothing to act on. The refusal needs to say

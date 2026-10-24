@@ -178,7 +178,6 @@ class UsageOut(BaseModel):
     turn_limit: int | None
     turns_used: int
     turns_remaining: int | None
-    turns_per_hour: int
     approx_edits_left: int | None
     exhausted: bool
     # Rounds the provider reported no usage for, charged at a fallback. Shown
@@ -194,7 +193,6 @@ class UsageTierOut(BaseModel):
     # a guest on a count of AI edits, an account on cost. See the design spec.
     credits: int | None
     turns: int | None
-    turns_per_hour: int
     # Derived here so the page does not have to know the credit peg.
     approx_edits: int
     can_publish: bool

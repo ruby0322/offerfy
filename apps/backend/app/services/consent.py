@@ -18,7 +18,7 @@ from app.models import CONSENT_ACTIONS, CONSENT_PURPOSES, ConsentEvent, GuestSes
 # The version of the policy a person is agreeing to. Must equal LEGAL_UPDATED
 # in apps/frontend/components/legal/LegalDocument.tsx -- the policy text and
 # its version belong together, and tests/test_consent.py fails on drift.
-POLICY_VERSION = "2026-10-24"
+POLICY_VERSION = "2026-10-25"
 
 # Purposes a signed-in person can turn on and off for themselves. 'service' is
 # not here: withdrawing it means closing the account, which is the job of
