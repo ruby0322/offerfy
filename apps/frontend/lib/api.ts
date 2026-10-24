@@ -548,6 +548,75 @@ export async function putConsent(
   });
 }
 
+export type TalentRole = {
+  employer?: string | null;
+  title?: string | null;
+  start?: string | null;
+  end?: string | null;
+  highlights?: string[];
+};
+
+export type TalentEducation = {
+  institution?: string | null;
+  credential?: string | null;
+  field?: string | null;
+  end?: string | null;
+};
+
+/** Never carries contact details: there is no field for one, by design. */
+export type TalentProfilePayload = {
+  schema_version?: number;
+  display_name?: string | null;
+  headline?: string | null;
+  summary?: string | null;
+  years_experience?: number | null;
+  locations?: string[];
+  languages?: string[];
+  skills?: string[];
+  roles?: TalentRole[];
+  education?: TalentEducation[];
+};
+
+export type TalentProfileStatus = {
+  consent_granted: boolean;
+  source_resume_id?: string | null;
+  source_resume_title?: string | null;
+  has_published_revision?: boolean;
+  profile?: TalentProfilePayload | null;
+  stale?: boolean;
+  built_at?: string | null;
+  disclosure_count?: number;
+  last_disclosed_at?: string | null;
+};
+
+export type TalentProfileDetail = {
+  profile_id: string;
+  updated_at: string;
+  profile: TalentProfilePayload;
+};
+
+export async function getTalentProfile(): Promise<TalentProfileStatus> {
+  return apiJson("/api/v1/me/talent-profile");
+}
+
+/** null clears the choice, which also drops any profile built from it. */
+export async function putTalentProfileSource(
+  resumeId: string | null,
+): Promise<TalentProfileStatus> {
+  return apiJson("/api/v1/me/talent-profile/source", {
+    method: "PUT",
+    body: JSON.stringify({ resume_id: resumeId }),
+  });
+}
+
+export async function refreshTalentProfile(): Promise<TalentProfileDetail> {
+  return apiJson("/api/v1/me/talent-profile/refresh", { method: "POST" });
+}
+
+export async function deleteTalentProfile(): Promise<void> {
+  await apiFetch("/api/v1/me/talent-profile", { method: "DELETE" });
+}
+
 export async function claimResumes(): Promise<void> {
   try {
     await apiJson("/api/v1/auth/claim", { method: "POST" });
