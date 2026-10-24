@@ -210,3 +210,65 @@ def test_google_next_editor_traversal_rejected(client: TestClient, monkeypatch):
     )
     assert cb.status_code == 302
     assert cb.headers["location"] == "/dashboard"
+
+
+def _fake_google(payload: dict):
+    """An httpx.Client stand-in returning one chosen userinfo payload."""
+
+    class _Client(_FakeHttpx):
+        def get(self, url, headers=None):
+            return _FakeResp(200, payload)
+
+    return _Client
+
+
+def _sign_in_with(client: TestClient, monkeypatch, payload: dict):
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "test-secret")
+    get_settings.cache_clear()
+    monkeypatch.setattr("app.routers.auth.httpx.Client", _fake_google(payload))
+    response = client.get(
+        "/v1/auth/google/callback", params={"code": "abc"}, follow_redirects=False
+    )
+    assert response.status_code == 302
+
+
+def test_google_name_is_persisted_on_signup(client: TestClient, db_session, monkeypatch):
+    _sign_in_with(
+        client,
+        monkeypatch,
+        {"sub": "g-name", "email": "name@example.com", "name": "Chen Wei"},
+    )
+    user = db_session.query(User).filter(User.google_sub == "g-name").one()
+    assert user.name == "Chen Wei"
+
+
+def test_google_name_is_refreshed_on_later_login(
+    client: TestClient, db_session, monkeypatch
+):
+    _sign_in_with(
+        client,
+        monkeypatch,
+        {"sub": "g-name", "email": "name@example.com", "name": "Chen Wei"},
+    )
+    _sign_in_with(
+        client,
+        monkeypatch,
+        {"sub": "g-name", "email": "name@example.com", "name": "Wei Chen"},
+    )
+    user = db_session.query(User).filter(User.google_sub == "g-name").one()
+    assert user.name == "Wei Chen"
+
+
+def test_absent_google_name_does_not_blank_a_known_name(
+    client: TestClient, db_session, monkeypatch
+):
+    """Google can omit `name`. Blanking it would hand an employer a nameless profile."""
+    _sign_in_with(
+        client,
+        monkeypatch,
+        {"sub": "g-name", "email": "name@example.com", "name": "Chen Wei"},
+    )
+    _sign_in_with(client, monkeypatch, {"sub": "g-name", "email": "name@example.com"})
+    user = db_session.query(User).filter(User.google_sub == "g-name").one()
+    assert user.name == "Chen Wei"

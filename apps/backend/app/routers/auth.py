@@ -141,9 +141,12 @@ def google_callback(request: Request, code: str | None = None, db: Session = Dep
         raise HTTPException(status_code=400, detail="Google sign-in failed")
 
     picture = _google_picture(info)
+    name = (info.get("name") or "").strip() or None
     user = db.query(User).filter(User.google_sub == sub).one_or_none()
     if user is None:
-        user = User(google_sub=sub, email=email, locale="zh-TW", picture=picture)
+        user = User(
+            google_sub=sub, email=email, locale="zh-TW", picture=picture, name=name
+        )
         db.add(user)
         db.flush()
         # The login page showed legal.loginAgree before this redirect, so the
@@ -163,6 +166,11 @@ def google_callback(request: Request, code: str | None = None, db: Session = Dep
         # Their data is not covered by a purpose they were never shown.
         user.email = email
         user.picture = picture
+        # Assigned only when Google sent one, unlike email and picture: it can
+        # omit `name`, and blanking a known name on one odd login would hand
+        # an employer a nameless profile.
+        if name:
+            user.name = name
 
     next_path = _safe_next(request.query_params.get("state"))
     redirect = RedirectResponse(next_path or "/dashboard", status_code=302)

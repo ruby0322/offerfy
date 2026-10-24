@@ -23,11 +23,34 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     locale: Mapped[str] = mapped_column(String(16), nullable=False, default="zh-TW")
     picture: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # Google hands us a name under the scope we already request. Stored because
+    # a name inferred from Typst by regex or by a model is a guess, and a wrong
+    # name on a profile an employer reads is worse than no name at all.
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Which resume feeds this person's talent profile. Required because kind
+    # defaults to 'master' for every resume, so "the master resume" is not a
+    # thing a user has one of. It lives here rather than on TalentProfile so
+    # the choice survives a withdrawal, which deletes the profile.
+    #
+    # use_alter is mandatory: resumes.user_id already points back at this
+    # table, and create_all cannot otherwise order the two.
+    profile_resume_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey(
+            "resumes.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_users_profile_resume_id",
+        ),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
 
-    resumes: Mapped[list["Resume"]] = relationship(back_populates="user")
+    resumes: Mapped[list["Resume"]] = relationship(
+        back_populates="user", foreign_keys="Resume.user_id"
+    )
 
 
 class GuestSession(Base):
@@ -119,7 +142,12 @@ class Resume(Base):
     target_context: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     guest_session: Mapped[GuestSession | None] = relationship(back_populates="resumes")
-    user: Mapped[User | None] = relationship(back_populates="resumes")
+    # foreign_keys is explicit on both sides: users.profile_resume_id is a
+    # second path between these two tables, so the owner join is ambiguous
+    # without it.
+    user: Mapped[User | None] = relationship(
+        back_populates="resumes", foreign_keys="Resume.user_id"
+    )
     messages: Mapped[list["ChatMessage"]] = relationship(
         back_populates="resume", cascade="all, delete-orphan"
     )
@@ -309,7 +337,7 @@ class JobIngestRun(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")
 
 
-LLM_CALL_PURPOSES = ("chat", "repair", "vision")
+LLM_CALL_PURPOSES = ("chat", "repair", "vision", "profile")
 
 
 class LlmCall(Base):
@@ -325,7 +353,8 @@ class LlmCall(Base):
     __tablename__ = "llm_calls"
     __table_args__ = (
         CheckConstraint(
-            "purpose IN ('chat', 'repair', 'vision')", name="llm_call_purpose_values"
+            "purpose IN ('chat', 'repair', 'vision', 'profile')",
+            name="llm_call_purpose_values",
         ),
     )
 
@@ -417,3 +446,89 @@ class ConsentEvent(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow, index=True
     )
+
+
+TALENT_PROFILE_SCHEMA_VERSION = 1
+
+
+class TalentProfile(Base):
+    """The structured profile we may hand to an employer, for one person.
+
+    Keyed on the user, not on a resume: consent_events' subject is a user, so
+    a withdrawal is one row against one profile rather than a fan-out over
+    however many documents they happen to own. The resume only says where the
+    content came from.
+
+    Derived state, not a ledger. Unlike ConsentEvent and DisclosureEvent this
+    row is updated in place and deleted outright -- on withdrawal, when the
+    source resume goes, or when the person points somewhere else. The audit
+    trail lives in those two append-only tables; this is a cache of a document
+    we were told we may show.
+
+    It holds no contact details by construction. There is no column for one,
+    the payload schema has no field for one, and services.profile.scrub_contacts
+    strips them from the text fields anyway. A reader who has this still cannot
+    reach the person except through Offerfy.
+    """
+
+    __tablename__ = "talent_profiles"
+    __table_args__ = (
+        CheckConstraint(
+            "years_experience IS NULL OR (years_experience >= 0 AND years_experience <= 60)",
+            name="talent_profile_years_range",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # CASCADE, not SET NULL as the ledgers use: this is a copy of personal
+    # data, not evidence that it was collected, so erasing the account must
+    # erase it.
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+    # Which resume, and which revision of it, this was built from. CASCADE
+    # because a profile with no source resume is unsourced -- deleting the
+    # resume is one more automatic kill switch.
+    source_resume_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False
+    )
+    source_revision_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    # Hash of everything that fed the build: the revision, its source, and the
+    # accepted memory items. Staleness is computed by comparing this and the
+    # revision pointer, so the publish path needs no code to invalidate
+    # anything.
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    schema_version: Mapped[int] = mapped_column(
+        nullable=False, default=TALENT_PROFILE_SCHEMA_VERSION, server_default="1"
+    )
+    # Text, not JSON: disclosure_events.profile_content_hash is the evidence
+    # that a recipient holds this exact payload, so the bytes have to be stable
+    # across a write-read round trip. Postgres JSONB normalises key order and
+    # numeric form and would break that. Nothing queries inside the blob --
+    # the columns below exist for that. Same idiom as ResumeRevision.
+    profile_json: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    # Denormalised for the list endpoint, never a second source of truth:
+    # services.profile rebuilds every one of these from profile_json on write.
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    headline: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    years_experience: Mapped[int | None] = mapped_column(nullable=True)
+    # Lowercased free text for the q filter, same plain-LIKE approach the jobs
+    # router already uses.
+    search_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Pipe-delimited and lowercased, '|python|go|', so LIKE '%|java|%' cannot
+    # match 'javascript'.
+    skills_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    built_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, index=True
+    )
+    model: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+
+    user: Mapped[User] = relationship(foreign_keys=[user_id])
