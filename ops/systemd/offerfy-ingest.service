@@ -10,6 +10,10 @@ Documentation=file:///home/ruby0322/offerfy/docs/deploy.md
 # when nothing was refreshed means a run that lands before Postgres is up just
 # fails and the next slot picks it up.
 
+# Fires the moment a pass exits non-zero, so a stalled catalog lands in
+# `journalctl --user -p err` instead of waiting to be noticed.
+OnFailure=offerfy-ingest-failure.service
+
 [Service]
 Type=oneshot
 WorkingDirectory=/home/ruby0322/offerfy/apps/backend

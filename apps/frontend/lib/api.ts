@@ -781,6 +781,42 @@ function adminQuery(params: Record<string, string | number | undefined>): string
   return text ? `?${text}` : "";
 }
 
+export type AdminIngestBoardFailure = {
+  source: string;
+  board_slug: string | null;
+  error_snippet: string | null;
+};
+
+export type AdminIngestPass = {
+  run_id: string;
+  started_at: string;
+  finished_at: string | null;
+  duration_seconds: number | null;
+  sources_ok: number;
+  sources_failed: number;
+  upserted: number;
+  expired: number;
+  status: "ok" | "degraded" | "failed";
+  failing_boards: AdminIngestBoardFailure[];
+};
+
+export type AdminIngestHealth = {
+  freshest_last_seen_at: string | null;
+  catalog_age_hours: number | null;
+  fresh_job_count: number;
+  stale_job_count: number;
+  freshness_days: number;
+  expected_interval_hours: number;
+  overdue: boolean;
+  last_failure_at: string | null;
+};
+
+export type AdminIngestOverview = {
+  health: AdminIngestHealth;
+  passes: AdminIngestPass[];
+  legacy_row_count: number;
+};
+
 export async function adminOverview(): Promise<AdminOverview> {
   return apiJson<AdminOverview>("/api/v1/admin/overview");
 }
@@ -824,4 +860,8 @@ export async function adminResumePreview(id: string): Promise<{ pages: string[] 
 
 export async function adminResumeAts(id: string): Promise<AtsReport> {
   return apiJson(`/api/v1/admin/resumes/${id}/ats`);
+}
+
+export async function adminJobsIngest(): Promise<AdminIngestOverview> {
+  return apiJson<AdminIngestOverview>("/api/v1/admin/jobs/ingest");
 }

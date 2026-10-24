@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, func, nulls_last, or_
@@ -12,29 +12,21 @@ from app.db import get_db
 from app.models import Job
 from app.schemas_jobs import JOB_SOURCES, JobDetail, JobList, JobListItem, JobSitemapItem, JobSitemapPage
 from app.services.jobs.spotlight import select_featured
+from app.services.jobs.store import freshness_cutoff
 
 router = APIRouter()
 
 LIST_MAX = 100
 SITEMAP_PAGE_SIZE = 1000
 
-# How long after we last confirmed a posting exists we are still willing to
-# advertise it to crawlers. Keep in step with JOB_FRESHNESS_DAYS in
-# apps/frontend/lib/seo.ts, which derives JobPosting.validThrough from the same
-# window. A row older than this is noindex on the frontend, so listing it here
-# would only hand Google a sitemap full of URLs it has been told to drop.
-JOB_FRESHNESS_DAYS = 30
-
-
 def _sitemap_conditions():
     """Rows eligible for the jobs sitemap.
 
-    is_active alone is not enough: it only flips when an ingest run sees the
-    posting gone, so a stalled ingest keeps every row active forever. Both the
-    count and the page query use this so they cannot drift apart.
+    A row past the freshness window is noindex on the frontend, so listing it
+    here would only hand Google a sitemap full of URLs it has been told to
+    drop. Both the count and the page query use this so they cannot drift.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=JOB_FRESHNESS_DAYS)
-    return (Job.is_active.is_(True), Job.last_seen_at >= cutoff)
+    return (Job.is_active.is_(True), Job.last_seen_at >= freshness_cutoff())
 
 
 def _iso(dt: datetime | None) -> str | None:

@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from app.models import Job
-from app.routers.jobs import JOB_FRESHNESS_DAYS
+from app.services.jobs.store import JOB_FRESHNESS_DAYS
 
 
 def _add_job(db_session, **kwargs) -> Job:

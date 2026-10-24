@@ -323,10 +323,14 @@ class JobIngestRun(Base):
     __tablename__ = "job_ingest_runs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # One id shared by every row of a single ingest pass. Nullable because rows
+    # written before migration 014 predate the concept; the admin ingest view
+    # skips those rather than inventing a pass for them.
+    run_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     board_slug: Mapped[str | None] = mapped_column(String(255), nullable=True)
     started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
+        DateTime(timezone=True), nullable=False, default=_utcnow, index=True
     )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ok_count: Mapped[int] = mapped_column(nullable=False, default=0)

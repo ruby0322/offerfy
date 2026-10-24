@@ -20,6 +20,7 @@ export default function AdminShell({ email, children }: Props) {
     { href: "/admin", label: t("overview"), exact: true },
     { href: "/admin/users", label: t("users"), exact: false },
     { href: "/admin/resumes", label: t("resumes"), exact: false },
+    { href: "/admin/jobs", label: t("jobs"), exact: false },
   ] as const;
 
   return (

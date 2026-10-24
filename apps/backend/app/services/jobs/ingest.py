@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -14,6 +15,15 @@ from app.services.jobs.store import expire_missing, record_run, upsert_jobs
 from app.services.jobs.spotlight import rescore_all
 from app.services.jobs.taiwanjobs import fetch_taiwanjobs
 from app.services.jobs.types import Board, NormalizedJob
+
+
+def refreshed_nothing(*, sources_ok: int, upserted: int) -> bool:
+    """Whether a pass left the catalog ageing towards expiry.
+
+    The single rule behind both the CLI's exit code and the admin view's
+    "failed" verdict, so the unit and the dashboard can never disagree.
+    """
+    return sources_ok == 0 or upserted == 0
 
 
 @dataclass(frozen=True)
@@ -36,6 +46,7 @@ class CatalogResult:
     """
 
     sources: tuple[SourceResult, ...]
+    run_id: str
 
     @property
     def ok(self) -> tuple[SourceResult, ...]:
@@ -51,16 +62,19 @@ class CatalogResult:
 
     @property
     def refreshed_nothing(self) -> bool:
-        return not self.ok or self.upserted == 0
+        return refreshed_nothing(sources_ok=len(self.ok), upserted=self.upserted)
 
 
-def ingest_board(db: Session, client: httpx.Client, board: Board) -> SourceResult:
+def ingest_board(
+    db: Session, client: httpx.Client, board: Board, *, run_id: str | None = None
+) -> SourceResult:
     started = datetime.now(timezone.utc)
     try:
         fetched = _fetch(client, board)
     except Exception as exc:
         record_run(
             db,
+            run_id=run_id,
             source=board.source,
             board_slug=board.slug,
             started_at=started,
@@ -73,6 +87,7 @@ def ingest_board(db: Session, client: httpx.Client, board: Board) -> SourceResul
     if fetched is None:
         record_run(
             db,
+            run_id=run_id,
             source=board.source,
             board_slug=board.slug,
             started_at=started,
@@ -91,6 +106,7 @@ def ingest_board(db: Session, client: httpx.Client, board: Board) -> SourceResul
     )
     record_run(
         db,
+        run_id=run_id,
         source=board.source,
         board_slug=board.slug,
         started_at=started,
@@ -103,13 +119,16 @@ def ingest_board(db: Session, client: httpx.Client, board: Board) -> SourceResul
     return SourceResult(board.source, board.slug, "ok", upserted=upserted)
 
 
-def ingest_taiwanjobs(db: Session, client: httpx.Client) -> SourceResult:
+def ingest_taiwanjobs(
+    db: Session, client: httpx.Client, *, run_id: str | None = None
+) -> SourceResult:
     started = datetime.now(timezone.utc)
     try:
         fetched = fetch_taiwanjobs(client)
     except Exception as exc:
         record_run(
             db,
+            run_id=run_id,
             source="taiwanjobs",
             board_slug=None,
             started_at=started,
@@ -129,6 +148,7 @@ def ingest_taiwanjobs(db: Session, client: httpx.Client) -> SourceResult:
         )
     record_run(
         db,
+        run_id=run_id,
         source="taiwanjobs",
         board_slug=None,
         started_at=started,
@@ -144,13 +164,17 @@ def ingest_taiwanjobs(db: Session, client: httpx.Client) -> SourceResult:
 def ingest_catalog(
     db: Session, client: httpx.Client, *, include_taiwanjobs: bool = True
 ) -> CatalogResult:
+    # One id for the whole pass, so ~119 per-board rows can be read back as a
+    # single thing. Minted here because this is the only place that knows where
+    # a pass begins and ends.
+    run_id = str(uuid.uuid4())
     results: list[SourceResult] = []
     for board in load_boards():
-        results.append(ingest_board(db, client, board))
+        results.append(ingest_board(db, client, board, run_id=run_id))
     if include_taiwanjobs:
-        results.append(ingest_taiwanjobs(db, client))
+        results.append(ingest_taiwanjobs(db, client, run_id=run_id))
     rescore_all(db)
-    return CatalogResult(tuple(results))
+    return CatalogResult(tuple(results), run_id=run_id)
 
 
 def _fetch(client: httpx.Client, board: Board) -> list[NormalizedJob] | None:
