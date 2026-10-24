@@ -4,14 +4,14 @@ from pathlib import Path
 
 import httpx
 
-from app.models import Job
+from app.models import Job, JobIngestRun
 from app.services.jobs.ashby import parse_ashby
 from app.services.jobs.boards import load_boards
 from app.services.jobs.greenhouse import parse_greenhouse
 from app.services.jobs.ingest import CatalogResult, SourceResult, ingest_board
 from app.services.jobs.lever import parse_lever
 from app.services.jobs.sanitize import sanitize_html
-from app.services.jobs.store import expire_missing, upsert_jobs
+from app.services.jobs.store import expire_missing, record_run, upsert_jobs
 from app.services.jobs.taiwanjobs import parse_taiwanjobs
 from app.services.jobs.types import Board, NormalizedJob
 
@@ -218,21 +218,57 @@ def test_catalog_result_flags_a_pass_that_refreshed_nothing():
         (
             SourceResult("greenhouse", "stripe", "error", error="boom"),
             SourceResult("taiwanjobs", None, "error", error="boom"),
-        )
+        ),
+        run_id="pass-1",
     )
     assert all_failed.refreshed_nothing is True
     assert len(all_failed.failed) == 2
 
-    ok_but_empty = CatalogResult((SourceResult("greenhouse", "stripe", "ok", upserted=0),))
+    ok_but_empty = CatalogResult(
+        (SourceResult("greenhouse", "stripe", "ok", upserted=0),), run_id="pass-2"
+    )
     assert ok_but_empty.refreshed_nothing is True
 
     partial = CatalogResult(
         (
             SourceResult("greenhouse", "stripe", "ok", upserted=12),
             SourceResult("taiwanjobs", None, "error", error="boom"),
-        )
+        ),
+        run_id="pass-3",
     )
     # One dead board must not fail the whole run: the catalog did get refreshed.
     assert partial.refreshed_nothing is False
     assert partial.upserted == 12
     assert len(partial.failed) == 1
+
+
+def test_ingest_board_stamps_the_pass_run_id(db_session):
+    """Every row of a pass must carry the same run_id, or it cannot be folded up."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"error": "not found"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    ingest_board(db_session, client, Board("greenhouse", "stripe", "Stripe"), run_id="pass-a")
+    ingest_board(db_session, client, Board("lever", "acme", "Acme"), run_id="pass-a")
+    ingest_board(db_session, client, Board("greenhouse", "other", "Other"), run_id="pass-b")
+
+    rows = db_session.query(JobIngestRun).all()
+    by_run: dict[str | None, int] = {}
+    for row in rows:
+        by_run[row.run_id] = by_run.get(row.run_id, 0) + 1
+    assert by_run == {"pass-a": 2, "pass-b": 1}
+
+
+def test_record_run_without_a_run_id_is_still_allowed(db_session):
+    """Rows written before migration 012 have no run_id; that must not break."""
+    record_run(
+        db_session,
+        source="greenhouse",
+        board_slug="stripe",
+        started_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
+        status="ok",
+    )
+    db_session.commit()
+    row = db_session.query(JobIngestRun).one()
+    assert row.run_id is None

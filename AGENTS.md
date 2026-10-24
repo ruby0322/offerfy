@@ -149,11 +149,12 @@ needs none. It needs lingering, which is already enabled:
 loginctl show-user ruby0322 --property=Linger   # must be Linger=yes
 ```
 
-Install or refresh it after editing `ops/systemd/offerfy-ingest.*`:
+Install or refresh it after editing `ops/systemd/offerfy-ingest*`. Note the glob —
+there are **three** files now, including the `OnFailure=` handler:
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp /home/ruby0322/offerfy/ops/systemd/offerfy-ingest.{service,timer} ~/.config/systemd/user/
+cp /home/ruby0322/offerfy/ops/systemd/offerfy-ingest*.{service,timer} ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now offerfy-ingest.timer
 ```
@@ -174,11 +175,35 @@ journalctl --user -u offerfy-ingest.service -n 40 --no-pager
    failed unit instead of as a slow SEO death.
 2. **Staleness is derived from `last_seen_at`, not from `is_active`.** `is_active` only
    flips when an ingest run sees a posting disappear, so a dead ingest leaves every row
-   active forever. `JOB_FRESHNESS_DAYS` (30) lives in both
-   `apps/frontend/lib/seo.ts` and `apps/backend/app/routers/jobs.py` and **must stay in
-   step**: the frontend noindexes and drops JSON-LD past the window, the backend drops
-   those rows from the jobs sitemap. A dead ingest now degrades to honest noindex.
+   active forever. `JOB_FRESHNESS_DAYS` (30) lives in exactly two places and **must stay
+   in step**: `apps/backend/app/services/jobs/store.py` (with `freshness_cutoff()`, which
+   both the jobs sitemap and the admin health block use) and `apps/frontend/lib/seo.ts`
+   (which derives `validThrough` and noindexes past the window). A dead ingest now
+   degrades to honest noindex. Do not add a third copy — import it.
 
-**Still missing:** nothing pages anyone when the unit fails, and there is no analytics or
-Search Console on the site at all, so "is Google crawling us" is still unanswerable.
-`systemctl --user list-timers` and the `job_ingest_runs` table are the only signals.
+The rule for "did this pass accomplish anything" is likewise single-sourced:
+`refreshed_nothing()` in `apps/backend/app/services/jobs/ingest.py` backs both the CLI
+exit code and the admin view's `failed` verdict, so the dashboard and the unit can never
+disagree.
+
+## 9. Monitoring the ingest
+
+Three signals, most useful first:
+
+1. **`/admin/jobs`** (behind `ADMIN_EMAILS`, robots-disallowed) — freshness verdict,
+   indexable vs noindexed page counts, recent passes, and the boards that failed in the
+   last bad pass. Backed by `GET /v1/admin/jobs/ingest`.
+2. **`journalctl --user -p err`** — the `OnFailure=` handler
+   (`offerfy-ingest-failure.service`) tags one `err`-priority line, so this catches a
+   failed pass whichever unit it came from.
+3. **`systemctl --user list-timers offerfy-ingest.timer`** — did it fire, when is next.
+
+`job_ingest_runs` holds one row **per board**, ~119 per pass. `run_id` (migration 012)
+groups them; rows written before that migration have `run_id IS NULL` and are reported as
+`legacy_row_count` rather than folded into a fake pass.
+
+**Known blind spot.** `OnFailure=` only fires when a pass ran and failed. A timer that
+silently stopped, or a host that went down, produces no event at all — that is caught only
+by the `overdue` flag on the admin page, which needs someone to look. Closing it properly
+needs an off-host dead-man's-switch. Also note there is still **no analytics and no Search
+Console** on the site, so "is Google crawling the job pages" remains unanswerable here.

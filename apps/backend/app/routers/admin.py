@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, text
+from sqlalchemy import case, func, text
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import get_settings
@@ -10,6 +10,7 @@ from app.deps import load_resume_for_admin, require_admin
 from app.models import (
     ChatMessage,
     GuestSession,
+    Job,
     JobIngestRun,
     LlmCall,
     RateEvent,
@@ -34,13 +35,32 @@ from app.schemas_admin import (
     AdminUserListItem,
     AdminUserResume,
 )
-from app.schemas_jobs import AdminIngestRun, AdminIngestRunList
+from app.schemas_jobs import (
+    AdminIngestBoardFailure,
+    AdminIngestHealth,
+    AdminIngestOverview,
+    AdminIngestPass,
+    AdminIngestRun,
+    AdminIngestRunList,
+)
 from app.services.ats import analyze_pdf
+from app.services.jobs.ingest import refreshed_nothing
+from app.services.jobs.store import JOB_FRESHNESS_DAYS, freshness_cutoff
 from app.services.typst_compile import compile_typst, compile_typst_pages
 
 router = APIRouter()
 
 SERIES_DAYS = 14
+INGEST_PASS_LIMIT = 20
+# The cadence ops/systemd/offerfy-ingest.timer actually runs at. Kept here so
+# the dashboard can say "overdue" rather than only "old".
+INGEST_EXPECTED_INTERVAL_HOURS = 6
+# One missed slot, with room for the timer's 10-minute jitter. Deliberately
+# tight: this went unnoticed for 54 days once.
+INGEST_OVERDUE_HOURS = 7
+# A pass writes one row per board; ~119 today, so this holds a whole pass with
+# headroom. The old endpoint capped at 20 and could not show even one.
+INGEST_BOARD_LIMIT = 500
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -82,10 +102,20 @@ def _count(db: Session, model, *filters) -> int:
     return int(q.scalar() or 0)
 
 
-def _utc_day(dt: datetime) -> str:
+def _utc(dt: datetime | None) -> datetime | None:
+    """Normalise to aware UTC. SQLite hands back naive datetimes in tests, and
+    subtracting one of those from an aware now() raises."""
+    if dt is None:
+        return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).date().isoformat()
+    return dt.astimezone(timezone.utc)
+
+
+def _utc_day(dt: datetime) -> str:
+    normalised = _utc(dt)
+    assert normalised is not None
+    return normalised.date().isoformat()
 
 
 def _day_points(db: Session, now: datetime) -> list[AdminDayPoint]:
@@ -454,32 +484,145 @@ def admin_resume_ats(
     return analyze_pdf(pdf, resume.typst_source)
 
 
-@router.get("/v1/admin/jobs/ingest", response_model=AdminIngestRunList)
+def _ingest_row(row: JobIngestRun) -> AdminIngestRun:
+    return AdminIngestRun(
+        id=row.id,
+        source=row.source,
+        board_slug=row.board_slug,
+        started_at=_iso(row.started_at) or "",
+        finished_at=_iso(row.finished_at),
+        status=row.status,
+        ok_count=row.ok_count,
+        error_count=row.error_count,
+        upserted_count=row.upserted_count,
+        expired_count=row.expired_count,
+        error_snippet=row.error_snippet,
+    )
+
+
+def _ingest_passes(db: Session, limit: int) -> list[AdminIngestPass]:
+    """Fold the per-board rows of each pass into one row.
+
+    Grouped in SQL rather than bucketed in Python: this table gains ~119 rows
+    per pass, roughly 480 a day, so streaming it all into a dict would not age
+    well. Rows with no run_id predate migration 012 and have no pass to belong
+    to; they are counted separately instead of guessed at.
+    """
+    groups = (
+        db.query(
+            JobIngestRun.run_id.label("run_id"),
+            func.min(JobIngestRun.started_at).label("started_at"),
+            func.max(JobIngestRun.finished_at).label("finished_at"),
+            func.sum(case((JobIngestRun.status == "ok", 1), else_=0)).label("sources_ok"),
+            func.sum(case((JobIngestRun.status != "ok", 1), else_=0)).label("sources_failed"),
+            func.sum(JobIngestRun.upserted_count).label("upserted"),
+            func.sum(JobIngestRun.expired_count).label("expired"),
+        )
+        .filter(JobIngestRun.run_id.isnot(None))
+        .group_by(JobIngestRun.run_id)
+        .order_by(func.min(JobIngestRun.started_at).desc())
+        .limit(limit)
+        .all()
+    )
+    if not groups:
+        return []
+
+    run_ids = [group.run_id for group in groups]
+    failures: dict[str, list[AdminIngestBoardFailure]] = {run_id: [] for run_id in run_ids}
+    failing_rows = (
+        db.query(JobIngestRun)
+        .filter(JobIngestRun.run_id.in_(run_ids), JobIngestRun.status != "ok")
+        .order_by(JobIngestRun.source, JobIngestRun.board_slug)
+        .all()
+    )
+    for row in failing_rows:
+        failures[row.run_id].append(
+            AdminIngestBoardFailure(
+                source=row.source,
+                board_slug=row.board_slug,
+                error_snippet=row.error_snippet,
+            )
+        )
+
+    passes: list[AdminIngestPass] = []
+    for group in groups:
+        sources_ok = int(group.sources_ok or 0)
+        sources_failed = int(group.sources_failed or 0)
+        upserted = int(group.upserted or 0)
+        started = _utc(group.started_at)
+        finished = _utc(group.finished_at)
+        duration = (finished - started).total_seconds() if started and finished else None
+        if refreshed_nothing(sources_ok=sources_ok, upserted=upserted):
+            status = "failed"
+        elif sources_failed:
+            status = "degraded"
+        else:
+            status = "ok"
+        passes.append(
+            AdminIngestPass(
+                run_id=group.run_id,
+                started_at=_iso(started) or "",
+                finished_at=_iso(finished),
+                duration_seconds=duration,
+                sources_ok=sources_ok,
+                sources_failed=sources_failed,
+                upserted=upserted,
+                expired=int(group.expired or 0),
+                status=status,
+                failing_boards=failures[group.run_id],
+            )
+        )
+    return passes
+
+
+def _ingest_health(db: Session, now: datetime, passes: list[AdminIngestPass]) -> AdminIngestHealth:
+    cutoff = freshness_cutoff(now)
+    freshest = _utc(
+        db.query(func.max(Job.last_seen_at)).filter(Job.is_active.is_(True)).scalar()
+    )
+    age_hours = (now - freshest).total_seconds() / 3600 if freshest else None
+    fresh_count = _count(db, Job, Job.is_active.is_(True), Job.last_seen_at >= cutoff)
+    stale_count = _count(db, Job, Job.is_active.is_(True), Job.last_seen_at < cutoff)
+    last_failure = next((item.started_at for item in passes if item.status != "ok"), None)
+    return AdminIngestHealth(
+        freshest_last_seen_at=_iso(freshest),
+        catalog_age_hours=age_hours,
+        fresh_job_count=fresh_count,
+        stale_job_count=stale_count,
+        freshness_days=JOB_FRESHNESS_DAYS,
+        expected_interval_hours=INGEST_EXPECTED_INTERVAL_HOURS,
+        # No catalog at all counts as overdue: there is nothing to serve.
+        overdue=age_hours is None or age_hours > INGEST_OVERDUE_HOURS,
+        last_failure_at=last_failure,
+    )
+
+
+@router.get("/v1/admin/jobs/ingest", response_model=AdminIngestOverview)
 def admin_jobs_ingest(
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
 ):
+    passes = _ingest_passes(db, INGEST_PASS_LIMIT)
+    legacy = _count(db, JobIngestRun, JobIngestRun.run_id.is_(None))
+    return AdminIngestOverview(
+        health=_ingest_health(db, datetime.now(timezone.utc), passes),
+        passes=passes,
+        legacy_row_count=legacy,
+    )
+
+
+@router.get("/v1/admin/jobs/ingest/{run_id}", response_model=AdminIngestRunList)
+def admin_jobs_ingest_pass(
+    run_id: str,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Every per-board row of one pass, for drilling into a failure."""
     rows = (
         db.query(JobIngestRun)
-        .order_by(JobIngestRun.started_at.desc())
-        .limit(20)
+        .filter(JobIngestRun.run_id == run_id)
+        .order_by(JobIngestRun.started_at.asc())
+        .limit(INGEST_BOARD_LIMIT)
         .all()
     )
-    return AdminIngestRunList(
-        items=[
-            AdminIngestRun(
-                id=row.id,
-                source=row.source,
-                board_slug=row.board_slug,
-                started_at=_iso(row.started_at) or "",
-                finished_at=_iso(row.finished_at),
-                status=row.status,
-                ok_count=row.ok_count,
-                error_count=row.error_count,
-                upserted_count=row.upserted_count,
-                expired_count=row.expired_count,
-                error_snippet=row.error_snippet,
-            )
-            for row in rows
-        ]
-    )
+    return AdminIngestRunList(items=[_ingest_row(row) for row in rows], limit=INGEST_BOARD_LIMIT)
