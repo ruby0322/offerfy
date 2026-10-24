@@ -19,6 +19,7 @@ from app.schemas import (
     TalentProfileStatus,
 )
 from app.services.consent import has_consent
+from app.services.disclosure import disclosure_count, last_disclosed_at
 from app.services.profile import (
     build_profile,
     delete_profile_for_user,
@@ -90,6 +91,7 @@ def _status(db: Session, user: User) -> TalentProfileStatus:
         and resume.published_revision_id
         and published_source(db, resume)
     )
+    last = last_disclosed_at(db, user)
     return TalentProfileStatus(
         consent_granted=has_consent(db, user=user, purpose="talent_introduction"),
         source_resume_id=resume.id if resume else None,
@@ -98,9 +100,11 @@ def _status(db: Session, user: User) -> TalentProfileStatus:
         profile=payload_of(profile) if profile else None,
         stale=is_stale(db, user, profile) if profile else False,
         built_at=profile.built_at.isoformat() if profile else None,
-        # disclosure_count and last_disclosed_at keep their defaults until the
-        # ledger exists; nothing can have read this profile yet, because no
-        # external route does.
+        # Read from the ledger, not from the profile: a withdrawal deletes the
+        # profile and keeps the disclosures, and after re-granting the person
+        # still needs to see who already had the old one.
+        disclosure_count=disclosure_count(db, user),
+        last_disclosed_at=last.isoformat() if last else None,
     )
 
 

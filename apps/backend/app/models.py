@@ -532,3 +532,149 @@ class TalentProfile(Base):
     model: Mapped[str] = mapped_column(String(128), nullable=False, default="")
 
     user: Mapped[User] = relationship(foreign_keys=[user_id])
+
+
+class TalentApiKey(Base):
+    """A credential we issue to one named organisation, by hand.
+
+    Not self-serve, and no route anywhere mints one except the admin endpoint:
+    apps/frontend/lib/agent-markdown.ts tells every agent that reads it there
+    is no public agent API, no machine OAuth server and no self-serve API
+    keys, and all three of those statements have to stay true.
+
+    key_hash follows GuestSession.key_hash: unsalted SHA-256 of the raw token.
+    Correct here for the same reason it is there -- the secret is 256 bits from
+    secrets.token_urlsafe, not a guessable password, so stretching buys nothing
+    and lookup stays one indexed equality. Do not "fix" this to bcrypt; it
+    would break the lookup without making the token harder to guess.
+
+    revoked_at and last_used_at are mutable, unlike the ledgers below. This is
+    credential state, not a record of what happened.
+    """
+
+    __tablename__ = "talent_api_keys"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    # Who holds it, in words, so a disclosure row can name them to the person
+    # whose profile they read.
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    contact: Mapped[str] = mapped_column(String(320), nullable=False)
+    created_by: Mapped[str] = mapped_column(String(320), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+DISCLOSURE_PURPOSES = ("talent_introduction",)
+DISCLOSURE_SCOPES = ("summary", "full")
+
+
+class DisclosureEvent(Base):
+    """One person's profile, handed to one recipient, once.
+
+    Append-only, like ConsentEvent and for the same reason: this is the
+    evidence behind "we will require anyone who already has it to stop using
+    it". You cannot keep that promise without being able to list who they are.
+
+    A row is one disclosure of one data subject to one recipient -- not one
+    HTTP request. A list page returning twenty profiles writes up to twenty
+    rows, because the obligation is per (recipient, subject) and a per-request
+    row cannot answer the only question that matters at withdrawal time.
+
+    recipient_label and recipient_contact are copied in at write time rather
+    than read through api_key_id, so the row still names a human to contact
+    after the key is revoked or deleted. Both subject columns are nullable and
+    ON DELETE SET NULL: an erased account, or a deleted key, leaves the record
+    standing. profile_content_hash pins which payload they hold, which is why
+    talent_profiles.profile_json is stored as stable bytes.
+
+    There is deliberately no mutable state column for whether the obligation
+    has been discharged. That is derived -- see
+    app.services.disclosure.pending_obligations -- and discharge is itself
+    recorded by appending a StopUseNotice.
+    """
+
+    __tablename__ = "disclosure_events"
+    __table_args__ = (
+        CheckConstraint(
+            "purpose IN ('talent_introduction')", name="disclosure_purpose_values"
+        ),
+        CheckConstraint(
+            "scope IN ('summary', 'full')", name="disclosure_scope_values"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    api_key_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("talent_api_keys.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    recipient_label: Mapped[str] = mapped_column(String(255), nullable=False)
+    recipient_contact: Mapped[str] = mapped_column(String(320), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False)
+    scope: Mapped[str] = mapped_column(String(16), nullable=False)
+    profile_content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Which endpoint handed it over, for reading the ledger back later.
+    route: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, index=True
+    )
+
+
+STOP_USE_CHANNELS = ("manual_email",)
+
+
+class StopUseNotice(Base):
+    """We told one recipient to stop using one person's profile.
+
+    Append-only, and the other half of the withdrawal promise. channel is
+    'manual_email' because that is the truth: there is no mailer in this
+    codebase, so an operator sends it and records that they did -- the same way
+    the privacy policy already handles access and deletion requests.
+
+    Deliberately not a flag on DisclosureEvent. A discharge is a thing that
+    happened at a time, by someone, and re-granting then withdrawing again
+    reopens the obligation rather than reusing the old answer.
+    """
+
+    __tablename__ = "stop_use_notices"
+    __table_args__ = (
+        CheckConstraint(
+            "channel IN ('manual_email')", name="stop_use_channel_values"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    api_key_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("talent_api_keys.id", ondelete="SET NULL"), nullable=True
+    )
+    recipient_contact: Mapped[str] = mapped_column(String(320), nullable=False)
+    # Which withdrawal this discharges, when we can still see it.
+    withdrawn_consent_event_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("consent_events.id", ondelete="SET NULL"), nullable=True
+    )
+    channel: Mapped[str] = mapped_column(String(32), nullable=False)
+    sent_by: Mapped[str] = mapped_column(String(320), nullable=False)
+    detail: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, index=True
+    )

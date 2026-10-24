@@ -136,3 +136,57 @@ class AdminChatMessage(BaseModel):
 
 class AdminChatMessageList(BaseModel):
     items: list[AdminChatMessage]
+
+
+class AdminTalentObligation(BaseModel):
+    """One recipient we still owe a stop-use notice for one withdrawal."""
+
+    user_id: str
+    user_email: str
+    withdrawn_at: str
+    consent_event_id: str
+    api_key_id: str | None = None
+    recipient_label: str
+    recipient_contact: str
+    first_disclosed_at: str
+    last_disclosed_at: str
+    disclosure_count: int
+
+
+class AdminTalentObligationList(BaseModel):
+    items: list[AdminTalentObligation]
+    total: int
+
+
+class AdminStopUseNoticeCreate(BaseModel):
+    recipient_contact: str
+    api_key_id: str | None = None
+    detail: str | None = None
+
+
+class AdminStopUseNotice(BaseModel):
+    id: str
+    user_id: str | None = None
+    recipient_contact: str
+    channel: str
+    sent_by: str
+    detail: str | None = None
+    created_at: str
+
+
+class AdminDisclosure(BaseModel):
+    id: str
+    user_id: str | None = None
+    api_key_id: str | None = None
+    recipient_label: str
+    recipient_contact: str
+    scope: str
+    profile_content_hash: str
+    policy_version: str
+    route: str
+    created_at: str
+
+
+class AdminDisclosureList(BaseModel):
+    items: list[AdminDisclosure]
+    total: int

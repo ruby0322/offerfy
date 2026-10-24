@@ -9,6 +9,7 @@ from app.db import get_db
 from app.deps import load_resume_for_admin, require_admin
 from app.models import (
     ChatMessage,
+    DisclosureEvent,
     GuestSession,
     JobIngestRun,
     LlmCall,
@@ -21,6 +22,8 @@ from app.schemas_admin import (
     AdminChatMessage,
     AdminChatMessageList,
     AdminCounts,
+    AdminDisclosure,
+    AdminDisclosureList,
     AdminDayPoint,
     AdminHealth,
     AdminOverview,
@@ -29,6 +32,10 @@ from app.schemas_admin import (
     AdminResumeDetail,
     AdminResumeList,
     AdminResumeListItem,
+    AdminStopUseNotice,
+    AdminStopUseNoticeCreate,
+    AdminTalentObligation,
+    AdminTalentObligationList,
     AdminUserDetail,
     AdminUserList,
     AdminUserListItem,
@@ -36,6 +43,7 @@ from app.schemas_admin import (
 )
 from app.schemas_jobs import AdminIngestRun, AdminIngestRunList
 from app.services.ats import analyze_pdf
+from app.services.disclosure import pending_obligations, record_stop_use_notice
 from app.services.typst_compile import compile_typst, compile_typst_pages
 
 router = APIRouter()
@@ -482,4 +490,134 @@ def admin_jobs_ingest(
             )
             for row in rows
         ]
+    )
+
+
+# --- talent introduction: the obligation side -------------------------------
+#
+# include_in_schema=False on every route below. create_app() serves
+# /openapi.json, /docs and /redoc, and the Next rewrite publishes them at
+# offerfy.cc/api/openapi.json -- so a route that appears there is a route on
+# the open web, whatever it requires to call. These describe who holds whose
+# resume data, and the key-minting ones describe how to get a credential.
+
+
+@router.get(
+    "/v1/admin/talent/obligations",
+    response_model=AdminTalentObligationList,
+    include_in_schema=False,
+)
+def admin_talent_obligations(
+    limit: int | None = None,
+    offset: int | None = None,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Everyone we still owe a stop-use notice, newest withdrawal first.
+
+    This is the operator's half of "we require anyone who already has it to
+    stop using it". There is no mailer in this codebase, so the queue exists
+    to be worked by hand and the discharge recorded.
+    """
+    lim, off = _page(limit, offset)
+    rows = pending_obligations(db)
+    page = rows[off : off + lim]
+    return AdminTalentObligationList(
+        items=[
+            AdminTalentObligation(
+                user_id=row["user_id"],
+                user_email=row["user_email"],
+                withdrawn_at=row["withdrawn_at"].isoformat(),
+                consent_event_id=row["consent_event_id"],
+                api_key_id=row["api_key_id"],
+                recipient_label=row["recipient_label"],
+                recipient_contact=row["recipient_contact"],
+                first_disclosed_at=row["first_disclosed_at"].isoformat(),
+                last_disclosed_at=row["last_disclosed_at"].isoformat(),
+                disclosure_count=row["disclosure_count"],
+            )
+            for row in page
+        ],
+        total=len(rows),
+    )
+
+
+@router.post(
+    "/v1/admin/talent/obligations/{user_id}/notices",
+    response_model=AdminStopUseNotice,
+    include_in_schema=False,
+)
+def admin_record_stop_use_notice(
+    user_id: str,
+    body: AdminStopUseNoticeCreate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Record that this recipient was told to stop. Appends, never updates."""
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    notice = record_stop_use_notice(
+        db,
+        user=user,
+        recipient_contact=body.recipient_contact,
+        sent_by=admin.email,
+        api_key_id=body.api_key_id,
+        detail=body.detail,
+    )
+    db.commit()
+    return AdminStopUseNotice(
+        id=notice.id,
+        user_id=notice.user_id,
+        recipient_contact=notice.recipient_contact,
+        channel=notice.channel,
+        sent_by=notice.sent_by,
+        detail=notice.detail,
+        created_at=notice.created_at.isoformat(),
+    )
+
+
+@router.get(
+    "/v1/admin/talent/disclosures",
+    response_model=AdminDisclosureList,
+    include_in_schema=False,
+)
+def admin_talent_disclosures(
+    user_id: str | None = None,
+    api_key_id: str | None = None,
+    limit: int | None = None,
+    offset: int | None = None,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    lim, off = _page(limit, offset)
+    query = db.query(DisclosureEvent)
+    if user_id:
+        query = query.filter(DisclosureEvent.user_id == user_id)
+    if api_key_id:
+        query = query.filter(DisclosureEvent.api_key_id == api_key_id)
+    total = query.count()
+    rows = (
+        query.order_by(DisclosureEvent.created_at.desc(), DisclosureEvent.id.desc())
+        .limit(lim)
+        .offset(off)
+        .all()
+    )
+    return AdminDisclosureList(
+        items=[
+            AdminDisclosure(
+                id=row.id,
+                user_id=row.user_id,
+                api_key_id=row.api_key_id,
+                recipient_label=row.recipient_label,
+                recipient_contact=row.recipient_contact,
+                scope=row.scope,
+                profile_content_hash=row.profile_content_hash,
+                policy_version=row.policy_version,
+                route=row.route,
+                created_at=row.created_at.isoformat(),
+            )
+            for row in rows
+        ],
+        total=total,
     )
