@@ -42,10 +42,16 @@ export default async function PricingPage() {
       <Nav variant="landing" />
       <JsonLd data={organizationJsonLd()} />
       <main>
-        <article className="legal-article">
-          <p className="pricing-kicker">{t("kicker")}</p>
-          <h1 className="font-display pricing-title">{t("title")}</h1>
-          <p className="pricing-lede">{t("lede")}</p>
+        {/* Same container as /jobs and /blog: mx-auto max-w-[72rem] px-5,
+            with .pricing-index carrying the vertical rhythm the way
+            .blog-index and .jobs-index do. The cards want that full width;
+            the prose does not, so it is wrapped. */}
+        <article className="pricing-index mx-auto max-w-[72rem] px-5">
+          <div className="pricing-prose">
+            <p className="pricing-kicker">{t("kicker")}</p>
+            <h1 className="font-display pricing-title">{t("title")}</h1>
+            <p className="pricing-lede">{t("lede")}</p>
+          </div>
 
           {tiers ? (
             <div className="pricing-grid">
@@ -70,29 +76,31 @@ export default async function PricingPage() {
           ) : (
             /* The numbers are the one thing on this page worth refusing to
                guess at, the same as on /usage. */
-            <p>{t("tiersUnavailable")}</p>
+            <p className="pricing-prose">{t("tiersUnavailable")}</p>
           )}
 
-          <section>
-            <h2 className="font-display">{t("includedHeading")}</h2>
-            <p>{t("includedIntro")}</p>
-            <ul className="usage-list">
-              {included.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </section>
-
-          {notes.map((note) => (
-            <section key={note.heading}>
-              <h2 className="font-display">{note.heading}</h2>
-              <p>{note.body}</p>
+          <div className="pricing-prose">
+            <section>
+              <h2 className="font-display">{t("includedHeading")}</h2>
+              <p>{t("includedIntro")}</p>
+              <ul className="usage-list">
+                {included.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
             </section>
-          ))}
 
-          <p className="legal-see-also">
-            <Link href="/usage">{t("seeUsage")}</Link>
-          </p>
+            {notes.map((note) => (
+              <section key={note.heading}>
+                <h2 className="font-display">{note.heading}</h2>
+                <p>{note.body}</p>
+              </section>
+            ))}
+
+            <p className="legal-see-also">
+              <Link href="/usage">{t("seeUsage")}</Link>
+            </p>
+          </div>
         </article>
       </main>
       <Footer variant="landing" />

@@ -697,6 +697,38 @@ textarea {
 
 /* --- pricing: the shape of a pricing page, with nothing to buy ----------- */
 
+/* The same container as .jobs-index and .blog-index -- both are
+   `mx-auto max-w-[72rem] px-5` with the vertical rhythm in the class. The card
+   grid wants all of that width; prose at 72rem would run ~1,150px lines, so
+   .pricing-prose keeps the text at a readable measure inside it. */
+.pricing-index {
+  padding-top: 4rem;
+  padding-bottom: 5rem;
+  color: var(--ink);
+}
+
+.pricing-index h1 {
+  font-size: 1.9rem;
+  line-height: 1.18;
+  letter-spacing: -0.03em;
+}
+
+.pricing-index h2 {
+  margin-top: 2.25rem;
+  font-size: 1.25rem;
+  letter-spacing: -0.02em;
+}
+
+.pricing-index section p,
+.pricing-index > .pricing-prose > p {
+  margin-top: 1rem;
+  line-height: 1.7;
+}
+
+.pricing-prose {
+  max-width: 44rem;
+}
+
 .pricing-kicker {
   margin: 0;
   font-size: 0.72rem;
@@ -708,10 +740,6 @@ textarea {
 
 .pricing-title {
   margin: 0.3rem 0 0;
-}
-
-.pricing-lede {
-  max-width: 44rem;
 }
 
 .pricing-grid {
@@ -726,6 +754,9 @@ textarea {
     grid-template-columns: repeat(3, 1fr);
   }
 }
+
+/* .pricing-lede sits inside .pricing-prose now, so it needs no width of its
+   own; keeping one would fight the wrapper. */
 
 .pricing-card {
   display: flex;
