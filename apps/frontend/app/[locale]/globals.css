@@ -695,6 +695,95 @@ textarea {
   color: var(--clay);
 }
 
+/* --- pricing: the shape of a pricing page, with nothing to buy ----------- */
+
+.pricing-kicker {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.pricing-title {
+  margin: 0.3rem 0 0;
+}
+
+.pricing-lede {
+  max-width: 44rem;
+}
+
+.pricing-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  margin: 1.6rem 0 2.2rem;
+}
+
+@media (min-width: 820px) {
+  .pricing-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.pricing-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--paper);
+  padding: 1.1rem 1.15rem 1.25rem;
+}
+
+.pricing-card-name {
+  margin: 0;
+  font-size: 1rem;
+}
+
+/* The figure a pricing page exists to show. Same on every card, which is the
+   whole argument of the page. */
+.pricing-price {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin: 0.1rem 0 0.2rem;
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.pricing-price-note {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+
+.pricing-card-allowance {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.pricing-card-list {
+  margin: 0.2rem 0 0;
+  padding-left: 1.1rem;
+  list-style: disc;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+}
+
+.pricing-card-how {
+  margin: auto 0 0;
+  padding-top: 0.7rem;
+  border-top: 1px solid color-mix(in srgb, var(--rule) 70%, transparent);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+}
+
 .usage-list {
   margin: 0.6rem 0 0;
   padding-left: 1.15rem;

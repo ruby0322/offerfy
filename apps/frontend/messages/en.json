@@ -13,7 +13,8 @@
     "logout": "Log out",
     "account": "Account",
     "blog": "Blog",
-    "jobs": "Jobs"
+    "jobs": "Jobs",
+    "pricing": "Pricing"
   },
   "footer": {
     "locales": "Language",
@@ -27,7 +28,8 @@
     "x": "X",
     "terms": "Terms",
     "privacy": "Privacy",
-    "usage": "Usage"
+    "usage": "Usage",
+    "pricing": "Pricing"
   },
   "notFound": {
     "title": "Not found",
@@ -852,5 +854,56 @@
         ]
       }
     ]
+  },
+  "pricing": {
+    "metaTitle": "Pricing — Offerfy",
+    "metaDescription": "Offerfy costs nothing. There is no paid plan, no card, and nothing to upgrade to.",
+    "kicker": "Pricing",
+    "title": "There is nothing to buy",
+    "lede": "This is the page where a product usually asks you for money. Offerfy does not. There is no paid plan, no card on file, no trial that ends, and no feature waiting behind a price. The three columns below are the only three there are, and all of them cost the same.",
+    "free": "$0",
+    "perMonth": "/month, and every month",
+    "tier_guest": "No account",
+    "tier_registered": "Signed in",
+    "tier_matching": "Open to matching",
+    "allowanceEdits": "{count} AI edits a week",
+    "allowanceCredits": "About {edits} AI edits a week",
+    "canPublish": "Publish a resume at a shareable link",
+    "cannotPublish": "Publishing needs an account",
+    "burst": "Up to {count} AI edits in an hour",
+    "everythingElse": "Everything on the list below, unlimited",
+    "how_guest": "Just open the editor.",
+    "how_registered": "Sign in with Google. One click, no form.",
+    "how_matching": "Turn on “Open to matching” in your settings. Off by default, and you can turn it back off whenever you like.",
+    "tiersUnavailable": "We could not load the current allowances. Rather than print a figure that might not be the one we actually enforce, we would rather show nothing — please reload.",
+    "includedHeading": "What every column includes, without a limit",
+    "includedIntro": "None of this is metered, counted, or reserved for a plan that does not exist:",
+    "includedItems": [
+      "Editing your resume's Typst source by hand, as much as you like.",
+      "The live preview, and recompiling as often as you want.",
+      "Exporting the PDF — no watermark, no export cap.",
+      "ATS parseability checks on the compiled PDF.",
+      "Browsing and searching the job catalog.",
+      "Keeping everything you have made, for as long as you have an account."
+    ],
+    "notes": [
+      {
+        "heading": "So why is there a limit on AI editing at all?",
+        "body": "Because that is the one part that costs us money every time you use it. Each AI edit is several calls to a language-model provider, and we pay for every one. A weekly allowance is what lets the answer on this page stay $0 instead of becoming a card form. The usage page explains exactly how it is counted."
+      },
+      {
+        "heading": "What we are not doing",
+        "body": "We are not collecting your card “for later”. We are not holding a feature back for a tier that does not exist. We are not watermarking your PDF, capping your exports, or deleting your work if you stop visiting. There is no annual discount, because there is nothing to discount."
+      },
+      {
+        "heading": "Will it always be free?",
+        "body": "We are not going to promise that, because we cannot keep a promise about a product this young — our Terms say the same thing in less friendly language. What we can say is what is true today: nothing here costs anything, we are not planning a paywall, and if that ever changes we will say so plainly and in advance rather than quietly adding a price to this page."
+      },
+      {
+        "heading": "Then what do you get out of it?",
+        "body": "If you turn on “Open to matching”, we may introduce you to employers, and that is the only thing we could ever be paid for. It is off by default, it is not required to use anything here, and the signed-in allowance is meant to be enough on its own. Turning it off costs you nothing you have already used."
+      }
+    ],
+    "seeUsage": "Read exactly how usage is counted"
   }
 }

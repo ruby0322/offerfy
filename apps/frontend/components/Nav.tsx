@@ -84,6 +84,9 @@ export default function Nav({ variant }: Props) {
               <Link href="/blog" className="inline-flex min-h-9 items-center rounded-md px-1 text-sm font-medium">
                 {t("blog")}
               </Link>
+              <Link href="/pricing" className="inline-flex min-h-9 items-center rounded-md px-1 text-sm font-medium">
+                {t("pricing")}
+              </Link>
             </>
           ) : null}
         </div>

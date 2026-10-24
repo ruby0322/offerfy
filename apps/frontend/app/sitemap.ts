@@ -17,7 +17,7 @@ function entry(
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const posts = listPosts();
-  const staticPaths = ["/", "/terms", "/privacy", "/usage", "/blog", "/jobs", "/about", "/contact"];
+  const staticPaths = ["/", "/terms", "/privacy", "/usage", "/pricing", "/blog", "/jobs", "/about", "/contact"];
   const items = staticPaths.map((href) => entry(href));
   for (const post of posts) {
     const lastModified = new Date(`${post.updatedAt ?? post.publishedAt}T00:00:00Z`);

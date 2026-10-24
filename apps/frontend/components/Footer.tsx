@@ -49,6 +49,9 @@ export default function Footer({ variant }: Props) {
           <Link href="/terms" className="inline-flex min-h-9 items-center text-sm font-medium">
             {t("terms")}
           </Link>
+          <Link href="/pricing" className="inline-flex min-h-9 items-center text-sm font-medium">
+            {t("pricing")}
+          </Link>
           <Link href="/usage" className="inline-flex min-h-9 items-center text-sm font-medium">
             {t("usage")}
           </Link>
