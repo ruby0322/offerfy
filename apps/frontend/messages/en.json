@@ -476,7 +476,9 @@
           "paragraphs": [
             "Chat is optional. You can edit Typst without ever opening chat.",
             "Model output can be wrong or incomplete. You must review any AI-edited resume before you use it.",
-            "Guest use is rate-limited to 10 chat turns and 20 PDF exports per hour."
+            "AI editing has a weekly allowance, which depends on whether you have an account and whether you have turned on “Open to matching”. Editing Typst by hand, the live preview, PDF export and ATS checks are not limited at any tier. The current figures are at offerfy.cc/usage, linked below.",
+            "Turning on “Open to matching” comes with a larger weekly allowance as thanks. It is not required in order to use Offerfy: the signed-in allowance is intended to be sufficient on its own. You may turn matching off at any time, we will not reclaim allowance you have already used, and nothing you have created is affected.",
+            "There is also an hourly cap to prevent one account from spending the service's budget at once, and a cap on what Offerfy as a whole spends on AI each week. If the latter is reached, AI editing pauses for everyone until the week resets; everything else keeps working."
           ]
         },
         {
@@ -533,7 +535,8 @@
             "Theme: light/dark preference is stored in the browser with localStorage. It is not a cookie.",
             "Resume data: title, Typst source, compiled SVG and PDF, ATS parseability report, and chat messages.",
             "Uploads: PDF, PNG, JPG, JPEG, WEBP, TXT, and MD files, up to 10 MiB, stored in object storage.",
-            "Job catalog: we store copies of public job postings from employer ATS board APIs and TaiwanJobs open data so we can show the catalog. These listings are not your personal data."
+            "Job catalog: we store copies of public job postings from employer ATS board APIs and TaiwanJobs open data so we can show the catalog. These listings are not your personal data.",
+            "Usage metering: for each model call we record what it billed — token counts, the model name and a cost figure — attached to your account or guest session, so the weekly allowance can be enforced. We also record when a request was refused for reaching a limit, with the tier and which limit it was. Neither record contains your resume, your uploads or your messages."
           ]
         },
         {
@@ -564,7 +567,8 @@
           "heading": "Retention",
           "paragraphs": [
             "Guest data is tied to the offerfy_guest cookie. If you lose that cookie, you lose access to that anonymous session.",
-            "Signed-in data is kept until you ask us to delete it. There is no in-app account or data deletion yet. Email james@offerfy.cc to request deletion."
+            "Signed-in data is kept until you ask us to delete it. There is no in-app account or data deletion yet. Email james@offerfy.cc to request deletion.",
+            "Usage metering and refusal records are kept for 90 days and then deleted. The weekly counters themselves are kept only as long as the window they belong to, plus a short grace period."
           ]
         },
         {
@@ -613,7 +617,8 @@
           ]
         }
       ]
-    }
+    },
+    "seeAlsoUsage": "Read how usage works"
   },
   "admin": {
     "metaTitle": "Ops · Offerfy",
