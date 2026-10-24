@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import httpx
@@ -15,7 +16,45 @@ from app.services.jobs.taiwanjobs import fetch_taiwanjobs
 from app.services.jobs.types import Board, NormalizedJob
 
 
-def ingest_board(db: Session, client: httpx.Client, board: Board) -> None:
+@dataclass(frozen=True)
+class SourceResult:
+    source: str
+    board_slug: str | None
+    status: str
+    upserted: int = 0
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class CatalogResult:
+    """What one catalog pass actually managed to do.
+
+    Per-source failures are recorded rather than raised so one dead board does
+    not abandon the rest of the catalog. The caller still needs to be able to
+    tell "refreshed the catalog" from "refreshed nothing", because only the
+    second one lets every posting age out of its validThrough window.
+    """
+
+    sources: tuple[SourceResult, ...]
+
+    @property
+    def ok(self) -> tuple[SourceResult, ...]:
+        return tuple(item for item in self.sources if item.status == "ok")
+
+    @property
+    def failed(self) -> tuple[SourceResult, ...]:
+        return tuple(item for item in self.sources if item.status != "ok")
+
+    @property
+    def upserted(self) -> int:
+        return sum(item.upserted for item in self.sources)
+
+    @property
+    def refreshed_nothing(self) -> bool:
+        return not self.ok or self.upserted == 0
+
+
+def ingest_board(db: Session, client: httpx.Client, board: Board) -> SourceResult:
     started = datetime.now(timezone.utc)
     try:
         fetched = _fetch(client, board)
@@ -30,7 +69,7 @@ def ingest_board(db: Session, client: httpx.Client, board: Board) -> None:
             error_snippet=str(exc),
         )
         db.commit()
-        return
+        return SourceResult(board.source, board.slug, "error", error=str(exc))
     if fetched is None:
         record_run(
             db,
@@ -42,7 +81,7 @@ def ingest_board(db: Session, client: httpx.Client, board: Board) -> None:
             error_snippet="board not found",
         )
         db.commit()
-        return
+        return SourceResult(board.source, board.slug, "error", error="board not found")
     upserted = upsert_jobs(db, fetched)
     expired = expire_missing(
         db,
@@ -61,9 +100,10 @@ def ingest_board(db: Session, client: httpx.Client, board: Board) -> None:
         expired_count=expired,
     )
     db.commit()
+    return SourceResult(board.source, board.slug, "ok", upserted=upserted)
 
 
-def ingest_taiwanjobs(db: Session, client: httpx.Client) -> None:
+def ingest_taiwanjobs(db: Session, client: httpx.Client) -> SourceResult:
     started = datetime.now(timezone.utc)
     try:
         fetched = fetch_taiwanjobs(client)
@@ -78,7 +118,7 @@ def ingest_taiwanjobs(db: Session, client: httpx.Client) -> None:
             error_snippet=str(exc),
         )
         db.commit()
-        return
+        return SourceResult("taiwanjobs", None, "error", error=str(exc))
     upserted = upsert_jobs(db, fetched)
     expired = 0
     if fetched:
@@ -98,14 +138,19 @@ def ingest_taiwanjobs(db: Session, client: httpx.Client) -> None:
         expired_count=expired,
     )
     db.commit()
+    return SourceResult("taiwanjobs", None, "ok", upserted=upserted)
 
 
-def ingest_catalog(db: Session, client: httpx.Client, *, include_taiwanjobs: bool = True) -> None:
+def ingest_catalog(
+    db: Session, client: httpx.Client, *, include_taiwanjobs: bool = True
+) -> CatalogResult:
+    results: list[SourceResult] = []
     for board in load_boards():
-        ingest_board(db, client, board)
+        results.append(ingest_board(db, client, board))
     if include_taiwanjobs:
-        ingest_taiwanjobs(db, client)
+        results.append(ingest_taiwanjobs(db, client))
     rescore_all(db)
+    return CatalogResult(tuple(results))
 
 
 def _fetch(client: httpx.Client, board: Board) -> list[NormalizedJob] | None:

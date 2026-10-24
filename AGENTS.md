@@ -119,7 +119,66 @@ chunk filename does not mean matching content.
   never zooms back. The pattern is `text-base md:text-sm`.
 - **Heights**: `dvh`, not `vh` — `100vh` includes the mobile URL bar. The editor shell
   additionally binds to `visualViewport` so the keyboard cannot cover the composer.
-- **There are no frontend tests.** `npm run lint` and `npm run build:public` are the only
-  automated gates, so verify UI changes by actually running the app. A stub serving
+- **There is no frontend test runner wired up**, but a few pure modules do have
+  `*.test.ts` beside them (`lib/seo.test.ts`, `lib/blog/*`). Run them by hand:
+  `./node_modules/.bin/tsx --test lib/seo.test.ts`. Otherwise `npm run lint` and
+  `npm run build:public` are the only automated gates, so verify UI changes by
+  actually running the app. A stub serving
   `/v1/resumes/<id>`, `/preview`, `/ats` and `/messages` is enough to drive the editor
   without the real backend; point `next dev` at it with `BACKEND_INTERNAL_URL`.
+
+## 8. The job catalog ingest (and why it went dark)
+
+The ~11k job pages are the only part of the site with real organic reach: they are
+sitemapped and carry `JobPosting` JSON-LD, which is what gets a job board into Google
+Jobs. They are also the part that silently broke.
+
+**What happened.** `README.md` claimed the catalog refreshed every 6 hours via the
+`jobs-ingest` CronJob in `k8s/`. Those manifests are never applied (§2), and nothing
+else scheduled it — no systemd timer, no crontab. The last ingest ran **2026-09-01**.
+`JobPosting.validThrough` is `last_seen_at + 30 days`, so on **2026-10-01** every
+posting on the site expired at once, and the sitemap went on advertising 11k expired
+URLs for three weeks. Nothing alerted, because nothing was watching and the ingest
+exits 0 even when every source fails.
+
+**The timer is a systemd _user_ unit**, not a system unit like `offerfy-api` /
+`offerfy-web`, because agent sessions have no passwordless sudo (§4) and a user timer
+needs none. It needs lingering, which is already enabled:
+
+```bash
+loginctl show-user ruby0322 --property=Linger   # must be Linger=yes
+```
+
+Install or refresh it after editing `ops/systemd/offerfy-ingest.*`:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp /home/ruby0322/offerfy/ops/systemd/offerfy-ingest.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now offerfy-ingest.timer
+```
+
+Check it, and run one pass by hand:
+
+```bash
+systemctl --user list-timers offerfy-ingest.timer     # NEXT / LAST / PASSED
+systemctl --user start offerfy-ingest.service         # blocks; a full pass is minutes
+journalctl --user -u offerfy-ingest.service -n 40 --no-pager
+```
+
+**Two guards keep it from going quiet again.** Do not undo either without replacing it:
+
+1. `app.jobs.ingest_catalog` **exits non-zero when a pass refreshed nothing** — every
+   source failed, or none returned any job. One dead board out of many still exits 0,
+   because the catalog did get refreshed. A stalled catalog therefore shows up as a
+   failed unit instead of as a slow SEO death.
+2. **Staleness is derived from `last_seen_at`, not from `is_active`.** `is_active` only
+   flips when an ingest run sees a posting disappear, so a dead ingest leaves every row
+   active forever. `JOB_FRESHNESS_DAYS` (30) lives in both
+   `apps/frontend/lib/seo.ts` and `apps/backend/app/routers/jobs.py` and **must stay in
+   step**: the frontend noindexes and drops JSON-LD past the window, the backend drops
+   those rows from the jobs sitemap. A dead ingest now degrades to honest noindex.
+
+**Still missing:** nothing pages anyone when the unit fails, and there is no analytics or
+Search Console on the site at all, so "is Google crawling us" is still unanswerable.
+`systemctl --user list-timers` and the `job_ingest_runs` table are the only signals.

@@ -24,7 +24,10 @@ Ingest the public job catalog (official ATS boards + TaiwanJobs; no 104 scrape):
 docker compose run --rm backend python -m app.jobs.ingest_catalog
 ```
 
-Production runs the same command every 6 hours via the `jobs-ingest` CronJob.
+Production runs the same command every 6 hours from the `offerfy-ingest`
+systemd **user** timer (`ops/systemd/offerfy-ingest.timer`). The `jobs-ingest`
+CronJob in `k8s/` is not applied — Offerfy does not run on k8s. See
+[AGENTS.md](AGENTS.md) and `docs/deploy.md`.
 
 Backend tests:
 

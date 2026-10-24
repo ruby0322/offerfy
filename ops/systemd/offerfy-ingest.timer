@@ -1,0 +1,21 @@
+# systemd **user** unit — see offerfy-ingest.service for why.
+[Unit]
+Description=Run the Offerfy job catalog ingest every 6 hours
+Documentation=file:///home/ruby0322/offerfy/docs/deploy.md
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:10:00
+
+# Run a missed slot on start rather than waiting for the next one. The catalog
+# going quietly stale is the failure this timer exists to prevent, so catching
+# up matters more than hitting the exact hour.
+Persistent=true
+
+# Don't hammer three third-party boards exactly on the hour.
+RandomizedDelaySec=10min
+AccuracySec=1min
+
+Unit=offerfy-ingest.service
+
+[Install]
+WantedBy=timers.target

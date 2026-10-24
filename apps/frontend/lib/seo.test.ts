@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { jobPostingJsonLd, organizationJsonLd, CONTACT_EMAIL, SITE_NAME, SITE_URL } from "./seo";
+import {
+  isJobIndexable,
+  jobPostingJsonLd,
+  organizationJsonLd,
+  CONTACT_EMAIL,
+  JOB_FRESHNESS_DAYS,
+  SITE_NAME,
+  SITE_URL,
+} from "./seo";
 
 const base = {
   locale: "en" as const,
@@ -82,4 +90,33 @@ test("Organization JSON-LD has name, description, url, and email contactPoint", 
     email: CONTACT_EMAIL,
   });
   assert.equal("address" in org, false);
+});
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+test("a posting seen just inside the freshness window is still indexable", () => {
+  const now = new Date("2026-10-24T00:00:00.000Z");
+  const seen = new Date(now.getTime() - (JOB_FRESHNESS_DAYS - 1) * DAY_MS);
+  assert.equal(isJobIndexable(seen.toISOString(), now), true);
+});
+
+test("a posting past the freshness window is not indexable", () => {
+  // The regression this guards: ingest stalled on 2026-09-01, every row stayed
+  // is_active, and validThrough quietly expired on 2026-10-01 while 11k pages
+  // kept advertising themselves to Google.
+  const now = new Date("2026-10-24T00:00:00.000Z");
+  assert.equal(isJobIndexable("2026-09-01T12:00:00.000Z", now), false);
+});
+
+test("validThrough is always ahead of now for an indexable posting", () => {
+  const now = new Date("2026-10-24T00:00:00.000Z");
+  const seen = new Date(now.getTime() - 1 * DAY_MS).toISOString();
+  assert.equal(isJobIndexable(seen, now), true);
+  const posting = jobPostingJsonLd({ ...base, lastSeenAt: seen, location: "Taipei", remote: false });
+  assert.ok(posting);
+  assert.ok(new Date(posting.validThrough as string).getTime() > now.getTime());
+});
+
+test("an unparseable last_seen_at is treated as not indexable", () => {
+  assert.equal(isJobIndexable("not-a-date"), false);
 });
