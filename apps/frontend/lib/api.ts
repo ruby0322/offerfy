@@ -413,8 +413,12 @@ export async function listTemplates(): Promise<UniverseTemplate[]> {
   return [];
 }
 
+/** Where the model's view of a long conversation starts. */
+export type ContextCut = { dropped: number; fromMessageId: string };
+
 export type ChatStreamEvent =
   | { type: "delta"; text: string }
+  | { type: "context"; dropped: number; from_message_id: string }
   | { type: "reasoning"; text: string }
   | { type: "tool"; message: ChatMessage }
   | { type: "source"; typst_source: string; applied: boolean }
@@ -495,13 +499,33 @@ export async function sendChat(
   if (tail) await onEvent(tail);
 }
 
-export async function getChatMessages(id: string): Promise<ChatMessage[]> {
+export async function getChatMessages(
+  id: string,
+): Promise<{ messages: ChatMessage[]; contextCut: ContextCut | null }> {
   try {
-    const data = await apiJson<unknown>(`/api/v1/resumes/${id}/messages`);
-    return asMessages(data);
+    const res = await apiFetch(`/api/v1/resumes/${id}/messages`);
+    const body = await parseBody(res);
+    if (!res.ok) {
+      throw new ApiError(
+        errorMessage(body, res.statusText || "Request failed"),
+        res.status,
+        body,
+      );
+    }
+    // The body is still the whole transcript. These two headers say where the
+    // model's view of it begins; absent means nothing is being left out, and a
+    // proxy that strips them degrades to not drawing the marker.
+    const from = res.headers.get("X-Context-From");
+    const dropped = Number(res.headers.get("X-Context-Dropped"));
+    return {
+      messages: asMessages(body),
+      contextCut: from && Number.isFinite(dropped) && dropped > 0
+        ? { dropped, fromMessageId: from }
+        : null,
+    };
   } catch (err) {
     if (err instanceof ApiError && (err.status === 404 || err.status === 405)) {
-      return [];
+      return { messages: [], contextCut: null };
     }
     throw err;
   }

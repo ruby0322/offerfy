@@ -39,6 +39,12 @@ def build_role_card(db: Session, resume: Resume) -> str:
         "Do not edit the new tailor in this turn; tell the user it will open next.",
         "- propose_memory only suggests a durable preference or fact about the person "
         "(never job-specific wording). It takes effect only after a signed-in user accepts it.",
+        "- Call propose_memory when the user states something lasting, and "
+        "especially when they say never or always to do something. Only part of "
+        "a long conversation is replayed to you, and a thing the document does "
+        "not do leaves no trace in it to find later -- accepted memory is "
+        "replayed in full on every turn, so that is where such a rule has to "
+        "live to survive.",
     ]
     accepted = accepted_memory_texts(db, master.id)
     if accepted:

@@ -46,6 +46,11 @@ export type ChatSuggestion = {
 
 type Props = {
   messages: ChatMessage[];
+  /** Draws the "older messages are not sent" marker above this message id. */
+  contextCutMessageId?: string | null;
+  contextCutTitle?: string;
+  contextCutDetail?: string;
+  contextCutJumpLabel?: string;
   streamingText?: string | null;
   reasoningText?: string | null;
   thinkingLabel?: string;
@@ -75,6 +80,10 @@ type Props = {
 
 export default function EditorChatPanel({
   messages,
+  contextCutMessageId,
+  contextCutTitle,
+  contextCutDetail,
+  contextCutJumpLabel,
   streamingText,
   reasoningText,
   thinkingLabel,
@@ -101,6 +110,9 @@ export default function EditorChatPanel({
 }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // The standing notice below scrolls this into view. Only one message can
+  // match the cut, so a single ref is enough.
+  const cutMarkerRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const composingRef = useRef(false);
   const confirmEnterRef = useRef(false);
@@ -252,6 +264,24 @@ export default function EditorChatPanel({
                   animate="visible"
                   exit="exit"
                 >
+                  {/* Sits where the model's view of the chat begins. Above it
+                      the messages are still here, still yours -- they are just
+                      not in the request any more. */}
+                  {contextCutMessageId && message.id === contextCutMessageId ? (
+                    <div
+                      ref={cutMarkerRef}
+                      className="mb-3 border-t border-dashed border-border/70 pt-3"
+                    >
+                      <p className="text-[0.7rem] font-medium uppercase tracking-wide text-muted-foreground">
+                        {contextCutTitle}
+                      </p>
+                      {contextCutDetail ? (
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                          {contextCutDetail}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <ChatMessageCard
                     message={message}
                     sending={sending}
@@ -289,6 +319,29 @@ export default function EditorChatPanel({
           </div>
         </ScrollArea>
       </div>
+      {/* The divider inside the transcript explains the trim where it happens,
+          which is often far above the fold -- the user sending a message is at
+          the bottom and would never see it. This stays in view for as long as
+          the condition holds, which is permanently once it starts. */}
+      {contextCutMessageId ? (
+        <p className="flex flex-wrap items-baseline gap-x-1.5 px-3 pb-1 text-[0.7rem] leading-snug text-muted-foreground">
+          <span>{contextCutTitle}</span>
+          {contextCutJumpLabel ? (
+            <button
+              type="button"
+              className="underline underline-offset-2 hover:text-foreground"
+              onClick={() =>
+                cutMarkerRef.current?.scrollIntoView({
+                  behavior: "smooth",
+                  block: "center",
+                })
+              }
+            >
+              {contextCutJumpLabel}
+            </button>
+          ) : null}
+        </p>
+      ) : null}
       <form
         className="chat-composer"
         onSubmit={onSubmit}
