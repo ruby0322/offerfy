@@ -10,6 +10,7 @@ import httpx
 from fastapi import HTTPException
 
 from app.config import get_settings
+from app.services.chat_window import window_history
 from app.services.edit_diff import edit_result_payload
 from app.services.layout import compile_digest, read_layout_report
 from app.typst_edit import apply_typst_edit
@@ -322,14 +323,30 @@ def _provider_error_detail(resp: httpx.Response) -> str:
 
 
 def _history_input(messages: list[dict]) -> list[dict]:
-    items: list[dict] = []
-    for message in messages:
-        role = message.get("role")
-        if role not in {"user", "assistant"}:
-            continue
-        content = message.get("content") or ""
-        items.append({"role": role, "content": content})
-    return items
+    """The chat history as the provider sees it, bounded.
+
+    This is the one funnel: the main turn and the repair loop both arrive here,
+    so neither can re-send an unbounded transcript. `window_history` keeps the
+    user/assistant filter this used to do inline -- `tool` rows have never been
+    sent and still are not -- and drops the middle of a long conversation. See
+    `app.services.chat_window` for why the cut moves in steps rather than
+    sliding, and what stops a shorter history from being touched at all.
+
+    The log line is per turn, not per round, and only when something was
+    actually dropped: it is how you tell from the host whether the bound is
+    engaging, without a schema change. `input_tokens` on `llm_calls` and
+    `llm_cache_hit_rate` on /v1/admin/overview are what measure the effect.
+    """
+    window = window_history(messages)
+    if window.folded:
+        logger.info(
+            "chat history folded dropped=%d kept=%d sent_chars=%d total_chars=%d",
+            window.dropped,
+            len(window.items),
+            window.sent_chars,
+            window.total_chars,
+        )
+    return window.items
 
 
 def _token_count(section: Any, key: str) -> int | None:

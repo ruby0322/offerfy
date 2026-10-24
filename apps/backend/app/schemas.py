@@ -233,11 +233,24 @@ class ConsentState(BaseModel):
     policy_version: str
 
 
-# Caps on the payload. They bound what one read can hand over as much as they
-# bound the model's output.
+# Caps on the payload. They bound what one read hands over.
+#
+# Enforced by services.profile.clamp_payload, NOT by Field(max_length=...) on
+# the fields below. A length constraint here would make pydantic *reject* a
+# payload that is one bullet point too long, and the whole profile would be
+# thrown away -- which is exactly what happened to the first real resume this
+# ran on: one role had five highlights where the cap was four. These are
+# limits, not a contract the provider has to satisfy, so they truncate.
 TALENT_SKILL_LIMIT = 40
 TALENT_ROLE_LIMIT = 12
 TALENT_EDUCATION_LIMIT = 6
+TALENT_HIGHLIGHT_LIMIT = 4
+TALENT_LOCATION_LIMIT = 4
+TALENT_LANGUAGE_LIMIT = 6
+TALENT_HEADLINE_CHARS = 120
+TALENT_SUMMARY_CHARS = 600
+TALENT_NAME_CHARS = 255
+TALENT_YEARS_MAX = 60
 TALENT_SUMMARY_SKILLS = 12
 
 
@@ -249,7 +262,7 @@ class TalentRole(BaseModel):
     # is better shown verbatim than dropped.
     start: str | None = None
     end: str | None = None
-    highlights: list[str] = Field(default_factory=list, max_length=4)
+    highlights: list[str] = Field(default_factory=list)
 
 
 class TalentEducation(BaseModel):
@@ -271,18 +284,16 @@ class TalentProfilePayload(BaseModel):
     """
 
     schema_version: int = 1
-    display_name: str | None = Field(default=None, max_length=255)
-    headline: str | None = Field(default=None, max_length=120)
-    summary: str | None = Field(default=None, max_length=600)
-    years_experience: int | None = Field(default=None, ge=0, le=60)
+    display_name: str | None = None
+    headline: str | None = None
+    summary: str | None = None
+    years_experience: int | None = None
     # City or region only. A street address is a contact detail.
-    locations: list[str] = Field(default_factory=list, max_length=4)
-    languages: list[str] = Field(default_factory=list, max_length=6)
-    skills: list[str] = Field(default_factory=list, max_length=TALENT_SKILL_LIMIT)
-    roles: list[TalentRole] = Field(default_factory=list, max_length=TALENT_ROLE_LIMIT)
-    education: list[TalentEducation] = Field(
-        default_factory=list, max_length=TALENT_EDUCATION_LIMIT
-    )
+    locations: list[str] = Field(default_factory=list)
+    languages: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+    roles: list[TalentRole] = Field(default_factory=list)
+    education: list[TalentEducation] = Field(default_factory=list)
 
 
 class TalentProfileDetail(BaseModel):
@@ -335,3 +346,8 @@ class TalentProfileStatus(BaseModel):
     built_at: str | None = None
     disclosure_count: int = 0
     last_disclosed_at: str | None = None
+    # Why the last build attempted by this request failed, when one was
+    # attempted and failed. Not stored: setting the source attempts a build
+    # opportunistically and must not refuse the choice, so without this the
+    # person sees "no profile yet" and cannot tell that anything went wrong.
+    build_error: str | None = None

@@ -5,8 +5,9 @@ from urllib.parse import parse_qs, urlparse
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
+from app.services.jobs.store import JOB_FRESHNESS_DAYS
 from app.deps import SESSION_COOKIE, _sign
-from app.models import ChatMessage, Resume, TalentApiKey, User
+from app.models import ChatMessage, Job, JobIngestRun, Resume, TalentApiKey, User
 from app.services.talent_keys import hash_talent_key
 
 
@@ -326,3 +327,238 @@ def test_talent_key_routes_are_invisible_to_everyone_else(
         ).status_code
         == 404
     )
+
+def _ops(db_session) -> User:
+    user = User(google_sub="sub-ingest-ops", email="ops@example.com", locale="en")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+def _ingest_row(db_session, *, run_id, source, slug, status, upserted=0, started=None, error=None, fetched=None):
+    db_session.add(
+        JobIngestRun(
+            run_id=run_id,
+            source=source,
+            board_slug=slug,
+            started_at=started or datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc),
+            finished_at=(started or datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc))
+            + timedelta(seconds=30),
+            status=status,
+            ok_count=(fetched if fetched is not None else (1 if status == "ok" else 0)),
+            error_count=0 if status == "ok" else 1,
+            upserted_count=upserted,
+            expired_count=0,
+            error_snippet=error,
+        )
+    )
+
+
+def _job(db_session, *, source_id, last_seen_at):
+    db_session.add(
+        Job(
+            source="greenhouse",
+            source_id=source_id,
+            company="Stripe",
+            title="Engineer",
+            location="Remote",
+            remote=True,
+            apply_url="https://example.com/a",
+            source_url="https://example.com/a",
+            description_text="x",
+            description_html="<p>x</p>",
+            posted_at=last_seen_at,
+            first_seen_at=last_seen_at,
+            last_seen_at=last_seen_at,
+            is_active=True,
+        )
+    )
+
+
+def test_admin_jobs_ingest_unauthenticated_401(client: TestClient, monkeypatch):
+    _allow(monkeypatch)
+    assert client.get("/v1/admin/jobs/ingest").status_code == 401
+
+
+def test_admin_jobs_ingest_non_admin_404(client: TestClient, db_session, monkeypatch):
+    _allow(monkeypatch, "ops@example.com")
+    user = User(google_sub="sub-user-ingest", email="user@example.com", locale="en")
+    db_session.add(user)
+    db_session.commit()
+    assert client.get("/v1/admin/jobs/ingest", cookies=_session_cookie(user)).status_code == 404
+
+
+def test_admin_jobs_ingest_empty_allowlist_404(client: TestClient, db_session, monkeypatch):
+    monkeypatch.setenv("ADMIN_EMAILS", "")
+    get_settings.cache_clear()
+    user = _ops(db_session)
+    assert client.get("/v1/admin/jobs/ingest", cookies=_session_cookie(user)).status_code == 404
+
+
+def test_admin_jobs_ingest_folds_rows_into_passes(client: TestClient, db_session, monkeypatch):
+    _allow(monkeypatch, "ops@example.com")
+    ops = _ops(db_session)
+    early = datetime(2026, 10, 24, 6, 0, tzinfo=timezone.utc)
+    late = datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc)
+    # One clean pass, one that lost a board but still refreshed the catalog.
+    _ingest_row(db_session, run_id="run-1", source="greenhouse", slug="a", status="ok", upserted=5, started=early)
+    _ingest_row(db_session, run_id="run-1", source="lever", slug="b", status="ok", upserted=3, started=early)
+    _ingest_row(db_session, run_id="run-2", source="greenhouse", slug="a", status="ok", upserted=7, started=late)
+    _ingest_row(
+        db_session, run_id="run-2", source="ashby", slug="dead", status="error",
+        started=late, error="board not found",
+    )
+    db_session.commit()
+
+    body = client.get("/v1/admin/jobs/ingest", cookies=_session_cookie(ops)).json()
+    passes = body["passes"]
+    assert [item["run_id"] for item in passes] == ["run-2", "run-1"]
+
+    newest = passes[0]
+    assert newest["sources_ok"] == 1
+    assert newest["sources_failed"] == 1
+    assert newest["upserted"] == 7
+    assert newest["status"] == "degraded"
+    assert newest["duration_seconds"] == 30
+    assert [b["board_slug"] for b in newest["failing_boards"]] == ["dead"]
+    assert newest["failing_boards"][0]["error_snippet"] == "board not found"
+
+    assert passes[1]["status"] == "ok"
+    assert passes[1]["sources_failed"] == 0
+    assert passes[1]["upserted"] == 8
+    assert passes[1]["failing_boards"] == []
+
+
+def test_admin_jobs_ingest_marks_a_pass_that_refreshed_nothing_failed(
+    client: TestClient, db_session, monkeypatch
+):
+    """Must match the rule the systemd unit exits non-zero on."""
+    _allow(monkeypatch, "ops@example.com")
+    ops = _ops(db_session)
+    _ingest_row(db_session, run_id="run-dead", source="greenhouse", slug="a", status="error", error="boom")
+    _ingest_row(db_session, run_id="run-dead", source="ashby", slug="b", status="error", error="boom")
+    # Every board answered, none had anything to give: still a stale catalog.
+    _ingest_row(db_session, run_id="run-empty", source="greenhouse", slug="a", status="ok", upserted=0)
+    db_session.commit()
+
+    body = client.get("/v1/admin/jobs/ingest", cookies=_session_cookie(ops)).json()
+    status_by_run = {item["run_id"]: item["status"] for item in body["passes"]}
+    assert status_by_run == {"run-dead": "failed", "run-empty": "failed"}
+    assert body["health"]["last_failure_at"] is not None
+
+
+def test_admin_jobs_ingest_degraded_pass_is_not_a_failure(
+    client: TestClient, db_session, monkeypatch
+):
+    """A pass that lost some boards but refreshed the catalog is not a failure.
+
+    63 of 118 boards fail every pass, so if degraded counted here the dashboard
+    would show a permanent "last failed pass" and stop meaning anything.
+    """
+    _allow(monkeypatch, "ops@example.com")
+    ops = _ops(db_session)
+    _ingest_row(db_session, run_id="run-1", source="greenhouse", slug="a", status="ok", upserted=9)
+    _ingest_row(db_session, run_id="run-1", source="ashby", slug="dead", status="error", error="board not found")
+    db_session.commit()
+
+    body = client.get("/v1/admin/jobs/ingest", cookies=_session_cookie(ops)).json()
+    assert body["passes"][0]["status"] == "degraded"
+    assert body["health"]["last_failure_at"] is None
+
+
+def test_admin_jobs_ingest_health_splits_fresh_from_stale(
+    client: TestClient, db_session, monkeypatch
+):
+    _allow(monkeypatch, "ops@example.com")
+    ops = _ops(db_session)
+    now = datetime.now(timezone.utc)
+    _job(db_session, source_id="fresh", last_seen_at=now - timedelta(hours=2))
+    _job(db_session, source_id="stale", last_seen_at=now - timedelta(days=JOB_FRESHNESS_DAYS + 1))
+    db_session.commit()
+
+    health = client.get("/v1/admin/jobs/ingest", cookies=_session_cookie(ops)).json()["health"]
+    assert health["fresh_job_count"] == 1
+    assert health["stale_job_count"] == 1
+    assert health["freshness_days"] == JOB_FRESHNESS_DAYS
+    assert health["expected_interval_hours"] == 6
+    assert health["catalog_age_hours"] is not None
+    assert health["catalog_age_hours"] < 3
+    assert health["overdue"] is False
+
+
+def test_admin_jobs_ingest_overdue_when_catalog_is_old(client: TestClient, db_session, monkeypatch):
+    _allow(monkeypatch, "ops@example.com")
+    ops = _ops(db_session)
+    _job(
+        db_session,
+        source_id="old",
+        last_seen_at=datetime.now(timezone.utc) - timedelta(hours=30),
+    )
+    db_session.commit()
+
+    health = client.get("/v1/admin/jobs/ingest", cookies=_session_cookie(ops)).json()["health"]
+    assert health["overdue"] is True
+
+
+def test_admin_jobs_ingest_overdue_when_catalog_is_empty(client: TestClient, db_session, monkeypatch):
+    """Nothing to serve is not healthy just because nothing is old."""
+    _allow(monkeypatch, "ops@example.com")
+    ops = _ops(db_session)
+    health = client.get("/v1/admin/jobs/ingest", cookies=_session_cookie(ops)).json()["health"]
+    assert health["freshest_last_seen_at"] is None
+    assert health["catalog_age_hours"] is None
+    assert health["overdue"] is True
+
+
+def test_admin_jobs_ingest_counts_rows_with_no_run_id_separately(
+    client: TestClient, db_session, monkeypatch
+):
+    """Pre-migration rows cannot be grouped, so they are reported, not guessed."""
+    _allow(monkeypatch, "ops@example.com")
+    ops = _ops(db_session)
+    _ingest_row(db_session, run_id=None, source="greenhouse", slug="a", status="ok", upserted=4)
+    _ingest_row(db_session, run_id="run-1", source="greenhouse", slug="a", status="ok", upserted=4)
+    db_session.commit()
+
+    body = client.get("/v1/admin/jobs/ingest", cookies=_session_cookie(ops)).json()
+    assert body["legacy_row_count"] == 1
+    assert [item["run_id"] for item in body["passes"]] == ["run-1"]
+
+
+def test_admin_jobs_ingest_pass_drilldown_returns_every_board_row(
+    client: TestClient, db_session, monkeypatch
+):
+    """The old endpoint capped at 20; a pass has ~119 rows."""
+    _allow(monkeypatch, "ops@example.com")
+    ops = _ops(db_session)
+    for i in range(25):
+        _ingest_row(db_session, run_id="run-1", source="greenhouse", slug=f"b{i}", status="ok", upserted=1)
+    db_session.commit()
+
+    body = client.get("/v1/admin/jobs/ingest/run-1", cookies=_session_cookie(ops)).json()
+    assert len(body["items"]) == 25
+    assert body["limit"] >= 119
+
+
+def test_admin_jobs_ingest_reports_what_the_scope_rules_dropped(
+    client: TestClient, db_session, monkeypatch
+):
+    """fetched - upserted is how many postings we chose not to carry.
+
+    Derived from the counts record_run already stores, so no column was added
+    for it -- but it has to actually surface, or a filter eating a whole board
+    would take weeks to notice.
+    """
+    _allow(monkeypatch, "ops@example.com")
+    ops = _ops(db_session)
+    _ingest_row(
+        db_session, run_id="run-1", source="greenhouse", slug="a", status="ok",
+        fetched=120, upserted=70,
+    )
+    db_session.commit()
+
+    body = client.get("/v1/admin/jobs/ingest", cookies=_session_cookie(ops)).json()
+    pass_row = body["passes"][0]
+    assert pass_row["fetched"] == 120
+    assert pass_row["upserted"] == 70

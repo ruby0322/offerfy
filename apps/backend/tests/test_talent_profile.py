@@ -52,8 +52,24 @@ class StubProfileLlm:
 
 
 def _said(profile: dict, usage: dict | None = None) -> dict:
-    """A Responses-API envelope carrying one profile payload."""
-    body = {"output_text": json.dumps(profile)}
+    """A Responses-API envelope carrying one profile payload.
+
+    Shaped like what the API actually returns, verified against a live call:
+    a reasoning item, then a message item whose content is an output_text
+    block. There is no top-level `output_text` key -- that is a convenience the
+    SDKs compute, and an earlier version of this helper invented one, which is
+    why every test here passed while the first real build failed.
+    """
+    body = {
+        "status": "completed",
+        "output": [
+            {"type": "reasoning", "content": [], "summary": []},
+            {
+                "type": "message",
+                "content": [{"type": "output_text", "text": json.dumps(profile)}],
+            },
+        ],
+    }
     if usage is not None:
         body["usage"] = usage
     return body
@@ -588,3 +604,163 @@ def test_a_skill_filter_cannot_match_a_longer_skill():
     text = _derived(TalentProfilePayload(skills=["JavaScript"]))["skills_text"]
     assert "|java|" not in text
     assert "|javascript|" in text
+
+
+# --- caps truncate, they do not reject --------------------------------------
+
+
+def test_a_role_with_more_highlights_than_the_cap_still_builds(
+    client: TestClient, db_session, monkeypatch, openai_enabled
+):
+    """The bug the first real resume hit.
+
+    One role came back with five highlights against a cap of four. The cap was
+    a pydantic max_length, so the whole payload was rejected and the person got
+    "no profile built yet" with no error. Caps truncate now.
+    """
+    generous = _profile(
+        roles=[
+            {
+                "employer": "Acme",
+                "title": "Engineer",
+                "start": "2021-03",
+                "end": "Present",
+                "highlights": [f"Did thing {n}" for n in range(5)],
+            }
+        ]
+    )
+    _stub(monkeypatch, StubProfileLlm(_said(generous)))
+    _, resume = _ready(client, db_session, monkeypatch, sub="sub-five-bullets")
+    _point_at(client, resume.id)
+
+    response = client.post("/v1/me/talent-profile/refresh")
+    assert response.status_code == 200
+    highlights = response.json()["profile"]["roles"][0]["highlights"]
+    assert len(highlights) == 4
+    assert db_session.query(TalentProfile).count() == 1
+
+
+def test_every_cap_truncates_instead_of_failing(
+    client: TestClient, db_session, monkeypatch, openai_enabled
+):
+    over = _profile(
+        headline="h" * 400,
+        summary="s" * 900,
+        years_experience=999,
+        locations=[f"City {n}" for n in range(9)],
+        languages=[f"Lang {n}" for n in range(9)],
+        skills=[f"Skill {n}" for n in range(60)],
+        roles=[
+            {
+                "employer": f"E{n}",
+                "title": "T",
+                "start": "2020-01",
+                "end": "2021-01",
+                "highlights": ["a", "b", "c", "d", "e", "f"],
+            }
+            for n in range(20)
+        ],
+        education=[{"institution": f"I{n}"} for n in range(9)],
+    )
+    _stub(monkeypatch, StubProfileLlm(_said(over)))
+    _, resume = _ready(client, db_session, monkeypatch, sub="sub-over-cap")
+    _point_at(client, resume.id)
+
+    body = client.post("/v1/me/talent-profile/refresh").json()
+    payload = body["profile"]
+    assert len(payload["headline"]) == 120
+    assert len(payload["summary"]) == 600
+    assert payload["years_experience"] == 60
+    assert len(payload["locations"]) == 4
+    assert len(payload["languages"]) == 6
+    assert len(payload["skills"]) == 40
+    assert len(payload["roles"]) == 12
+    assert len(payload["education"]) == 6
+    assert all(len(role["highlights"]) <= 4 for role in payload["roles"])
+
+
+def test_a_payload_missing_required_fields_is_reported_as_invalid(
+    client: TestClient, db_session, monkeypatch, openai_enabled
+):
+    """Still rejected -- but as invalid_payload, distinctly from bad JSON."""
+    _stub(monkeypatch, StubProfileLlm({"output": [
+        {"type": "message", "content": [{"type": "output_text", "text": '{"skills": "not a list"}'}]}
+    ]}))
+    _, resume = _ready(client, db_session, monkeypatch, sub="sub-wrong-types")
+    _point_at(client, resume.id)
+    assert client.post("/v1/me/talent-profile/refresh").status_code == 502
+    assert db_session.query(TalentProfile).count() == 0
+
+
+def test_the_reasoning_item_is_skipped_for_the_message(
+    client: TestClient, db_session, monkeypatch, openai_enabled
+):
+    """Reasoning models put a reasoning item before the message.
+
+    Production returned an empty one, but a populated one must not be mistaken
+    for the answer -- which is why this uses llm._output_text rather than a
+    second copy of that logic.
+    """
+    envelope = {
+        "output": [
+            {
+                "type": "reasoning",
+                "content": [{"type": "reasoning_text", "text": "Let me think about this."}],
+            },
+            {
+                "type": "message",
+                "content": [{"type": "output_text", "text": json.dumps(_profile())}],
+            },
+        ]
+    }
+    _stub(monkeypatch, StubProfileLlm(envelope))
+    _, resume = _ready(client, db_session, monkeypatch, sub="sub-reasoning")
+    _point_at(client, resume.id)
+
+    body = client.post("/v1/me/talent-profile/refresh").json()
+    assert body["profile"]["headline"] == "Backend engineer"
+
+
+# --- a failed opportunistic build is visible --------------------------------
+
+
+def test_choosing_a_resume_reports_why_the_build_failed(
+    client: TestClient, db_session, monkeypatch, openai_enabled
+):
+    """The second half of the production bug.
+
+    Setting the source deliberately returns 200 even when the build fails, so
+    without build_error the response is identical to never having tried.
+    """
+    _stub(monkeypatch, StubProfileLlm(None, status_code=500))
+    user = _signed_in(client, db_session, sub="sub-silent")
+    resume = _resume(db_session, user)
+    _grant(client)
+
+    response = _point_at(client, resume.id)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["profile"] is None
+    assert body["build_error"] == "provider_error"
+
+
+def test_a_successful_build_reports_no_error(
+    client: TestClient, db_session, monkeypatch, openai_enabled
+):
+    _stub(monkeypatch, StubProfileLlm(_said(_profile())))
+    user = _signed_in(client, db_session, sub="sub-no-error")
+    resume = _resume(db_session, user)
+    _grant(client)
+    body = _point_at(client, resume.id).json()
+    assert body["build_error"] is None
+    assert body["profile"] is not None
+
+
+def test_clearing_the_source_reports_no_error(
+    client: TestClient, db_session, monkeypatch, openai_enabled
+):
+    """Clearing attempts no build, so there is no failure to report."""
+    _stub(monkeypatch, StubProfileLlm(_said(_profile())))
+    _, resume = _ready(client, db_session, monkeypatch, sub="sub-clear-error")
+    _point_at(client, resume.id)
+    assert _point_at(client, None).json()["build_error"] is None

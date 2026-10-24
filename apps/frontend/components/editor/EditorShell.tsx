@@ -35,6 +35,7 @@ import {
   fetchUsage,
   getAtsReport,
   getChatMessages,
+  type ContextCut,
   getMe,
   getPreviewPages,
   getResume,
@@ -144,6 +145,9 @@ export default function EditorShell({ resumeId }: Props) {
   const [ats, setAts] = useState<AtsReport | null>(null);
   const [status, setStatus] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // Which earlier messages the model is no longer sent. Only ever moves
+  // forward -- the cut is monotonic -- so this never needs clearing.
+  const [contextCut, setContextCut] = useState<ContextCut | null>(null);
   // Text that has streamed in but not yet been finalized into a real message.
   // Deliberately outside `messages`: it carries no id and must never persist.
   const [streamingText, setStreamingText] = useState<string | null>(null);
@@ -375,7 +379,10 @@ export default function EditorShell({ resumeId }: Props) {
           });
         try {
           const history = await getChatMessages(resumeId);
-          if (!cancelled) setMessages(history.map(withMessageId));
+          if (!cancelled) {
+            setMessages(history.messages.map(withMessageId));
+            setContextCut(history.contextCut);
+          }
         } catch {
           /* chat history is optional */
         }
@@ -529,6 +536,13 @@ export default function EditorShell({ resumeId }: Props) {
     }
     try {
       await sendChat(resumeId, trimmed, file, options, async (event) => {
+        if (event.type === "context") {
+          setContextCut({
+            dropped: event.dropped,
+            fromMessageId: event.from_message_id,
+          });
+          return;
+        }
         if (event.type === "delta") {
           setChatUnavailable(false);
           pushDelta(event.text);
@@ -1163,6 +1177,13 @@ export default function EditorShell({ resumeId }: Props) {
       >
         <EditorChatPanel
           messages={messages}
+          contextCutMessageId={contextCut?.fromMessageId ?? null}
+          contextCutTitle={t("contextTrimmed")}
+          contextCutDetail={
+            contextCut ? t("contextTrimmedHint", { count: contextCut.dropped }) : undefined
+          }
+          contextCutJumpLabel={t("contextTrimmedJump")}
+          scrollToLatestLabel={t("scrollToLatest")}
           streamingText={streamingText}
           reasoningText={reasoningText}
           thinkingLabel={t("thinking")}

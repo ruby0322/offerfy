@@ -413,6 +413,9 @@ export async function listTemplates(): Promise<UniverseTemplate[]> {
   return [];
 }
 
+/** Where the model's view of a long conversation starts. */
+export type ContextCut = { dropped: number; fromMessageId: string };
+
 export type UsageTier = "guest" | "registered" | "matching";
 
 /** GET /v1/usage. Credits, never micro-USD — see the backend's UsageOut. */
@@ -474,6 +477,7 @@ export function usageRefusalOf(err: unknown): UsageRefusal | null {
 
 export type ChatStreamEvent =
   | { type: "delta"; text: string }
+  | { type: "context"; dropped: number; from_message_id: string }
   | { type: "reasoning"; text: string }
   | { type: "tool"; message: ChatMessage }
   | { type: "source"; typst_source: string; applied: boolean }
@@ -557,13 +561,33 @@ export async function sendChat(
   if (tail) await onEvent(tail);
 }
 
-export async function getChatMessages(id: string): Promise<ChatMessage[]> {
+export async function getChatMessages(
+  id: string,
+): Promise<{ messages: ChatMessage[]; contextCut: ContextCut | null }> {
   try {
-    const data = await apiJson<unknown>(`/api/v1/resumes/${id}/messages`);
-    return asMessages(data);
+    const res = await apiFetch(`/api/v1/resumes/${id}/messages`);
+    const body = await parseBody(res);
+    if (!res.ok) {
+      throw new ApiError(
+        errorMessage(body, res.statusText || "Request failed"),
+        res.status,
+        body,
+      );
+    }
+    // The body is still the whole transcript. These two headers say where the
+    // model's view of it begins; absent means nothing is being left out, and a
+    // proxy that strips them degrades to not drawing the marker.
+    const from = res.headers.get("X-Context-From");
+    const dropped = Number(res.headers.get("X-Context-Dropped"));
+    return {
+      messages: asMessages(body),
+      contextCut: from && Number.isFinite(dropped) && dropped > 0
+        ? { dropped, fromMessageId: from }
+        : null,
+    };
   } catch (err) {
     if (err instanceof ApiError && (err.status === 404 || err.status === 405)) {
-      return [];
+      return { messages: [], contextCut: null };
     }
     throw err;
   }
@@ -649,6 +673,8 @@ export type TalentProfileStatus = {
   built_at?: string | null;
   disclosure_count?: number;
   last_disclosed_at?: string | null;
+  /** Why the build this request attempted failed, if one did. Not persisted. */
+  build_error?: string | null;
 };
 
 export type TalentProfileDetail = {
@@ -843,6 +869,43 @@ function adminQuery(params: Record<string, string | number | undefined>): string
   return text ? `?${text}` : "";
 }
 
+export type AdminIngestBoardFailure = {
+  source: string;
+  board_slug: string | null;
+  error_snippet: string | null;
+};
+
+export type AdminIngestPass = {
+  run_id: string;
+  started_at: string;
+  finished_at: string | null;
+  duration_seconds: number | null;
+  sources_ok: number;
+  sources_failed: number;
+  fetched: number;
+  upserted: number;
+  expired: number;
+  status: "ok" | "degraded" | "failed";
+  failing_boards: AdminIngestBoardFailure[];
+};
+
+export type AdminIngestHealth = {
+  freshest_last_seen_at: string | null;
+  catalog_age_hours: number | null;
+  fresh_job_count: number;
+  stale_job_count: number;
+  freshness_days: number;
+  expected_interval_hours: number;
+  overdue: boolean;
+  last_failure_at: string | null;
+};
+
+export type AdminIngestOverview = {
+  health: AdminIngestHealth;
+  passes: AdminIngestPass[];
+  legacy_row_count: number;
+};
+
 export async function adminOverview(): Promise<AdminOverview> {
   return apiJson<AdminOverview>("/api/v1/admin/overview");
 }
@@ -886,4 +949,8 @@ export async function adminResumePreview(id: string): Promise<{ pages: string[] 
 
 export async function adminResumeAts(id: string): Promise<AtsReport> {
   return apiJson(`/api/v1/admin/resumes/${id}/ats`);
+}
+
+export async function adminJobsIngest(): Promise<AdminIngestOverview> {
+  return apiJson<AdminIngestOverview>("/api/v1/admin/jobs/ingest");
 }

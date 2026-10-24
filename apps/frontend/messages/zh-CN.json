@@ -175,6 +175,7 @@
     "profileNoDisclosures": "尚无人读取。",
     "profileDelete": "删除人才档案",
     "profileError": "操作失败，请再试一次。",
+    "profileBuildFailed": "目前无法用这份简历创建人才档案。请按“重新创建”再试一次。",
     "usageTitle": "本周 AI 用量",
     "usageNotice": "编辑、预览、导出 PDF 和 ATS 检查都没有限制，只有 AI 编辑会计量。",
     "usageThisWeekEdits": "已使用 {used} / {limit} 次 AI 编辑",
@@ -350,6 +351,10 @@
     "settingsDelete": "删除这份简历",
     "settingsDeleteTailor": "删除这份定制版",
     "thinking": "思考中",
+    "contextTrimmed": "较早的消息不会发送给 AI",
+    "contextTrimmedHint": "为了控制每次回复的成本，这条线以上的 {count} 条消息不会放进请求。AI 仍会收到这段对话的开头、这条线以下的全部内容，以及你的简历本身，没有任何消息被删除。如果它好像忘了某件事，再说一次就好。",
+    "contextTrimmedJump": "看是哪里",
+    "scrollToLatest": "回到最新",
     "usageMeterEdits": "本周 AI 编辑 {used} / {limit} 次",
     "usageMeterCredits": "本周额度 {used} / {limit}",
     "usageEditsLeft": "大约还能编辑 {count} 次",
@@ -479,9 +484,7 @@
           "paragraphs": [
             "聊天是选用功能。你可以只编辑 Typst，永远不打开聊天。",
             "模型输出可能错误或不完整。使用任何经 AI 修改的简历前，你必须自行检查。",
-            "AI 编辑有每周额度，额度多少取决于你是否有账号、以及是否开启「开放匹配」。手动编辑 Typst、实时预览、导出 PDF 和 ATS 检查在任何方案都没有限制。当前的数字请见下方链接的 offerfy.cc/usage。",
-            "开启「开放匹配」会附带更高的每周额度作为感谢。它不是使用 Offerfy 的必要条件：登录后的额度本身就应该足够。你可以随时关闭匹配，我们不会收回你已经使用的额度，你创建的任何内容也不受影响。",
-            "另外还有每小时上限，用来防止单一账号一次花光服务的预算；以及 Offerfy 整体每周的 AI 支出上限。若达到后者，AI 编辑会对所有人暂停到下周重置为止，其余功能照常运作。"
+            "访客使用有速率限制：每小时 10 次聊天、20 次 PDF 导出。"
           ]
         },
         {
@@ -538,8 +541,7 @@
             "主题：浅色／深色偏好存在浏览器的 localStorage，不是 Cookie。",
             "简历数据：标题、Typst 源码、编译后的 SVG 与 PDF、ATS 可解析性报告，以及聊天消息。",
             "上传：PDF、PNG、JPG、JPEG、WEBP、TXT、MD，上限 10 MiB，存在对象存储。",
-            "职位目录：我们存储雇主 ATS 职位板 API 与台湾就业通开放数据中的公开职位副本，以便显示目录。这些职位不是你的个人数据。",
-            "用量计量：每一次模型调用，我们都会记录它的费用——token 数量、模型名称和一个成本数字——并附在你的账号或访客会话上，以便执行每周额度。我们也会记录某次请求因达到上限而被拒绝，连同方案与是哪一个上限。这两种记录都不包含你的简历、上传文件或消息内容。"
+            "职位目录：我们存储雇主 ATS 职位板 API 与台湾就业通开放数据中的公开职位副本，以便显示目录。这些职位不是你的个人数据。"
           ]
         },
         {
@@ -570,8 +572,7 @@
           "heading": "保存期限",
           "paragraphs": [
             "访客数据与 offerfy_guest Cookie 绑定。若你失去该 Cookie，就无法再访问该匿名会话。",
-            "登录后的数据会保存到你要求删除为止。目前没有应用内的账号或数据删除功能。请写信至 james@offerfy.cc 提出删除请求。",
-            "用量计量与拒绝记录保留 90 天后删除。每周计数本身只保留其所属的那一周，再加一段短暂的缓冲期。"
+            "登录后的数据会保存到你要求删除为止。目前没有应用内的账号或数据删除功能。请写信至 james@offerfy.cc 提出删除请求。"
           ]
         },
         {
@@ -702,7 +703,39 @@
     "chartCacheRateSeries": "命中率 %",
     "chartLlmCalls": "模型调用",
     "chartLlmCallsHint": "每个 UTC 日的所有调用，含修复回合与 read_layout 的视觉调用。",
-    "chartLlmCallsSeries": "调用次数"
+    "chartLlmCallsSeries": "调用次数",
+    "jobs": "职位资料库",
+    "ingestVerdict_fresh": "资料库是最新的",
+    "ingestVerdict_expiring": "资料库正在流失页面",
+    "ingestVerdict_overdue": "资料库已逾期未更新",
+    "ingestVerdict_empty": "资料库是空的",
+    "ingestVerdictHint": "职位在最后一次确认存在后的 {days} 天内可以被索引。超过之后就会转成 noindex 并离开 sitemap，所以抓取一旦停止，所有职位页面都会安静地消失。",
+    "ingestAge": "最新职位",
+    "ingestFresh": "可索引页面",
+    "ingestStale": "已 noindex 页面",
+    "ingestCadence": "预期间隔",
+    "ingestFreshest": "最后确认于",
+    "ingestLastFailure": "最近失败的抓取",
+    "ingestPasses": "最近的抓取",
+    "ingestPassesHint": "一次抓取一行，由约 119 条各自的来源记录合并而成。完全没有更新到任何职位时计为失败——跟 systemd 单元返回非零的规则一致。",
+    "ingestNoPasses": "自从开始以抓取为单位记录后，还没有任何记录。",
+    "ingestStarted": "开始时间",
+    "ingestDuration": "耗时",
+    "ingestSourcesOk": "成功来源",
+    "ingestSourcesFailed": "失败来源",
+    "ingestUpserted": "更新职位数",
+    "ingestStatus": "状态",
+    "ingestStatus_ok": "正常",
+    "ingestStatus_degraded": "部分失败",
+    "ingestStatus_failed": "失败",
+    "ingestLegacyRows": "有 {count} 条较旧记录在以抓取为单位分组之前写入，未列在上方。",
+    "ingestFailingBoards": "失败的职位版",
+    "ingestFailingBoardsHint": "最近一次有失败的抓取中，哪些职位版抓不到。同一个 slug 每六小时重复出现是一个坏掉的职位版，不是每次都是新事件——大多数是没有使用这些 ATS 服务的公司。",
+    "ingestBoard": "职位版",
+    "ingestBoardError": "错误",
+    "ingestFetched": "抓回条数",
+    "ingestOutOfScope": "不在范围内",
+    "ingestScopeHint": "“抓回条数”是职位版返回的数量；“不在范围内”是被类别规则当成非技术职位丢掉的。SmartRecruiters 会在抓职位正文前先自行筛选，所以它的数字会低估。"
   },
   "usage": {
     "metaTitle": "用量说明 — Offerfy",

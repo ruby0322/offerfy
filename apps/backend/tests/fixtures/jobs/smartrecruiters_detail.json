@@ -1,0 +1,15 @@
+{
+  "id": "744000157446751",
+  "name": "Senior Software Engineer, Payments",
+  "postingUrl": "https://jobs.smartrecruiters.com/Grab/744000157446751",
+  "applyUrl": "https://jobs.smartrecruiters.com/Grab/744000157446751/apply",
+  "location": {"city": "Singapore", "country": "sg", "remote": false},
+  "function": {"id": "engineering", "label": "Engineering"},
+  "jobAd": {
+    "sections": {
+      "companyDescription": {"title": "Company Description", "text": "<p>Grab is a superapp.</p>"},
+      "jobDescription": {"title": "Job Description", "text": "<p>Build payment systems.</p>"},
+      "qualifications": {"title": "Qualifications", "text": "<p>5 years of backend work.</p>"}
+    }
+  }
+}

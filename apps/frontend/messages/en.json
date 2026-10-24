@@ -172,6 +172,7 @@
     "profileNoDisclosures": "Nobody has read it yet.",
     "profileDelete": "Delete profile",
     "profileError": "That did not work. Try again.",
+    "profileBuildFailed": "We could not build a profile from this resume just now. Try Rebuild.",
     "usageTitle": "AI usage this week",
     "usageNotice": "Editing, preview, PDF export and ATS checks are unlimited. Only AI edits are metered.",
     "usageThisWeekEdits": "{used} of {limit} AI edits used",
@@ -347,6 +348,10 @@
     "settingsDelete": "Delete this resume",
     "settingsDeleteTailor": "Delete this tailored version",
     "thinking": "Thinking",
+    "contextTrimmed": "Earlier messages aren't sent to the assistant",
+    "contextTrimmedHint": "To keep each reply affordable, {count} messages above this line are left out of the request. The assistant still gets the start of this chat, everything from here down, and your resume itself — nothing has been deleted. If it seems to have forgotten something, say it again.",
+    "contextTrimmedJump": "Show where",
+    "scrollToLatest": "Jump to latest",
     "usageMeterEdits": "{used} of {limit} AI edits this week",
     "usageMeterCredits": "{used} of {limit} credits this week",
     "usageEditsLeft": "about {count} more edits",
@@ -476,9 +481,7 @@
           "paragraphs": [
             "Chat is optional. You can edit Typst without ever opening chat.",
             "Model output can be wrong or incomplete. You must review any AI-edited resume before you use it.",
-            "AI editing has a weekly allowance, which depends on whether you have an account and whether you have turned on “Open to matching”. Editing Typst by hand, the live preview, PDF export and ATS checks are not limited at any tier. The current figures are at offerfy.cc/usage, linked below.",
-            "Turning on “Open to matching” comes with a larger weekly allowance as thanks. It is not required in order to use Offerfy: the signed-in allowance is intended to be sufficient on its own. You may turn matching off at any time, we will not reclaim allowance you have already used, and nothing you have created is affected.",
-            "There is also an hourly cap to prevent one account from spending the service's budget at once, and a cap on what Offerfy as a whole spends on AI each week. If the latter is reached, AI editing pauses for everyone until the week resets; everything else keeps working."
+            "Guest use is rate-limited to 10 chat turns and 20 PDF exports per hour."
           ]
         },
         {
@@ -535,8 +538,7 @@
             "Theme: light/dark preference is stored in the browser with localStorage. It is not a cookie.",
             "Resume data: title, Typst source, compiled SVG and PDF, ATS parseability report, and chat messages.",
             "Uploads: PDF, PNG, JPG, JPEG, WEBP, TXT, and MD files, up to 10 MiB, stored in object storage.",
-            "Job catalog: we store copies of public job postings from employer ATS board APIs and TaiwanJobs open data so we can show the catalog. These listings are not your personal data.",
-            "Usage metering: for each model call we record what it billed — token counts, the model name and a cost figure — attached to your account or guest session, so the weekly allowance can be enforced. We also record when a request was refused for reaching a limit, with the tier and which limit it was. Neither record contains your resume, your uploads or your messages."
+            "Job catalog: we store copies of public job postings from employer ATS board APIs and TaiwanJobs open data so we can show the catalog. These listings are not your personal data."
           ]
         },
         {
@@ -567,8 +569,7 @@
           "heading": "Retention",
           "paragraphs": [
             "Guest data is tied to the offerfy_guest cookie. If you lose that cookie, you lose access to that anonymous session.",
-            "Signed-in data is kept until you ask us to delete it. There is no in-app account or data deletion yet. Email james@offerfy.cc to request deletion.",
-            "Usage metering and refusal records are kept for 90 days and then deleted. The weekly counters themselves are kept only as long as the window they belong to, plus a short grace period."
+            "Signed-in data is kept until you ask us to delete it. There is no in-app account or data deletion yet. Email james@offerfy.cc to request deletion."
           ]
         },
         {
@@ -699,7 +700,39 @@
     "chartCacheRateSeries": "Hit rate %",
     "chartLlmCalls": "Model calls",
     "chartLlmCallsHint": "Every call per UTC day, including repair rounds and the vision calls read_layout makes.",
-    "chartLlmCallsSeries": "Calls"
+    "chartLlmCallsSeries": "Calls",
+    "jobs": "Job catalog",
+    "ingestVerdict_fresh": "Catalog is fresh",
+    "ingestVerdict_expiring": "Catalog is shedding pages",
+    "ingestVerdict_overdue": "Catalog is overdue",
+    "ingestVerdict_empty": "Catalog is empty",
+    "ingestVerdictHint": "A posting stays indexable for {days} days after an ingest last confirmed it exists. Past that it goes noindex and leaves the sitemap, so an ingest that stops running quietly removes every job page.",
+    "ingestAge": "Freshest posting",
+    "ingestFresh": "Indexable pages",
+    "ingestStale": "Noindexed pages",
+    "ingestCadence": "Expected interval",
+    "ingestFreshest": "Last confirmed",
+    "ingestLastFailure": "Last failed pass",
+    "ingestPasses": "Recent passes",
+    "ingestPassesHint": "One row per ingest pass, folded up from roughly 119 per-board rows. A pass counts as failed when it refreshed nothing at all — the same rule the systemd unit exits non-zero on.",
+    "ingestNoPasses": "No pass has been recorded since passes started being grouped.",
+    "ingestStarted": "Started",
+    "ingestDuration": "Duration",
+    "ingestSourcesOk": "Sources ok",
+    "ingestSourcesFailed": "Sources failed",
+    "ingestUpserted": "Jobs refreshed",
+    "ingestStatus": "Status",
+    "ingestStatus_ok": "ok",
+    "ingestStatus_degraded": "degraded",
+    "ingestStatus_failed": "failed",
+    "ingestLegacyRows": "{count} older rows predate per-pass grouping and are not shown above.",
+    "ingestFailingBoards": "Failing boards",
+    "ingestFailingBoardsHint": "Boards that failed in the most recent pass that had any failure. A slug repeating here every six hours is one broken board, not a new incident each time — most are companies that do not use these ATS providers.",
+    "ingestBoard": "Board",
+    "ingestBoardError": "Error",
+    "ingestFetched": "Fetched",
+    "ingestOutOfScope": "Out of scope",
+    "ingestScopeHint": "Fetched is what the boards handed us; out of scope is what the catalogue rules dropped as non-technical. SmartRecruiters filters itself before fetching each description, so its out-of-scope figure undercounts."
   },
   "usage": {
     "metaTitle": "Usage — Offerfy",

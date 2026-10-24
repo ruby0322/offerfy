@@ -175,6 +175,7 @@
     "profileNoDisclosures": "尚無人讀取。",
     "profileDelete": "刪除人才檔案",
     "profileError": "操作失敗，請再試一次。",
+    "profileBuildFailed": "目前無法用這份履歷建立人才檔案。請按「重新建立」再試一次。",
     "usageTitle": "本週 AI 用量",
     "usageNotice": "編輯、預覽、匯出 PDF 和 ATS 檢查都沒有限制，只有 AI 編輯會計量。",
     "usageThisWeekEdits": "已使用 {used} / {limit} 次 AI 編輯",
@@ -350,6 +351,10 @@
     "settingsDelete": "刪除這份履歷",
     "settingsDeleteTailor": "刪除這份客製版",
     "thinking": "思考中",
+    "contextTrimmed": "較早的訊息不會送給 AI",
+    "contextTrimmedHint": "為了控制每次回覆的成本，這條線以上的 {count} 則訊息不會放進請求。AI 仍會收到這段對話的開頭、這條線以下的全部內容，以及你的履歷本身，沒有任何訊息被刪除。如果它好像忘了某件事，再說一次就好。",
+    "contextTrimmedJump": "看是哪裡",
+    "scrollToLatest": "回到最新",
     "usageMeterEdits": "本週 AI 編輯 {used} / {limit} 次",
     "usageMeterCredits": "本週額度 {used} / {limit}",
     "usageEditsLeft": "大約還能編輯 {count} 次",
@@ -479,9 +484,7 @@
           "paragraphs": [
             "聊天是選用功能。你可以只編輯 Typst，永遠不開聊天。",
             "模型輸出可能錯誤或不完整。使用任何經 AI 修改的履歷前，你必須自行檢查。",
-            "AI 編輯有每週額度，額度多少取決於你是否有帳號、以及是否開啟「開放配對」。手動編輯 Typst、即時預覽、匯出 PDF 和 ATS 檢查在任何方案都沒有限制。目前的數字請見下方連結的 offerfy.cc/usage。",
-            "開啟「開放配對」會附帶更高的每週額度作為感謝。它不是使用 Offerfy 的必要條件：登入後的額度本身就應該足夠。你可以隨時關閉配對，我們不會收回你已經使用的額度，你建立的任何內容也不受影響。",
-            "另外還有每小時上限，用來防止單一帳號一次花光服務的預算；以及 Offerfy 整體每週的 AI 支出上限。若達到後者，AI 編輯會對所有人暫停到下週重置為止，其餘功能照常運作。"
+            "訪客使用有速率限制：每小時 10 次聊天、20 次 PDF 匯出。"
           ]
         },
         {
@@ -538,8 +541,7 @@
             "主題：亮色／暗色偏好存在瀏覽器的 localStorage，不是 Cookie。",
             "履歷資料：標題、Typst 原始碼、編譯後的 SVG 與 PDF、ATS 可解析性報告，以及聊天訊息。",
             "上傳：PDF、PNG、JPG、JPEG、WEBP、TXT、MD，上限 10 MiB，存在物件儲存。",
-            "職缺目錄：我們儲存雇主 ATS 職缺板 API 與台灣就業通開放資料中的公開職缺副本，以便顯示目錄。這些職缺不是你的個人資料。",
-            "用量計量：每一次模型呼叫，我們都會記錄它的費用——token 數量、模型名稱和一個成本數字——並附在你的帳號或訪客工作階段上，以便執行每週額度。我們也會記錄某次請求因達到上限而被拒絕，連同方案與是哪一個上限。這兩種記錄都不包含你的履歷、上傳檔案或訊息內容。"
+            "職缺目錄：我們儲存雇主 ATS 職缺板 API 與台灣就業通開放資料中的公開職缺副本，以便顯示目錄。這些職缺不是你的個人資料。"
           ]
         },
         {
@@ -570,8 +572,7 @@
           "heading": "保存期間",
           "paragraphs": [
             "訪客資料與 offerfy_guest Cookie 綁定。若你失去該 Cookie，就無法再存取該匿名工作階段。",
-            "登入後的資料會保存到你要求刪除為止。目前沒有應用程式內的帳號或資料刪除功能。請寫信至 james@offerfy.cc 提出刪除請求。",
-            "用量計量與拒絕記錄保留 90 天後刪除。每週計數本身只保留其所屬的那一週，再加一段短暫的緩衝期。"
+            "登入後的資料會保存到你要求刪除為止。目前沒有應用程式內的帳號或資料刪除功能。請寫信至 james@offerfy.cc 提出刪除請求。"
           ]
         },
         {
@@ -702,7 +703,39 @@
     "chartCacheRateSeries": "命中率 %",
     "chartLlmCalls": "模型呼叫",
     "chartLlmCallsHint": "每個 UTC 日的所有呼叫，含修復回合與 read_layout 的視覺呼叫。",
-    "chartLlmCallsSeries": "呼叫次數"
+    "chartLlmCallsSeries": "呼叫次數",
+    "jobs": "職缺資料庫",
+    "ingestVerdict_fresh": "資料庫是最新的",
+    "ingestVerdict_expiring": "資料庫正在流失頁面",
+    "ingestVerdict_overdue": "資料庫已逾期未更新",
+    "ingestVerdict_empty": "資料庫是空的",
+    "ingestVerdictHint": "職缺在最後一次確認存在後的 {days} 天內可以被索引。超過之後就會轉成 noindex 並隢開 sitemap，所以抓取一旦停止，所有職缺頁面都會安靜地消失。",
+    "ingestAge": "最新職缺",
+    "ingestFresh": "可索引頁面",
+    "ingestStale": "已 noindex 頁面",
+    "ingestCadence": "預期間隔",
+    "ingestFreshest": "最後確認於",
+    "ingestLastFailure": "最近失敗的抓取",
+    "ingestPasses": "最近的抓取",
+    "ingestPassesHint": "一次抓取一列，由約 119 筆各自的來源紀錄合併而成。完全沒有更新到任何職缺時計為失敗——跟 systemd 單元回傳非零的規則一致。",
+    "ingestNoPasses": "自從開始以抓取為單位記錄後，還沒有任何紀錄。",
+    "ingestStarted": "開始時間",
+    "ingestDuration": "耗時",
+    "ingestSourcesOk": "成功來源",
+    "ingestSourcesFailed": "失敗來源",
+    "ingestUpserted": "更新職缺數",
+    "ingestStatus": "狀態",
+    "ingestStatus_ok": "正常",
+    "ingestStatus_degraded": "部分失敗",
+    "ingestStatus_failed": "失敗",
+    "ingestLegacyRows": "有 {count} 筆較舊紀錄在以抓取為單位分組之前寫入，未列在上方。",
+    "ingestFailingBoards": "失敗的職缺版",
+    "ingestFailingBoardsHint": "最近一次有失敗的抓取中，哪些職缺版抓不到。同一個 slug 每六小時重複出現是一個壞掉的職缺版，不是每次都是新事件——大多數是沒有使用這些 ATS 服務的公司。",
+    "ingestBoard": "職缺版",
+    "ingestBoardError": "錯誤",
+    "ingestFetched": "抓回筆數",
+    "ingestOutOfScope": "不在範圍内",
+    "ingestScopeHint": "「抓回筆數」是職缺版回傳的數量；「不在範圍内」是被類別規則當成非技術職丟掉的。SmartRecruiters 會在抓職缺內文前先自行篩選，所以它的數字會低估。"
   },
   "usage": {
     "metaTitle": "用量說明 — Offerfy",

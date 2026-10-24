@@ -1,0 +1,20 @@
+# systemd **user** unit — installs to ~/.config/systemd/user/, not /etc.
+# Triggered by OnFailure= on offerfy-ingest.service.
+#
+# This exists so that `journalctl --user -p err` is a single place to look,
+# whatever failed. Deliberately NOT a second log file: the journal already
+# records the failure and is persistent on this host (/var/log/journal), so a
+# parallel file would only be a duplicate that drifts out of date.
+#
+# Known limit: this fires when a pass RAN and failed. It cannot fire when the
+# timer silently stopped or the host went down, because absence of a run is not
+# an event. That case is only caught by the `overdue` flag on
+# /v1/admin/jobs/ingest, which needs someone to look. A dead-man's-switch is
+# the fix if that stops being good enough.
+[Unit]
+Description=Record that the Offerfy job catalog ingest failed
+Documentation=file:///home/ruby0322/offerfy/docs/deploy.md
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemd-cat -p err -t offerfy-ingest /bin/sh -c 'echo "job catalog ingest FAILED; the catalog is now ageing towards expiry. Check: journalctl --user -u offerfy-ingest.service -n 50, and /admin/jobs"'

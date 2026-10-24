@@ -2,13 +2,17 @@
 # Agent sessions on abbey have no passwordless sudo, and a user timer plus
 # `loginctl enable-linger ruby0322` needs none. See docs/deploy.md.
 [Unit]
-Description=Offerfy job catalog ingest (ATS boards + TaiwanJobs)
+Description=Offerfy job catalog ingest (curated ATS boards)
 Documentation=file:///home/ruby0322/offerfy/docs/deploy.md
 
 # No After=/Requires= on postgres: a user manager cannot order itself against
 # system or docker units. Persistent=true on the timer plus a non-zero exit
 # when nothing was refreshed means a run that lands before Postgres is up just
 # fails and the next slot picks it up.
+
+# Fires the moment a pass exits non-zero, so a stalled catalog lands in
+# `journalctl --user -p err` instead of waiting to be noticed.
+OnFailure=offerfy-ingest-failure.service
 
 [Service]
 Type=oneshot

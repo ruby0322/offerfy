@@ -1,6 +1,14 @@
 import type { AppLocale } from "@/i18n/routing";
 
-export type JobSource = "greenhouse" | "lever" | "ashby" | "taiwanjobs";
+// taiwanjobs is retired and no longer ingested, but historical rows keep the
+// value, so it stays in the union and in sourceLabel.
+export type JobSource =
+  | "greenhouse"
+  | "lever"
+  | "ashby"
+  | "smartrecruiters"
+  | "workday"
+  | "taiwanjobs";
 
 export type JobListItem = {
   id: string;
@@ -118,5 +126,7 @@ export function sourceLabel(source: string, locale: AppLocale): string {
   if (source === "greenhouse") return "Greenhouse";
   if (source === "lever") return "Lever";
   if (source === "ashby") return "Ashby";
+  if (source === "smartrecruiters") return "SmartRecruiters";
+  if (source === "workday") return "Workday";
   return source;
 }

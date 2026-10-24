@@ -121,9 +121,13 @@ chunk filename does not mean matching content.
   additionally binds to `visualViewport` so the keyboard cannot cover the composer.
 - **There is no frontend test runner wired up**, but a few pure modules do have
   `*.test.ts` beside them (`lib/seo.test.ts`, `lib/blog/*`). Run them by hand:
-  `./node_modules/.bin/tsx --test lib/seo.test.ts`. Otherwise `npm run lint` and
-  `npm run build:public` are the only automated gates, so verify UI changes by
-  actually running the app. A stub serving
+  `./node_modules/.bin/tsx --test lib/seo.test.ts`.
+- **`npm run build:public` is the real gate** — it typechecks. **`npm run lint` is not
+  usable as one**: bare `eslint` with no path walks generated and vendored files and
+  reports ~121k problems (9k of them errors) on a clean tree, so a real error in your
+  change is invisible in the noise and the exit code is meaningless. Lint the files you
+  touched instead: `./node_modules/.bin/eslint path/to/file.tsx`. Beyond that, verify UI
+  changes by actually running the app. A stub serving
   `/v1/resumes/<id>`, `/preview`, `/ats` and `/messages` is enough to drive the editor
   without the real backend; point `next dev` at it with `BACKEND_INTERNAL_URL`.
 
@@ -149,11 +153,12 @@ needs none. It needs lingering, which is already enabled:
 loginctl show-user ruby0322 --property=Linger   # must be Linger=yes
 ```
 
-Install or refresh it after editing `ops/systemd/offerfy-ingest.*`:
+Install or refresh it after editing `ops/systemd/offerfy-ingest*`. Note the glob —
+there are **three** files now, including the `OnFailure=` handler:
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp /home/ruby0322/offerfy/ops/systemd/offerfy-ingest.{service,timer} ~/.config/systemd/user/
+cp /home/ruby0322/offerfy/ops/systemd/offerfy-ingest*.{service,timer} ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now offerfy-ingest.timer
 ```
@@ -174,11 +179,134 @@ journalctl --user -u offerfy-ingest.service -n 40 --no-pager
    failed unit instead of as a slow SEO death.
 2. **Staleness is derived from `last_seen_at`, not from `is_active`.** `is_active` only
    flips when an ingest run sees a posting disappear, so a dead ingest leaves every row
-   active forever. `JOB_FRESHNESS_DAYS` (30) lives in both
-   `apps/frontend/lib/seo.ts` and `apps/backend/app/routers/jobs.py` and **must stay in
-   step**: the frontend noindexes and drops JSON-LD past the window, the backend drops
-   those rows from the jobs sitemap. A dead ingest now degrades to honest noindex.
+   active forever. `JOB_FRESHNESS_DAYS` (30) lives in exactly two places and **must stay
+   in step**: `apps/backend/app/services/jobs/store.py` (with `freshness_cutoff()`, which
+   both the jobs sitemap and the admin health block use) and `apps/frontend/lib/seo.ts`
+   (which derives `validThrough` and noindexes past the window). A dead ingest now
+   degrades to honest noindex. Do not add a third copy — import it.
 
-**Still missing:** nothing pages anyone when the unit fails, and there is no analytics or
-Search Console on the site at all, so "is Google crawling us" is still unanswerable.
-`systemctl --user list-timers` and the `job_ingest_runs` table are the only signals.
+The rule for "did this pass accomplish anything" is likewise single-sourced:
+`refreshed_nothing()` in `apps/backend/app/services/jobs/ingest.py` backs both the CLI
+exit code and the admin view's `failed` verdict, so the dashboard and the unit can never
+disagree.
+
+## 8b. The board list and what the catalogue carries
+
+Both are deliberate and both are tuned against live data, not guesses.
+
+**`apps/backend/data/ats_boards.json` is curated, and every row must be live.** It once
+held 120 boards of which **64 404ed on every pass** — companies that had moved ATS, or
+that never used Greenhouse/Lever/Ashby at all (TSMC, MediaTek, Shopee, Netflix, Shopify,
+Zendesk…). Those were not lost inventory: they had never returned a single job. They were
+removed, 29 were repaired by correcting the provider or slug (Anthropic is on Greenhouse,
+not Ashby; Anduril is `andurilindustries`), and the file is now 77 boards that all answer.
+
+Before adding a board, **probe it**; do not assume. The three endpoints are in
+`greenhouse.py` / `lever.py` / `ashby.py`, plus `smartrecruiters.py`. Note that probing
+many slugs concurrently gets you rate-limited and returns false 404s — space the requests
+out and retry anything that is not a definite 404, or you will delete live boards.
+
+**SmartRecruiters is the fourth provider**, added because Grab, Canva and Wise publish
+there and nowhere we could read. It differs from the others in two ways that matter:
+descriptions are **not** in the list payload, so each posting costs its own request, and it
+publishes a structured `function` per posting. Both facts shape the fetcher — it scopes
+from the cheap list metadata first so a posting we will not keep never costs a detail call.
+
+**TaiwanJobs is retired** (migration `015_scope_catalog`). It was 1,549 active postings of
+which **91 were technical** — the rest room attendants, delivery drivers, caregivers. The
+source is gone, but `'taiwanjobs'` stays in `JOB_SOURCES` and in the `job_source_values`
+check constraint because historical rows still carry it; narrowing either would fail
+against them.
+
+**`data/job_scope.json` decides which postings we carry.** The board list picks employers,
+this picks their roles: the audience is technical candidates, so a Finance Manager at a
+great engineering company is out. Two deny tiers, and the distinction is load-bearing:
+
+- `deny_always` — the role is non-technical whatever domain it serves. "Technical
+  Recruiter, Hardware" is a recruiting job, and it leaked through a single-tier list
+  because `hardware` rescued it.
+- `deny_context` — a domain, not a role, so a keep needle overrides. "Compliance Engineer"
+  and "Engineering Manager, Billing" are engineers.
+
+Three substring accidents are called out in `tests/test_jobs_scope.py` and must not come
+back: **`cto` is inside Dire*cto*r**, **`ux` is inside L*ux*e**, and `development` rescues
+every Sales Development Representative. Topical keep-words (`data`, `cloud`, `platform`,
+`security`, `technical`) are absent on purpose — the roles they would rescue are already
+caught by a role noun, and as keep needles they let sales titles back in.
+
+The filter runs in `ingest_board` **before `seen_ids` is computed**, which is what makes a
+posting that falls out of scope get `is_active = False` on that same pass and leave the
+sitemap. Do not move it after.
+
+Retune by editing the JSON, then **measure against the real catalogue before committing** —
+run the predicate over live titles and read a sample of both sides. A deny-list written
+from imagination is how you lose "Infrastructure Security Engineer" to the word "security".
+
+## 8c. Workday is a second, slower pass
+
+Workday reaches the competitive semiconductor tier nothing else could — NVIDIA, Micron,
+Applied Materials, Intel, NXP, Marvell — plus CrowdStrike, Zendesk, Red Hat, Salesforce,
+Adobe and Workday itself. **12 boards, ~12k postings**, in
+`apps/backend/data/workday_boards.json`.
+
+**It is not TSMC or MediaTek, and it cannot be.** Checked 2026-10-24: TSMC returns 403 to
+every request including its own `robots.txt`, and MediaTek runs a bespoke Strapi site with
+no public jobs API. Both would need scraping, which this project does not do. Do not add a
+Workday row for either; they have no tenant.
+
+**Adding a board needs a confirmed 200, not a guess.** `*.myworkdayjobs.com` is a wildcard
+host, so a nonsense tenant like `mtk.wd1` still answers 406 — that is not evidence of
+anything. A wrong site slug returns 422. Only a `POST /wday/cxs/<tenant>/<site>/jobs` that
+returns 200 with an integer `total` proves a board exists. AMD, Qualcomm, Lam Research, Dell
+and Analog Devices all have tenants whose site slug we have not found yet.
+
+**Why it is a separate unit and a separate config file.** Workday's list endpoint is capped
+at 20 per call and carries no description, and `postedOn` is the English phrase *"Posted
+Yesterday"* rather than a date. Everything usable — description, `startDate`, apply url —
+is behind a per-posting detail call at ~0.7s. Fetching all 12k every pass is 20–36 minutes
+against 12,600 requests; the whole 6-hourly ATS pass is 80 seconds. So Workday gets
+`offerfy-workday.timer`, **daily at 03:40**, and `ingest_workday` rather than
+`ingest_board`.
+
+Two things make it affordable, and **both are load-bear**:
+
+1. **Scope from the free list metadata first**, so a posting we would not carry never costs
+   a detail call.
+2. **Skip the detail call for a posting already held.** `known_source_ids` reads what we
+   have, and the fetcher returns those ids as `still_live` instead of re-fetching. Steady
+   state therefore only pays for genuinely new listings.
+
+The trap in (2): a skipped posting still needs its freshness clock bumped, which is what
+`store.touch_jobs` is for. Miss it and the row ages out of `validThrough` and goes noindex
+while the job is still open — the same failure that took the catalogue dark in October.
+`WorkdayFetch.seen_ids` likewise unions new **and** still-live ids, because handing
+`expire_missing` only the new ones would deactivate the entire board on every pass. Both
+are covered by tests in `tests/test_jobs_workday.py`; do not simplify either away.
+
+Note also that `refreshed_nothing` means something different here: upserting zero is the
+normal steady state, so a Workday pass counts as failed only when **no board answered**.
+
+## 9. Monitoring the ingest
+
+Three signals, most useful first:
+
+1. **`/admin/jobs`** (behind `ADMIN_EMAILS`, robots-disallowed) — freshness verdict,
+   indexable vs noindexed page counts, recent passes, and the boards that failed in the
+   last bad pass. Backed by `GET /v1/admin/jobs/ingest`.
+2. **`journalctl --user -p err`** — the `OnFailure=` handler
+   (`offerfy-ingest-failure.service`) tags one `err`-priority line, so this catches a
+   failed pass whichever unit it came from.
+3. **`systemctl --user list-timers offerfy-ingest.timer`** — did it fire, when is next.
+
+`job_ingest_runs` holds one row **per board**, ~77 per pass. `ok_count - upserted_count`
+is how many postings the scope rules dropped, which `/admin/jobs` shows as "out of scope"
+without needing a column for it. (For smartrecruiters that figure undercounts: it scopes
+itself before fetching descriptions, so its `ok_count` is already post-filter.) `run_id` (migration 014)
+groups them; rows written before that migration have `run_id IS NULL` and are reported as
+`legacy_row_count` rather than folded into a fake pass.
+
+**Known blind spot.** `OnFailure=` only fires when a pass ran and failed. A timer that
+silently stopped, or a host that went down, produces no event at all — that is caught only
+by the `overdue` flag on the admin page, which needs someone to look. Closing it properly
+needs an off-host dead-man's-switch. Also note there is still **no analytics and no Search
+Console** on the site, so "is Google crawling the job pages" remains unanswerable here.
