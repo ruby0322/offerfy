@@ -13,6 +13,7 @@ from app.routers import (
     memory,
     resumes,
     shares,
+    talent_me,
     templates,
 )
 from app.services.templates import start_template_prefetch
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
     application.include_router(memory.router)
     application.include_router(templates.router)
     application.include_router(admin.router)
+    application.include_router(talent_me.router)
     return application
 
 

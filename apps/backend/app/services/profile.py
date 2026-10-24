@@ -4,13 +4,200 @@ A profile is derived state. It exists only while its owner's newest answer for
 talent_introduction is 'granted', and it holds no contact details -- see
 scrub_contacts, and the absence of any field for one in
 app.schemas.TalentProfilePayload.
+
+Nothing here is triggered implicitly. Building is not hung off publishing,
+because publishing commits in-request and must not start failing when the
+provider is down; staleness is computed from the revision pointer instead, so
+the publish path needs no code at all. And it is never done lazily inside a
+read, because that would let an external reader spend our money and set our
+latency.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
+import re
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any
+
+import httpx
 from sqlalchemy.orm import Session
 
-from app.models import TalentProfile, User
+from app.config import get_settings
+from app.models import Resume, TalentProfile, User
+from app.schemas import (
+    TALENT_EDUCATION_LIMIT,
+    TALENT_ROLE_LIMIT,
+    TALENT_SKILL_LIMIT,
+    TALENT_SUMMARY_SKILLS,
+    TalentProfileDetail,
+    TalentProfilePayload,
+    TalentProfileSummary,
+)
+from app.services.consent import has_consent
+from app.services.family import family_master
+from app.services.llm import _responses_url, llm_configured, normalize_openai_model
+from app.services.memory import accepted_memory_texts
+from app.services.revisions import published_source
+
+logger = logging.getLogger(__name__)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+PROFILE_TIMEOUT = httpx.Timeout(90.0, connect=10.0)
+
+PROMPT = (
+    "You read one resume and return a structured talent profile for it. "
+    "Use only what the resume and the listed facts about the person say; "
+    "never infer, guess or fill a gap. Leave a field null and a list empty "
+    "when the resume does not answer it. "
+    "Never include an email address, phone number, URL, social handle or "
+    "street address in any field, including the summary and the role "
+    "highlights -- employers are introduced through Offerfy, not directly. "
+    "locations is city or region only. "
+    "Use YYYY-MM for dates, or Present for an ongoing role. "
+    "headline is the person's own current role in their words, not a pitch. "
+    "summary is at most three sentences, in the resume's own language."
+)
+
+
+def _schema() -> dict[str, Any]:
+    """The response schema, written out rather than derived from pydantic.
+
+    Strict structured output requires every property in `required` and
+    additionalProperties false throughout, which a pydantic schema with
+    defaults does not produce. The payload is still validated against
+    TalentProfilePayload afterwards, so this is the wire contract and that is
+    the truth.
+    """
+    text = {"type": ["string", "null"]}
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "display_name",
+            "headline",
+            "summary",
+            "years_experience",
+            "locations",
+            "languages",
+            "skills",
+            "roles",
+            "education",
+        ],
+        "properties": {
+            "display_name": text,
+            "headline": text,
+            "summary": text,
+            "years_experience": {"type": ["integer", "null"]},
+            "locations": {"type": "array", "items": {"type": "string"}},
+            "languages": {"type": "array", "items": {"type": "string"}},
+            "skills": {"type": "array", "items": {"type": "string"}},
+            "roles": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "employer",
+                        "title",
+                        "start",
+                        "end",
+                        "highlights",
+                    ],
+                    "properties": {
+                        "employer": text,
+                        "title": text,
+                        "start": text,
+                        "end": text,
+                        "highlights": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
+            "education": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["institution", "credential", "field", "end"],
+                    "properties": {
+                        "institution": text,
+                        "credential": text,
+                        "field": text,
+                        "end": text,
+                    },
+                },
+            },
+        },
+    }
+
+
+# --- contact scrubbing -------------------------------------------------------
+
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_URL = re.compile(
+    r"(?:https?://|www\.)\S+|\b[\w-]+\.(?:com|net|org|io|dev|cc|tw|me|ai|co)\b",
+    re.IGNORECASE,
+)
+_PHONE = re.compile(r"\+?\d[\d\s().-]{6,}\d")
+_HANDLE = re.compile(r"(?<!\w)@[\w.]{2,}")
+# Four or more digits in a row: postcodes and street numbers. Stripped from
+# locations, where a city is the most precise thing we want.
+_LONG_DIGITS = re.compile(r"\d{4,}")
+
+
+def _scrub_text(value: str | None) -> str | None:
+    if not value:
+        return None
+    cleaned = value
+    for pattern in (_EMAIL, _URL, _PHONE, _HANDLE):
+        cleaned = pattern.sub(" ", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" ,;·|-")
+    return cleaned or None
+
+
+def scrub_contacts(payload: TalentProfilePayload) -> TalentProfilePayload:
+    """Strip anything that could be used to reach the person directly.
+
+    The prompt already says not to include it. This runs anyway: a model that
+    puts an email in `summary` once in a hundred builds is a model that leaks
+    a hundredth of the pool, and the whole promise of this surface is that the
+    introduction goes through us.
+
+    A field that is only a contact detail becomes None rather than an empty
+    string, so the payload never carries a field that looks answered.
+    """
+    payload.display_name = _scrub_text(payload.display_name)
+    payload.headline = _scrub_text(payload.headline)
+    payload.summary = _scrub_text(payload.summary)
+    payload.locations = [
+        cleaned
+        for raw in payload.locations
+        if (cleaned := _scrub_text(_LONG_DIGITS.sub(" ", raw)))
+    ]
+    payload.languages = [c for raw in payload.languages if (c := _scrub_text(raw))]
+    payload.skills = [c for raw in payload.skills if (c := _scrub_text(raw))]
+    for role in payload.roles:
+        role.employer = _scrub_text(role.employer)
+        role.title = _scrub_text(role.title)
+        role.start = _scrub_text(role.start)
+        role.end = _scrub_text(role.end)
+        role.highlights = [c for raw in role.highlights if (c := _scrub_text(raw))]
+    for school in payload.education:
+        school.institution = _scrub_text(school.institution)
+        school.credential = _scrub_text(school.credential)
+        school.field = _scrub_text(school.field)
+        school.end = _scrub_text(school.end)
+    return payload
+
+
+# --- reading what we hold ----------------------------------------------------
 
 
 def profile_for_user(db: Session, user: User) -> TalentProfile | None:
@@ -38,3 +225,271 @@ def delete_profile_for_user(db: Session, user: User) -> bool:
     db.delete(profile)
     db.flush()
     return True
+
+
+def source_resume(db: Session, user: User) -> Resume | None:
+    """The resume the person chose, if they chose one they still own."""
+    if not user.profile_resume_id:
+        return None
+    resume = db.get(Resume, user.profile_resume_id)
+    if resume is None or resume.user_id != user.id:
+        return None
+    return resume
+
+
+def _input_hash(revision_id: str, source: str, facts: list[str]) -> str:
+    joined = "\x00".join([revision_id, source, "\n".join(facts)])
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+
+def _bundle(db: Session, user: User) -> tuple[Resume, str, str, list[str]] | None:
+    """Everything a build reads: the resume, its published revision and facts."""
+    resume = source_resume(db, user)
+    if resume is None or resume.published_revision_id is None:
+        return None
+    source = published_source(db, resume)
+    if not source:
+        return None
+    # Memory items hang off the master of the family, so a tailor chosen as
+    # the source still reads its parent's facts.
+    facts = accepted_memory_texts(db, family_master(db, resume).id)
+    return resume, resume.published_revision_id, source, facts
+
+
+def is_stale(db: Session, user: User, profile: TalentProfile) -> bool:
+    """True when the profile no longer matches what it was built from.
+
+    Covers republishing the resume and accepting a new memory item, which is
+    why input_hash exists beside the revision pointer.
+    """
+    bundle = _bundle(db, user)
+    if bundle is None:
+        return False
+    _resume, revision_id, source, facts = bundle
+    if profile.source_revision_id != revision_id:
+        return True
+    return profile.input_hash != _input_hash(revision_id, source, facts)
+
+
+def payload_of(profile: TalentProfile) -> TalentProfilePayload:
+    return TalentProfilePayload.model_validate_json(profile.profile_json)
+
+
+def detail_of(profile: TalentProfile) -> TalentProfileDetail:
+    return TalentProfileDetail(
+        profile_id=profile.id,
+        updated_at=profile.built_at.isoformat(),
+        profile=payload_of(profile),
+    )
+
+
+def summary_of(profile: TalentProfile) -> TalentProfileSummary:
+    payload = payload_of(profile)
+    return TalentProfileSummary(
+        profile_id=profile.id,
+        display_name=profile.display_name,
+        headline=profile.headline,
+        years_experience=profile.years_experience,
+        locations=payload.locations,
+        skills=payload.skills[:TALENT_SUMMARY_SKILLS],
+        updated_at=profile.built_at.isoformat(),
+    )
+
+
+# --- building ----------------------------------------------------------------
+
+
+@dataclass
+class ProfileBuildResult:
+    """What a build did. A failure never writes and never overwrites."""
+
+    profile: TalentProfile | None = None
+    error: str | None = None
+    usage: dict[str, Any] = field(default_factory=dict)
+    model: str = ""
+    source_chars: int = 0
+    resume_id: str | None = None
+
+
+def _derived(payload: TalentProfilePayload) -> dict[str, Any]:
+    """The denormalised columns, rebuilt from the payload on every write.
+
+    skills_text is pipe-delimited so LIKE '%|java|%' cannot match 'javascript'.
+    """
+    skills = [skill.lower() for skill in payload.skills]
+    words = [
+        payload.display_name or "",
+        payload.headline or "",
+        payload.summary or "",
+        " ".join(payload.locations),
+        " ".join(payload.languages),
+        " ".join(payload.skills),
+        " ".join(
+            " ".join(filter(None, [role.title, role.employer]))
+            for role in payload.roles
+        ),
+        " ".join(
+            " ".join(filter(None, [school.institution, school.credential, school.field]))
+            for school in payload.education
+        ),
+    ]
+    return {
+        "display_name": (payload.display_name or None),
+        "headline": (payload.headline or None),
+        "years_experience": payload.years_experience,
+        "search_text": re.sub(r"\s+", " ", " ".join(words)).strip().lower(),
+        "skills_text": ("|" + "|".join(skills) + "|") if skills else "",
+    }
+
+
+def _is_empty(payload: TalentProfilePayload) -> bool:
+    """No name, no headline and no roles is not a profile.
+
+    Writing it would mean handing an employer an empty card and logging a
+    disclosure for it.
+    """
+    return not (payload.display_name or payload.headline or payload.roles)
+
+
+def _request_body(model: str, source: str, facts: list[str]) -> dict[str, Any]:
+    parts = [PROMPT, "", "RESUME (Typst source):", source]
+    if facts:
+        parts += ["", "FACTS THE PERSON CONFIRMED ABOUT THEMSELVES:"]
+        parts += [f"- {fact}" for fact in facts]
+    return {
+        "model": model,
+        "input": [{"role": "user", "content": "\n".join(parts)}],
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "talent_profile",
+                "strict": True,
+                "schema": _schema(),
+            }
+        },
+    }
+
+
+def _output_text(data: dict[str, Any]) -> str | None:
+    direct = data.get("output_text")
+    if isinstance(direct, str) and direct.strip():
+        return direct
+    for item in data.get("output") or []:
+        if not isinstance(item, dict):
+            continue
+        for part in item.get("content") or []:
+            if isinstance(part, dict) and isinstance(part.get("text"), str):
+                if part["text"].strip():
+                    return part["text"]
+    return None
+
+
+def _usage_of(data: dict[str, Any]) -> dict[str, Any]:
+    usage = data.get("usage")
+    if not isinstance(usage, dict):
+        return {}
+    cached = usage.get("input_tokens_details") or {}
+    return {
+        "input_tokens": usage.get("input_tokens"),
+        "output_tokens": usage.get("output_tokens"),
+        "cached_tokens": cached.get("cached_tokens")
+        if isinstance(cached, dict)
+        else None,
+    }
+
+
+async def build_profile(db: Session, user: User) -> ProfileBuildResult:
+    """Build or rebuild this person's profile. Never raises.
+
+    Consent is required here, not only on the read path: extraction sends
+    resume content to the language-model provider for a purpose that only the
+    talent_introduction grant covers.
+    """
+    if not has_consent(db, user=user, purpose="talent_introduction"):
+        return ProfileBuildResult(error="no_consent")
+    bundle = _bundle(db, user)
+    if bundle is None:
+        return ProfileBuildResult(error="no_source")
+    resume, revision_id, source, facts = bundle
+    if not llm_configured():
+        return ProfileBuildResult(error="llm_not_configured", resume_id=resume.id)
+
+    settings = get_settings()
+    model = normalize_openai_model(settings.openai_model)
+    url = _responses_url(settings.openai_base_url or "https://api.openai.com/v1")
+    headers = {
+        "Authorization": f"Bearer {settings.openai_api_key}",
+        "Content-Type": "application/json",
+    }
+    result = ProfileBuildResult(
+        model=model, source_chars=len(source), resume_id=resume.id
+    )
+    try:
+        async with httpx.AsyncClient(timeout=PROFILE_TIMEOUT) as client:
+            response = await client.post(
+                url, headers=headers, json=_request_body(model, source, facts)
+            )
+            if response.status_code >= 400:
+                logger.warning("profile build failed status=%s", response.status_code)
+                result.error = "provider_error"
+                return result
+            data = response.json()
+    except httpx.HTTPError as exc:
+        logger.warning("profile build transport failed: %s", exc.__class__.__name__)
+        result.error = "provider_error"
+        return result
+    except ValueError:
+        result.error = "unparseable"
+        return result
+
+    if not isinstance(data, dict):
+        result.error = "unparseable"
+        return result
+    result.usage = _usage_of(data)
+    text = _output_text(data)
+    if not text:
+        result.error = "unparseable"
+        return result
+    try:
+        payload = TalentProfilePayload.model_validate_json(text)
+    except ValueError:
+        result.error = "unparseable"
+        return result
+
+    payload = scrub_contacts(payload)
+    # A name Google verified beats one a model read off a document.
+    if user.name:
+        payload.display_name = user.name
+    payload.skills = payload.skills[:TALENT_SKILL_LIMIT]
+    payload.roles = payload.roles[:TALENT_ROLE_LIMIT]
+    payload.education = payload.education[:TALENT_EDUCATION_LIMIT]
+    if _is_empty(payload):
+        result.error = "empty"
+        return result
+
+    # Canonical JSON: the bytes are what content_hash commits to, and
+    # disclosure_events will cite that hash as evidence of what a recipient
+    # holds. sort_keys so an identical payload hashes identically.
+    blob = json.dumps(
+        payload.model_dump(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    columns = _derived(payload)
+    profile = profile_for_user(db, user)
+    if profile is None:
+        profile = TalentProfile(user_id=user.id)
+        db.add(profile)
+    profile.source_resume_id = resume.id
+    profile.source_revision_id = revision_id
+    profile.input_hash = _input_hash(revision_id, source, facts)
+    profile.profile_json = blob
+    profile.content_hash = hashlib.sha256(blob.encode("utf-8")).hexdigest()
+    profile.model = model[:128]
+    profile.schema_version = payload.schema_version
+    # Set on every write, not just the insert: built_at is what the owner and
+    # the reader see as this payload's date.
+    profile.built_at = _utcnow()
+    for column, value in columns.items():
+        setattr(profile, column, value)
+    db.flush()
+    result.profile = profile
+    return result

@@ -162,3 +162,107 @@ class ConsentState(BaseModel):
     # does not have to know the purpose list.
     consents: dict[str, bool]
     policy_version: str
+
+
+# Caps on the payload. They bound what one read can hand over as much as they
+# bound the model's output.
+TALENT_SKILL_LIMIT = 40
+TALENT_ROLE_LIMIT = 12
+TALENT_EDUCATION_LIMIT = 6
+TALENT_SUMMARY_SKILLS = 12
+
+
+class TalentRole(BaseModel):
+    employer: str | None = None
+    title: str | None = None
+    # YYYY-MM, or Present/至今/现在 -- the convention llm.SYSTEM_PROMPT already
+    # enforces inside the documents. Kept as written: a date we could not parse
+    # is better shown verbatim than dropped.
+    start: str | None = None
+    end: str | None = None
+    highlights: list[str] = Field(default_factory=list, max_length=4)
+
+
+class TalentEducation(BaseModel):
+    institution: str | None = None
+    credential: str | None = None
+    field: str | None = None
+    end: str | None = None
+
+
+class TalentProfilePayload(BaseModel):
+    """What an employer may be shown, stored as talent_profiles.profile_json.
+
+    There is deliberately no email, phone, URL, address or social-handle field,
+    and none may be added: introductions go through Offerfy, so a reader who
+    has this payload still cannot contact the person directly. Three things
+    enforce that -- this schema having nowhere to put one, the prompt saying
+    not to, and services.profile.scrub_contacts removing them from the text
+    fields regardless.
+    """
+
+    schema_version: int = 1
+    display_name: str | None = Field(default=None, max_length=255)
+    headline: str | None = Field(default=None, max_length=120)
+    summary: str | None = Field(default=None, max_length=600)
+    years_experience: int | None = Field(default=None, ge=0, le=60)
+    # City or region only. A street address is a contact detail.
+    locations: list[str] = Field(default_factory=list, max_length=4)
+    languages: list[str] = Field(default_factory=list, max_length=6)
+    skills: list[str] = Field(default_factory=list, max_length=TALENT_SKILL_LIMIT)
+    roles: list[TalentRole] = Field(default_factory=list, max_length=TALENT_ROLE_LIMIT)
+    education: list[TalentEducation] = Field(
+        default_factory=list, max_length=TALENT_EDUCATION_LIMIT
+    )
+
+
+class TalentProfileDetail(BaseModel):
+    """One profile as a credentialed reader sees it.
+
+    The identifier is the profile's own id, never the user's: handing an
+    external reader a user id makes it correlatable with anything that ever
+    leaks one.
+    """
+
+    profile_id: str
+    updated_at: str
+    profile: TalentProfilePayload
+
+
+class TalentProfileSummary(BaseModel):
+    """Enough to decide whom to open, and no more."""
+
+    profile_id: str
+    display_name: str | None = None
+    headline: str | None = None
+    years_experience: int | None = None
+    locations: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+    updated_at: str
+
+
+class TalentProfileSummaryList(BaseModel):
+    items: list[TalentProfileSummary]
+    # Counted before the per-candidate consent filter, so it is advisory. A
+    # page can be shorter than limit; see services.profile.readable_profiles.
+    total: int
+    limit: int
+    offset: int
+
+
+class TalentProfileSourceUpdate(BaseModel):
+    resume_id: str | None = None
+
+
+class TalentProfileStatus(BaseModel):
+    """The owner's view: what we hold, where it came from, who has read it."""
+
+    consent_granted: bool
+    source_resume_id: str | None = None
+    source_resume_title: str | None = None
+    has_published_revision: bool = False
+    profile: TalentProfilePayload | None = None
+    stale: bool = False
+    built_at: str | None = None
+    disclosure_count: int = 0
+    last_disclosed_at: str | None = None
