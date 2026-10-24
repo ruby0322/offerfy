@@ -156,7 +156,7 @@
     "turnOff": "Turn off",
     "error": "Could not save that. Please try again.",
     "profileTitle": "The profile employers see",
-    "profileNotice": "We build a short structured profile from the published version of the resume you choose here, and that profile — not your resume file — is what an employer or recruiter sees.",
+    "profileNotice": "We build a short profile from the published version of the resume you choose here, and that profile — not your resume file — is what an employer or recruiter sees.",
     "profileNoContact": "It never includes your email, phone number or links. Interested employers are introduced to you through Offerfy, and every time someone reads your profile we record who they were.",
     "profileSourceLabel": "Resume to build it from",
     "profileSourceNone": "No resume chosen",
@@ -167,7 +167,7 @@
     "profileBuiltAt": "Built {date}",
     "profileStale": "This resume changed since the profile was built.",
     "profileNever": "No profile built yet.",
-    "profileDisclosures": "Read by {count} so far.",
+    "profileDisclosures": "Read {count} times so far.",
     "profileNoDisclosures": "Nobody has read it yet.",
     "profileDelete": "Delete profile",
     "profileError": "That did not work. Try again."
@@ -523,7 +523,7 @@
           "paragraphs": [
             "If you explicitly turn on “Open to matching” in your settings, we pass your resume data to hiring companies, or to recruiters acting for them, to introduce you to roles.",
             "This is off by default. Until you turn it on, we give your resume to no employer. You can turn it off at any time; we then stop passing it on and require anyone who already has it to stop using it.",
-            "What we pass on is a short structured profile built from the published version of a resume you choose — roles, skills, education, and a summary. It never includes your email, phone number, or links; interested employers are introduced to you through Offerfy. We record every read of your profile and who read it, and you can see that count in your settings."
+            "What we pass on is a short profile built from the published version of a resume you choose — roles, skills, education, and a summary. It never includes your email, phone number, or links; if an employer is interested, Offerfy introduces you. We record every read of your profile and who read it, and you can see that count in your settings."
           ]
         },
         {
