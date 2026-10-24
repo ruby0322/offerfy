@@ -292,7 +292,8 @@ class Job(Base):
     __table_args__ = (
         CheckConstraint(
             # taiwanjobs is retired but stays listed: historical rows carry it.
-            "source IN ('greenhouse', 'lever', 'ashby', 'smartrecruiters', 'taiwanjobs')",
+            "source IN ('greenhouse', 'lever', 'ashby', 'smartrecruiters', "
+            "'workday', 'taiwanjobs')",
             name="job_source_values",
         ),
         UniqueConstraint("source", "source_id", name="jobs_source_source_id_key"),

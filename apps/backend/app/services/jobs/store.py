@@ -64,6 +64,46 @@ def upsert_jobs(
     return count
 
 
+def touch_jobs(
+    db: Session,
+    *,
+    source: str,
+    source_ids: set[str],
+    now: datetime | None = None,
+) -> int:
+    """Mark known postings as still live without rewriting their content.
+
+    For a source where the description costs its own request (workday), we skip
+    that request for a posting we already hold. But skipping it must not mean
+    skipping the row: last_seen_at is what keeps a posting inside its
+    validThrough window, so a row we never touch goes noindex in 30 days while
+    the job is still open. This bumps the freshness clock and nothing else.
+    """
+    if not source_ids:
+        return 0
+    stamp = now or datetime.now(timezone.utc)
+    rows = (
+        db.query(Job)
+        .filter(Job.source == source, Job.source_id.in_(source_ids))
+        .all()
+    )
+    for row in rows:
+        row.last_seen_at = stamp
+        row.is_active = True
+    return len(rows)
+
+
+def known_source_ids(db: Session, *, source: str, prefix: str) -> set[str]:
+    """source_ids we already hold for one board, so a caller can skip re-fetching
+    their descriptions."""
+    rows = (
+        db.query(Job.source_id)
+        .filter(Job.source == source, Job.source_id.startswith(prefix))
+        .all()
+    )
+    return {row[0] for row in rows}
+
+
 def expire_missing(
     db: Session,
     *,

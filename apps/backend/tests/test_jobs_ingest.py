@@ -6,7 +6,7 @@ import httpx
 
 from app.models import Job, JobIngestRun
 from app.services.jobs.ashby import parse_ashby
-from app.services.jobs.boards import boards_path, load_boards
+from app.services.jobs.boards import boards_path, load_boards, load_workday_boards
 from app.services.jobs.greenhouse import parse_greenhouse
 from app.services.jobs.ingest import CatalogResult, SourceResult, ingest_board
 from app.services.jobs.lever import parse_lever
@@ -325,3 +325,22 @@ def test_out_of_scope_postings_are_not_stored_and_get_expired(db_session):
     # ok_count stays the pre-filter count so admin can show fetched vs kept.
     assert result.fetched == 2
     assert result.upserted == 1
+
+
+def test_shipped_workday_board_list_is_well_formed():
+    """Each row must carry host/tenant/site, and the slug must be unique.
+
+    Liveness is not checked here -- it needs a POST per board and the admin
+    monitor already reports failures. But note a wrong tenant still returns 406
+    from the wildcard *.myworkdayjobs.com host, so a board can only be confirmed
+    by a 200 with a `total`. Never add one on a guess.
+    """
+    raw = json.loads((BACKEND_DATA / "workday_boards.json").read_text(encoding="utf-8"))
+    boards = load_workday_boards()
+    assert len(boards) == len(raw["boards"])
+    slugs = {b.slug for b in boards}
+    assert len(slugs) == len(boards), "two boards share a source_id prefix"
+    for b in boards:
+        assert b.host.endswith("myworkdayjobs.com"), b
+        assert b.tenant and b.site and b.company
+        assert b.api("/jobs").startswith(f"https://{b.host}/wday/cxs/{b.tenant}/{b.site}")

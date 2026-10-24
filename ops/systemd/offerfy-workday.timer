@@ -1,0 +1,15 @@
+# systemd **user** unit — see offerfy-workday.service.
+[Unit]
+Description=Run the Offerfy Workday ingest daily
+Documentation=file:///home/ruby0322/offerfy/docs/deploy.md
+
+[Timer]
+# Daily, well clear of the 6-hourly ATS pass at :10 past 00/06/12/18.
+OnCalendar=*-*-* 03:40:00
+Persistent=true
+RandomizedDelaySec=20min
+AccuracySec=5min
+Unit=offerfy-workday.service
+
+[Install]
+WantedBy=timers.target
