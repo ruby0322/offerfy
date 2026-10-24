@@ -46,7 +46,7 @@ todos:
     status: in_progress
   - id: t11-verify
     content: "Task 11: pytest, lint, tsc, build, a real browser walk through all three tiers, then deploy"
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -888,7 +888,7 @@ rather than trusting a green suite.
 
 ---
 
-## Task 11: Verify, then deploy
+## Task 11: Verify, then deploy — DONE 2026-10-24
 
 - [x] `cd apps/backend && PATH="$PWD/.tools:$PATH" .venv/bin/pytest -q` —
       **469 passed, 1 failed** as of 2026-10-24. The failure is
@@ -932,6 +932,61 @@ rather than trusting a green suite.
 - [ ] After a day, read the admin dashboard: measured per-turn cost against Task
       0's number, refusal rate by tier, guest network-key refusals, spend against
       both ceilings. **Tune the constants from that, not from this document.**
+
+### Deploy record, 2026-10-24
+
+Live at 20:42 Taipei. Two restarts of `offerfy-web`, 7s and 4s of downtime --
+well under the ~40s AGENTS.md warns about. `offerfy-api` took SIGHUP with none.
+
+**Production was on a migration this branch had never seen.** `alembic_version`
+read `016_workday_source`; this branch's head was `016_usage_refusals`. Both
+chains descended from `013`, so alembic had two heads and `upgrade head` would
+have refused -- after the merge and the push, before the build. The merge could
+not have caught it: different files, colliding revision numbers, no textual
+conflict. Renumbered to 017/018/019 onto main's head, then rehearsed the exact
+production path on a throwaway Postgres: fresh database to `016_workday_source`,
+the three new ones up, all three down, up again, and `\d` identical against an
+`ensure_schema()` database for all three tables.
+
+Migrations ran **before** the restart, deliberately: they are additive -- three
+columns and two tables -- and the old code ignores them, so production served
+normally throughout. The backfill caught all 23 existing `llm_calls` rows with
+zero orphans. `usage_counters` starts empty by design.
+
+**The smoke check caught a silent data loss.** The live Terms page still
+published "Guest use is rate-limited to 10 chat turns and 20 PDF exports per
+hour", which this work had just made false. The merge's key-level resolution of
+the three message files carried every key that was *new* on either side -- but
+the Terms and privacy changes were modified values inside arrays that already
+existed in the merge base, so they were dropped in favour of main's version and
+nothing complained. Lost in all three locales: three Terms paragraphs, one
+privacy paragraph in "What we collect", one in "Retention". Restored, rebuilt,
+redeployed, re-smoked.
+
+The resolution script asserted that none of *main's* keys were lost and never
+asserted the same for its own side. **An asymmetric check on a symmetric
+operation reads as thorough and is not** -- and only a grep against the live
+site found it, which is the second time this work was saved by running the thing
+rather than trusting a green suite.
+
+Verified live: all three locales of `/usage`, `/terms` and `/privacy` carrying
+the new copy; `/usage` in the sitemap and the footer; `GET /v1/usage` reporting
+`enforced: true`, `0/4` edits for a guest and a Monday reset; the admin usage
+endpoint 401ing without a session; zero errors in either unit's journal.
+
+**Open, in priority order:**
+
+1. **Re-peg `CREDIT_UUSD`.** The history trim is now live, so a round costs
+   ~16,400 input tokens rather than ~25,900 and the reference edit is nearer
+   $0.045 than the $0.07 the tiers are pegged to. Safe direction -- a credit
+   buys more than advertised -- but the public page understates by ~35%. Re-run
+   the Task 0 queries after a few days of real traffic and re-peg.
+2. **Task 8**, the guest network key. Guests are capped per cookie and a cookie
+   is free to clear, which is the one unbounded term in the whole design.
+3. **`prune_refusals` is not scheduled.** The privacy policy now promises 90
+   days with no mechanism behind it; it needs a systemd user timer like the
+   ingest has.
+4. Task 10's remaining test gaps, and Task 13 (grants) in the backlog.
 
 ## Not in scope
 

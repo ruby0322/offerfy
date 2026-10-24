@@ -1,0 +1,536 @@
+# Offerfy on abbey — local ops runbook
+
+**Agents: read this file before any deploy, DNS, Ingress, TLS, port, process, or firewall work on this host.** Do not re-derive the public routing. Do not invent a second 443 listener.
+
+This file is gitignored (`docs/deploy.md`). Update it when live state changes.
+
+Last verified: **2026-10-22 19:50 CST** (abbey).
+
+---
+
+## Hard rules
+
+1. **Do not bind host `:80` or `:443`.** Those belong to pd-care’s socat ingress-bridge. Stealing them breaks `pd.lu.im.ntu.edu.tw`, `test.pd.lu.im.ntu.edu.tw`, `argocd.pd.lu.im.ntu.edu.tw`, and ACME HTTP-01.
+2. **Do not change pd-care Ingress hosts** or the bridge compose file under `/home/ruby0322/pd-care`.
+3. **Do not publish backend `:8001` on the public NIC.** Browser API goes `https://<host>/api/*` → Next rewrite → `127.0.0.1:8001`.
+4. **Do not bind `:3000`, `:8000`, `:5432`, or `:8333`.** Those are pd-care (and other users) on this machine.
+5. Offerfy is **not** a k8s Deployment. Only Ingress + Service + Endpoints in `offerfy-native-tmp` point at the host Next process.
+6. Namespace name `offerfy-native-tmp` is live-only; it is **not** in git. Recreate from the YAML in this file if missing.
+7. UI copy must never say CareerOS / Roleloop / Offerly / Offerloop / RenderResume. Public landing is the warm-paper indie page (not navy).
+8. Do not commit `apps/frontend/next-env.d.ts` (flips `.next/dev/types` vs `.next/types`).
+9. **Every compose `ports:` entry must be prefixed `127.0.0.1:`.** A two-segment mapping (`"8334:8333"`) makes Docker bind `0.0.0.0` — the public NIC. SeaweedFS S3 and Postgres were world-reachable this way until 2026-10-22; see *Security posture*. **Docker publishes via its own iptables chains and does not honour the UFW INPUT policy**, so "UFW default DROP" does not protect a published port. In-stack consumers use docker DNS (`postgres:5432`, `seaweedfs-s3:8333`) and never need the host port.
+10. **Never run a bare `npx next build` for the public site.** Dest `apps/frontend/.env.local` sets `BACKEND_INTERNAL_URL=http://127.0.0.1:8002`. Next **bakes** `/api` rewrites into `.next/routes-manifest.json` at build time. systemd `Environment=BACKEND_INTERNAL_URL=…8001` on `offerfy-web` does **not** override that. The public site then proxies Google login to dest uvicorn, which sends `redirect_uri=http://127.0.0.1:3001/…`. Always `npm run build:public` (or `BACKEND_INTERNAL_URL=http://127.0.0.1:8001 npx next build`). Confirm the baked destination is `:8001` before restarting `offerfy-web`.
+
+---
+
+## Google login `redirect_uri` (do not send users to 127)
+
+**Symptom:** Sign-in on `https://offerfy.cc` opens Google with `redirect_uri=http://127.0.0.1:3001/api/v1/auth/google/callback`.
+
+**This is not `GOOGLE_REDIRECT_URI` on `offerfy-api`.** Hit `:8001` directly vs the public `/api` path — they can disagree:
+
+| Request | What it hits | Typical `redirect_uri` |
+|---|---|---|
+| `http://127.0.0.1:8001/v1/auth/google/start` | systemd `offerfy-api`, `.env.production` | `https://offerfy.cc/api/v1/auth/google/callback` (correct) |
+| `https://offerfy.cc/api/v1/auth/google/start` | Next `:3200` rewrite → whatever was **baked** | dest `:8002` + `.env` → `http://127.0.0.1:3001/…` if the last public build used dest |
+
+Dest `.env`: `APP_ENV=development`, `GOOGLE_REDIRECT_URI=http://127.0.0.1:3001/api/v1/auth/google/callback`. Production `.env.production`: `APP_ENV=production`, `GOOGLE_REDIRECT_URI=https://offerfy.cc/api/v1/auth/google/callback`. Do not share those three keys (`APP_ENV`, `GOOGLE_REDIRECT_URI`, `AUTH_TOKEN_SECRET`).
+
+After every public frontend build:
+
+```bash
+python3 -c "import json; print(json.load(open('/home/ruby0322/offerfy/apps/frontend/.next/routes-manifest.json'))['rewrites']['afterFiles'])"
+# destination MUST be http://127.0.0.1:8001/:path*  — never :8002, never :3001
+curl -sS -D - -o /dev/null --max-time 15 https://offerfy.cc/api/v1/auth/google/start | grep -i '^location:'
+# redirect_uri MUST contain offerfy.cc  — never 127.0.0.1
+```
+
+Google Cloud authorized redirect URI for the public client: `https://offerfy.cc/api/v1/auth/google/callback` (dest may list `http://127.0.0.1:3001/api/v1/auth/google/callback` on the same or a second client).
+
+---
+
+## Host
+
+| | |
+|---|---|
+| Hostname | `abbey` / `abbey.lu.im.ntu.edu.tw` |
+| Public IPv4 | **`140.112.106.204`** |
+| Repo | `/home/ruby0322/offerfy` |
+| Shared cluster | minikube **docker driver**, IP **`192.168.49.2`** |
+| Host gateway as seen from minikube | **`192.168.49.1`** |
+| kubectl | same as pd-care (this minikube) |
+
+Campus public **80/443** already reach abbey. DNS cannot point at a port.
+
+---
+
+## Public path (do not redesign)
+
+```
+Internet
+  :80/:443  →  abbey 140.112.106.204
+                docker host-network socat (pd-care)
+                  :80  → 192.168.49.2:30940   ingress-nginx HTTP NodePort
+                  :443 → 192.168.49.2:30793   ingress-nginx HTTPS NodePort
+                    Host header selects Ingress
+                    offerfy.cc / www.offerfy.cc / test.lu.im.ntu.edu.tw
+                      → Service offerfy-native-3100:3200
+                      → Endpoints 192.168.49.1:3200
+                      → host systemd `offerfy-web` (`next start` :3200)
+                         rewrite /api/* → http://127.0.0.1:8001
+                         → host systemd `offerfy-api` (uvicorn 127.0.0.1:8001, 2 workers)
+```
+
+pd-care hosts on the **same** ingress-nginx: `pd.lu.im.ntu.edu.tw`, `test.pd.lu.im.ntu.edu.tw`, `argocd.pd.lu.im.ntu.edu.tw`.
+
+Bridge containers (leave running):
+
+- `pd-care-ingress-bridge-http` — `TCP-LISTEN:80` → `192.168.49.2:30940`
+- `pd-care-ingress-bridge-https` — `TCP-LISTEN:443` → `192.168.49.2:30793`
+
+Compose: `/home/ruby0322/pd-care/docker-compose.ingress-bridge.yml`. NodePorts can change if ingress-nginx is reinstalled; then the bridge `command` must match `kubectl -n ingress-nginx get svc ingress-nginx-controller`.
+
+---
+
+## Public hostnames
+
+| Host | DNS | TLS secret | Notes |
+|---|---|---|---|
+| **`offerfy.cc`** | Cloudflare A `@` → `140.112.106.204`, **grey cloud (DNS only)** | `offerfy-cc-tls` | Canonical public site |
+| **`www.offerfy.cc`** | CNAME → `offerfy.cc`, grey cloud | same cert (SAN) | Serves same backend |
+| **`test.lu.im.ntu.edu.tw`** | A → `140.112.106.204` (public resolvers) | `test-lu-im-ntu-edu-tw-tls` | Still on Ingress; campus resolver may NXDOMAIN |
+
+Cloudflare NS: `algin.ns.cloudflare.com`, `leanna.ns.cloudflare.com`.
+
+**Do not orange-cloud until ACME is issued.** After cert is Ready, Full (strict) is OK. HTTP-01 needs Let’s Encrypt to hit abbey `:80`.
+
+### Add another domain
+
+1. A (or CNAME to a name that already resolves here) → `140.112.106.204`. Apex usually cannot CNAME.
+2. Add `host` rule + `tls.hosts` + new `secretName` on Ingress `offerfy-native` (or extra SAN on `offerfy-cc-tls`).
+3. Wait for `certificate` Ready. Cluster issuer: **`letsencrypt-prod`** (HTTP-01, class `nginx`).
+4. Optional: Google OAuth origin + redirect for the new host.
+
+---
+
+## Live processes (systemd)
+
+Public API and Next are **system** units (`User=ruby0322`). Templates live in `ops/systemd/`. Dest `:3100` is **not** a unit. Compose postgres/seaweed and the pd-care bridge have `restart: unless-stopped`.
+
+| Role | Bind | How it is running | Persist |
+|---|---|---|---|
+| **Public frontend** | `0.0.0.0:3200` | `offerfy-web.service` → `npx next start --hostname 0.0.0.0 --port 3200` in `apps/frontend`. Env `BACKEND_INTERNAL_URL=http://127.0.0.1:8001` | systemd `Restart=always` |
+| **Dev frontend** | `*:3100` | `next dest -p 3100` in `apps/frontend`. `Cache-Control: no-store`. Not on Ingress. Stop it during `next build` (shares `.next`) | No |
+| **API** | **`127.0.0.1:8001`** | `offerfy-api.service` → uvicorn `--host 127.0.0.1 --port 8001 --workers 2` (no `--reload`), cwd `apps/backend`, venv `apps/backend/.venv`, `APP_ENV=production` | systemd `Restart=always` |
+| **Postgres** | host **`5433`** → container 5432 | compose project `offerfy`, `offerfy-postgres-1` | Docker |
+| **SeaweedFS S3** | host **`8334`** → container 8333 | `offerfy-seaweedfs-s3-1` (plus master/volume/filer, unpublished) | Docker |
+
+**Snapshot 2026-08-27 21:49:** Chat I/O is async (`httpx.AsyncClient` + SSE); Typst/ATS in `asyncio.to_thread`. Units still 2 workers, `APP_ENV=production`. `https://offerfy.cc/` 200, `/api/healthz` 200.
+
+There is **no** `apps/backend/.env`. Dest / compose load repo-root `/home/ruby0322/offerfy/.env`. Public `offerfy-api` uses `EnvironmentFile=/home/ruby0322/offerfy/.env.production` (process env overrides pydantic’s `.env` load). Frontend extra: `apps/frontend/.env.local`. Both env files are gitignored.
+
+Install or refresh units after editing `ops/systemd/*.service`:
+
+```bash
+sudo cp /home/ruby0322/offerfy/ops/systemd/offerfy-api.service /etc/systemd/system/
+sudo cp /home/ruby0322/offerfy/ops/systemd/offerfy-web.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now offerfy-api offerfy-web
+```
+
+### Restart API / web
+
+```bash
+sudo systemctl restart offerfy-api
+sudo systemctl restart offerfy-web
+sudo systemctl status offerfy-api offerfy-web
+```
+
+Health: `curl -sS http://127.0.0.1:8001/healthz` → `{"status":"ok"}`.
+
+Do **not** start a second uvicorn with `--reload` on `:8001`; the unit already owns that port. Local dest can still use `--reload` on a **different** port/command.
+
+Do not use compose `backend`/`frontend` images for the public site; they would fight host ports. Infra only:
+
+```bash
+cd /home/ruby0322/offerfy
+docker compose up -d postgres seaweedfs-master seaweedfs-volume seaweedfs-filer seaweedfs-s3
+```
+
+### Rebuild public Next
+
+```bash
+cd /home/ruby0322/offerfy/apps/frontend
+# Stop `next dest` first — it shares `.next` with this build (often :3001 or :3100).
+npm run build:public
+# equivalent: BACKEND_INTERNAL_URL=http://127.0.0.1:8001 npx next build
+# A bare `npx next build` / `npm run build` loads dest `.env.local` (:8002) and
+# next.config.ts will throw. Do not "fix" that by pointing dest at :8001.
+python3 -c "import json; print(json.load(open('.next/routes-manifest.json'))['rewrites']['afterFiles'])"
+sudo systemctl restart offerfy-web
+```
+
+`react-resizable-panels` must stay **@3.0.5**.
+
+If `sudo` asks for a password, prefer **SIGHUP** over SIGTERM on `offerfy-api`:
+
+```bash
+kill -HUP $(systemctl show -p MainPID --value offerfy-api)
+```
+
+uvicorn 0.52.4's `Multiprocess.handle_hup()` calls `restart_all()`: workers respawn and re-import the app while the **master keeps the listening socket**. Verified 2026-10-22 — 60/60 `/healthz` probes returned 200 across the reload, master PID and systemd `NRestarts` unchanged, so it does not race `Restart=always`.
+
+**SIGHUP reloads code only, not the environment.** `EnvironmentFile=.env.production` is injected by systemd at service start, so after editing either env file you still need `sudo systemctl restart offerfy-api`. SIGTERM also works (`Restart=always` brings it back after `RestartSec=3`) but drops connections. Neither rebuilds `.next`.
+
+---
+
+## Local ports vs this machine
+
+| Offerfy (this host) | Why not default |
+|---|---|
+| Frontend dest in compose example 3100 | `:3000` = pd-care Next |
+| API **8001** | `:8000` taken (pd-care + others) |
+| Postgres **5433** | `:5432` = pd-care postgres |
+| S3 **8334** | `:8333` = pd-care seaweed |
+
+All four are bound **loopback-only** since 2026-10-22 (`127.0.0.1:` prefix in `docker-compose.yml`). Remote DB access goes through an SSH tunnel: `ssh -L 5433:127.0.0.1:5433 ruby0322@abbey.lu.im.ntu.edu.tw`.
+
+Root `.env` (dest / compose) has `OFFERFY_POSTGRES_PORT=5433`, `OFFERFY_S3_PORT=8334`, `DATABASE_URL=...127.0.0.1:5433/offerfy`, `S3_ENDPOINT=http://127.0.0.1:8334`, `APP_ENV=development`, `GOOGLE_REDIRECT_URI=http://127.0.0.1:3100/api/v1/auth/google/callback`. `.env.production` (systemd) keeps the same DB/S3 ports, `APP_ENV=production`, `GOOGLE_REDIRECT_URI=https://offerfy.cc/api/v1/auth/google/callback`, and a separate `AUTH_TOKEN_SECRET`. Guest chat/export caps (10/20 per hour) apply to guests only when `APP_ENV=production`.
+
+Google Cloud OAuth client must list both redirect URIs (or use two clients). After editing either env file, `sudo systemctl restart offerfy-api` (unit does not reload env on its own).
+
+---
+
+## Kubernetes (Offerfy)
+
+Namespace: **`offerfy-native-tmp`**.
+
+| Object | Role |
+|---|---|
+| Service `offerfy-native-3100` | ClusterIP port **3200** (name is leftover from the 3100 era) |
+| Endpoints `offerfy-native-3100` | **`192.168.49.1:3200`** (minikube → host Next). Manual Endpoints; no selector |
+| Ingress `offerfy-native` | class `nginx`; hosts below; `ssl-redirect: true`; body 15m; proxy timeouts 3600 |
+| Certificate `offerfy-cc-tls` | `offerfy.cc` + `www.offerfy.cc` → secret `offerfy-cc-tls` |
+| Certificate `test-lu-im-ntu-edu-tw` | Ready → secret `test-lu-im-ntu-edu-tw-tls` |
+| Certificate `test-lu-im-ntu-edu-tw-tls` | **False** (ingress-shim duplicate on same secret). Harmless if `test-lu-im-ntu-edu-tw` stays Ready. Do not point two Certificates at one secret |
+
+Annotations on Ingress: `cert-manager.io/cluster-issuer: letsencrypt-prod`.
+
+### Recreate (idempotent)
+
+```bash
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: offerfy-native-tmp
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: offerfy-native-3100
+  namespace: offerfy-native-tmp
+spec:
+  ports:
+    - name: http
+      port: 3200
+      targetPort: 3200
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: offerfy-native-3100
+  namespace: offerfy-native-tmp
+subsets:
+  - addresses:
+      - ip: 192.168.49.1
+    ports:
+      - name: http
+        port: 3200
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: offerfy-native
+  namespace: offerfy-native-tmp
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "15m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: test.lu.im.ntu.edu.tw
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: offerfy-native-3100
+                port:
+                  number: 3200
+    - host: offerfy.cc
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: offerfy-native-3100
+                port:
+                  number: 3200
+    - host: www.offerfy.cc
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: offerfy-native-3100
+                port:
+                  number: 3200
+  tls:
+    - hosts:
+        - test.lu.im.ntu.edu.tw
+      secretName: test-lu-im-ntu-edu-tw-tls
+    - hosts:
+        - offerfy.cc
+        - www.offerfy.cc
+      secretName: offerfy-cc-tls
+EOF
+```
+
+Teardown (drops public Offerfy HTTPS only; does not stop host Next/API):
+
+```bash
+kubectl delete namespace offerfy-native-tmp
+```
+
+---
+
+## Firewall (minikube → host :3200)
+
+UFW default **INPUT/FORWARD DROP**. Minikube pods cannot reach host `:3200` unless allowed. Symptom: public HTTPS **504**.
+
+Required (not guaranteed persistent across reboot / `ufw reload`):
+
+```bash
+sudo ufw allow from 192.168.49.0/24 to any port 3200 proto tcp
+# optional if you ever point Ingress at next dev:
+sudo ufw allow from 192.168.49.0/24 to any port 3100 proto tcp
+```
+
+Equivalent iptables: `ACCEPT` from `192.168.49.0/24` to tcp **3200**.
+
+Quick check from cluster:
+
+```bash
+kubectl -n offerfy-native-tmp run curlcheck --rm -i --restart=Never --image=curlimages/curl:8.5.0 \
+  -- curl -sS -o /dev/null -w '%{http_code}\n' --max-time 8 http://192.168.49.1:3200/
+```
+
+Expect `200`. If it hangs on image pull, wait; do not leave the pod.
+
+---
+
+## Security posture (audit 2026-10-22)
+
+Triggered by NTU CERT notice **NISAC-110-202610-00000035** (alleged intrusion
+2026-07-26..28 from `159.223.38[.]244`). No evidence of *that* intrusion was found, but
+the audit surfaced an unrelated live exposure. See also `/root/incident-NISAC-202610/`.
+
+### Fixed: object store was world-open
+
+`seaweedfs-s3` published `0.0.0.0:8334` **and** SeaweedFS S3 runs with no `-s3.config`,
+so it performed **no authentication at all**. Anonymous `ListAllMyBuckets`,
+`ListBucket`, `GetObject`, `PutObject` and `CreateBucket` all succeeded from the public
+IP. `offerfy-private` holds real user uploads. Postgres `5433` was published the same way.
+
+Both are now `127.0.0.1:`-bound (hard rule 9). **Binding is the only control in place —
+there is still no S3 authentication.** Anything that can reach the host can read every
+bucket.
+
+### Still open: two buckets nothing in this repo creates
+
+| Bucket | Created (UTC) | Objects |
+|---|---|---|
+| `offerfy-private` | 2026-08-26 14:14 | 473 (ours) |
+| `6smh5u74` | 2026-09-28 16:53 | **0** |
+| `kyrwcvgs` | 2026-09-29 15:09 | **0** |
+
+`grep -r "create_bucket\|CreateBucket"` over app, tests and scripts returns **nothing**,
+and neither name appears anywhere in the repo or env files. Random 8-char lowercase names,
+empty, created a day apart — consistent with an automated open-S3 write probe. Benign
+alternatives exist (a manual S3 GUI client, an ad-hoc script never committed).
+
+The filer holds no provenance: `/buckets/*` entries carry `Crtime`/`Mtime` but
+`UserName:""`, `Uid:0`, `Extended:null` — with no auth, nothing was ever attributed, and
+our own `offerfy-private` has an identical fingerprint. The storage layer therefore
+**cannot** distinguish an externally-created bucket from ours. `Mtime == Crtime` on both,
+so nothing was written after creation.
+
+The UFW probe above makes external reachability **likely**: Docker-published `8334`
+bypassed the INPUT policy that was filtering every other host service. Still
+**unresolved** on the question of whether anyone actually connected — the S3 container's
+logs only reach its last restart, and the ports are now closed, so this can no longer be
+settled by scanning. The one remaining source is **NTU CC netflow/IDS data for
+`140.112.106.204:8334` around 2026-09-28/29** — worth asking for in the same thread as
+the NISAC reply. Do not delete these buckets meanwhile; the timestamps are the only
+evidence left.
+
+### Tests write to the production bucket
+
+`apps/backend/tests/conftest.py` pins `DATABASE_URL` to in-memory SQLite and `APP_ENV` to
+`development`, but **never overrides `S3_ENDPOINT` / `S3_BUCKET`**, so pydantic falls
+through to repo-root `.env` and every `pytest` run PUTs fixtures into live
+`offerfy-private`. Confirmed: a 2026-10-22 run added 27 objects.
+
+Of 473 objects, **465 are test fixtures** (`notes.txt` x325+, `SWE_Resume.pdf` x46,
+`Ada Lovelace CV.pdf` x21, `jd.txt` x40). Write bursts: 2026-08-26 (114), 08-27 (187),
+09-01 (27), 09-17 (18), 10-09 (72), 10-22 (45). Nothing in the app ever *reads* these
+back (see below), so they are pure liability.
+
+Fix before running the suite again:
+
+```python
+# conftest.py, beside the DATABASE_URL pin
+os.environ["S3_ENDPOINT"] = ""      # s3_configured() -> False, put_object becomes a no-op
+os.environ["S3_BUCKET"] = "test-bucket"
+```
+
+### The 8 non-fixture objects
+
+Real personal documents from **5 individuals**, all exposed for the whole window the
+bucket was open:
+
+| Object | Date | Size |
+|---|---|---|
+| `蔡宜蓁_thesis_v2.pdf` (x2) | 2026-08-27 | 1.3 MB |
+| `resume_shengche_huang_2.pdf` (x2) | 2026-09-04 | 215 KB |
+| `Tushal_Lohar_Resume.pdf` (x2) | 2026-09-11 | 146 KB |
+| `James-CV-20260420.pdf` | 2026-09-16 | 195 KB |
+| `final-summary-report.pdf` | 2026-08-31 | 163 KB |
+
+`x2` = original plus the `chat/` archival copy. Relevant to any 個資法 assessment: the
+affected population is 5 people, not hundreds.
+
+### S3 is write-only — there is no download path
+
+`app/services/s3.py` exposes only `put_object` / `delete_object`; the backend has **no**
+`get_object`, no presigned URLs, and the frontend never references S3. All 10 binary
+endpoints render from `resume.typst_source` in Postgres via `compile_typst`, or serve a
+local template thumbnail. `upload_s3_key` is written once and read only on delete.
+
+Consequences: loopback-binding S3 cannot break downloads; and the stored originals are
+never used, so a retention policy can delete them freely.
+
+### Enabling S3 auth — validated, low risk
+
+Tested 2026-10-22 against an **isolated** SeaweedFS 3.76 instance on `127.0.0.1:18334`
+(production untouched). With `-s3.config`:
+
+- anonymous `ListAllBuckets` / `ListBucket` / `GetObject` / `PutObject` / `CreateBucket` → all **403**
+- boto3 with `addressing_style: "path"` (what `_client()` uses) → put/get/list/delete all OK
+- **objects written *before* auth was enabled stay readable and deletable** — no ownership migration problem
+- works with `-s3.domainName=seaweedfs-s3` present, so path-style + SigV4 is unaffected
+- wrong credentials → `InvalidAccessKeyId` 403
+
+```yaml
+seaweedfs-s3:
+  command: "s3 -filer=seaweedfs-filer:8888 -ip.bind=0.0.0.0 -port=8333 -domainName=seaweedfs-s3 -config=/etc/seaweedfs/s3.json"
+  volumes:
+    - ./infra/seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
+```
+
+`identities[].actions` must be bucket-scoped (`Read:offerfy-private`, `Write:…`,
+`List:…`); **omit any `anonymous` identity**. `accessKey`/`secretKey` must match
+`S3_ACCESS_KEY`/`S3_SECRET_KEY` in **both** `.env` and `.env.production` — they currently
+fall back to the `seaweed-access` / `seaweed-secret` literals in `docker-compose.yml`.
+Gitignore the json; it is a credential.
+
+Caveats: the file is a plaintext secret on disk (compose has no Secret primitive, unlike
+pd-care's `pd-care-secrets`), a mismatch now surfaces as upload **5xx** rather than silent
+loss, and pd-care's `seaweedfs-s3` has the identical missing-`-config` problem in both
+`pd-care-prod` and `pd-care-dev`.
+
+### Upload failures are no longer silent
+
+`put_object` used to swallow every `ClientError` and return `None`, which
+`resumes.py` committed as `upload_s3_key=None` before returning 201 — a lost file
+reported as success. It now logs and, outside `_FAIL_SOFT_ENVS`
+(`development`/`dev`/`local`/`test`), re-raises so the caller's transaction rolls back.
+`chat.py`'s archival copy passes `required=False` because the reply is built from the
+in-memory bytes and must not fail the turn. `delete_object` still never raises but logs
+possible orphans.
+
+### Do not bother with NetworkPolicy on this cluster
+
+minikube runs the **bridge** CNI (`/etc/cni/net.d/1-k8s.conflist`: `bridge` +
+`host-local` + `portmap`). No Calico/Cilium, so NetworkPolicy objects are accepted and
+silently **not enforced** — including the 7 that `argocd` already ships. Switching needs
+`minikube start --cni=calico`, which rebuilds cluster networking.
+
+### Open items
+
+1. Scan `140.112.106.204` from off-host; settle the two unexplained buckets.
+2. Enable S3 auth (offerfy **and** both pd-care namespaces).
+3. Patch `conftest.py` before the next `pytest` run.
+4. Retention/erasure policy for the 465 fixtures and the 8 real documents.
+5. Copy `/root/incident-NISAC-202610/journal-preserve-20261022.tar.gz` off-host.
+6. Host-wide: `3389` xrdp, `25` SMTP, `111` rpcbind, `2049` nfsd (no exports), `3690` svn,
+   `9100` all listen on `0.0.0.0` — but UFW appears to drop them. Probed 2026-10-22 from a
+   cluster pod (non-loopback source) against `140.112.106.204`: `3200` **OPEN** (the explicit
+   `192.168.49.0/24` allow), `3389`/`25`/`9100`/`111` **all filtered**, `8334`/`5433`/`8001`
+   closed. So UFW INPUT default DROP is genuinely active, and the only thing that was
+   internet-reachable was the Docker-published port that bypassed it — which is precisely
+   hard rule 9. Not a true internet-sourced probe (same-host routing, and `192.168.49.0/24`
+   has its own allow), so confirm from off-campus before relying on it.
+
+---
+
+## Smoke
+
+```bash
+systemctl is-active offerfy-api offerfy-web
+curl -sS -o /dev/null -w '%{http_code}\n' https://offerfy.cc/
+curl -sS -o /dev/null -w '%{http_code}\n' https://www.offerfy.cc/
+curl -sS http://127.0.0.1:8001/healthz
+curl -sS -o /dev/null -w '%{http_code}\n' https://offerfy.cc/api/healthz
+curl -sS -D - -o /dev/null --max-time 15 https://offerfy.cc/api/v1/auth/google/start | grep -i '^location:'
+# must be redirect_uri=https://offerfy.cc/api/v1/auth/google/callback (not 127.0.0.1)
+ss -tlnp | grep -E ':(3200|3100|8001|5433|8334) '
+# :8001 / :3200 should be in systemd cgroups, not a leftover shell
+tr '\0' ' ' < /proc/$(systemctl show -p MainPID --value offerfy-api)/cmdline; echo
+kubectl -n offerfy-native-tmp get ingress,certificate,endpoints
+```
+
+Public HTML 200 is not enough; **API health must be 200** or Chat/upload/compile fail.
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| HTTPS 404 / wrong cert | Host not on Ingress, or DNS not to abbey | Add host + TLS; `dig +short <host> A` = `140.112.106.204` |
+| ACME pending `no such host` inside cluster | CoreDNS NXDOMAIN cache | Restart `kube-system` `coredns`; wait; grey-cloud DNS |
+| ACME pending, DNS OK | Orange cloud, or `:80` bridge down | Grey cloud; `docker ps` bridge; HTTP-01 on `:80` |
+| HTTPS 504 | minikube cannot reach `192.168.49.1:3200` | UFW/iptables allow `192.168.49.0/24` → 3200; `systemctl status offerfy-web` |
+| Google login `redirect_uri` is `127.0.0.1` | Public `.next` rewrite baked dest `:8002` | `npm run build:public`; confirm routes-manifest `:8001`; restart `offerfy-web`. Do not "fix" by editing live `GOOGLE_REDIRECT_URI` on dest `.env` |
+| HTML 200, `/api` 500 | uvicorn `:8001` down | `sudo systemctl restart offerfy-api`; Next log shows `ECONNREFUSED ... port: 8001` |
+| After reboot, public dead | minikube / pd-care bridge / UFW / compose, not Offerfy units | `systemctl status offerfy-api offerfy-web`; start minikube + pd-care bridge + compose infra; re-check UFW |
+| pd-care HTTPS/ACME broken | Something else bound `:80`/`:443` | Stop it; restore pd-care ingress-bridge |
+| Resume upload returns 5xx, `S3 put_object failed` in journal | S3 unreachable or credentials wrong. Since 2026-10-22 this fails loudly instead of losing the file silently | `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8334/` ; `docker compose ps seaweedfs-s3` ; check `S3_*` in `.env.production` |
+| `pytest` adds objects to `offerfy-private` | `conftest.py` does not override `S3_ENDPOINT`/`S3_BUCKET` | See *Security posture → Tests write to the production bucket* |
+
+---
+
+## Shared host inventory (do not collide)
+
+pd-care on this machine (leave alone): compose postgres `:5432`, seaweed `:8333`, native/dev Next `:3000`, uvicorn `:8000`, minikube, ingress-bridge, Ingress ns `pd-care-prod` / `pd-care-dev` / `argocd`.
+
+Offerfy compose app services (`backend`/`frontend` in `docker-compose.yml`) are **not** used for public serving.
+)
