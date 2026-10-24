@@ -407,7 +407,7 @@
             "Offerfy is a web resume editor. You can create a resume from a starter template or upload a file, edit Typst source, preview a live compile, export a PDF, and check whether that compiled PDF can be parsed by applicant tracking systems (ATS).",
             "ATS checks parseability of the compiled PDF only. They do not predict hireability or job outcomes.",
             "You may use the editor without an account. Signing in with Google saves your resume history.",
-            "Offerfy also publishes a public job catalog collected from employer career-board APIs (Greenhouse, Lever, Ashby) and TaiwanJobs open data. Applying happens on the original posting. We do not operate 104 or LinkedIn. Resume-to-job matching, tailoring a resume to a posting, and apply tracking are not part of the current service."
+            "Offerfy also publishes a public job catalog collected from employer career-board APIs (Greenhouse, Lever, Ashby) and TaiwanJobs open data. Applying happens on the original posting. We do not operate 104 or LinkedIn. If you turn on “Open to matching” in your settings, we may introduce you to employers; the Privacy Policy explains what is passed on. We still do not score your resume against a posting, tailor it to one, or track your applications."
           ]
         },
         {
@@ -506,14 +506,16 @@
           "heading": "Talent introduction (only if you turn it on)",
           "paragraphs": [
             "If you explicitly turn on “Open to matching” in your settings, we pass your resume data to hiring companies, or to recruiters acting for them, to introduce you to roles.",
-            "This is off by default. Until you turn it on, we give your resume to no employer. You can turn it off at any time; we then stop passing it on and require anyone who already has it to stop using it."
+            "This is off by default. Until you turn it on, we give your resume to no employer. You can turn it off at any time; we then stop passing it on and require anyone who already has it to stop using it.",
+            "What we pass on is a short structured profile built from the published version of a resume you choose — roles, skills, education, and a summary. It never includes your email, phone number, or links; interested employers are introduced to you through Offerfy. We record every read of your profile and who read it, and you can see that count in your settings."
           ]
         },
         {
           "heading": "When we share",
           "paragraphs": [
             "Google: to sign you in.",
-            "Language-model provider: we send resume, upload, and chat content to an OpenAI-compatible API only when you use chat.",
+            "Language-model provider: we send resume, upload, and chat content to an OpenAI-compatible API when you use chat, and — if you have turned on “Open to matching” — to build the profile we show employers.",
+            "Employers and recruiters: only if you have turned on “Open to matching”, and only through credentials we issue to named organisations. There is no public or self-serve access.",
             "Infrastructure: database, object storage, and hosting that run Offerfy.",
             "We do not sell personal data. Offerfy does not include a third-party analytics product today."
           ]
