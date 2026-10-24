@@ -529,6 +529,7 @@ def _ingest_passes(db: Session, limit: int) -> list[AdminIngestPass]:
             func.max(JobIngestRun.finished_at).label("finished_at"),
             func.sum(case((JobIngestRun.status == "ok", 1), else_=0)).label("sources_ok"),
             func.sum(case((JobIngestRun.status != "ok", 1), else_=0)).label("sources_failed"),
+            func.sum(JobIngestRun.ok_count).label("fetched"),
             func.sum(JobIngestRun.upserted_count).label("upserted"),
             func.sum(JobIngestRun.expired_count).label("expired"),
         )
@@ -580,6 +581,7 @@ def _ingest_passes(db: Session, limit: int) -> list[AdminIngestPass]:
                 duration_seconds=duration,
                 sources_ok=sources_ok,
                 sources_failed=sources_failed,
+                fetched=int(group.fetched or 0),
                 upserted=upserted,
                 expired=int(group.expired or 0),
                 status=status,

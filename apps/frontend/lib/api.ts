@@ -796,6 +796,7 @@ export type AdminIngestPass = {
   duration_seconds: number | null;
   sources_ok: number;
   sources_failed: number;
+  fetched: number;
   upserted: number;
   expired: number;
   status: "ok" | "degraded" | "failed";

@@ -18,7 +18,8 @@ docker compose up --build
 
 Frontend: http://localhost:3100 (default locale `en`). API is rewritten from `/api/*` to the FastAPI backend.
 
-Ingest the public job catalog (official ATS boards + TaiwanJobs; no 104 scrape):
+Ingest the public job catalog (curated ATS boards: Greenhouse, Lever, Ashby,
+SmartRecruiters; no 104 scrape, and TaiwanJobs is retired — see AGENTS.md §8b):
 
 ```bash
 docker compose run --rm backend python -m app.jobs.ingest_catalog

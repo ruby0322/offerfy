@@ -700,6 +700,9 @@
     "ingestFailingBoards": "Failing boards",
     "ingestFailingBoardsHint": "Boards that failed in the most recent pass that had any failure. A slug repeating here every six hours is one broken board, not a new incident each time — most are companies that do not use these ATS providers.",
     "ingestBoard": "Board",
-    "ingestBoardError": "Error"
+    "ingestBoardError": "Error",
+    "ingestFetched": "Fetched",
+    "ingestOutOfScope": "Out of scope",
+    "ingestScopeHint": "Fetched is what the boards handed us; out of scope is what the catalogue rules dropped as non-technical. SmartRecruiters filters itself before fetching each description, so its out-of-scope figure undercounts."
   }
 }

@@ -336,7 +336,7 @@ def _ops(db_session) -> User:
     return user
 
 
-def _ingest_row(db_session, *, run_id, source, slug, status, upserted=0, started=None, error=None):
+def _ingest_row(db_session, *, run_id, source, slug, status, upserted=0, started=None, error=None, fetched=None):
     db_session.add(
         JobIngestRun(
             run_id=run_id,
@@ -346,7 +346,7 @@ def _ingest_row(db_session, *, run_id, source, slug, status, upserted=0, started
             finished_at=(started or datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc))
             + timedelta(seconds=30),
             status=status,
-            ok_count=1 if status == "ok" else 0,
+            ok_count=(fetched if fetched is not None else (1 if status == "ok" else 0)),
             error_count=0 if status == "ok" else 1,
             upserted_count=upserted,
             expired_count=0,
@@ -539,3 +539,26 @@ def test_admin_jobs_ingest_pass_drilldown_returns_every_board_row(
     body = client.get("/v1/admin/jobs/ingest/run-1", cookies=_session_cookie(ops)).json()
     assert len(body["items"]) == 25
     assert body["limit"] >= 119
+
+
+def test_admin_jobs_ingest_reports_what_the_scope_rules_dropped(
+    client: TestClient, db_session, monkeypatch
+):
+    """fetched - upserted is how many postings we chose not to carry.
+
+    Derived from the counts record_run already stores, so no column was added
+    for it -- but it has to actually surface, or a filter eating a whole board
+    would take weeks to notice.
+    """
+    _allow(monkeypatch, "ops@example.com")
+    ops = _ops(db_session)
+    _ingest_row(
+        db_session, run_id="run-1", source="greenhouse", slug="a", status="ok",
+        fetched=120, upserted=70,
+    )
+    db_session.commit()
+
+    body = client.get("/v1/admin/jobs/ingest", cookies=_session_cookie(ops)).json()
+    pass_row = body["passes"][0]
+    assert pass_row["fetched"] == 120
+    assert pass_row["upserted"] == 70

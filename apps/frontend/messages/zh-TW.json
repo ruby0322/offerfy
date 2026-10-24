@@ -703,6 +703,9 @@
     "ingestFailingBoards": "失敗的職缺版",
     "ingestFailingBoardsHint": "最近一次有失敗的抓取中，哪些職缺版抓不到。同一個 slug 每六小時重複出現是一個壞掉的職缺版，不是每次都是新事件——大多數是沒有使用這些 ATS 服務的公司。",
     "ingestBoard": "職缺版",
-    "ingestBoardError": "錯誤"
+    "ingestBoardError": "錯誤",
+    "ingestFetched": "抓回筆數",
+    "ingestOutOfScope": "不在範圍内",
+    "ingestScopeHint": "「抓回筆數」是職缺版回傳的數量；「不在範圍内」是被類別規則當成非技術職丟掉的。SmartRecruiters 會在抓職缺內文前先自行篩選，所以它的數字會低估。"
   }
 }

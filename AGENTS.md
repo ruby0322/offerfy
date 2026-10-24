@@ -190,6 +190,58 @@ The rule for "did this pass accomplish anything" is likewise single-sourced:
 exit code and the admin view's `failed` verdict, so the dashboard and the unit can never
 disagree.
 
+## 8b. The board list and what the catalogue carries
+
+Both are deliberate and both are tuned against live data, not guesses.
+
+**`apps/backend/data/ats_boards.json` is curated, and every row must be live.** It once
+held 120 boards of which **64 404ed on every pass** — companies that had moved ATS, or
+that never used Greenhouse/Lever/Ashby at all (TSMC, MediaTek, Shopee, Netflix, Shopify,
+Zendesk…). Those were not lost inventory: they had never returned a single job. They were
+removed, 29 were repaired by correcting the provider or slug (Anthropic is on Greenhouse,
+not Ashby; Anduril is `andurilindustries`), and the file is now 77 boards that all answer.
+
+Before adding a board, **probe it**; do not assume. The three endpoints are in
+`greenhouse.py` / `lever.py` / `ashby.py`, plus `smartrecruiters.py`. Note that probing
+many slugs concurrently gets you rate-limited and returns false 404s — space the requests
+out and retry anything that is not a definite 404, or you will delete live boards.
+
+**SmartRecruiters is the fourth provider**, added because Grab, Canva and Wise publish
+there and nowhere we could read. It differs from the others in two ways that matter:
+descriptions are **not** in the list payload, so each posting costs its own request, and it
+publishes a structured `function` per posting. Both facts shape the fetcher — it scopes
+from the cheap list metadata first so a posting we will not keep never costs a detail call.
+
+**TaiwanJobs is retired** (migration `015_scope_catalog`). It was 1,549 active postings of
+which **91 were technical** — the rest room attendants, delivery drivers, caregivers. The
+source is gone, but `'taiwanjobs'` stays in `JOB_SOURCES` and in the `job_source_values`
+check constraint because historical rows still carry it; narrowing either would fail
+against them.
+
+**`data/job_scope.json` decides which postings we carry.** The board list picks employers,
+this picks their roles: the audience is technical candidates, so a Finance Manager at a
+great engineering company is out. Two deny tiers, and the distinction is load-bearing:
+
+- `deny_always` — the role is non-technical whatever domain it serves. "Technical
+  Recruiter, Hardware" is a recruiting job, and it leaked through a single-tier list
+  because `hardware` rescued it.
+- `deny_context` — a domain, not a role, so a keep needle overrides. "Compliance Engineer"
+  and "Engineering Manager, Billing" are engineers.
+
+Three substring accidents are called out in `tests/test_jobs_scope.py` and must not come
+back: **`cto` is inside Dire*cto*r**, **`ux` is inside L*ux*e**, and `development` rescues
+every Sales Development Representative. Topical keep-words (`data`, `cloud`, `platform`,
+`security`, `technical`) are absent on purpose — the roles they would rescue are already
+caught by a role noun, and as keep needles they let sales titles back in.
+
+The filter runs in `ingest_board` **before `seen_ids` is computed**, which is what makes a
+posting that falls out of scope get `is_active = False` on that same pass and leave the
+sitemap. Do not move it after.
+
+Retune by editing the JSON, then **measure against the real catalogue before committing** —
+run the predicate over live titles and read a sample of both sides. A deny-list written
+from imagination is how you lose "Infrastructure Security Engineer" to the word "security".
+
 ## 9. Monitoring the ingest
 
 Three signals, most useful first:
@@ -202,7 +254,10 @@ Three signals, most useful first:
    failed pass whichever unit it came from.
 3. **`systemctl --user list-timers offerfy-ingest.timer`** — did it fire, when is next.
 
-`job_ingest_runs` holds one row **per board**, ~119 per pass. `run_id` (migration 014)
+`job_ingest_runs` holds one row **per board**, ~77 per pass. `ok_count - upserted_count`
+is how many postings the scope rules dropped, which `/admin/jobs` shows as "out of scope"
+without needing a column for it. (For smartrecruiters that figure undercounts: it scopes
+itself before fetching descriptions, so its `ok_count` is already post-filter.) `run_id` (migration 014)
 groups them; rows written before that migration have `run_id IS NULL` and are reported as
 `legacy_row_count` rather than folded into a fake pass.
 

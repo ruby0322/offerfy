@@ -22,7 +22,7 @@ export default function JobSearchForm({ query }: Props) {
           <option value="greenhouse">Greenhouse</option>
           <option value="lever">Lever</option>
           <option value="ashby">Ashby</option>
-          <option value="taiwanjobs">{t("sourceTaiwanjobs")}</option>
+          <option value="smartrecruiters">SmartRecruiters</option>
         </select>
       </label>
       <label className="jobs-field">
