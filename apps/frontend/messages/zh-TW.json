@@ -341,7 +341,8 @@
     "thinking": "思考中",
     "contextTrimmed": "較早的訊息不會送給 AI",
     "contextTrimmedHint": "為了控制每次回覆的成本，這條線以上的 {count} 則訊息不會放進請求。AI 仍會收到這段對話的開頭、這條線以下的全部內容，以及你的履歷本身，沒有任何訊息被刪除。如果它好像忘了某件事，再說一次就好。",
-    "contextTrimmedJump": "看是哪裡"
+    "contextTrimmedJump": "看是哪裡",
+    "scrollToLatest": "回到最新"
   },
   "share": {
     "brand": "Offerfy",
