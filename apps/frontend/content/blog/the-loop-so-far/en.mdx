@@ -1,0 +1,54 @@
+---
+title: "The loop so far, and what is honestly not in it yet"
+description: "Offerfy is building one loop — find a role, tailor a resume to it, send it. Here is the real state of that loop: editing and tailoring work, applying does not."
+---
+
+## The goal is one loop, not four tools
+
+A job hunt is scattered. The resume lives in some editor, a folder fills up with near-identical PDFs, the roles are spread across a dozen sites, and what you sent where lives in a spreadsheet you maintain by hand. Every step retypes the same facts.
+
+Offerfy bets on a different shape: one master resume as the spine, with finding, tailoring, and sending hanging off it. One document, not seven.
+
+That is the goal. Here is where it actually stands.
+
+## What works today
+
+- **The master resume.** Create one or upload one, edit the Typst source directly, watch the PDF compile beside it, export it, and run ATS parseability checks on the compiled file.
+- **Chat that edits that same file.** Not a new document generated for you to download — a change to the one you have. Version history, and you can go back.
+- **Tailored versions.** Fork the master at one role: paste the job description, and it first scores where the resume fits that role and what is missing, then suggests changes. Your master is left alone.
+- **A public job catalog.** From 89 official employer career boards across five ATS providers. Browse it, search it, and when you want to apply it links out to the original posting.
+
+Editing, previewing, exporting, ATS checks, and browsing jobs are unmetered at every tier, because none of them cost us anything per use.
+
+## What does not work today
+
+Better said plainly than fudged:
+
+- **Nothing matches you to a role.** You pick it. We do not rank, recommend, or score which ones suit you.
+- **Nothing applies for you, and nothing tracks it.** Applying means leaving Offerfy and finishing on the original posting. What you sent, when, and whether anyone replied — Offerfy does not know.
+
+<Callout label="Not shipping yet">
+Matching and application tracking are on the way. Tailored versions will rewrite your resume; they will not find the job for you or send it.
+</Callout>
+
+## What we are working on now: making free actually free
+
+The pricing page says there is nothing to buy. Most of this month's engineering went into making that sentence hold.
+
+Usage is metered on what the model calls actually bill us, not on how many times you asked. So a small question costs you less of your week than a full rewrite.
+
+Then we went after the most expensive part. Chat had been re-sending the entire transcript on every round; once that was bounded, input per round fell from 26,038 tokens to 11,727, and one edit now costs about a third of what it did.
+
+What matters is where that saving went. We did not lower the allowance to match — that would have taken the efficiency gain back off the people using it. The allowance stayed where it was, so the "about this many edits" figure went up instead. The guest allowance doubled, 4 to 8, and the hourly cap is gone entirely: the week is yours, and you can spend it in one sitting.
+
+## And one thing we got wrong
+
+In early October, every posting on the site expired on the same day. The reason is embarrassing: the catalog refresh that was supposed to run every six hours had never actually been scheduled, and the last run was 1 September. So for three weeks we advertised a pile of long-dead job pages, and nothing told us.
+
+It now runs on a schedule that genuinely fires and leaves a record when it fails, and a stale posting drops out of search results honestly instead of pretending the role is still open.
+
+This is here because a job catalog that lies to you is worse than no job catalog.
+
+## So who is it for right now
+
+If you want a resume you can actually edit, see, and export ready to send, today's Offerfy is enough — and you can start without an account. If you are waiting for the version that finds the role and sends it for you, that is not here yet. When it is, we will say so here, rather than putting up a waitlist and a diagram first.
