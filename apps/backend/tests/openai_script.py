@@ -32,6 +32,7 @@ def llm_usage(
     *,
     input_tokens: int | None = None,
     cached_tokens: int | None = None,
+    cache_write_tokens: int | None = None,
     output_tokens: int | None = None,
     reasoning_tokens: int | None = None,
     total_tokens: int | None = None,
@@ -44,8 +45,18 @@ def llm_usage(
     usage: dict = {}
     if input_tokens is not None:
         usage["input_tokens"] = input_tokens
-    if cached_tokens is not None:
-        usage["input_tokens_details"] = {"cached_tokens": cached_tokens}
+    if cached_tokens is not None or cache_write_tokens is not None:
+        details: dict = {}
+        if cached_tokens is not None:
+            details["cached_tokens"] = cached_tokens
+        if cache_write_tokens is not None:
+            # Nested beside cached_tokens, as the provider nests it, with the
+            # TTL split the reader deliberately ignores.
+            details["cache_write_tokens"] = cache_write_tokens
+            details["cache_write_tokens_details"] = {
+                "ttl_30m_tokens": cache_write_tokens
+            }
+        usage["input_tokens_details"] = details
     if output_tokens is not None:
         usage["output_tokens"] = output_tokens
     if reasoning_tokens is not None:

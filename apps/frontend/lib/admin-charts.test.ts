@@ -23,6 +23,9 @@ function day(overrides: Partial<AdminDayPoint> = {}): AdminDayPoint {
     llm_output_tokens: 0,
     llm_reasoning_tokens: 0,
     llm_cache_hit_rate: null,
+    llm_cost_uusd: 0,
+    llm_cache_write_tokens: 0,
+    llm_unmeasured_calls: 0,
     ...overrides,
   };
 }

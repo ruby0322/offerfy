@@ -26,7 +26,8 @@
     "contact": "Contact",
     "x": "X",
     "terms": "Terms",
-    "privacy": "Privacy"
+    "privacy": "Privacy",
+    "usage": "Usage"
   },
   "notFound": {
     "title": "Not found",
@@ -171,7 +172,18 @@
     "profileNoDisclosures": "Nobody has read it yet.",
     "profileDelete": "Delete profile",
     "profileError": "That did not work. Try again.",
-    "profileBuildFailed": "We could not build a profile from this resume just now. Try Rebuild."
+    "profileBuildFailed": "We could not build a profile from this resume just now. Try Rebuild.",
+    "usageTitle": "AI usage this week",
+    "usageNotice": "Editing, preview, PDF export and ATS checks are unlimited. Only AI edits are metered.",
+    "usageThisWeekEdits": "{used} of {limit} AI edits used",
+    "usageThisWeekCredits": "{used} of {limit} credits used",
+    "usageTier_guest": "Guest",
+    "usageTier_registered": "Signed in",
+    "usageTier_matching": "Open to matching",
+    "usageTierLine": "Your plan: {tier}.",
+    "usageResetLine": "Resets {date}.",
+    "usageUnmeasured": "{count} model calls this week reported no token count, so part of this figure is an estimate.",
+    "usageLearnMore": "How usage works"
   },
   "picker": {
     "title": "How do you want to start?",
@@ -339,7 +351,19 @@
     "contextTrimmed": "Earlier messages aren't sent to the assistant",
     "contextTrimmedHint": "To keep each reply affordable, {count} messages above this line are left out of the request. The assistant still gets the start of this chat, everything from here down, and your resume itself — nothing has been deleted. If it seems to have forgotten something, say it again.",
     "contextTrimmedJump": "Show where",
-    "scrollToLatest": "Jump to latest"
+    "scrollToLatest": "Jump to latest",
+    "usageMeterEdits": "{used} of {limit} AI edits this week",
+    "usageMeterCredits": "{used} of {limit} credits this week",
+    "usageEditsLeft": "about {count} more edits",
+    "usageResets": "resets Monday",
+    "usageLimitTitle": "That's this week's AI editing",
+    "usageOfferSignIn": "Sign in and you get {credits} credits a week — enough to finish polishing a page — and you can publish your resume.",
+    "usageOfferMatching": "Turning on Open to matching raises it to {credits} credits a week. You can turn it off again whenever you like, and nothing you've made is lost.",
+    "usageLimitReset": "Your allowance resets Monday morning. Editing, preview, PDF export and ATS checks keep working in the meantime.",
+    "usageSignIn": "Sign in with Google",
+    "usageOpenSettings": "Open settings",
+    "usageLearnMore": "How usage works",
+    "usageDismiss": "Keep editing"
   },
   "share": {
     "brand": "Offerfy",
@@ -594,7 +618,8 @@
           ]
         }
       ]
-    }
+    },
+    "seeAlsoUsage": "Read how usage works"
   },
   "admin": {
     "metaTitle": "Ops · Offerfy",
@@ -707,6 +732,121 @@
     "ingestBoardError": "Error",
     "ingestFetched": "Fetched",
     "ingestOutOfScope": "Out of scope",
-    "ingestScopeHint": "Fetched is what the boards handed us; out of scope is what the catalogue rules dropped as non-technical. SmartRecruiters filters itself before fetching each description, so its out-of-scope figure undercounts."
+    "ingestScopeHint": "Fetched is what the boards handed us; out of scope is what the catalogue rules dropped as non-technical. SmartRecruiters filters itself before fetching each description, so its out-of-scope figure undercounts.",
+    "usageNav": "Usage",
+    "usageTitle": "AI usage",
+    "usageWindow": "Week of {from} → {to}",
+    "usageNotEnforced": "not enforced in this environment",
+    "usageCeilings": "Spend against the ceilings",
+    "usageCeiling_global": "All usage this week",
+    "usageCeiling_guest_pool": "Guests this week",
+    "usageCeilingOff": "no ceiling set",
+    "usageTopSubjects": "Top spenders this week",
+    "usageTopNote": "Read from the counters the limits are enforced against, so these are the numbers people were actually held to. A red dot means they are at or over their allowance.",
+    "usageNobody": "Nothing spent yet this week.",
+    "usageColWho": "Who",
+    "usageColTier": "Tier",
+    "usageColCredits": "Credits",
+    "usageColCost": "Cost",
+    "usageColTurns": "Edits",
+    "usageColRefusals": "Refused",
+    "usageColSubjects": "People",
+    "usageColLimit": "Limit",
+    "usageColCount": "Count",
+    "usageColCounter": "Counter",
+    "usageColTelemetry": "Telemetry",
+    "usageKind_guest": "Guest",
+    "usageKind_network": "Network",
+    "usageTier_guest": "Guest",
+    "usageTier_registered": "Signed in",
+    "usageTier_matching": "Matching",
+    "usageByTier": "By tier",
+    "usageByPurpose": "By purpose",
+    "usageRefusalsTitle": "Refusals",
+    "usageNoRefusals": "Nobody has been refused this week.",
+    "usageRefusalsNote": "The number to tune the tiers from. Signed-in refusals matter most: the matching bonus is only a thank-you while the signed-in tier is enough on its own.",
+    "usageGapsTitle": "Counter vs telemetry",
+    "usageNoGaps": "The counters and the telemetry agree.",
+    "usageGapsNote": "A gap means either a telemetry row was lost, which is allowed, or something billed without going through the meter, which is not.",
+    "orderCreated": "Newest first",
+    "orderUsage": "Biggest spenders first",
+    "usageThisWeek": "This week",
+    "usageLifetime": "All time",
+    "usageLifetimeTurns": "{count} edits all time",
+    "usageResetsAt": "Resets {date}",
+    "usageRefusedTimes": "refused {count} times this week",
+    "usageUnmeasuredRounds": "{count} rounds with no reported cost",
+    "loadError": "Could not load usage."
+  },
+  "usage": {
+    "metaTitle": "Usage — Offerfy",
+    "metaDescription": "What you get on Offerfy, what the AI limits are, and why they exist.",
+    "title": "How usage works",
+    "intro": "Offerfy is free. One part of it costs us real money every time you use it, so that one part has a weekly limit. This page explains exactly which part, how much you get, and why.",
+    "freeHeading": "What has no limit at all",
+    "freeIntro": "None of this is metered, at any tier, with or without an account:",
+    "freeItems": [
+      "Editing your resume's Typst source by hand, as much as you like.",
+      "The live preview, and recompiling as often as you want.",
+      "Exporting the PDF.",
+      "ATS parseability checks on the compiled PDF.",
+      "Browsing and searching the job catalog."
+    ],
+    "whyHeading": "Why the AI has a limit",
+    "whyBody": "When you ask the assistant to change your resume, it reads the document, makes the edit, recompiles it and checks the result. That is several calls to a language-model provider, and we pay for every one of them. A weekly limit is what keeps Offerfy free instead of asking you for a card.",
+    "tiersHeading": "What you get",
+    "colTier": "Tier",
+    "colAllowance": "AI edits per week",
+    "colPublish": "Can publish a resume",
+    "tier_guest": "No account",
+    "tier_registered": "Signed in",
+    "tier_matching": "Open to matching",
+    "allowanceEdits": "{count} edits, to try it out",
+    "allowanceCredits": "about {edits} edits",
+    "yes": "Yes",
+    "no": "No",
+    "tiersUnavailable": "We could not load the current numbers. Rather than print a figure that might not be the one we actually enforce, we would rather show nothing — please reload.",
+    "tiersNote": "Without an account you get enough to see the assistant work on your own resume, but not enough to finish polishing a page — and publishing needs an account in any case. Signing in is free and takes one click.",
+    "costlierHeading": "What makes one edit cost more than another",
+    "costlierIntro": "We count what each edit actually costs us, so a small question costs you less than a big rewrite. These are the things that make an edit expensive:",
+    "costlierItems": [
+      "A long resume. Every edit sends the whole document, so a three-page CV costs more per edit than a one-pager.",
+      "Switching templates, or uploading a file to import. Both rewrite the entire document rather than changing a few lines.",
+      "Questions about the rendered page — whether something wrapped, how crowded a page looks — because answering those means rendering it and looking.",
+      "An edit that produces a document which will not compile, because the assistant then has to repair it.",
+      "A long conversation on the same resume. The assistant is sent the history each time it acts."
+    ],
+    "sections": [
+      {
+        "heading": "How we count",
+        "paragraphs": [
+          "We add up what the model calls actually billed us — the tokens going in, the tokens coming out, and the discounts we get when parts of the request are reused. We do not charge you twice for the discounted parts.",
+          "Credits are our own unit, not a currency. One credit is about what a typical edit costs. We use a unit of our own so that the allowance we publish stays the same when a provider changes its prices.",
+          "Occasionally a provider does not tell us what a call cost. When that happens we record our best estimate rather than nothing, and your usage page says how many of those there were."
+        ]
+      },
+      {
+        "heading": "The week, and where to watch it",
+        "paragraphs": [
+          "The allowance resets every Monday at midnight, Taipei time. There is a meter above the chat box in the editor, and a fuller breakdown in your settings.",
+          "If you run out, nothing is lost. Your resumes, your edits and your published links all stay exactly as they are, and you can keep editing by hand and exporting PDFs until the week turns over."
+        ]
+      },
+      {
+        "heading": "Matching is a thank-you, not a toll",
+        "paragraphs": [
+          "Turning on “Open to matching” lets us introduce you to employers, and it comes with a larger weekly allowance as thanks.",
+          "It is not how you unlock the product. The signed-in allowance is meant to be enough on its own to polish a resume and tailor it for a role, and if it turns out not to be, we will raise it rather than leave matching as the only way to get real use out of Offerfy.",
+          "You can turn it off at any time, in one click, and we will not take back the allowance you have already used this week. Turning it off removes your profile from the index and does not touch anything you have made."
+        ]
+      },
+      {
+        "heading": "Abuse limits",
+        "paragraphs": [
+          "Separately from the weekly allowance there is a cap on how many edits can run in a single hour. It exists to stop one account or one script from spending the whole budget in a few minutes, and ordinary use does not come near it.",
+          "We also cap what the whole site can spend on AI in a week. If we ever reach it, AI editing pauses for everyone until the week turns over — and everything on the free list above keeps working. We would rather pause one feature honestly than quietly bill you for it."
+        ]
+      }
+    ]
   }
 }

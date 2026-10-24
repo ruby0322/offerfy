@@ -367,6 +367,7 @@ def _usage_counts(data: dict) -> dict[str, int | None]:
     empty: dict[str, int | None] = {
         "input_tokens": None,
         "cached_tokens": None,
+        "cache_write_tokens": None,
         "output_tokens": None,
         "reasoning_tokens": None,
     }
@@ -378,6 +379,17 @@ def _usage_counts(data: dict) -> dict[str, int | None]:
             "input_tokens": _token_count(usage, "input_tokens"),
             "cached_tokens": _token_count(
                 usage.get("input_tokens_details"), "cached_tokens"
+            ),
+            # Its own charge, not a subset of anything else here: cached and
+            # reasoning counts are slices of input and output respectively, but
+            # a cache write bills on top of the read at 1.25x the uncached
+            # input rate. Nests beside cached_tokens with a
+            # cache_write_tokens_details TTL split we deliberately do not read
+            # -- 30m is the only TTL we have ever been billed, and taking the
+            # 30m rate for an unseen 12h write would under- rather than
+            # over-charge, which is the wrong direction to guess in.
+            "cache_write_tokens": _token_count(
+                usage.get("input_tokens_details"), "cache_write_tokens"
             ),
             "output_tokens": _token_count(usage, "output_tokens"),
             "reasoning_tokens": _token_count(
@@ -419,8 +431,11 @@ def _vision_usage_event(
         "prefer_full_source": prefer_full_source,
         "source_chars": source_chars,
         "input_tokens": _token_count(visual, "input_tokens"),
-        # Input tokens are the whole bill on the decisions endpoint.
+        # Input tokens are the whole bill on the decisions endpoint: it drops
+        # output charges and has no cache line at all, which is most of why
+        # read_layout's vision half rides on it.
         "cached_tokens": None,
+        "cache_write_tokens": None,
         "output_tokens": None,
         "reasoning_tokens": None,
     }

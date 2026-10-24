@@ -17,6 +17,8 @@ from app.models import (
     RateEvent,
     Resume,
     TalentApiKey,
+    UsageCounter,
+    UsageRefusal,
     User,
 )
 from app.schemas import AtsReport, PreviewPages
@@ -24,9 +26,9 @@ from app.schemas_admin import (
     AdminChatMessage,
     AdminChatMessageList,
     AdminCounts,
+    AdminDayPoint,
     AdminDisclosure,
     AdminDisclosureList,
-    AdminDayPoint,
     AdminHealth,
     AdminOverview,
     AdminRecentResume,
@@ -42,10 +44,17 @@ from app.schemas_admin import (
     AdminTalentKeyList,
     AdminTalentObligation,
     AdminTalentObligationList,
+    AdminUsageCeiling,
+    AdminUsageGap,
+    AdminUsageOverview,
+    AdminUsageRefusal,
+    AdminUsageSubject,
+    AdminUsageTier,
     AdminUserDetail,
     AdminUserList,
     AdminUserListItem,
     AdminUserResume,
+    AdminUserUsage,
 )
 from app.schemas_jobs import (
     AdminIngestBoardFailure,
@@ -61,6 +70,17 @@ from app.services.jobs.ingest import refreshed_nothing
 from app.services.jobs.store import JOB_FRESHNESS_DAYS, freshness_cutoff
 from app.services.talent_keys import mint_talent_key
 from app.services.typst_compile import compile_typst, compile_typst_pages
+from app.services import usage as usage_service
+from app.services.usage import (
+    CREDIT_UUSD,
+    TIERS,
+    limits_enabled,
+    reconcile,
+    refusals_by,
+    round_cost_uusd,
+    window_end,
+    window_start,
+)
 
 router = APIRouter()
 
@@ -150,6 +170,9 @@ def _day_points(db: Session, now: datetime) -> list[AdminDayPoint]:
             "llm_cached_tokens": 0,
             "llm_output_tokens": 0,
             "llm_reasoning_tokens": 0,
+            "llm_cache_write_tokens": 0,
+            "llm_cost_uusd": 0,
+            "llm_unmeasured_calls": 0,
         }
         for key in keys
     }
@@ -185,14 +208,14 @@ def _day_points(db: Session, now: datetime) -> list[AdminDayPoint]:
     # Tokens are sums, not counts, so these rows cannot go through bump(). A
     # null column means the provider did not report that number; it adds zero
     # to the total while the call itself still counts.
-    for created, purpose, inputs, cached, outputs, reasoning in db.query(
-        LlmCall.created_at,
-        LlmCall.purpose,
-        LlmCall.input_tokens,
-        LlmCall.cached_tokens,
-        LlmCall.output_tokens,
-        LlmCall.reasoning_tokens,
-    ).filter(LlmCall.created_at >= start):
+    # Whole rows rather than columns, because the cost comes from
+    # app.services.usage.round_cost_uusd -- the same function enforcement and
+    # the reconciliation use, so a figure here can never disagree with the one
+    # a person was limited by.
+    for row in db.query(LlmCall).filter(LlmCall.created_at >= start):
+        created, purpose = row.created_at, row.purpose
+        inputs, cached = row.input_tokens, row.cached_tokens
+        outputs, reasoning = row.output_tokens, row.reasoning_tokens
         if created is None:
             continue
         key = _utc_day(created)
@@ -204,6 +227,11 @@ def _day_points(db: Session, now: datetime) -> list[AdminDayPoint]:
         bucket["llm_cached_tokens"] += int(cached or 0)
         bucket["llm_output_tokens"] += int(outputs or 0)
         bucket["llm_reasoning_tokens"] += int(reasoning or 0)
+        bucket["llm_cache_write_tokens"] += int(row.cache_write_tokens or 0)
+        cost, measured = round_cost_uusd(row)
+        bucket["llm_cost_uusd"] += cost
+        if not measured:
+            bucket["llm_unmeasured_calls"] += 1
         # The decisions endpoint reports input tokens only, so a vision row
         # can never contribute a cached count -- it stays out of the rate even
         # if some proxy starts reporting one.
@@ -328,21 +356,65 @@ def admin_overview(
 @router.get("/v1/admin/users", response_model=AdminUserList)
 def admin_users(
     q: str | None = None,
+    order: str | None = "created",
     limit: int | None = 50,
     offset: int | None = 0,
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
 ):
+    """The user list, orderable by this window's spend.
+
+    `order='usage'` is an OUTER join to usage_counters, not an inner one: a
+    user who has spent nothing this week has no counter row, and dropping them
+    from the list would make "sort by usage" quietly also mean "hide everyone
+    who was idle".
+    """
     lim, off = _page(limit, offset)
+    start = window_start()
     query = db.query(User)
     if q:
         query = query.filter(User.email.ilike(f"%{q}%"))
     total = query.count()
-    rows = query.order_by(User.created_at.desc()).offset(off).limit(lim).all()
+    if (order or "").strip() == "usage":
+        spend = (
+            db.query(UsageCounter.subject_id.label("sid"), UsageCounter.uusd.label("uusd"))
+            .filter(
+                UsageCounter.window_start == start,
+                UsageCounter.subject_kind == "user",
+            )
+            .subquery()
+        )
+        rows = (
+            query.outerjoin(spend, spend.c.sid == User.id)
+            .order_by(func.coalesce(spend.c.uusd, 0).desc(), User.created_at.desc())
+            .offset(off)
+            .limit(lim)
+            .all()
+        )
+    else:
+        rows = query.order_by(User.created_at.desc()).offset(off).limit(lim).all()
     counts = dict(
         db.query(Resume.user_id, func.count(Resume.id))
         .filter(Resume.user_id.in_([row.id for row in rows] or [""]))
         .group_by(Resume.user_id)
+        .all()
+    )
+    spent = dict(
+        db.query(UsageCounter.subject_id, UsageCounter.uusd)
+        .filter(
+            UsageCounter.window_start == start,
+            UsageCounter.subject_kind == "user",
+            UsageCounter.subject_id.in_([row.id for row in rows] or [""]),
+        )
+        .all()
+    )
+    turns = dict(
+        db.query(UsageCounter.subject_id, UsageCounter.turns)
+        .filter(
+            UsageCounter.window_start == start,
+            UsageCounter.subject_kind == "user",
+            UsageCounter.subject_id.in_([row.id for row in rows] or [""]),
+        )
         .all()
     )
     return AdminUserList(
@@ -354,6 +426,9 @@ def admin_users(
                 picture=row.picture,
                 created_at=_iso(row.created_at) or "",
                 resume_count=int(counts.get(row.id) or 0),
+                tier=usage_service.tier_of(db, row, None),
+                credits_used=round(int(spent.get(row.id) or 0) / CREDIT_UUSD, 2),
+                turns_used=int(turns.get(row.id) or 0),
             )
             for row in rows
         ],
@@ -377,6 +452,24 @@ def admin_user_detail(
         .all()
     )
     msg = _message_counts(db, [row.id for row in resumes])
+    bal = usage_service.balance(db, user, None)
+    lifetime_uusd = 0
+    lifetime_turns = 0
+    for row in db.query(LlmCall).filter(LlmCall.user_id == user.id):
+        cost, _ = round_cost_uusd(row)
+        lifetime_uusd += cost
+        if row.purpose == "chat" and row.round_index == 0:
+            lifetime_turns += 1
+    refusals = (
+        db.query(func.count(UsageRefusal.id))
+        .filter(
+            UsageRefusal.subject_kind == "user",
+            UsageRefusal.subject_id == user.id,
+            UsageRefusal.created_at >= window_start(),
+        )
+        .scalar()
+        or 0
+    )
     return AdminUserDetail(
         id=user.id,
         email=user.email,
@@ -395,6 +488,19 @@ def admin_user_detail(
             )
             for row in resumes
         ],
+        usage=AdminUserUsage(
+            tier=bal.tier,
+            credits_used=bal.used_credits,
+            limit_credits=bal.limit_credits,
+            turns_used=bal.turns_used,
+            turn_limit=bal.turn_limit,
+            remaining_credits=bal.remaining_credits,
+            reset_at=_iso(bal.reset_at) or "",
+            refusals=int(refusals),
+            unmeasured_rounds=bal.unmeasured_rounds,
+            lifetime_uusd=lifetime_uusd,
+            lifetime_turns=lifetime_turns,
+        ),
     )
 
 
@@ -868,3 +974,167 @@ def admin_revoke_talent_key(
         key.revoked_at = datetime.now(timezone.utc)
         db.commit()
     return Response(status_code=204)
+
+
+# --------------------------------------------------------------------------
+# usage (Task 9)
+# --------------------------------------------------------------------------
+
+
+def _subject_emails(db: Session, ids: list[str]) -> dict[str, str]:
+    if not ids:
+        return {}
+    return {
+        row.id: row.email
+        for row in db.query(User).filter(User.id.in_(ids)).all()
+    }
+
+
+def _tier_of_subject(db: Session, kind: str, subject_id: str) -> str:
+    """The tier a counter row belongs to.
+
+    A guest or network counter is the guest tier by definition. For a user it
+    is read live from the consent ledger through services.usage, the same way
+    enforcement reads it, so this view cannot disagree with what they were
+    actually limited by.
+    """
+    if kind != "user":
+        return usage_service.GUEST
+    user = db.get(User, subject_id)
+    return usage_service.tier_of(db, user, None) if user else usage_service.REGISTERED
+
+
+def _usage_subjects(db: Session, *, start: datetime, limit: int) -> list[AdminUsageSubject]:
+    """Who spent what this window, most expensive first.
+
+    Read off usage_counters rather than aggregated from llm_calls, because the
+    counters are what the limit is enforced against -- a view built on the
+    telemetry would show a number nobody was held to.
+    """
+    rows = (
+        db.query(UsageCounter)
+        .filter(UsageCounter.window_start == start)
+        .order_by(UsageCounter.uusd.desc())
+        .limit(limit)
+        .all()
+    )
+    emails = _subject_emails(
+        db, [r.subject_id for r in rows if r.subject_kind == "user"]
+    )
+    refusal_counts = dict(
+        db.query(UsageRefusal.subject_id, func.count(UsageRefusal.id))
+        .filter(UsageRefusal.created_at >= start)
+        .group_by(UsageRefusal.subject_id)
+        .all()
+    )
+    out: list[AdminUsageSubject] = []
+    for row in rows:
+        tier_name = _tier_of_subject(db, row.subject_kind, row.subject_id)
+        tier = TIERS[tier_name]
+        limit_uusd = tier.credits * CREDIT_UUSD if tier.credits is not None else None
+        over = bool(
+            (limit_uusd is not None and row.uusd >= limit_uusd)
+            or (tier.turns is not None and row.turns >= tier.turns)
+        )
+        out.append(
+            AdminUsageSubject(
+                subject_kind=row.subject_kind,
+                subject_id=row.subject_id,
+                email=emails.get(row.subject_id),
+                tier=tier_name,
+                credits_used=round(row.uusd / CREDIT_UUSD, 2),
+                uusd_used=int(row.uusd),
+                turns_used=int(row.turns),
+                refusals=int(refusal_counts.get(row.subject_id) or 0),
+                unmeasured_rounds=int(row.unmeasured),
+                limit_credits=float(tier.credits) if tier.credits is not None else None,
+                turn_limit=tier.turns,
+                over_limit=over,
+            )
+        )
+    return out
+
+
+@router.get("/v1/admin/usage", response_model=AdminUsageOverview)
+def admin_usage(
+    top: int | None = 25,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """What AI editing is costing, and who is costing it.
+
+    Everything here is priced through services.usage, so no figure on this page
+    can disagree with the figure someone was limited by.
+    """
+    start, end = window_start(), window_end()
+    top_n = max(1, min(int(top or 25), 200))
+    subjects = _usage_subjects(db, start=start, limit=top_n)
+
+    settings = get_settings()
+    totals = dict(
+        db.query(UsageCounter.subject_kind, func.coalesce(func.sum(UsageCounter.uusd), 0))
+        .filter(UsageCounter.window_start == start)
+        .group_by(UsageCounter.subject_kind)
+        .all()
+    )
+    everyone = sum(int(v) for v in totals.values())
+    # 'network' rides alongside its guest session, so counting both would
+    # double the guest pool.
+    guests = int(totals.get("guest") or 0)
+
+    def ceiling(name: str, spent: int, raw: int | None) -> AdminUsageCeiling:
+        cap = int(raw) if raw and raw > 0 else None
+        return AdminUsageCeiling(
+            name=name,
+            spent_uusd=spent,
+            ceiling_uusd=cap,
+            share=round(spent / cap, 4) if cap else None,
+        )
+
+    # Every tier appears even at zero, so an empty row reads as "nobody on this
+    # tier spent anything" rather than as a missing tier.
+    by_tier_acc = {name: [0, 0, 0, 0] for name in TIERS}
+    for subject in subjects:
+        acc = by_tier_acc[subject.tier]
+        acc[0] += 1
+        acc[1] += subject.uusd_used
+        acc[2] += subject.turns_used
+    by_tier = [
+        AdminUsageTier(
+            tier=name,
+            subjects=acc[0],
+            uusd_used=acc[1],
+            credits_used=round(acc[1] / CREDIT_UUSD, 2),
+            turns_used=acc[2],
+        )
+        for name, acc in by_tier_acc.items()
+    ]
+
+    purpose_cost: dict[str, int] = {}
+    for row in db.query(LlmCall).filter(LlmCall.created_at >= start):
+        cost, _ = round_cost_uusd(row)
+        purpose_cost[row.purpose] = purpose_cost.get(row.purpose, 0) + cost
+
+    return AdminUsageOverview(
+        window_start=_iso(start) or "",
+        window_end=_iso(end) or "",
+        enforced=limits_enabled(),
+        credit_uusd=CREDIT_UUSD,
+        ceilings=[
+            ceiling("global", everyone, settings.global_weekly_ceiling_uusd),
+            ceiling("guest_pool", guests, settings.guest_weekly_ceiling_uusd),
+        ],
+        by_tier=by_tier,
+        top_subjects=subjects,
+        refusals=[
+            AdminUsageRefusal(tier=t, limit_kind=k, count=n)
+            for t, k, n in refusals_by(db, since=start)
+        ],
+        gaps=[
+            AdminUsageGap(
+                subject_kind=k, subject_id=i, counter_uusd=c, llm_call_uusd=l
+            )
+            for k, i, c, l in reconcile(db, window_start=start)
+        ],
+        by_purpose=sorted(purpose_cost.items(), key=lambda kv: -kv[1]),
+    )

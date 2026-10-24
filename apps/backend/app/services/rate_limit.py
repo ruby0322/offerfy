@@ -6,7 +6,15 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.models import RateEvent
 
-LIMITS = {"chat": 10, "export": 20}
+# Exports only. Chat moved to app.services.usage, which meters cost over a
+# weekly window and keeps its own hourly burst guard -- counted off the LlmCall
+# rows a turn writes anyway, so no RateEvent row is needed for it. An export is
+# a Typst compile: CPU, not tokens, so it does not belong in a cost meter and
+# stays here as a plain abuse guard.
+#
+# 'chat' is still permitted by RateEvent's check constraint on purpose: rows
+# written before the move exist and must stay readable.
+LIMITS = {"export": 20}
 WINDOW = timedelta(hours=1)
 
 

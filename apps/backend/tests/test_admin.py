@@ -7,7 +7,16 @@ from fastapi.testclient import TestClient
 from app.config import get_settings
 from app.services.jobs.store import JOB_FRESHNESS_DAYS
 from app.deps import SESSION_COOKIE, _sign
-from app.models import ChatMessage, Job, JobIngestRun, Resume, TalentApiKey, User
+from app.models import (
+    ChatMessage,
+    GuestSession,
+    Job,
+    JobIngestRun,
+    LlmCall,
+    Resume,
+    TalentApiKey,
+    User,
+)
 from app.services.talent_keys import hash_talent_key
 
 
@@ -562,3 +571,182 @@ def test_admin_jobs_ingest_reports_what_the_scope_rules_dropped(
     pass_row = body["passes"][0]
     assert pass_row["fetched"] == 120
     assert pass_row["upserted"] == 70
+
+
+# --------------------------------------------------------------------------
+# usage tracking (Task 9)
+# --------------------------------------------------------------------------
+
+
+def _user(db_session, *, sub):
+    user = User(google_sub=sub, email=f"{sub}@example.com", locale="en")
+    db_session.add(user)
+    db_session.commit()
+    return user
+
+
+def _spend_as(db_session, user=None, guest=None, *, turns=1, input_tokens=20_000):
+    from app.services.metering import Meter, system_guard
+
+    meter = Meter(system_guard(user=user, guest=guest, purpose="chat", reason="test"))
+    for _ in range(turns):
+        db_session.add(
+            LlmCall(
+                user_id=user.id if user else None,
+                guest_session_id=guest.id if guest else None,
+                purpose="chat",
+                model="gpt-5.6-terra",
+                round_index=0,
+                input_tokens=input_tokens,
+            )
+        )
+        db_session.commit()
+        meter.record(
+            {
+                "model": "gpt-5.6-terra",
+                "purpose": "chat",
+                "round_index": 0,
+                "input_tokens": input_tokens,
+            }
+        )
+
+
+def test_usage_overview_ranks_the_biggest_spenders_first(
+    client: TestClient, db_session, monkeypatch
+):
+    """The question this page exists to answer: who is costing the most."""
+    admin = _admin_client(client, db_session, monkeypatch)
+    small = _user(db_session, sub="sub-small")
+    big = _user(db_session, sub="sub-big")
+    _spend_as(db_session, user=small, turns=1, input_tokens=10_000)
+    _spend_as(db_session, user=big, turns=3, input_tokens=50_000)
+
+    body = client.get("/v1/admin/usage").json()
+    ranked = [row["subject_id"] for row in body["top_subjects"]]
+    assert ranked[0] == big.id
+    assert small.id in ranked
+    top = body["top_subjects"][0]
+    assert top["email"] == big.email
+    assert top["turns_used"] == 3
+    assert top["credits_used"] > 0
+    assert top["tier"] == "registered"
+    assert admin is not None
+
+
+def test_usage_overview_names_a_guest_without_inventing_an_email(
+    client: TestClient, db_session, monkeypatch
+):
+    _admin_client(client, db_session, monkeypatch)
+    guest = GuestSession(key_hash="u" * 64)
+    db_session.add(guest)
+    db_session.commit()
+    _spend_as(db_session, guest=guest)
+    row = client.get("/v1/admin/usage").json()["top_subjects"][0]
+    assert (row["subject_kind"], row["email"], row["tier"]) == ("guest", None, "guest")
+    assert row["turn_limit"] is not None and row["limit_credits"] is None
+
+
+def test_usage_overview_shows_both_ceilings_and_the_share_used(
+    client: TestClient, db_session, monkeypatch
+):
+    """A ceiling nobody is told about is an outage with no explanation."""
+    _admin_client(client, db_session, monkeypatch)
+    user = _user(db_session, sub="sub-ceil")
+    _spend_as(db_session, user=user, input_tokens=100_000)
+    ceilings = {c["name"]: c for c in client.get("/v1/admin/usage").json()["ceilings"]}
+    assert set(ceilings) == {"global", "guest_pool"}
+    assert ceilings["global"]["spent_uusd"] > 0
+    assert 0 < ceilings["global"]["share"] < 1
+
+
+def test_a_disabled_ceiling_reports_no_share_instead_of_dividing_by_zero(
+    client: TestClient, db_session, monkeypatch
+):
+    _admin_client(client, db_session, monkeypatch)
+    monkeypatch.setenv("GLOBAL_WEEKLY_CEILING_UUSD", "0")
+    get_settings.cache_clear()
+    ceilings = {c["name"]: c for c in client.get("/v1/admin/usage").json()["ceilings"]}
+    assert ceilings["global"]["ceiling_uusd"] is None
+    assert ceilings["global"]["share"] is None
+
+
+def test_usage_overview_surfaces_a_reconciliation_gap(
+    client: TestClient, db_session, monkeypatch
+):
+    """A counter with no telemetry behind it means a path billed unmetered."""
+    from app.services.metering import Meter, system_guard
+
+    _admin_client(client, db_session, monkeypatch)
+    user = _user(db_session, sub="sub-gap")
+    # Counter only, no LlmCall row -- the shape a missed wrap would leave.
+    Meter(system_guard(user=user, purpose="chat", reason="test")).record(
+        {"model": "gpt-5.6-terra", "purpose": "chat", "round_index": 0,
+         "input_tokens": 10_000}
+    )
+    gaps = client.get("/v1/admin/usage").json()["gaps"]
+    assert [(g["subject_id"], g["llm_call_uusd"]) for g in gaps] == [(user.id, 0)]
+
+
+def test_the_user_list_can_be_ordered_by_spend_without_hiding_idle_users(
+    client: TestClient, db_session, monkeypatch
+):
+    """An inner join would make "sort by usage" also mean "hide the idle"."""
+    _admin_client(client, db_session, monkeypatch)
+    idle = _user(db_session, sub="sub-idle")
+    spender = _user(db_session, sub="sub-spender")
+    _spend_as(db_session, user=spender, turns=2, input_tokens=40_000)
+
+    page = client.get("/v1/admin/users?order=usage").json()
+    ids = [row["id"] for row in page["items"]]
+    assert ids[0] == spender.id
+    assert idle.id in ids, "an idle user fell out of the usage ordering"
+    top = next(row for row in page["items"] if row["id"] == spender.id)
+    assert top["turns_used"] == 2 and top["credits_used"] > 0
+    assert next(row for row in page["items"] if row["id"] == idle.id)["credits_used"] == 0
+
+
+def test_user_detail_carries_this_week_and_lifetime(
+    client: TestClient, db_session, monkeypatch
+):
+    _admin_client(client, db_session, monkeypatch)
+    user = _user(db_session, sub="sub-detail")
+    _spend_as(db_session, user=user, turns=2, input_tokens=20_000)
+    usage = client.get(f"/v1/admin/users/{user.id}").json()["usage"]
+    assert usage["tier"] == "registered"
+    assert usage["turns_used"] == 2
+    assert usage["lifetime_turns"] == 2
+    assert usage["lifetime_uusd"] > 0
+    assert usage["limit_credits"] is not None
+    assert usage["reset_at"]
+
+
+def test_the_day_series_prices_rows_through_the_enforced_function(
+    client: TestClient, db_session, monkeypatch
+):
+    """Admin and enforcement must not disagree about what a round cost."""
+    from app.services.usage import round_cost_uusd
+
+    _admin_client(client, db_session, monkeypatch)
+    user = _user(db_session, sub="sub-series")
+    _spend_as(db_session, user=user, turns=1, input_tokens=1_000_000)
+    rows = db_session.query(LlmCall).all()
+    expected = sum(round_cost_uusd(r)[0] for r in rows)
+    series = client.get("/v1/admin/overview").json()["series"]
+    assert sum(point["llm_cost_uusd"] for point in series) == expected
+
+
+def test_a_correctly_metered_user_is_not_reported_as_a_gap(
+    client: TestClient, db_session, monkeypatch
+):
+    """Regression. The counter truncates integer micro-USD once per round while
+    a per-model aggregate truncates once at the end, so pricing the two
+    differently made every correctly metered subject show up as a gap -- a
+    reconciliation that cries wolf is worse than none. Caught by running the
+    admin page against seeded data, not by a test, which is why this exists.
+    """
+    _admin_client(client, db_session, monkeypatch)
+    user = _user(db_session, sub="sub-nogap")
+    # Several rounds, so per-round truncation would accumulate a difference.
+    _spend_as(db_session, user=user, turns=6, input_tokens=90_000)
+    gaps = client.get("/v1/admin/usage").json()["gaps"]
+    assert gaps == [], f"correctly metered user reported as a gap: {gaps}"

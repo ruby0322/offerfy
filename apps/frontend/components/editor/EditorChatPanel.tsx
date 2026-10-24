@@ -7,7 +7,9 @@ import ChatMessageCard, { type FamilyCardActions } from "@/components/editor/Cha
 import LoadingMessage from "@/components/editor/LoadingMessage";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
-import type { ChatMessage } from "@/lib/api";
+import UsageLimitCard from "@/components/editor/UsageLimitCard";
+import UsageMeter from "@/components/editor/UsageMeter";
+import type { ChatMessage, Usage, UsageRefusal } from "@/lib/api";
 
 // How far from the bottom counts as "the reader has scrolled away". Bigger
 // than the 120px the streaming follow uses, so a jump button does not blink in
@@ -82,6 +84,28 @@ type Props = {
   /** Bumped by the caller to put the caret in the composer, e.g. when a phone
    *  raises the tool sheet straight into chat. */
   focusKey?: number;
+  /** This week's AI allowance, and the refusal when it has run out. Grouped
+   *  rather than spread over nine props: the shell owns the copy, as it does
+   *  for every other label here. */
+  usage?: UsagePanelProps;
+};
+
+export type UsagePanelProps = {
+  usage: Usage | null;
+  refusal: UsageRefusal | null;
+  onDismissRefusal: () => void;
+  labels: {
+    meter: string;
+    editsLeft: string | null;
+    reset: string;
+    limitTitle: string;
+    offer: string | null;
+    limitReset: string;
+    signIn: string | null;
+    settings: string | null;
+    learnMore: string;
+    dismiss: string;
+  };
 };
 
 export default function EditorChatPanel({
@@ -114,6 +138,7 @@ export default function EditorChatPanel({
   familyActions,
   suggestions,
   focusKey,
+  usage,
 }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -386,6 +411,19 @@ export default function EditorChatPanel({
           </button>
         ) : null}
       </div>
+      {usage?.refusal ? (
+        <UsageLimitCard
+          refusal={usage.refusal}
+          title={usage.labels.limitTitle}
+          offer={usage.labels.offer}
+          resetLabel={usage.labels.limitReset}
+          signInLabel={usage.labels.signIn}
+          settingsLabel={usage.labels.settings}
+          learnMoreLabel={usage.labels.learnMore}
+          onDismiss={usage.onDismissRefusal}
+          dismissLabel={usage.labels.dismiss}
+        />
+      ) : null}
       <form
         className="chat-composer"
         onSubmit={onSubmit}
@@ -393,6 +431,14 @@ export default function EditorChatPanel({
         onDragLeave={onDragLeave}
         onDrop={onDrop}
       >
+        {usage ? (
+          <UsageMeter
+            usage={usage.usage}
+            label={usage.labels.meter}
+            editsLeftLabel={usage.labels.editsLeft}
+            resetLabel={usage.labels.reset}
+          />
+        ) : null}
         <div className="chat-composer-field" data-dragging={dragging ? "true" : undefined}>
           {attachment ? (
             <div className="chat-composer-chip">

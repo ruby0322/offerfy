@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
+import UsageCard from "@/components/UsageCard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Link, useRouter } from "@/i18n/navigation";
@@ -255,6 +256,7 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         ) : null}
+        <UsageCard />
       </main>
       <Footer variant="app" />
     </div>

@@ -32,6 +32,7 @@ import {
   deleteResume,
   dismissMemory,
   exportPdf,
+  fetchUsage,
   getAtsReport,
   getChatMessages,
   type ContextCut,
@@ -43,7 +44,6 @@ import {
   publishResume,
   putResumeSource,
   sendChat,
-  typstCompileDetail,
   type AtsReport,
   type ChatMessage,
   type ImportStatus,
@@ -53,7 +53,10 @@ import {
   type ResumeKind,
   type ResumeSource,
   type ShareState,
+  typstCompileDetail,
+  usageRefusalOf,
 } from "@/lib/api";
+import type { Usage, UsageRefusal } from "@/lib/api";
 import { formatUserAttachmentMessage, parseToolPayload } from "@/lib/chat-tools";
 import type { AtsCheckName } from "@/lib/ats-checks";
 import { peekPendingCreate, takePendingCreate } from "@/lib/pending-create";
@@ -156,6 +159,10 @@ export default function EditorShell({ resumeId }: Props) {
   const [sending, setSending] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [chatUnavailable, setChatUnavailable] = useState(false);
+  // This week's AI allowance. Fetched once on mount, then kept current by the
+  // `quota` frame every turn ends with -- no polling.
+  const [usage, setUsage] = useState<Usage | null>(null);
+  const [refusal, setRefusal] = useState<UsageRefusal | null>(null);
   const [leftTab, setLeftTab] = useState(() =>
     peekPendingUpload(resumeId) || peekPendingCreate(resumeId)
       ? "chat"
@@ -308,6 +315,20 @@ export default function EditorShell({ resumeId }: Props) {
       return;
     }
     setStatus(fallback);
+  }, []);
+
+  useEffect(() => {
+    let live = true;
+    // A failure here must not break the editor: no meter is better than no
+    // editor, and the limit is enforced server-side either way.
+    fetchUsage()
+      .then((next) => {
+        if (live) setUsage(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -552,6 +573,37 @@ export default function EditorShell({ resumeId }: Props) {
           }
           return;
         }
+        if (event.type === "quota") {
+          // The person's own allowance, never telemetry -- see the backend's
+          // quota_event. Arrives just before `done`, so this is the number the
+          // database holds at the end of the turn.
+          setUsage((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  tier: event.tier,
+                  reset_at: event.reset_at,
+                  used_credits: event.used_credits,
+                  limit_credits: event.limit_credits,
+                  turns_used: event.turns_used,
+                  turn_limit: event.turn_limit,
+                  approx_edits_left: event.approx_edits_left,
+                  remaining_credits:
+                    event.limit_credits === null
+                      ? null
+                      : Math.max(0, event.limit_credits - event.used_credits),
+                  turns_remaining:
+                    event.turn_limit === null
+                      ? null
+                      : Math.max(0, event.turn_limit - event.turns_used),
+                  exhausted:
+                    (event.turn_limit !== null && event.turns_used >= event.turn_limit) ||
+                    (event.limit_credits !== null && event.used_credits >= event.limit_credits),
+                }
+              : prev,
+          );
+          return;
+        }
         if (event.type === "done") {
           // Safety net: a stream that ends mid-round must not strand a bubble.
           clearStream();
@@ -608,7 +660,28 @@ export default function EditorShell({ resumeId }: Props) {
         }
       });
     } catch (err) {
-      if (err instanceof ApiError && err.status === 503) {
+      const limitHit = usageRefusalOf(err);
+      if (limitHit) {
+        // A card, not a chat bubble: this is the sign-up moment for a guest and
+        // the matching moment for everyone else, and a bubble scrolls away.
+        setRefusal(limitHit);
+        // The refusal carries the balance that caused it, so the meter lands
+        // on empty without a second request.
+        setUsage((prev) =>
+          prev
+            ? {
+                ...prev,
+                tier: limitHit.tier,
+                reset_at: limitHit.reset_at,
+                used_credits: limitHit.used_credits,
+                limit_credits: limitHit.limit_credits,
+                turns_used: limitHit.turns_used,
+                turn_limit: limitHit.turn_limit,
+                exhausted: true,
+              }
+            : prev,
+        );
+      } else if (err instanceof ApiError && err.status === 503) {
         setChatUnavailable(true);
         setMessages((prev) => [
           ...prev,
@@ -946,6 +1019,46 @@ export default function EditorShell({ resumeId }: Props) {
     return { master: rename(family.master), tailors: family.tailors.map(rename) };
   }, [family, resumeId, title]);
 
+  const usagePanel = useMemo(() => {
+    const countCapped = usage?.turn_limit != null;
+    const editsLeft = usage?.approx_edits_left;
+    const nextTier = refusal?.next_tier;
+    return {
+      usage,
+      refusal,
+      onDismissRefusal: () => setRefusal(null),
+      labels: {
+        meter: countCapped
+          ? t("usageMeterEdits", {
+              used: usage?.turns_used ?? 0,
+              limit: usage?.turn_limit ?? 0,
+            })
+          : t("usageMeterCredits", {
+              used: usage?.used_credits ?? 0,
+              limit: usage?.limit_credits ?? 0,
+            }),
+        // Suppressed when it would only restate the bar: on a turn-capped tier,
+        // "about 3 edits left" beside "1 of 4 AI edits" is one fact twice.
+        editsLeft:
+          !countCapped && typeof editsLeft === "number"
+            ? t("usageEditsLeft", { count: editsLeft })
+            : null,
+        reset: t("usageResets"),
+        limitTitle: t("usageLimitTitle"),
+        offer: nextTier
+          ? nextTier.name === "registered"
+            ? t("usageOfferSignIn", { credits: nextTier.credits ?? 0 })
+            : t("usageOfferMatching", { credits: nextTier.credits ?? 0 })
+          : null,
+        limitReset: t("usageLimitReset"),
+        signIn: t("usageSignIn"),
+        settings: t("usageOpenSettings"),
+        learnMore: t("usageLearnMore"),
+        dismiss: t("usageDismiss"),
+      },
+    };
+  }, [refusal, t, usage]);
+
   if (loadError) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground">
@@ -962,6 +1075,9 @@ export default function EditorShell({ resumeId }: Props) {
     );
   }
 
+  // Copy lives here, as it does for every other label the chat panel takes.
+  // Exactly one side of a tier is capped -- a guest on a turn count, an account
+  // on cost -- so the meter string comes from whichever is set.
   const chatEmptyHint = chatUnavailable ? t("chatNotConfigured") : t("chatEmpty");
   // Openers for a master whose chat has never been used. A tailor gets none: its
   // kickstart already opens with a score against the target role. These fill the
@@ -1091,6 +1207,7 @@ export default function EditorShell({ resumeId }: Props) {
           familyActions={familyActions}
           suggestions={chatSuggestions}
           focusKey={chatFocusKey}
+          usage={usagePanel}
         />
       </TabsContent>
       <TabsContent

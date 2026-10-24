@@ -8,6 +8,12 @@ import { useEffect, useState } from "react";
 
 const LIMIT = 50;
 
+function tierKey(tier: string) {
+  if (tier === "guest") return "usageTier_guest" as const;
+  if (tier === "matching") return "usageTier_matching" as const;
+  return "usageTier_registered" as const;
+}
+
 function stamp(value: string) {
   return value.replace("T", " ").slice(0, 19);
 }
@@ -15,6 +21,7 @@ function stamp(value: string) {
 export default function AdminUsersPage() {
   const t = useTranslations("admin");
   const [q, setQ] = useState("");
+  const [order, setOrder] = useState<"created" | "usage">("created");
   const [offset, setOffset] = useState(0);
   const [items, setItems] = useState<AdminUserListItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -23,7 +30,7 @@ export default function AdminUsersPage() {
 
   useEffect(() => {
     let cancelled = false;
-    adminUsers({ q: q.trim() || undefined, limit: LIMIT, offset })
+    adminUsers({ q: q.trim() || undefined, order, limit: LIMIT, offset })
       .then((page) => {
         if (cancelled) return;
         setItems(page.items);
@@ -39,7 +46,7 @@ export default function AdminUsersPage() {
     return () => {
       cancelled = true;
     };
-  }, [q, offset]);
+  }, [q, order, offset]);
 
   return (
     <div className="space-y-6">
@@ -53,6 +60,27 @@ export default function AdminUsersPage() {
         placeholder={t("search")}
         className="max-w-sm"
       />
+      {/* The whole point of the usage columns: one click answers "who is
+          costing the most this week" without opening anyone's page. */}
+      <div className="flex gap-2 text-sm">
+        {(["created", "usage"] as const).map((key) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => {
+              setOffset(0);
+              setOrder(key);
+            }}
+            className={
+              order === key
+                ? "rounded-md border border-border px-2 py-1 font-medium"
+                : "rounded-md border border-transparent px-2 py-1 text-muted-foreground"
+            }
+          >
+            {t(key === "created" ? "orderCreated" : "orderUsage")}
+          </button>
+        ))}
+      </div>
       {error ? <p className="text-sm text-destructive">{t("error")}</p> : null}
       {loading ? <p className="text-sm text-muted-foreground">{t("loading")}</p> : null}
       {!loading && items.length === 0 ? (
@@ -60,12 +88,15 @@ export default function AdminUsersPage() {
       ) : null}
       {items.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[34rem] text-left text-sm">
+          <table className="w-full min-w-[48rem] text-left text-sm">
             <thead>
               <tr className="border-b border-border text-muted-foreground">
                 <th className="py-2 font-medium">{t("email")}</th>
                 <th className="py-2 font-medium">{t("locale")}</th>
                 <th className="py-2 font-medium">{t("resumeCount")}</th>
+                <th className="py-2 font-medium">{t("usageColTier")}</th>
+                <th className="py-2 text-right font-medium">{t("usageColCredits")}</th>
+                <th className="py-2 text-right font-medium">{t("usageColTurns")}</th>
                 <th className="py-2 font-medium">{t("created")}</th>
               </tr>
             </thead>
@@ -79,6 +110,9 @@ export default function AdminUsersPage() {
                   </td>
                   <td className="py-2">{row.locale}</td>
                   <td className="py-2">{row.resume_count}</td>
+                  <td className="py-2">{t(tierKey(row.tier))}</td>
+                  <td className="py-2 text-right">{row.credits_used}</td>
+                  <td className="py-2 text-right">{row.turns_used}</td>
                   <td className="py-2">{stamp(row.created_at)}</td>
                 </tr>
               ))}

@@ -26,7 +26,8 @@
     "contact": "聯絡",
     "x": "X",
     "terms": "條款",
-    "privacy": "隱私權"
+    "privacy": "隱私權",
+    "usage": "用量"
   },
   "notFound": {
     "title": "找不到頁面",
@@ -174,7 +175,18 @@
     "profileNoDisclosures": "尚無人讀取。",
     "profileDelete": "刪除人才檔案",
     "profileError": "操作失敗，請再試一次。",
-    "profileBuildFailed": "目前無法用這份履歷建立人才檔案。請按「重新建立」再試一次。"
+    "profileBuildFailed": "目前無法用這份履歷建立人才檔案。請按「重新建立」再試一次。",
+    "usageTitle": "本週 AI 用量",
+    "usageNotice": "編輯、預覽、匯出 PDF 和 ATS 檢查都沒有限制，只有 AI 編輯會計量。",
+    "usageThisWeekEdits": "已使用 {used} / {limit} 次 AI 編輯",
+    "usageThisWeekCredits": "已使用 {used} / {limit} 點額度",
+    "usageTier_guest": "訪客",
+    "usageTier_registered": "已登入",
+    "usageTier_matching": "開放配對",
+    "usageTierLine": "你的方案：{tier}。",
+    "usageResetLine": "{date} 重置。",
+    "usageUnmeasured": "本週有 {count} 次模型呼叫未回報 token 數，因此這個數字有一部分是估算。",
+    "usageLearnMore": "用量說明"
   },
   "picker": {
     "title": "選擇開始方式",
@@ -342,7 +354,19 @@
     "contextTrimmed": "較早的訊息不會送給 AI",
     "contextTrimmedHint": "為了控制每次回覆的成本，這條線以上的 {count} 則訊息不會放進請求。AI 仍會收到這段對話的開頭、這條線以下的全部內容，以及你的履歷本身，沒有任何訊息被刪除。如果它好像忘了某件事，再說一次就好。",
     "contextTrimmedJump": "看是哪裡",
-    "scrollToLatest": "回到最新"
+    "scrollToLatest": "回到最新",
+    "usageMeterEdits": "本週 AI 編輯 {used} / {limit} 次",
+    "usageMeterCredits": "本週額度 {used} / {limit}",
+    "usageEditsLeft": "大約還能編輯 {count} 次",
+    "usageResets": "週一重置",
+    "usageLimitTitle": "本週的 AI 編輯用完了",
+    "usageOfferSignIn": "登入後每週有 {credits} 點額度，足以把一頁履歷修到完成，也可以發布履歷。",
+    "usageOfferMatching": "開啟「開放配對」後每週提升到 {credits} 點。你隨時可以關掉，已經完成的內容不會消失。",
+    "usageLimitReset": "額度在週一早上重置。在那之前，編輯、預覽、匯出 PDF 和 ATS 檢查都照常可用。",
+    "usageSignIn": "使用 Google 登入",
+    "usageOpenSettings": "開啟設定",
+    "usageLearnMore": "用量說明",
+    "usageDismiss": "繼續編輯"
   },
   "share": {
     "brand": "Offerfy",
@@ -597,7 +621,8 @@
           ]
         }
       ]
-    }
+    },
+    "seeAlsoUsage": "閱讀用量說明"
   },
   "admin": {
     "metaTitle": "營運 · Offerfy",
@@ -710,6 +735,121 @@
     "ingestBoardError": "錯誤",
     "ingestFetched": "抓回筆數",
     "ingestOutOfScope": "不在範圍内",
-    "ingestScopeHint": "「抓回筆數」是職缺版回傳的數量；「不在範圍内」是被類別規則當成非技術職丟掉的。SmartRecruiters 會在抓職缺內文前先自行篩選，所以它的數字會低估。"
+    "ingestScopeHint": "「抓回筆數」是職缺版回傳的數量；「不在範圍内」是被類別規則當成非技術職丟掉的。SmartRecruiters 會在抓職缺內文前先自行篩選，所以它的數字會低估。",
+    "usageNav": "用量",
+    "usageTitle": "AI 用量",
+    "usageWindow": "{from} → {to} 這一週",
+    "usageNotEnforced": "此環境不強制執行",
+    "usageCeilings": "對上限的支出",
+    "usageCeiling_global": "本週全站",
+    "usageCeiling_guest_pool": "本週訪客",
+    "usageCeilingOff": "未設上限",
+    "usageTopSubjects": "本週支出最多",
+    "usageTopNote": "讀自實際用於強制限制的計數，所以這些就是人們真正被限制的數字。紅點表示已達到或超過額度。",
+    "usageNobody": "本週尚無支出。",
+    "usageColWho": "對象",
+    "usageColTier": "方案",
+    "usageColCredits": "額度",
+    "usageColCost": "成本",
+    "usageColTurns": "編輯",
+    "usageColRefusals": "被拒",
+    "usageColSubjects": "人數",
+    "usageColLimit": "限制",
+    "usageColCount": "次數",
+    "usageColCounter": "計數",
+    "usageColTelemetry": "遙測",
+    "usageKind_guest": "訪客",
+    "usageKind_network": "網路",
+    "usageTier_guest": "訪客",
+    "usageTier_registered": "已登入",
+    "usageTier_matching": "開放配對",
+    "usageByTier": "依方案",
+    "usageByPurpose": "依用途",
+    "usageRefusalsTitle": "拒絕記錄",
+    "usageNoRefusals": "本週沒有人被拒絕。",
+    "usageRefusalsNote": "調整方案額度要看的數字。已登入者被拒最重要：只有在登入額度本身就足夠時，配對加碼才算是感謝。",
+    "usageGapsTitle": "計數與遙測對帳",
+    "usageNoGaps": "計數與遙測一致。",
+    "usageGapsNote": "有落差表示遙測少記了一列（可接受），或是有路徑沒經過計量就花了錢（不可接受）。",
+    "orderCreated": "最新優先",
+    "orderUsage": "支出最多優先",
+    "usageThisWeek": "本週",
+    "usageLifetime": "累計",
+    "usageLifetimeTurns": "累計 {count} 次編輯",
+    "usageResetsAt": "{date} 重置",
+    "usageRefusedTimes": "本週被拒 {count} 次",
+    "usageUnmeasuredRounds": "{count} 個回合未回報成本",
+    "loadError": "無法載入用量。"
+  },
+  "usage": {
+    "metaTitle": "用量說明 — Offerfy",
+    "metaDescription": "Offerfy 提供什麼、AI 用量限制是什麼，以及為什麼會有限制。",
+    "title": "用量說明",
+    "intro": "Offerfy 是免費的。其中有一項功能每次使用都要花我們真實的費用，所以那一項有每週上限。這一頁說明那是哪一項、你能用多少，以及為什麼。",
+    "freeHeading": "完全沒有限制的部分",
+    "freeIntro": "以下都不計量——不分方案，有沒有帳號都一樣：",
+    "freeItems": [
+      "手動編輯履歷的 Typst 原始碼，想改多少都可以。",
+      "即時預覽，想重新編譯幾次都可以。",
+      "匯出 PDF。",
+      "對編譯後的 PDF 做 ATS 可解析性檢查。",
+      "瀏覽與搜尋職缺。"
+    ],
+    "whyHeading": "為什麼 AI 有限制",
+    "whyBody": "當你請助理修改履歷時，它會讀整份文件、做出修改、重新編譯，再檢查結果。那是好幾次對語言模型供應商的呼叫，每一次我們都要付費。有每週上限，才能讓 Offerfy 保持免費，而不是跟你要信用卡。",
+    "tiersHeading": "你能用多少",
+    "colTier": "方案",
+    "colAllowance": "每週 AI 編輯",
+    "colPublish": "可以發布履歷",
+    "tier_guest": "未註冊",
+    "tier_registered": "已登入",
+    "tier_matching": "開放配對",
+    "allowanceEdits": "{count} 次，讓你試試看",
+    "allowanceCredits": "大約 {edits} 次編輯",
+    "yes": "可以",
+    "no": "不可以",
+    "tiersUnavailable": "目前的數字載入失敗。與其顯示一個可能和實際執行不一致的數字，我們寧願不顯示——請重新載入。",
+    "tiersNote": "沒有帳號時，額度足以讓你看到助理在你自己的履歷上做出改變，但不足以把一頁修到完成；而發布履歷本來就需要帳號。登入是免費的，一鍵完成。",
+    "costlierHeading": "為什麼有些編輯比較貴",
+    "costlierIntro": "我們計算每次編輯實際花了我們多少，所以小問題花得比大改寫少。以下情況會讓一次編輯變貴：",
+    "costlierItems": [
+      "履歷很長。每次編輯都會送出整份文件，所以三頁的 CV 每次編輯比一頁的貴。",
+      "切換模板，或上傳檔案匯入。兩者都是重寫整份文件，而不是改幾行。",
+      "關於排版後樣子的問題——某一行有沒有折行、某一頁看起來擠不擠——因為要回答得先把它渲染出來看。",
+      "改完之後無法編譯的編輯，因為助理必須接著修好它。",
+      "同一份履歷上很長的對話。助理每次動作都會收到完整的對話歷史。"
+    ],
+    "sections": [
+      {
+        "heading": "我們怎麼計算",
+        "paragraphs": [
+          "我們把模型呼叫實際向我們收取的費用加總——送進去的 token、產出的 token，以及部分請求被重複利用時拿到的折扣。已經折扣的部分，我們不會重複計算。",
+          "「額度」是我們自己的單位，不是貨幣。一點大約是一次典型編輯的成本。用自己的單位，是為了讓供應商調價時，我們公布的額度不會跟著變。",
+          "偶爾供應商不會告知某次呼叫的費用。遇到這種情況，我們記錄最佳估計而不是記成零，而你的用量頁會說明有幾次是這樣。"
+        ]
+      },
+      {
+        "heading": "一週的起算，以及在哪裡看",
+        "paragraphs": [
+          "額度每週一台北時間午夜重置。編輯器的對話框上方有一條用量條，設定頁有更完整的明細。",
+          "用完了也不會損失任何東西。你的履歷、你做過的修改、已發布的連結都原樣保留，而且在下週開始前，你仍然可以手動編輯和匯出 PDF。"
+        ]
+      },
+      {
+        "heading": "配對是感謝，不是門檻",
+        "paragraphs": [
+          "開啟「開放配對」讓我們可以把你介紹給雇主，並附帶更高的每週額度作為感謝。",
+          "它不是解鎖產品的方式。登入後的額度本身就應該足以把一份履歷修到完成、並針對一個職位調整；如果事實證明不夠，我們會把它調高，而不是讓配對成為真正能用 Offerfy 的唯一途徑。",
+          "你隨時可以一鍵關閉，我們不會收回你這週已經用掉的額度。關閉會把你的檔案從索引中移除，而不會動到你做過的任何東西。"
+        ]
+      },
+      {
+        "heading": "防濫用上限",
+        "paragraphs": [
+          "除了每週額度之外，還有單一小時內可執行幾次編輯的上限。它的作用是防止某個帳號或某個腳本在幾分鐘內把預算花光，正常使用不會接近它。",
+          "我們也為整個網站設了每週 AI 支出上限。萬一真的達到，AI 編輯會對所有人暫停到下週開始——而上面「完全沒有限制」清單裡的一切照常運作。我們寧願誠實地暫停一項功能，也不要悄悄向你收費。"
+        ]
+      }
+    ]
   }
 }

@@ -153,6 +153,75 @@ class PublicShareOut(BaseModel):
     locale: str
 
 
+class UsageOut(BaseModel):
+    """One caller's weekly AI allowance.
+
+    Credits, never micro-USD: the ledger is money so that cheap edits cost
+    less, but a published allowance that is re-denominated every time a
+    provider changes a price is not an allowance. `approx_edits_left` is the
+    number people actually read, derived from their own trailing cost per
+    turn.
+
+    Both halves are nullable because the tiers are capped differently -- a
+    guest on a turn count has no credit limit, and the account tiers have no
+    turn limit. Exactly one side is set.
+    """
+
+    tier: Literal["guest", "registered", "matching"]
+    # False in development, so a client can say "not enforced here" rather
+    # than drawing an empty meter.
+    enforced: bool
+    reset_at: str
+    limit_credits: float | None
+    used_credits: float
+    remaining_credits: float | None
+    turn_limit: int | None
+    turns_used: int
+    turns_remaining: int | None
+    turns_per_hour: int
+    approx_edits_left: int | None
+    exhausted: bool
+    # Rounds the provider reported no usage for, charged at a fallback. Shown
+    # because a meter that is guessing should say so.
+    unmeasured_rounds: int
+
+
+class UsageTierOut(BaseModel):
+    """One published tier. The shape the public /usage page renders."""
+
+    name: Literal["guest", "registered", "matching"]
+    # Exactly one of these is set, because the tiers are capped differently:
+    # a guest on a count of AI edits, an account on cost. See the design spec.
+    credits: int | None
+    turns: int | None
+    turns_per_hour: int
+    # Derived here so the page does not have to know the credit peg.
+    approx_edits: int
+    can_publish: bool
+
+
+class UsageTiersOut(BaseModel):
+    """Every tier, for the public page.
+
+    Public and subject-free on purpose: the page has to render the same table
+    for a crawler and for a signed-out visitor as for a signed-in one.
+
+    It exists so the page never holds a copy of the numbers. A published
+    allowance that has drifted from the enforced one is the worst bug this page
+    could have, and fetching makes that drift impossible rather than merely
+    tested for. On this host it is also the cheaper thing to operate: tuning
+    the tiers is then a code change plus a zero-downtime API reload, where a
+    number baked into the message files would need a frontend rebuild and ~40s
+    of downtime (AGENTS.md section 4).
+    """
+
+    tiers: list[UsageTierOut]
+    # Monday 00:00 Asia/Taipei, so the page can say when the week turns over
+    # without re-deriving the rule.
+    reset_at: str
+    enforced: bool
+
+
 class ConsentUpdate(BaseModel):
     granted: bool
 

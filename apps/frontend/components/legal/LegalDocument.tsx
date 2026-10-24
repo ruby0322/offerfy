@@ -68,6 +68,11 @@ export default async function LegalDocument({ doc }: Props) {
           <p className="legal-see-also">
             <Link href={otherHref}>{common(seeAlso)}</Link>
           </p>
+          {/* The Terms now describe a weekly AI allowance whose actual numbers
+              live on /usage, so the reader needs a way to get there. */}
+          <p className="legal-see-also">
+            <Link href="/usage">{common("seeAlsoUsage")}</Link>
+          </p>
         </article>
       </main>
       <Footer variant="landing" />

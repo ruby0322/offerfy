@@ -19,8 +19,10 @@ from app.schemas import (
     TalentProfileStatus,
 )
 from app.services.consent import has_consent
+from app.services.metering import metered, preflight
 from app.services.disclosure import disclosure_count, last_disclosed_at
 from app.services.profile import (
+    record_build_spend,
     build_profile,
     delete_profile_for_user,
     detail_of,
@@ -33,54 +35,11 @@ from app.services.revisions import published_source
 
 router = APIRouter()
 
-# A build is one model call the owner pays for in latency and we pay for in
-# tokens. Metered on LlmCall rows rather than on a new table, because the row
-# is written anyway.
-REFRESH_LIMIT_PER_HOUR = 5
-
-
-def _recent_builds(db: Session, user: User) -> int:
-    since = datetime.now(timezone.utc) - timedelta(hours=1)
-    return (
-        db.query(LlmCall)
-        .join(Resume, Resume.id == LlmCall.resume_id)
-        .filter(
-            LlmCall.purpose == "profile",
-            LlmCall.created_at >= since,
-            Resume.user_id == user.id,
-        )
-        .count()
-    )
-
-
-def _record_spend(db: Session, result) -> None:
-    """Profile builds are a billable path and belong in LlmCall like the rest.
-
-    Commits on its own, so callers must settle the build's own transaction
-    first -- commit a profile they are keeping, roll back one they are not --
-    or this commit would persist a write they had decided to discard.
-
-    try/except for the same reason the chat router wraps its own insert:
-    telemetry may be lost, the work may not.
-    """
-    if not result.model or result.resume_id is None:
-        return
-    try:
-        db.add(
-            LlmCall(
-                resume_id=result.resume_id,
-                purpose="profile",
-                model=result.model[:128],
-                round_index=0,
-                input_tokens=result.usage.get("input_tokens"),
-                cached_tokens=result.usage.get("cached_tokens"),
-                output_tokens=result.usage.get("output_tokens"),
-                source_chars=result.source_chars,
-            )
-        )
-        db.commit()
-    except Exception:  # pragma: no cover - telemetry must never fail a build
-        db.rollback()
+# The hourly build limit used to live here as REFRESH_LIMIT_PER_HOUR, with its
+# own LlmCall count. It is now TIERS[...].profile_builds_per_hour, enforced by
+# the same preflight as everything else -- "too much" had three definitions
+# across three routers and now has one. The weekly cost budget applies to
+# builds too, because it is the same money.
 
 
 def _status(
@@ -144,12 +103,18 @@ async def put_talent_profile_source(
     # refuse the choice they just made. It has to be reported, though --
     # returning 200 with no profile and no reason is indistinguishable from
     # never having tried, which is how the first real failure went unnoticed.
-    result = await build_profile(db, user)
-    if result.profile is not None:
-        db.commit()
-    else:
-        db.rollback()
-    _record_spend(db, result)
+    #
+    # The preflight can still refuse, because this is a model call like any
+    # other -- which is why it runs before the build rather than being skipped
+    # for an "opportunistic" one.
+    guard = preflight(db, user=user, guest=None, purpose="profile")
+    async with metered(guard) as meter:
+        result = await build_profile(db, user)
+        if result.profile is not None:
+            db.commit()
+        else:
+            db.rollback()
+        record_build_spend(db, user, result, meter)
     return _status(db, user, build_error=result.error)
 
 
@@ -164,25 +129,26 @@ async def refresh_talent_profile(
         raise HTTPException(status_code=409, detail="Choose a resume first")
     if not (resume.published_revision_id and published_source(db, resume)):
         raise HTTPException(status_code=409, detail="Publish this resume first")
-    if _recent_builds(db, user) >= REFRESH_LIMIT_PER_HOUR:
-        raise HTTPException(status_code=429, detail="Too many rebuilds")
-
-    result = await build_profile(db, user)
-    if result.profile is None:
-        db.rollback()
-        _record_spend(db, result)
-        if result.error == "llm_not_configured":
-            raise HTTPException(status_code=503, detail="Profile build unavailable")
-        if result.error == "empty":
-            raise HTTPException(
-                status_code=422, detail="This resume has too little to go on"
-            )
-        raise HTTPException(status_code=502, detail="Profile build failed")
-    # Read the payload out before committing, so the response does not depend
-    # on reloading an expired row.
-    detail = detail_of(result.profile)
-    db.commit()
-    _record_spend(db, result)
+    # Replaces the local REFRESH_LIMIT_PER_HOUR check. Same hourly cap, now
+    # from the tier, and the weekly cost budget applies too.
+    guard = preflight(db, user=user, guest=None, purpose="profile")
+    async with metered(guard) as meter:
+        result = await build_profile(db, user)
+        if result.profile is None:
+            db.rollback()
+            record_build_spend(db, user, result, meter)
+            if result.error == "llm_not_configured":
+                raise HTTPException(status_code=503, detail="Profile build unavailable")
+            if result.error == "empty":
+                raise HTTPException(
+                    status_code=422, detail="This resume has too little to go on"
+                )
+            raise HTTPException(status_code=502, detail="Profile build failed")
+        # Read the payload out before committing, so the response does not
+        # depend on reloading an expired row.
+        detail = detail_of(result.profile)
+        db.commit()
+        record_build_spend(db, user, result, meter)
     return detail
 
 

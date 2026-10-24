@@ -531,6 +531,16 @@ def test_rebuilding_an_unchanged_profile_keeps_the_same_hash(
 def test_refresh_is_rate_limited(
     client: TestClient, db_session, monkeypatch, openai_enabled
 ):
+    """Five builds an hour, now from the tier rather than this router.
+
+    The limit moved to TIERS[matching].profile_builds_per_hour, so it respects
+    USAGE_LIMITS_ENABLED like every other limit -- which the old local check
+    did not. Production is unchanged (still 5/hour, still enforced); what
+    changed is that development no longer enforces it, so this test has to say
+    it wants enforcement.
+    """
+    monkeypatch.setenv("USAGE_LIMITS_ENABLED", "true")
+    get_settings.cache_clear()
     _stub(monkeypatch, StubProfileLlm(_said(_profile())))
     _, resume = _ready(client, db_session, monkeypatch, sub="sub-rate")
     _point_at(client, resume.id)
@@ -538,6 +548,17 @@ def test_refresh_is_rate_limited(
         assert client.post("/v1/me/talent-profile/refresh").status_code == 200
     # The pointer build plus four refreshes is five.
     assert client.post("/v1/me/talent-profile/refresh").status_code == 429
+
+
+def test_development_does_not_rate_limit_refresh(
+    client: TestClient, db_session, monkeypatch, openai_enabled
+):
+    """The other half of that change, asserted rather than left implicit."""
+    _stub(monkeypatch, StubProfileLlm(_said(_profile())))
+    _, resume = _ready(client, db_session, monkeypatch, sub="sub-rate-dev")
+    _point_at(client, resume.id)
+    for _ in range(8):
+        assert client.post("/v1/me/talent-profile/refresh").status_code == 200
 
 
 # --- storage shape -----------------------------------------------------------
