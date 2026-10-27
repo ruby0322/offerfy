@@ -11,6 +11,8 @@ type Props = {
   title: string;
   familyMenu?: ReactNode;
   actions?: ReactNode;
+  /** The avatar and account menu, last in the row as in the site nav. */
+  accountMenu?: ReactNode;
   status?: string;
   publishLabel?: string;
   publishingLabel?: string;
@@ -24,6 +26,7 @@ export default function EditorHeader({
   title,
   familyMenu,
   actions,
+  accountMenu,
   status,
   publishLabel,
   publishingLabel,
@@ -60,6 +63,10 @@ export default function EditorHeader({
           ) : null}
           <LocaleSwitcher />
           <ThemeSwitcher />
+          {/* Same trailing position as the site nav: the editor has its own
+              header and never renders Nav, so without this the account menu is
+              missing from the page people spend the most time on. */}
+          {accountMenu}
         </div>
       </div>
     </header>
