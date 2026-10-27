@@ -152,6 +152,11 @@ export default function Nav({ variant }: Props) {
                     <DropdownMenuSeparator />
                   </>
                 ) : null}
+                {/* Straight under the identity row: who this account is, then
+                    what it has left this week. It brings its own trailing
+                    separator, so the actions below stay their own group
+                    whether or not the meter is there. */}
+                <NavUsage />
                 {/* Above Settings and not inside NavUsage's block: that block
                     renders only once its fetch lands and only where limits are
                     enforced, and the route to this page must not depend on
@@ -163,7 +168,6 @@ export default function Nav({ variant }: Props) {
                   <Link href="/settings">{t("settings")}</Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => void onLogout()}>{t("logout")}</DropdownMenuItem>
-                <NavUsage />
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (

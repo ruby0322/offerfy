@@ -18,8 +18,12 @@ import { fetchUsage, type Usage } from "@/lib/api";
  * per open, which is the behaviour we want: the balance moves while you edit,
  * and a figure cached at page load would be stale by the time anyone looked.
  *
- * Renders nothing until it has an answer, and sits below the menu's actions, so
- * a slow reply never shifts Settings or Log out out from under the pointer.
+ * Renders nothing until it has an answer, and sits directly under the identity
+ * row at the top of the menu: the two together are "which account this is and
+ * what it has left". The cost of that placement is that a slow reply pushes the
+ * actions below down once -- the menu is capped at the meter's own 14rem width,
+ * so it grows downwards only, and the fetch is one request against a menu that
+ * stays usable the whole time.
  *
  * It no longer carries its own follow-through link. "Plan & usage" is a static
  * item in Nav, above Settings, so it is there whether or not this fetch
@@ -63,9 +67,11 @@ export default function NavUsage() {
       ? t("usageEditsLeft", { count: editsLeft })
       : null;
 
+  // The separator trails the meter rather than leading it: the identity row
+  // above already closes with one, and a leading separator here would double it
+  // up the moment the fetch landed.
   return (
     <>
-      <DropdownMenuSeparator />
       <div className="nav-usage px-2 py-1.5">
         <UsageMeter
           usage={usage}
@@ -74,6 +80,7 @@ export default function NavUsage() {
           resetLabel={t("usageResets")}
         />
       </div>
+      <DropdownMenuSeparator />
     </>
   );
 }
