@@ -294,8 +294,6 @@
     "familyNewTailor": "新建定制版",
     "familyNewTailorHint": "针对单一职位的副本，并按该职位评分。主简历不会被改动。",
     "switchBlocked": "等这一轮结束再切换。",
-    "backToDashboard": "返回仪表板",
-    "backToHome": "返回 Offerfy",
     "leaveSaveError": "当前内容无法保存，暂留在此页。",
     "switchSaveError": "当前内容无法保存，暂不切换。",
     "tailorDialogTitle": "从主简历新建定制版",

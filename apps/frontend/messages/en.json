@@ -291,8 +291,6 @@
     "familyNewTailor": "New tailored version",
     "familyNewTailorHint": "A copy aimed at one job, scored against that role. Your master stays untouched.",
     "switchBlocked": "Wait for this turn to finish before switching.",
-    "backToDashboard": "Back to Dashboard",
-    "backToHome": "Back to Offerfy",
     "leaveSaveError": "Could not save this document, so it stayed open.",
     "switchSaveError": "Could not save this document, so it stayed open.",
     "tailorDialogTitle": "New tailored version from the master",
