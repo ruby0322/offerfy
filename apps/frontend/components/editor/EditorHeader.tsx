@@ -1,13 +1,13 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Link } from "@/i18n/navigation";
 import LocaleSwitcher from "@/components/LocaleSwitcher";
 import ThemeSwitcher from "@/components/ThemeSwitcher";
 import { Button } from "@/components/ui/button";
 
 type Props = {
-  brand: string;
+  /** The way out of the editor, where the brand mark used to be. */
+  back: ReactNode;
   title: string;
   familyMenu?: ReactNode;
   actions?: ReactNode;
@@ -22,7 +22,7 @@ type Props = {
 };
 
 export default function EditorHeader({
-  brand,
+  back,
   title,
   familyMenu,
   actions,
@@ -38,12 +38,11 @@ export default function EditorHeader({
     <header className="border-b border-border bg-background">
       <div className="flex min-w-0 items-center justify-between gap-3 px-3 py-3 sm:px-4">
         <div className="flex min-w-0 items-center gap-3 sm:gap-6">
-          <Link
-            href="/"
-            className="shrink-0 text-lg font-bold tracking-tight text-foreground sm:text-xl"
-          >
-            {brand}
-          </Link>
+          {/* The brand mark used to sit here and was the only way out of the
+              editor, pointing at the marketing front page -- which is almost
+              never where someone leaving a resume wants to land. A labelled
+              exit is worth more here than the logo. */}
+          {back}
           {familyMenu ?? <span className="truncate text-sm text-muted-foreground">{title}</span>}
           {status ? (
             <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">{status}</span>

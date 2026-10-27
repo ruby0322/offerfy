@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { AlignLeft, History, LayoutTemplate, MessageCircle, Settings } from "lucide-react";
+import { AlignLeft, ArrowLeft, History, LayoutTemplate, MessageCircle, Settings } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import AccountMenu from "@/components/AccountMenu";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
@@ -23,6 +23,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useRouter } from "@/i18n/navigation";
 import { NARROW_SCREEN, useMediaQuery, useVisualViewportHeight } from "@/lib/use-media-query";
+import { cn } from "@/lib/utils";
 import {
   ApiError,
   acceptMemory,
@@ -128,7 +129,6 @@ export default function EditorShell({ resumeId }: Props) {
   const t = useTranslations("editor");
   const tAts = useTranslations("ats");
   const tCommon = useTranslations("common");
-  const tNav = useTranslations("nav");
   const locale = useLocale();
   const toast = useToast();
   const [title, setTitle] = useState("");
@@ -183,6 +183,10 @@ export default function EditorShell({ resumeId }: Props) {
   // draw the avatar without asking a second time.
   const [me, setMe] = useState<AuthUser | null | undefined>(undefined);
   const signedIn = !!me;
+  // Still unknown reads as the signed-in label: that is the common case in
+  // the editor, so its width is the right one to hold, and the header keeps
+  // it invisible until it is actually true.
+  const backLabel = signedIn || me === undefined ? t("backToDashboard") : t("backToHome");
   const [unpublishedChanges, setUnpublishedChanges] = useState(false);
   const [updatedAt, setUpdatedAt] = useState("");
   const [publishing, setPublishing] = useState(false);
@@ -192,6 +196,7 @@ export default function EditorShell({ resumeId }: Props) {
   const [tailorError, setTailorError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingResume, setDeletingResume] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [memory, setMemory] = useState<MemoryItem[]>([]);
   const [memoryLoaded, setMemoryLoaded] = useState(false);
@@ -798,6 +803,26 @@ export default function EditorShell({ resumeId }: Props) {
     }
   }
 
+  async function onLeaveEditor() {
+    if (leaving || sendingRef.current) return;
+    setLeaving(true);
+    try {
+      // Leaving unmounts the 400ms autosave debounce, so anything typed inside
+      // that window would never be written. Flush first, exactly as switching
+      // between versions already does.
+      if (!(await flushSave())) {
+        setStatus(t("leaveSaveError"));
+        return;
+      }
+      // The same rule the delete flow uses: /dashboard bounces a guest to
+      // /login, which is a dead end that reads like a bug, so a guest goes to
+      // the front page instead.
+      router.push(signedIn ? "/dashboard" : "/");
+    } finally {
+      setLeaving(false);
+    }
+  }
+
   async function onSwitchResume(id: string) {
     if (sendingRef.current || id === resumeId) return;
     if (!(await flushSave())) {
@@ -1269,7 +1294,25 @@ export default function EditorShell({ resumeId }: Props) {
       style={visibleHeight ? { height: visibleHeight } : undefined}
     >
       <EditorHeader
-        brand={tNav("brand")}
+        back={
+          <button
+            type="button"
+            onClick={() => void onLeaveEditor()}
+            disabled={leaving}
+            aria-label={backLabel}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-1 text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-60"
+          >
+            <ArrowLeft className="size-4" aria-hidden="true" />
+            {/* Where "back" goes depends on who this is, and that answer lands
+                a tick after the header does. Holding the label's width while
+                it is unknown keeps the title from sliding, and rendering it
+                invisible rather than wrong means nobody reads a destination
+                that is about to change. */}
+            <span className={cn("hidden sm:inline", me === undefined && "invisible")}>
+              {backLabel}
+            </span>
+          </button>
+        }
         title={title}
         familyMenu={
           <ResumeFamilyMenu
