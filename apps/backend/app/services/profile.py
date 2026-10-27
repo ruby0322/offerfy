@@ -52,6 +52,7 @@ from app.schemas import (
     TalentProfilePayload,
     TalentProfileSummary,
 )
+from app.services.account import display_name_of
 from app.services.consent import has_consent, has_consent_many
 from app.services.family import family_master
 from app.services.llm import (
@@ -556,9 +557,13 @@ async def build_profile(db: Session, user: User) -> ProfileBuildResult:
         return result
 
     payload = clamp_payload(scrub_contacts(payload))
-    # A name Google verified beats one a model read off a document.
-    if user.name:
-        payload.display_name = _cut(user.name, TALENT_NAME_CHARS)
+    # A name the person typed, or failing that one Google verified, beats one a
+    # model read off a document. display_name_of settles that precedence in one
+    # place -- the nav shows the same answer, and the name an employer reads
+    # must not be a different one from the name the owner sees.
+    own_name = display_name_of(user)
+    if own_name:
+        payload.display_name = _cut(own_name, TALENT_NAME_CHARS)
     if _is_empty(payload):
         logger.warning("profile build produced an empty payload")
         result.error = "empty"

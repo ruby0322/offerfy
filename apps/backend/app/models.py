@@ -25,6 +25,10 @@ def _utcnow() -> datetime:
 
 class User(Base):
     __tablename__ = "users"
+    # A unique index rather than `unique=True` on the column, so that the name
+    # and the kind of object match migration 020 exactly -- see the comment
+    # there for why a constraint was not an option on SQLite.
+    __table_args__ = (Index("uq_users_username", "username", unique=True),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     google_sub: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
@@ -35,6 +39,31 @@ class User(Base):
     # a name inferred from Typst by regex or by a model is a guess, and a wrong
     # name on a profile an employer reads is worse than no name at all.
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # --- The account profile ---------------------------------------------
+    #
+    # Everything below is the person's own, typed by them, and separate from
+    # both the Google fields above and from TalentProfile. The distinction is
+    # load-bearing in two directions:
+    #
+    #   * `name` above is what Google asserts and is overwritten on every
+    #     login (see routers/auth.google_callback), so it cannot hold an edit.
+    #     `display_name` is the editable one and wins wherever a name is shown.
+    #   * TalentProfile is *derived* and exists only while the matching consent
+    #     is live -- withdrawing deletes it. These columns survive that, because
+    #     they are account settings rather than something we inferred and
+    #     passed to an employer. Nothing here is sent to the talent API; only
+    #     display_name reaches a profile, as the name on it.
+    username: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    display_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    headline: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    location: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # Stored as the full URL including scheme, normalised on write. One link
+    # rather than a set of named ones: a column per network ages badly, and the
+    # resume already carries whichever links the person wants an employer to
+    # see.
+    website: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    bio: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Which resume feeds this person's talent profile. Required because kind
     # defaults to 'master' for every resume, so "the master resume" is not a
     # thing a user has one of. It lives here rather than on TalentProfile so

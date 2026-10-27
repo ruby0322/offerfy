@@ -2,9 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Link } from "@/i18n/navigation";
 import UsageMeter from "@/components/UsageMeter";
-import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import { DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { fetchUsage, type Usage } from "@/lib/api";
 
 /**
@@ -21,6 +20,11 @@ import { fetchUsage, type Usage } from "@/lib/api";
  *
  * Renders nothing until it has an answer, and sits below the menu's actions, so
  * a slow reply never shifts Settings or Log out out from under the pointer.
+ *
+ * It no longer carries its own follow-through link. "Plan & usage" is a static
+ * item in Nav, above Settings, so it is there whether or not this fetch
+ * succeeds and whether or not limits are enforced -- a link that disappeared
+ * with the meter took the only route to the plan page with it.
  */
 export default function NavUsage() {
   const t = useTranslations("nav");
@@ -70,9 +74,6 @@ export default function NavUsage() {
           resetLabel={t("usageResets")}
         />
       </div>
-      <DropdownMenuItem asChild>
-        <Link href="/usage">{t("usageDetails")}</Link>
-      </DropdownMenuItem>
     </>
   );
 }

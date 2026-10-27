@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from app.db import ensure_schema
 from app.routers import (
+    account,
     admin,
     auth,
     chat,
@@ -32,6 +33,7 @@ def create_app() -> FastAPI:
     application = FastAPI(title="Offerfy", lifespan=lifespan)
     application.include_router(health.router)
     application.include_router(auth.router)
+    application.include_router(account.router)
     application.include_router(consent.router)
     application.include_router(resumes.router)
     application.include_router(shares.router)

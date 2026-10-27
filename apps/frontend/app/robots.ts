@@ -8,6 +8,11 @@ const DISALLOW_PATHS = [
   "/editor",
   "/login",
   "/api",
+  // Both are one signed-in person's own page, so there is nothing here for a
+  // crawler to index -- /plan also sets robots: noindex in its own metadata,
+  // which is the half that holds if someone links to it.
+  "/plan",
+  "/settings",
   "/create",
   "/upload",
   "/new",

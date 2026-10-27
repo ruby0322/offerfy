@@ -1,3 +1,5 @@
+import type { UsageTierRow, UsageTiers } from "@/lib/usage-tiers";
+
 export class ApiError extends Error {
   status: number;
   body: unknown;
@@ -152,6 +154,10 @@ export type AuthUser = {
   email?: string | null;
   locale?: string | null;
   picture?: string | null;
+  /** The chosen handle, or null until they choose one. */
+  username?: string | null;
+  /** Their own name if they set one, else Google's. Never the email. */
+  display_name?: string | null;
   is_admin?: boolean;
 };
 
@@ -418,11 +424,19 @@ export type ContextCut = { dropped: number; fromMessageId: string };
 
 export type UsageTier = "guest" | "registered" | "matching";
 
+// Re-exported rather than redeclared: the published tier table has exactly one
+// shape, and a second copy of it here is a copy that can drift. The import is
+// type-only, so nothing from that server-side module reaches the browser
+// bundle.
+export type { UsageTierRow, UsageTiers };
+
 /** GET /v1/usage. Credits, never micro-USD — see the backend's UsageOut. */
 export type Usage = {
   tier: UsageTier;
   /** False in development, so the UI can stay quiet rather than draw an empty meter. */
   enforced: boolean;
+  /** Monday 00:00 Asia/Taipei. Both ends come from one reading of the clock. */
+  period_start: string;
   reset_at: string;
   /** Null on a tier capped by a turn count instead of by cost. Exactly one side is set. */
   limit_credits: number | null;
@@ -456,6 +470,14 @@ export type UsageRefusal = {
 
 export async function fetchUsage(): Promise<Usage> {
   return apiJson<Usage>("/api/v1/usage");
+}
+
+/** Every published tier. The browser-side twin of lib/usage-tiers.ts, which
+ * the indexable /usage and /pricing pages fetch on the server so a crawler
+ * sees the numbers in the HTML. /plan is signed-in only and has no crawler to
+ * serve, so it reads this through the same /api rewrite as everything else. */
+export async function fetchUsageTierTable(): Promise<UsageTiers> {
+  return apiJson<UsageTiers>("/api/v1/usage/tiers");
 }
 
 /**
@@ -610,6 +632,74 @@ export async function getMe(): Promise<AuthUser | null> {
     }
     throw err;
   }
+}
+
+/**
+ * The account profile: six fields the person typed about themselves.
+ *
+ * Not the talent profile. That one lives at `/v1/me/talent-profile`, is built
+ * from a resume by a model, and is deleted when the matching consent is
+ * withdrawn — see `TalentProfileStatus` further down. These six are account
+ * settings and survive all of that.
+ */
+export type Account = {
+  email: string;
+  picture: string | null;
+  /** What Google asserted. Read-only, and shown as the display-name placeholder. */
+  google_name: string | null;
+  username: string | null;
+  display_name: string | null;
+  headline: string | null;
+  location: string | null;
+  website: string | null;
+  bio: string | null;
+};
+
+export type AccountField =
+  | "username"
+  | "display_name"
+  | "headline"
+  | "location"
+  | "website"
+  | "bio";
+
+/** Which field the server refused, and why, so the form can mark that one input. */
+export type AccountFieldError = { field: AccountField; code: string };
+
+export async function getAccount(): Promise<Account> {
+  return apiJson<Account>("/api/v1/me/account");
+}
+
+/**
+ * PATCH, so a form can send one field without blanking the other five.
+ *
+ * An explicit `null` clears a field; omitting the key leaves it alone. That
+ * distinction is the reason this takes a `Partial` rather than a whole
+ * `Account` — see the backend's `patch_account`.
+ */
+export async function patchAccount(
+  updates: Partial<Record<AccountField, string | null>>,
+): Promise<Account> {
+  return apiJson<Account>("/api/v1/me/account", {
+    method: "PATCH",
+    body: JSON.stringify(updates),
+  });
+}
+
+/**
+ * Pull the refused field out of an ApiError, or null if it is not one.
+ *
+ * The server sends a code rather than a sentence, because the sentence has to
+ * be in the reader's locale and the three locales live in `messages/*.json`.
+ */
+export function accountFieldErrorOf(err: unknown): AccountFieldError | null {
+  if (!(err instanceof ApiError)) return null;
+  if (err.status !== 422 && err.status !== 409) return null;
+  const detail = (err.body as { detail?: unknown } | null)?.detail;
+  if (!detail || typeof detail !== "object") return null;
+  const rec = detail as Record<string, unknown>;
+  if (typeof rec.field !== "string" || typeof rec.code !== "string") return null;
+  return { field: rec.field as AccountField, code: rec.code };
 }
 
 export type ConsentPurpose = "talent_introduction";
