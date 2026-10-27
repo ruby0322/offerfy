@@ -14,7 +14,12 @@
     "account": "账户",
     "blog": "Blog",
     "jobs": "职位",
-    "pricing": "方案"
+    "pricing": "方案",
+    "usageEdits": "本周 AI 编辑 {used} / {limit} 次",
+    "usageCredits": "本周额度 {used} / {limit}",
+    "usageEditsLeft": "大约还能编辑 {count} 次",
+    "usageResets": "周一重置",
+    "usageDetails": "用量说明"
   },
   "footer": {
     "locales": "语言",

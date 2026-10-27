@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { Link, usePathname, useRouter } from "@/i18n/navigation";
 import BrandMark from "@/components/BrandMark";
 import LocaleSwitcher from "@/components/LocaleSwitcher";
+import NavUsage from "@/components/NavUsage";
 import ThemeSwitcher from "@/components/ThemeSwitcher";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -123,7 +124,10 @@ export default function Nav({ variant }: Props) {
                   <AvatarFallback className="text-xs font-medium">{initials(user)}</AvatarFallback>
                 </Avatar>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-44">
+              {/* 14rem, the same cap `.nav-usage` puts on the meter, so the
+                  menu is already the width the meter needs and does not widen
+                  when the usage request lands. */}
+              <DropdownMenuContent align="end" className="min-w-56">
                 {user.email ? (
                   <>
                     <DropdownMenuLabel className="max-w-52 truncate font-normal text-muted-foreground">
@@ -136,6 +140,7 @@ export default function Nav({ variant }: Props) {
                   <Link href="/settings">{t("settings")}</Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => void onLogout()}>{t("logout")}</DropdownMenuItem>
+                <NavUsage />
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
