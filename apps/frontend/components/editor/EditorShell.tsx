@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import dynamic from "next/dynamic";
 import { AlignLeft, History, LayoutTemplate, MessageCircle, Settings } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
+import AccountMenu from "@/components/AccountMenu";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import { useToast } from "@/components/Toaster";
 import CompileErrorDialog from "@/components/editor/CompileErrorDialog";
@@ -56,7 +57,7 @@ import {
   typstCompileDetail,
   usageRefusalOf,
 } from "@/lib/api";
-import type { Usage, UsageRefusal } from "@/lib/api";
+import type { AuthUser, Usage, UsageRefusal } from "@/lib/api";
 import { formatUserAttachmentMessage, parseToolPayload } from "@/lib/chat-tools";
 import type { AtsCheckName } from "@/lib/ats-checks";
 import { peekPendingCreate, takePendingCreate } from "@/lib/pending-create";
@@ -177,7 +178,11 @@ export default function EditorShell({ resumeId }: Props) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [chatFocusKey, setChatFocusKey] = useState(0);
   const [compileError, setCompileError] = useState<string | null>(null);
-  const [signedIn, setSignedIn] = useState(false);
+  // The auth check already runs for `claimResumes` below; keeping the
+  // account it returns, rather than just a boolean, is what lets the header
+  // draw the avatar without asking a second time.
+  const [me, setMe] = useState<AuthUser | null | undefined>(undefined);
+  const signedIn = !!me;
   const [unpublishedChanges, setUnpublishedChanges] = useState(false);
   const [updatedAt, setUpdatedAt] = useState("");
   const [publishing, setPublishing] = useState(false);
@@ -336,9 +341,9 @@ export default function EditorShell({ resumeId }: Props) {
     (async () => {
       try {
         try {
-          const me = await getMe();
-          if (me) {
-            setSignedIn(true);
+          const account = await getMe();
+          setMe(account);
+          if (account) {
             try {
               await claimResumes();
             } catch {
@@ -347,6 +352,7 @@ export default function EditorShell({ resumeId }: Props) {
           }
         } catch {
           /* auth check is optional */
+          setMe(null);
         }
         const resume = await getResume(resumeId);
         if (cancelled) return;
@@ -976,7 +982,10 @@ export default function EditorShell({ resumeId }: Props) {
         let notice = t("memoryError");
         if (err instanceof ApiError && err.status === 409) notice = t("memoryFull");
         if (err instanceof ApiError && err.status === 401) {
-          setSignedIn(false);
+          // The session expired under us: drop the account, which also takes
+          // the avatar out of the header rather than leaving it offering a
+          // menu for a session that is gone.
+          setMe(null);
           notice = t("memoryLogin");
         }
         setMemoryNotice(notice);
@@ -1286,6 +1295,15 @@ export default function EditorShell({ resumeId }: Props) {
             notice={memoryNotice}
             actions={familyActions}
             onDeleteMemory={(id) => void runMemoryAction(id, deleteMemory)}
+          />
+        }
+        accountMenu={
+          <AccountMenu
+            user={me}
+            onLoggedOut={() => {
+              setMe(null);
+              router.push("/");
+            }}
           />
         }
         status={status}

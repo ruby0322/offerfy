@@ -3,36 +3,15 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Link, usePathname, useRouter } from "@/i18n/navigation";
+import AccountMenu from "@/components/AccountMenu";
 import BrandMark from "@/components/BrandMark";
 import LocaleSwitcher from "@/components/LocaleSwitcher";
-import NavUsage from "@/components/NavUsage";
 import ThemeSwitcher from "@/components/ThemeSwitcher";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { getMe, logout, type AuthUser } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { getMe, type AuthUser } from "@/lib/api";
 
 type Props = {
   variant?: "landing" | "app";
 };
-
-function initials(user: AuthUser): string {
-  // Their name before their email: once someone has set a display name, an
-  // avatar still showing the first letter of their address is wrong about who
-  // they are. Falls through to the email, which every account has.
-  const name = (user.display_name || "").trim();
-  if (name) return name[0]!.toUpperCase();
-  const email = (user.email || "").trim();
-  if (email) return email[0]!.toUpperCase();
-  return "?";
-}
 
 export default function Nav({ variant }: Props) {
   const t = useTranslations("nav");
@@ -55,15 +34,6 @@ export default function Nav({ variant }: Props) {
       cancelled = true;
     };
   }, []);
-
-  async function onLogout() {
-    try {
-      await logout();
-    } finally {
-      setUser(null);
-      router.push("/");
-    }
-  }
 
   return (
     <header className={landing ? "landing-nav" : "rr-nav"}>
@@ -111,70 +81,18 @@ export default function Nav({ variant }: Props) {
           ) : null}
           <LocaleSwitcher />
           <ThemeSwitcher />
-          {user === undefined ? (
-            <span className="inline-block size-8" aria-hidden="true" />
-          ) : user ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                className={cn(
-                  "inline-flex size-8 items-center justify-center rounded-full p-0",
-                  "outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                )}
-                aria-label={t("account")}
-              >
-                <Avatar className="size-8">
-                  {user.picture ? (
-                    <AvatarImage src={user.picture} alt="" referrerPolicy="no-referrer" />
-                  ) : null}
-                  <AvatarFallback className="text-xs font-medium">{initials(user)}</AvatarFallback>
-                </Avatar>
-              </DropdownMenuTrigger>
-              {/* 14rem, the same cap `.nav-usage` puts on the meter, so the
-                  menu is already the width the meter needs and does not widen
-                  when the usage request lands. */}
-              <DropdownMenuContent align="end" className="min-w-56">
-                {user.email ? (
-                  <>
-                    {/* The name they chose on top, with the handle and the
-                        address under it. The email stays visible because it is
-                        which account this is; the name is only who they are. */}
-                    <DropdownMenuLabel className="max-w-52 font-normal">
-                      {user.display_name ? (
-                        <span className="block truncate font-medium">{user.display_name}</span>
-                      ) : null}
-                      {user.username ? (
-                        <span className="block truncate text-muted-foreground">
-                          @{user.username}
-                        </span>
-                      ) : null}
-                      <span className="block truncate text-muted-foreground">{user.email}</span>
-                    </DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                  </>
-                ) : null}
-                {/* Straight under the identity row: who this account is, then
-                    what it has left this week. It brings its own trailing
-                    separator, so the actions below stay their own group
-                    whether or not the meter is there. */}
-                <NavUsage />
-                {/* Above Settings and not inside NavUsage's block: that block
-                    renders only once its fetch lands and only where limits are
-                    enforced, and the route to this page must not depend on
-                    either. */}
-                <DropdownMenuItem asChild>
-                  <Link href="/plan">{t("planAndUsage")}</Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/settings">{t("settings")}</Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => void onLogout()}>{t("logout")}</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : (
+          <AccountMenu
+            user={user}
+            onLoggedOut={() => {
+              setUser(null);
+              router.push("/");
+            }}
+          />
+          {user === null ? (
             <Link href="/login" className="inline-flex min-h-9 items-center rounded-md px-1 text-sm font-medium">
               {t("login")}
             </Link>
-          )}
+          ) : null}
         </div>
       </div>
     </header>
