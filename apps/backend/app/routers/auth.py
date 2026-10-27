@@ -18,6 +18,7 @@ from app.deps import (
 )
 from app.models import GuestSession, Resume, User
 from app.schemas import AuthMe, ClaimResponse
+from app.services.account import display_name_of
 from app.services.consent import record_consent
 from app.services.guest import GUEST_COOKIE, hash_guest_key
 
@@ -228,6 +229,12 @@ def me(user: User | None = Depends(get_current_user)):
             "email": user.email,
             "locale": user.locale,
             "picture": user.picture,
+            # The account profile's two public-facing fields. Here rather than
+            # only on /v1/me/account because the nav renders on every page and
+            # already calls this one: a second request per page load, to show a
+            # name next to an avatar, is not worth it.
+            "username": user.username,
+            "display_name": display_name_of(user),
             "is_admin": is_admin_user(user),
         },
         guest=False,

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import AccountCard from "@/components/AccountCard";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
 import UsageCard from "@/components/UsageCard";
@@ -115,12 +116,19 @@ export default function SettingsPage() {
 
         {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
 
+        {/* First on the page, and above the matching toggle. Who you are is
+            the least conditional thing here -- it does not depend on a
+            consent, it cannot refuse, and it is what someone arriving at
+            /settings from the account menu is most likely looking for. The
+            card fetches on its own so a slow consent read does not hold it. */}
+        <AccountCard />
+
         {granted == null && !error ? (
-          <p className="text-sm text-muted-foreground">{tCommon("loading")}</p>
+          <p className="mt-6 text-sm text-muted-foreground">{tCommon("loading")}</p>
         ) : null}
 
         {granted != null ? (
-          <Card>
+          <Card className="mt-6">
             <CardHeader>
               <CardTitle>{t("matchingTitle")}</CardTitle>
               {/* The label has to carry the notice itself -- "open to matching"

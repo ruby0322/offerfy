@@ -119,6 +119,47 @@ class AuthMe(BaseModel):
     guest: bool = True
 
 
+class AccountOut(BaseModel):
+    """The signed-in person's own account profile.
+
+    `email` and `picture` are included read-only, because this is the shape the
+    settings form renders and a form that shows some of someone's identity and
+    hides the rest is confusing. They are changed by signing in again, not here.
+
+    `display_name` is the editable name; `google_name` is what Google asserted,
+    shown as the placeholder so the field can be left empty and still display
+    something. Keeping both visible is the only way the precedence is legible.
+    """
+
+    email: str
+    picture: str | None = None
+    google_name: str | None = None
+    username: str | None = None
+    display_name: str | None = None
+    headline: str | None = None
+    location: str | None = None
+    website: str | None = None
+    bio: str | None = None
+
+
+class AccountUpdate(BaseModel):
+    """A partial update. Absent means "leave it"; empty or null means "clear it".
+
+    Every field is a plain string rather than a constrained type: the lengths
+    and the character rules live in services.account, which normalises first
+    and so can accept a value pydantic would have refused outright (a pasted
+    name with a trailing space, a URL with no scheme). Refusals come back as a
+    field plus a code the client translates.
+    """
+
+    username: str | None = None
+    display_name: str | None = None
+    headline: str | None = None
+    location: str | None = None
+    website: str | None = None
+    bio: str | None = None
+
+
 class ClaimResponse(BaseModel):
     claimed: int
 
@@ -171,6 +212,11 @@ class UsageOut(BaseModel):
     # False in development, so a client can say "not enforced here" rather
     # than drawing an empty meter.
     enforced: bool
+    # Both ends of the window, so a page can name the period it is reporting
+    # on without re-deriving "the most recent Monday in Taipei" in the client.
+    # Getting that rule wrong in a second place is how a meter comes to
+    # disagree with itself about which week it is showing.
+    period_start: str
     reset_at: str
     limit_credits: float | None
     used_credits: float

@@ -642,6 +642,22 @@ def test_usage_endpoint_answers_for_a_guest_with_no_cookie(client: TestClient):
     assert "offerfy_guest" not in client.cookies
 
 
+def test_usage_endpoint_names_both_ends_of_the_window(client: TestClient):
+    """period_start and reset_at come from one reading of the clock.
+
+    Both derive from `Balance`, not from a second window_start() call, so they
+    cannot straddle a Monday boundary and report a period that ends before it
+    begins -- which is the failure a plan page showing "27 Oct - 2 Nov" would
+    make visible and nobody would think to test for.
+    """
+    body = client.get("/v1/usage").json()
+    assert body["period_start"] == usage.window_start().isoformat()
+    assert body["reset_at"] == usage.window_end().isoformat()
+    start = datetime.fromisoformat(body["period_start"])
+    end = datetime.fromisoformat(body["reset_at"])
+    assert end - start == timedelta(days=7)
+
+
 def test_usage_endpoint_reports_credits_for_a_signed_in_person(
     client: TestClient, db_session
 ):

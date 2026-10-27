@@ -44,6 +44,7 @@ def read_usage(
     return UsageOut(
         tier=bal.tier,
         enforced=limits_enabled(),
+        period_start=bal.period_start.isoformat(),
         reset_at=bal.reset_at.isoformat(),
         limit_credits=bal.limit_credits,
         used_credits=bal.used_credits,

@@ -24,6 +24,11 @@ type Props = {
 };
 
 function initials(user: AuthUser): string {
+  // Their name before their email: once someone has set a display name, an
+  // avatar still showing the first letter of their address is wrong about who
+  // they are. Falls through to the email, which every account has.
+  const name = (user.display_name || "").trim();
+  if (name) return name[0]!.toUpperCase();
   const email = (user.email || "").trim();
   if (email) return email[0]!.toUpperCase();
   return "?";
@@ -130,12 +135,30 @@ export default function Nav({ variant }: Props) {
               <DropdownMenuContent align="end" className="min-w-56">
                 {user.email ? (
                   <>
-                    <DropdownMenuLabel className="max-w-52 truncate font-normal text-muted-foreground">
-                      {user.email}
+                    {/* The name they chose on top, with the handle and the
+                        address under it. The email stays visible because it is
+                        which account this is; the name is only who they are. */}
+                    <DropdownMenuLabel className="max-w-52 font-normal">
+                      {user.display_name ? (
+                        <span className="block truncate font-medium">{user.display_name}</span>
+                      ) : null}
+                      {user.username ? (
+                        <span className="block truncate text-muted-foreground">
+                          @{user.username}
+                        </span>
+                      ) : null}
+                      <span className="block truncate text-muted-foreground">{user.email}</span>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
                   </>
                 ) : null}
+                {/* Above Settings and not inside NavUsage's block: that block
+                    renders only once its fetch lands and only where limits are
+                    enforced, and the route to this page must not depend on
+                    either. */}
+                <DropdownMenuItem asChild>
+                  <Link href="/plan">{t("planAndUsage")}</Link>
+                </DropdownMenuItem>
                 <DropdownMenuItem asChild>
                   <Link href="/settings">{t("settings")}</Link>
                 </DropdownMenuItem>

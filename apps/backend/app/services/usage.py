@@ -484,6 +484,11 @@ def tier_of(db: Session, user: User | None, guest: GuestSession | None) -> str:
 @dataclass(frozen=True)
 class Balance:
     tier: str
+    # Both ends of the window, from one reading of the clock. Derived here
+    # rather than by a caller calling window_start() again: the two calls
+    # straddle a Monday boundary roughly once a week, and a meter reporting a
+    # period that ends before it starts is the kind of bug nobody looks for.
+    period_start: datetime
     reset_at: datetime
     # Cost side. None on a tier that is not cost-capped.
     limit_uusd: int | None
@@ -558,7 +563,8 @@ def balance(
     limit_uusd = tier.credits * CREDIT_UUSD if tier.credits is not None else None
     return Balance(
         tier=tier_name,
-        reset_at=window_end(now),
+        period_start=start,
+        reset_at=start + timedelta(days=7),
         limit_uusd=limit_uusd,
         used_uusd=used_uusd,
         remaining_uusd=None if limit_uusd is None else limit_uusd - used_uusd,
