@@ -129,6 +129,7 @@ export default function EditorShell({ resumeId }: Props) {
   const t = useTranslations("editor");
   const tAts = useTranslations("ats");
   const tCommon = useTranslations("common");
+  const tNav = useTranslations("nav");
   const locale = useLocale();
   const toast = useToast();
   const [title, setTitle] = useState("");
@@ -183,10 +184,14 @@ export default function EditorShell({ resumeId }: Props) {
   // draw the avatar without asking a second time.
   const [me, setMe] = useState<AuthUser | null | undefined>(undefined);
   const signedIn = !!me;
+  // Just the destination, after the arrow that already says "back". These are
+  // the nav's own names for the two places rather than editor copies of them,
+  // so the word in the header cannot drift from the word in the menu.
+  //
   // Still unknown reads as the signed-in label: that is the common case in
   // the editor, so its width is the right one to hold, and the header keeps
   // it invisible until it is actually true.
-  const backLabel = signedIn || me === undefined ? t("backToDashboard") : t("backToHome");
+  const backLabel = signedIn || me === undefined ? tNav("dashboard") : tNav("brand");
   const [unpublishedChanges, setUnpublishedChanges] = useState(false);
   const [updatedAt, setUpdatedAt] = useState("");
   const [publishing, setPublishing] = useState(false);
