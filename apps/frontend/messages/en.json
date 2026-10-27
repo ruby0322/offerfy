@@ -14,7 +14,12 @@
     "account": "Account",
     "blog": "Blog",
     "jobs": "Jobs",
-    "pricing": "Pricing"
+    "pricing": "Pricing",
+    "usageEdits": "{used} of {limit} AI edits this week",
+    "usageCredits": "{used} of {limit} credits this week",
+    "usageEditsLeft": "about {count} more edits",
+    "usageResets": "resets Monday",
+    "usageDetails": "How usage works"
   },
   "footer": {
     "locales": "Language",

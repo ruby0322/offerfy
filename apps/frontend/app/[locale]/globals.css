@@ -1501,6 +1501,18 @@ textarea {
   opacity: 0.72;
 }
 
+/* The account menu's copy of the same meter. The dropdown supplies its own
+   padding, so the chat panel's inset comes off, and the cap is what makes the
+   three readings wrap to a second line instead of stretching the whole menu to
+   fit them on one. */
+.nav-usage {
+  max-width: 14rem;
+}
+
+.nav-usage .usage-meter {
+  margin: 0;
+}
+
 /* A card, not a toast: for a guest this is the sign-up moment and for everyone
    else the matching moment, and a toast that fades wastes both. */
 .usage-limit-card {

@@ -8,7 +8,7 @@ import LoadingMessage from "@/components/editor/LoadingMessage";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import UsageLimitCard from "@/components/editor/UsageLimitCard";
-import UsageMeter from "@/components/editor/UsageMeter";
+import UsageMeter from "@/components/UsageMeter";
 import type { ChatMessage, Usage, UsageRefusal } from "@/lib/api";
 
 // How far from the bottom counts as "the reader has scrolled away". Bigger

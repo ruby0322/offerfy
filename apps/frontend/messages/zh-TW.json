@@ -14,7 +14,12 @@
     "account": "帳戶",
     "blog": "Blog",
     "jobs": "職缺",
-    "pricing": "方案"
+    "pricing": "方案",
+    "usageEdits": "本週 AI 編輯 {used} / {limit} 次",
+    "usageCredits": "本週額度 {used} / {limit}",
+    "usageEditsLeft": "大約還能編輯 {count} 次",
+    "usageResets": "週一重置",
+    "usageDetails": "用量說明"
   },
   "footer": {
     "locales": "語言",
