@@ -14,6 +14,7 @@ from app.models import (
     Job,
     JobIngestRun,
     LlmCall,
+    QuotaGrant,
     RateEvent,
     Resume,
     TalentApiKey,
@@ -31,6 +32,8 @@ from app.schemas_admin import (
     AdminDisclosureList,
     AdminHealth,
     AdminOverview,
+    AdminQuotaGrant,
+    AdminQuotaGrantCreate,
     AdminRecentResume,
     AdminRecentUser,
     AdminResumeDetail,
@@ -66,6 +69,7 @@ from app.schemas_jobs import (
 )
 from app.services.ats import analyze_pdf
 from app.services.disclosure import pending_obligations, record_stop_use_notice
+from app.services.grants import active_grants, all_grants, issue_grant, revoke_grant
 from app.services.jobs.ingest import refreshed_nothing
 from app.services.jobs.store import JOB_FRESHNESS_DAYS, freshness_cutoff
 from app.services.talent_keys import mint_talent_key
@@ -99,6 +103,39 @@ INGEST_BOARD_LIMIT = 500
 
 def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat() if dt else None
+
+
+def _grant_out(db: Session, grant: QuotaGrant, *, active: bool) -> AdminQuotaGrant:
+    issuer = None
+    if grant.issued_by_user_id is not None:
+        row = db.get(User, grant.issued_by_user_id)
+        issuer = None if row is None else row.email
+    return AdminQuotaGrant(
+        id=grant.id,
+        credits=grant.credits,
+        reason=grant.reason,
+        detail=grant.detail,
+        starts_at=_iso(grant.starts_at) or "",
+        expires_at=_iso(grant.expires_at),
+        revoked_at=_iso(grant.revoked_at),
+        issued_by=issuer,
+        created_at=_iso(grant.created_at) or "",
+        active=active,
+    )
+
+
+def _parse_expiry(raw: str | None) -> datetime | None:
+    """ISO 8601 in, aware UTC out. A naive string is read as UTC rather than
+    rejected: the admin form sends a local-looking datetime, and guessing the
+    server's zone would be worse than naming one.
+    """
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="expires_at must be ISO 8601")
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def _page(limit: int | None, offset: int | None) -> tuple[int, int]:
@@ -470,6 +507,7 @@ def admin_user_detail(
         .scalar()
         or 0
     )
+    active_ids = {row.id for row in active_grants(db, user=user)}
     return AdminUserDetail(
         id=user.id,
         email=user.email,
@@ -495,13 +533,76 @@ def admin_user_detail(
             turns_used=bal.turns_used,
             turn_limit=bal.turn_limit,
             remaining_credits=bal.remaining_credits,
+            tier_credits=bal.tier_credits,
+            granted_credits=bal.granted_credits,
             reset_at=_iso(bal.reset_at) or "",
             refusals=int(refusals),
             unmeasured_rounds=bal.unmeasured_rounds,
             lifetime_uusd=lifetime_uusd,
             lifetime_turns=lifetime_turns,
         ),
+        grants=[
+            _grant_out(db, row, active=row.id in active_ids)
+            for row in all_grants(db, user=user)
+        ],
     )
+
+
+@router.post(
+    "/v1/admin/users/{user_id}/grants", response_model=AdminQuotaGrant, status_code=201
+)
+def admin_issue_grant(
+    user_id: str,
+    body: AdminQuotaGrantCreate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Raise one person's weekly ceiling without a deploy.
+
+    No endpoint to *edit* a grant: changing the credits on a live one would
+    rewrite what someone's ceiling was last week. Revoke and issue instead, so
+    the history stays readable.
+    """
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    expires_at = _parse_expiry(body.expires_at)
+    try:
+        grant = issue_grant(
+            db,
+            user=user,
+            credits=body.credits,
+            reason=body.reason,
+            detail=body.detail,
+            issued_by=admin,
+            expires_at=expires_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.flush()
+    active_ids = {row.id for row in active_grants(db, user=user)}
+    return _grant_out(db, grant, active=grant.id in active_ids)
+
+
+@router.delete(
+    "/v1/admin/users/{user_id}/grants/{grant_id}", response_model=AdminQuotaGrant
+)
+def admin_revoke_grant(
+    user_id: str,
+    grant_id: str,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Revoke, never delete -- see models.QuotaGrant. Takes effect at once
+    rather than at the window boundary, which is the one place a ceiling is
+    allowed to move down mid-week: this is the lever for abuse.
+    """
+    grant = db.get(QuotaGrant, grant_id)
+    if grant is None or grant.user_id != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+    revoke_grant(db, grant=grant)
+    db.flush()
+    return _grant_out(db, grant, active=False)
 
 
 @router.get("/v1/admin/resumes", response_model=AdminResumeList)

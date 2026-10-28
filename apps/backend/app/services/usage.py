@@ -39,6 +39,7 @@ from app.models import (
     User,
 )
 from app.services.consent import has_consent
+from app.services.grants import granted_credits
 
 logger = logging.getLogger(__name__)
 
@@ -494,6 +495,12 @@ class Balance:
     limit_uusd: int | None
     used_uusd: int
     remaining_uusd: int | None
+    # The split behind limit_uusd, so a reader can say "20 + 50" rather than an
+    # unexplained 70. tier_credits is the published number from TIERS;
+    # granted_credits is the sum of this person's active grants. Both are None
+    # and 0 respectively on a tier that is not cost-capped.
+    tier_credits: int | None
+    granted_credits: int
     # Count side. None on a tier that is not count-capped.
     turn_limit: int | None
     turns_used: int
@@ -560,7 +567,14 @@ def balance(
         db, kind=kind, subject_id=subject_id, window_start=start
     )
 
-    limit_uusd = tier.credits * CREDIT_UUSD if tier.credits is not None else None
+    # A grant raises the ceiling; it never sets one. None stays None, because a
+    # grant on a tier that is not cost-capped is arithmetically a no-op -- that
+    # is the guest tier, and grants are user-only anyway, so the two rules agree
+    # by construction rather than by coincidence. See models.QuotaGrant.
+    bonus = granted_credits(db, user=user, now=now)
+    limit_uusd = (
+        (tier.credits + bonus) * CREDIT_UUSD if tier.credits is not None else None
+    )
     return Balance(
         tier=tier_name,
         period_start=start,
@@ -568,6 +582,8 @@ def balance(
         limit_uusd=limit_uusd,
         used_uusd=used_uusd,
         remaining_uusd=None if limit_uusd is None else limit_uusd - used_uusd,
+        tier_credits=tier.credits,
+        granted_credits=bonus,
         turn_limit=tier.turns,
         turns_used=turns_used,
         turns_remaining=None if tier.turns is None else tier.turns - turns_used,
@@ -755,7 +771,7 @@ def enforce_usage(
         raise _refusal(
             "weekly_credits",
             bal,
-            detail=f"Weekly limit of {tier.credits} credits reached",
+            detail=f"Weekly limit of {bal.limit_credits:g} credits reached",
             **refuse,
         )
 

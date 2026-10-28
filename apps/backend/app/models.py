@@ -632,6 +632,107 @@ class UsageRefusal(Base):
     turns_used: Mapped[int] = mapped_column(nullable=False, default=0)
 
 
+GRANT_REASONS = ("manual", "compensation", "beta", "staff", "promotion")
+
+
+class QuotaGrant(Base):
+    """Extra weekly credits for one user, on top of their tier's ceiling.
+
+    Why a table when the ceiling is a code constant: services.usage.TIERS is
+    right for a *published* allowance -- /v1/usage/tiers serves it, so the
+    public page cannot drift from the enforced number -- and wrong for a
+    *per-person* one. Raising one person's allowance before this table meant
+    editing TIERS and redeploying, which moves everyone in that tier.
+
+    Additive, never a replacement. A grant raises a ceiling; it cannot lower
+    one and cannot set one. So a tier change still reaches everyone it should,
+    and no grant can quietly become the real limit -- which is also why there
+    is no `credits` override column on User.
+
+    Credits, not turns. Only the guest tier is turn-capped, and grants are
+    user-only: a guest can mint a fresh cookie, which is the farming vector the
+    'network' subject kind in UsageCounter exists to stop. A guest grant would
+    hand that vector a lever. The two rules agree by construction rather than
+    by coincidence -- the guest tier is also the only one with credits=None,
+    where a grant is arithmetically a no-op.
+
+    Weekly and recurring: an active grant raises the ceiling in every window it
+    covers. There is deliberately no one-off pool. A pool spanning windows
+    cannot be derived from UsageCounter, which resets every Monday, so it would
+    need either its own draw ledger inside metering's atomic path or a
+    reconstruction of past weekly ceilings -- and past ceilings are unknowable
+    once consent has changed, because services.usage.tier_of derives the tier
+    from the *current* answer. If a one-off is ever needed it is an additive
+    change here, not a reinterpretation of these rows.
+
+    No consumed or remaining column, for the reason tier_of gives: nothing
+    about the quota is written back, it is derived. The window counter already
+    *is* the consumption, so a weekly grant needs no state beyond its validity.
+    """
+
+    __tablename__ = "quota_grants"
+    __table_args__ = (
+        CheckConstraint("credits > 0", name="quota_grant_credits_positive"),
+        CheckConstraint(
+            "expires_at IS NULL OR expires_at > starts_at",
+            name="quota_grant_interval",
+        ),
+        CheckConstraint(
+            "reason IN ('manual', 'compensation', 'beta', 'staff', 'promotion')",
+            name="quota_grant_reasons",
+        ),
+        # Every read is "this user's grants", and there are a handful per user,
+        # so a plain index rather than one partial on revoked_at: ensure_schema()
+        # builds this table for SQLite in the tests, where a partial index would
+        # not go. Must match migration 021 by name.
+        Index("ix_quota_grants_user", "user_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # A real foreign key, unlike sibling UsageCounter -- none of the three
+    # reasons it gives for omitting one apply. A grant is an entitlement rather
+    # than a record of something that happened, it is meaningless once the user
+    # is gone, and it has no subject kind that lacks a table to point at.
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE", name="fk_quota_grants_user_id"),
+        nullable=False,
+    )
+    # Credits, matching Tier.credits, rather than uusd. CREDIT_UUSD is a
+    # promise; converting once in services.usage.balance keeps a grant
+    # denominated in the same unit the tier is published in.
+    credits: Mapped[int] = mapped_column(nullable=False)
+
+    starts_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    # NULL means open-ended: a staff or beta grant that lasts until revoked.
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Soft, like the consent ledger: a grant that was taken away still
+    # happened, and "why did their ceiling drop on Tuesday" has to stay
+    # answerable after the fact.
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    reason: Mapped[str] = mapped_column(String(32), nullable=False)
+    detail: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Which admin issued it. SET NULL rather than CASCADE: deleting the issuer
+    # must not delete the recipient's allowance.
+    issued_by_user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey(
+            "users.id", ondelete="SET NULL", name="fk_quota_grants_issued_by"
+        ),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+
 CONSENT_PURPOSES = ("service", "talent_introduction")
 CONSENT_ACTIONS = ("granted", "withdrawn")
 

@@ -1,9 +1,10 @@
 "use client";
 
+import QuotaGrants from "@/components/admin/QuotaGrants";
 import { adminUser, type AdminUserDetail } from "@/lib/api";
 import { Link } from "@/i18n/navigation";
 import { useTranslations } from "next-intl";
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 
 function tierKey(tier: string) {
   if (tier === "guest") return "usageTier_guest" as const;
@@ -25,6 +26,9 @@ export default function AdminUserDetailPage({
   const [data, setData] = useState<AdminUserDetail | null>(null);
   const [error, setError] = useState(false);
 
+  const [reloads, setReloads] = useState(0);
+  const reload = useCallback(() => setReloads((n) => n + 1), []);
+
   useEffect(() => {
     let cancelled = false;
     adminUser(id)
@@ -37,7 +41,7 @@ export default function AdminUserDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, reloads]);
 
   if (error) return <p className="text-sm text-destructive">{t("error")}</p>;
   if (!data) return <p className="text-sm text-muted-foreground">{t("loading")}</p>;
@@ -69,6 +73,11 @@ export default function AdminUserDetailPage({
               </span>
             ) : null}
           </p>
+          {data.usage.granted_credits > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {t("usageGranted", { credits: data.usage.granted_credits })}
+            </p>
+          ) : null}
         </div>
         <div className="rounded-md border border-border p-3">
           <p className="text-xs uppercase text-muted-foreground">{t("usageColTurns")}</p>
@@ -98,6 +107,12 @@ export default function AdminUserDetailPage({
           ? ` · ${t("usageUnmeasuredRounds", { count: data.usage.unmeasured_rounds })}`
           : ""}
       </p>
+      <QuotaGrants
+        userId={data.id}
+        grants={data.grants}
+        usage={data.usage}
+        onChanged={reload}
+      />
       {data.resumes.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t("empty")}</p>
       ) : (

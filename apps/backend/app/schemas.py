@@ -221,6 +221,13 @@ class UsageOut(BaseModel):
     limit_credits: float | None
     used_credits: float
     remaining_credits: float | None
+    # The split behind limit_credits. tier_credits is the published number for
+    # this tier; granted_credits is what this person has been granted on top of
+    # it. Sent so a meter can say "20 + 50" rather than an unexplained 70 --
+    # /v1/usage/tiers deliberately knows nothing about grants, so a client
+    # comparing the two would otherwise see a contradiction.
+    tier_credits: int | None
+    granted_credits: int
     turn_limit: int | None
     turns_used: int
     turns_remaining: int | None

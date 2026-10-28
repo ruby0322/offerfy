@@ -166,6 +166,11 @@ class AdminUserUsage(BaseModel):
     turns_used: int
     turn_limit: int | None
     remaining_credits: float | None
+    # The split behind limit_credits, both already folded into it. Carried
+    # separately so the detail page can show why this person's ceiling is not
+    # their tier's, without doing the subtraction in the client.
+    tier_credits: int | None
+    granted_credits: int
     reset_at: str
     refusals: int
     unmeasured_rounds: int
@@ -173,6 +178,35 @@ class AdminUserUsage(BaseModel):
     # week is typical for them.
     lifetime_uusd: int
     lifetime_turns: int
+
+
+class AdminQuotaGrant(BaseModel):
+    """One grant, active or not.
+
+    The lapsed and revoked ones are shown too: a ceiling that dropped is
+    exactly what someone opens this list to explain.
+    """
+
+    id: str
+    credits: int
+    reason: str
+    detail: str | None = None
+    starts_at: str
+    expires_at: str | None = None
+    revoked_at: str | None = None
+    issued_by: str | None = None
+    created_at: str
+    # Whether this one counts for the current window. Computed server-side
+    # rather than inferred from the dates in the client, because the rule is
+    # window overlap and not "valid right now" -- see services.grants.
+    active: bool
+
+
+class AdminQuotaGrantCreate(BaseModel):
+    credits: int
+    reason: str
+    detail: str | None = None
+    expires_at: str | None = None
 
 
 class AdminUserListItem(BaseModel):
@@ -212,6 +246,7 @@ class AdminUserDetail(BaseModel):
     created_at: str
     resumes: list[AdminUserResume]
     usage: AdminUserUsage
+    grants: list[AdminQuotaGrant]
 
 
 class AdminResumeListItem(BaseModel):
