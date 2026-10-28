@@ -13,6 +13,7 @@ import {
   fetchUsageTierTable,
   getMe,
   type Usage,
+  type UsageGrant,
   type UsageTier,
   type UsageTierRow,
   type UsageTiers,
@@ -45,6 +46,36 @@ function nameKey(tier: UsageTier) {
   if (tier === "guest") return "tier_guest" as const;
   if (tier === "matching") return "tier_matching" as const;
   return "tier_registered" as const;
+}
+
+function reasonKey(reason: string) {
+  switch (reason) {
+    case "compensation":
+      return "grantReason_compensation" as const;
+    case "beta":
+      return "grantReason_beta" as const;
+    case "staff":
+      return "grantReason_staff" as const;
+    case "promotion":
+      return "grantReason_promotion" as const;
+    // Including 'manual', which is an operator's category and means nothing to
+    // the person who received it. They get the generic noun instead.
+    default:
+      return "grantReason_extra" as const;
+  }
+}
+
+function grantStatusKey(grant: UsageGrant) {
+  switch (grant.status) {
+    case "scheduled":
+      return "grantStatus_scheduled" as const;
+    case "expired":
+      return "grantStatus_expired" as const;
+    case "revoked":
+      return "grantStatus_revoked" as const;
+    default:
+      return "grantStatus_active" as const;
+  }
 }
 
 function blurbKey(tier: UsageTier) {
@@ -153,8 +184,20 @@ export default function PlanView() {
                     ? allowance(current)
                     : countCapped
                       ? t("allowanceEdits", { count: usage.turn_limit ?? 0 })
-                      : t("grantCredits", { credits: usage.limit_credits ?? 0 })}
+                      : t("grantCredits", { credits: usage.tier_credits ?? 0 })}
                 </p>
+                {/* Without this the line above -- the *published* allowance
+                    for this plan -- contradicts the meter below it, which
+                    counts against the granted ceiling. Both numbers are true;
+                    the page has to say which is which. */}
+                {usage.granted_credits > 0 && usage.tier_credits !== null ? (
+                  <p className="text-sm">
+                    {t("grantedLine", {
+                      granted: usage.granted_credits,
+                      total: usage.tier_credits + usage.granted_credits,
+                    })}
+                  </p>
+                ) : null}
                 {/* Matching is a plan, so its state belongs here rather than
                     only on /settings -- but the control stays there. Saying it
                     in both places and switching it in one keeps the consent
@@ -234,6 +277,44 @@ export default function PlanView() {
                 )}
               </CardContent>
             </Card>
+
+            {usage.grants.length > 0 ? (
+              <Card className="mt-6">
+                <CardHeader>
+                  <CardTitle>{t("grantsTitle")}</CardTitle>
+                  <CardDescription>{t("grantsNotice")}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ul className="flex flex-col divide-y divide-rule">
+                    {usage.grants.map((row, i) => (
+                      <li
+                        key={`${row.starts_at}-${i}`}
+                        className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 py-3 first:pt-0 last:pb-0"
+                      >
+                        <span className="flex items-center gap-2 text-sm font-medium">
+                          {t("grantAmount", { credits: row.credits })}
+                          <Badge
+                            variant={row.status === "active" ? "secondary" : "outline"}
+                          >
+                            {t(grantStatusKey(row))}
+                          </Badge>
+                        </span>
+                        <span className="text-sm text-muted-foreground">
+                          {t(reasonKey(row.reason))}
+                          {" · "}
+                          {row.expires_at
+                            ? t("grantPeriod", {
+                                start: dateFmt(row.starts_at),
+                                end: dateFmt(row.expires_at),
+                              })
+                            : t("grantFrom", { start: dateFmt(row.starts_at) })}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            ) : null}
 
             {tiers ? (
               <Card className="mt-6">

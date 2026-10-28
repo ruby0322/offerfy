@@ -196,9 +196,11 @@ class AdminQuotaGrant(BaseModel):
     revoked_at: str | None = None
     issued_by: str | None = None
     created_at: str
-    # Whether this one counts for the current window. Computed server-side
-    # rather than inferred from the dates in the client, because the rule is
-    # window overlap and not "valid right now" -- see services.grants.
+    # Computed server-side rather than inferred from the dates in the client,
+    # because the rule is window overlap and not "valid right now" -- see
+    # services.grants.grant_status, which is the one definition both this and
+    # the person's own /v1/usage read from.
+    status: str
     active: bool
 
 

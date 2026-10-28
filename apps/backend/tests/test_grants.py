@@ -15,6 +15,7 @@ CASCADE onto users is not exercised here -- migration 021 carries it and it
 needs a Postgres check.
 """
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -455,3 +456,100 @@ def test_grants_need_an_admin(client: TestClient, db_session, monkeypatch):
     )
     assert denied.status_code == 404
     assert db_session.query(QuotaGrant).count() == 0
+
+
+# --------------------------------------------------------------------------
+# what the person holding a grant sees
+# --------------------------------------------------------------------------
+
+
+def test_usage_endpoint_lists_the_persons_own_grants(client: TestClient, db_session):
+    user = _user(db_session)
+    client.cookies.set(SESSION_COOKIE, _sign(user.id, get_settings().auth_token_secret))
+    _grant(db_session, user, credits=50, reason="compensation", detail="outage")
+    body = client.get("/v1/usage").json()
+    assert len(body["grants"]) == 1
+    row = body["grants"][0]
+    assert row["credits"] == 50
+    assert row["reason"] == "compensation"
+    assert row["status"] == "active"
+
+
+def test_usage_endpoint_withholds_the_operator_only_fields(
+    client: TestClient, db_session, monkeypatch
+):
+    """detail is an operator's note and issued_by is a colleague's address.
+
+    Neither is written with this reader in mind, so a leak here would be a leak
+    of internal shorthand to the person it is about.
+    """
+    admin = _admin(client, db_session, monkeypatch)
+    user = _user(db_session, sub="sub-grantee")
+    _grant(
+        db_session,
+        user,
+        credits=50,
+        reason="beta",
+        detail="cohort 3 -- see ticket OPS-412",
+        issued_by=admin,
+    )
+    client.cookies.set(SESSION_COOKIE, _sign(user.id, get_settings().auth_token_secret))
+    body = client.get("/v1/usage").json()
+    row = body["grants"][0]
+    assert set(row) == {"credits", "reason", "status", "starts_at", "expires_at"}
+    assert "OPS-412" not in json.dumps(body)
+    assert admin.email not in json.dumps(body)
+
+
+def test_usage_endpoint_reports_each_status(client: TestClient, db_session):
+    user = _user(db_session)
+    client.cookies.set(SESSION_COOKIE, _sign(user.id, get_settings().auth_token_secret))
+    start = usage.window_start()
+    _grant(db_session, user, credits=5, starts_at=start)
+    _grant(db_session, user, credits=6, starts_at=start + timedelta(days=9))
+    _grant(
+        db_session,
+        user,
+        credits=7,
+        starts_at=start - timedelta(days=30),
+        expires_at=start - timedelta(seconds=1),
+    )
+    revoked = _grant(db_session, user, credits=8, starts_at=start)
+    revoke_grant(db_session, grant=revoked)
+    db_session.commit()
+
+    got = {
+        row["credits"]: row["status"]
+        for row in client.get("/v1/usage").json()["grants"]
+    }
+    assert got == {5: "active", 6: "scheduled", 7: "expired", 8: "revoked"}
+
+
+def test_a_guest_sees_no_grants(client: TestClient, db_session):
+    body = client.get("/v1/usage").json()
+    assert body["tier"] == "guest"
+    assert body["grants"] == []
+
+
+def test_the_balance_and_its_explanation_agree(client: TestClient, db_session):
+    """granted_credits must equal the active grants the same response lists.
+
+    The two are computed by different queries -- a SUM for the ceiling, the
+    rows for the history -- so this is the assertion that keeps them honest.
+    """
+    user = _user(db_session)
+    client.cookies.set(SESSION_COOKIE, _sign(user.id, get_settings().auth_token_secret))
+    start = usage.window_start()
+    _grant(db_session, user, credits=30, starts_at=start)
+    _grant(db_session, user, credits=20, starts_at=start)
+    _grant(
+        db_session,
+        user,
+        credits=99,
+        starts_at=start - timedelta(days=30),
+        expires_at=start - timedelta(seconds=1),
+    )
+    body = client.get("/v1/usage").json()
+    active = sum(r["credits"] for r in body["grants"] if r["status"] == "active")
+    assert active == body["granted_credits"] == 50
+    assert body["limit_credits"] == body["tier_credits"] + body["granted_credits"]

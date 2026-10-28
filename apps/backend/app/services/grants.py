@@ -90,6 +90,40 @@ def granted_credits(
     return int(total or 0)
 
 
+GRANT_STATUSES = ("active", "scheduled", "expired", "revoked")
+
+
+def _aware(dt: datetime) -> datetime:
+    """Read a stored timestamp as UTC when it comes back without a zone.
+
+    The predicates in _active compare inside the database, so they never meet
+    this. grant_status compares in Python, where it matters: Postgres returns
+    these columns aware (DateTime(timezone=True)) and SQLite returns them
+    naive, so without this the status rule raises under the tests and works in
+    production -- the worst possible split. Everything written here is UTC.
+    """
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+def grant_status(grant: QuotaGrant, *, now: datetime | None = None) -> str:
+    """Where one grant stands, as one definition for every surface.
+
+    Lives here rather than in each client because the rule is window overlap
+    and not "valid right now" -- see _active -- and a client re-deriving it
+    from the dates would quietly disagree about a grant issued or lapsing
+    mid-week. 'scheduled' therefore means "starts after this window ends", not
+    "starts later today".
+    """
+    if grant.revoked_at is not None:
+        return "revoked"
+    start, end = _window(now)
+    if _aware(grant.starts_at) >= end:
+        return "scheduled"
+    if grant.expires_at is not None and _aware(grant.expires_at) <= start:
+        return "expired"
+    return "active"
+
+
 def all_grants(db: Session, *, user: User) -> list[QuotaGrant]:
     """Every grant ever issued to this user, newest first.
 

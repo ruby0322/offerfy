@@ -69,7 +69,13 @@ from app.schemas_jobs import (
 )
 from app.services.ats import analyze_pdf
 from app.services.disclosure import pending_obligations, record_stop_use_notice
-from app.services.grants import active_grants, all_grants, issue_grant, revoke_grant
+from app.services.grants import (
+    active_grants,
+    all_grants,
+    grant_status,
+    issue_grant,
+    revoke_grant,
+)
 from app.services.jobs.ingest import refreshed_nothing
 from app.services.jobs.store import JOB_FRESHNESS_DAYS, freshness_cutoff
 from app.services.talent_keys import mint_talent_key
@@ -120,6 +126,7 @@ def _grant_out(db: Session, grant: QuotaGrant, *, active: bool) -> AdminQuotaGra
         revoked_at=_iso(grant.revoked_at),
         issued_by=issuer,
         created_at=_iso(grant.created_at) or "",
+        status=grant_status(grant),
         active=active,
     )
 
