@@ -10,6 +10,12 @@ import { Textarea } from "@/components/ui/textarea";
 import UsageLimitCard from "@/components/editor/UsageLimitCard";
 import UsageMeter from "@/components/UsageMeter";
 import type { ChatMessage, Usage, UsageRefusal } from "@/lib/api";
+import {
+  commandTerm,
+  filterCommands,
+  moveCommandIndex,
+  type ChatCommand,
+} from "@/lib/chat-commands";
 
 // How far from the bottom counts as "the reader has scrolled away". Bigger
 // than the 120px the streaming follow uses, so a jump button does not blink in
@@ -51,6 +57,8 @@ export type ChatSuggestion = {
   prompt: string;
 };
 
+export type { ChatCommand };
+
 type Props = {
   messages: ChatMessage[];
   /** Draws the "older messages are not sent" marker above this message id. */
@@ -81,6 +89,14 @@ type Props = {
   onRestoreEdit?: (source: string) => void;
   familyActions?: FamilyCardActions;
   suggestions?: ChatSuggestion[];
+  /** The `/` menu. Absent or empty leaves the composer plain. The copy for
+   *  each command comes from the caller, as every other label here does. */
+  commands?: ChatCommand[];
+  commandsTitle?: string;
+  /** Marks a command whose prompt stops mid-sentence and waits for the user. */
+  commandsNeedsInput?: string;
+  /** One line under the openers telling a first-time reader that `/` exists. */
+  commandsHint?: string;
   /** Bumped by the caller to put the caret in the composer, e.g. when a phone
    *  raises the tool sheet straight into chat. */
   focusKey?: number;
@@ -137,6 +153,10 @@ export default function EditorChatPanel({
   onRestoreEdit,
   familyActions,
   suggestions,
+  commands,
+  commandsTitle,
+  commandsNeedsInput,
+  commandsHint,
   focusKey,
   usage,
 }: Props) {
@@ -146,11 +166,41 @@ export default function EditorChatPanel({
   // message can match the cut, so a single ref is enough.
   const cutMarkerRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const commandListRef = useRef<HTMLDivElement>(null);
   const composingRef = useRef(false);
   const confirmEnterRef = useRef(false);
   const [dragging, setDragging] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
   const [scrolledUp, setScrolledUp] = useState(false);
+  // Where the keyboard is in the `/` menu, tagged with the term it was moved
+  // in. Carrying the term means a new term resets the selection while
+  // rendering, instead of in an effect that would render twice to fix it.
+  const [commandCursor, setCommandCursor] = useState({ term: "", index: 0 });
+  // The term Escape shut the menu on. Without it the menu springs straight
+  // back up on the next keypress, which is not what Escape means.
+  const [dismissedTerm, setDismissedTerm] = useState<string | null>(null);
+
+  // The `/` menu. A null term is ordinary prose and the shut state; the list
+  // is short enough that filtering it on every keystroke costs nothing.
+  const commandList = commands ?? [];
+  const commandSearch = commandList.length > 0 && !sending ? commandTerm(draft) : null;
+  const commandMatches =
+    commandSearch === null || commandSearch === dismissedTerm
+      ? []
+      : filterCommands(commandList, commandSearch);
+  const commandsOpen = commandMatches.length > 0;
+  const commandIndex = commandCursor.term === commandSearch ? commandCursor.index : 0;
+  // Clamped rather than trusted: the list shrinks as the term gets longer.
+  const activeCommand = commandsOpen
+    ? commandMatches[Math.min(commandIndex, commandMatches.length - 1)]
+    : null;
+
+  // Keeps the keyboard selection in view when the list outgrows its box.
+  useEffect(() => {
+    commandListRef.current
+      ?.querySelector<HTMLElement>('[data-selected="true"]')
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeCommand?.key]);
 
   // Whether to offer the jump back down. Watches the content box as well as
   // the viewport: a turn that appends a long answer moves the bottom away from
@@ -244,6 +294,28 @@ export default function EditorChatPanel({
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    // While the `/` menu is up it owns the arrows, Tab, Escape and Enter --
+    // Enter above all, or picking a command would send it in the same stroke.
+    if (commandsOpen) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const delta = event.key === "ArrowDown" ? 1 : -1;
+        selectCommand(moveCommandIndex(commandIndex, commandMatches.length, delta));
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setDismissedTerm(commandSearch);
+        return;
+      }
+      if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey)) {
+        // An IME candidate list is driven by Enter too. It gets there first.
+        if (composingRef.current || event.nativeEvent.isComposing) return;
+        event.preventDefault();
+        if (activeCommand) pickCommand(activeCommand);
+        return;
+      }
+    }
     if (event.key !== "Enter" || event.shiftKey) return;
     const ime =
       composingRef.current ||
@@ -268,14 +340,25 @@ export default function EditorChatPanel({
   }
 
   // Fills the composer and hands the caret over. Deliberately does not submit:
-  // the user reads it, edits it, and sends it themselves.
-  function pickSuggestion(prompt: string) {
+  // the user reads it, edits it, and sends it themselves. Both the openers and
+  // the `/` menu end here, so a command behaves like a draft you wrote.
+  function fillComposer(prompt: string) {
     onDraftChange(prompt);
     const textarea = textareaRef.current;
     if (!textarea) return;
     textarea.focus();
     const end = prompt.length;
     textarea.setSelectionRange(end, end);
+  }
+
+  function pickCommand(command: ChatCommand) {
+    setDismissedTerm(null);
+    fillComposer(command.prompt);
+  }
+
+  function selectCommand(index: number) {
+    if (commandSearch === null) return;
+    setCommandCursor({ term: commandSearch, index });
   }
 
   function onDrop(event: DragEvent) {
@@ -300,13 +383,16 @@ export default function EditorChatPanel({
                           type="button"
                           data-testid={`chat-suggestion-${suggestion.key}`}
                           className="w-full rounded-md border border-border px-3 py-2 text-left text-sm transition-colors hover:border-ring hover:bg-muted/50"
-                          onClick={() => pickSuggestion(suggestion.prompt)}
+                          onClick={() => fillComposer(suggestion.prompt)}
                         >
                           {suggestion.label}
                         </button>
                       </li>
                     ))}
                   </ul>
+                ) : null}
+                {commandsHint && commandList.length > 0 ? (
+                  <p className="text-xs text-muted-foreground">{commandsHint}</p>
                 ) : null}
               </div>
             ) : null}
@@ -439,6 +525,50 @@ export default function EditorChatPanel({
             resetLabel={usage.labels.reset}
           />
         ) : null}
+        {commandsOpen ? (
+          <div className="chat-command-menu">
+            {commandsTitle ? (
+              <p className="chat-command-menu-title">{commandsTitle}</p>
+            ) : null}
+            <div
+              ref={commandListRef}
+              id="chat-command-menu"
+              role="listbox"
+              aria-label={commandsTitle ?? ariaLabel}
+              className="chat-command-list"
+            >
+              {commandMatches.map((command, index) => {
+                const selected = command.key === activeCommand?.key;
+                return (
+                  <button
+                    key={command.key}
+                    type="button"
+                    id={`chat-command-${command.key}`}
+                    role="option"
+                    aria-selected={selected}
+                    data-selected={selected ? "true" : undefined}
+                    data-testid={`chat-command-${command.key}`}
+                    className="chat-command-item"
+                    // Mousedown would blur the composer before the click lands
+                    // and take the caret with it. The click still fires.
+                    onMouseDown={(event) => event.preventDefault()}
+                    onMouseMove={() => selectCommand(index)}
+                    onClick={() => pickCommand(command)}
+                  >
+                    <span className="chat-command-slug">/{command.key}</span>
+                    <span className="chat-command-text">
+                      <span className="chat-command-label">{command.label}</span>
+                      <span className="chat-command-description">{command.description}</span>
+                    </span>
+                    {command.needsInput && commandsNeedsInput ? (
+                      <span className="chat-command-badge">{commandsNeedsInput}</span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
         <div className="chat-composer-field" data-dragging={dragging ? "true" : undefined}>
           {attachment ? (
             <div className="chat-composer-chip">
@@ -458,7 +588,16 @@ export default function EditorChatPanel({
           <Textarea
             ref={textareaRef}
             value={draft}
-            onChange={(event) => onDraftChange(event.target.value)}
+            onChange={(event) => {
+              const value = event.target.value;
+              // An Escape applies to the term it was pressed on. Typing out of
+              // command mode altogether retires it, so coming back to the same
+              // term later opens the menu again.
+              if (dismissedTerm !== null && commandTerm(value) === null) {
+                setDismissedTerm(null);
+              }
+              onDraftChange(value);
+            }}
             onCompositionStart={onCompositionStart}
             onCompositionEnd={onCompositionEnd}
             onKeyDown={onKeyDown}
@@ -472,6 +611,12 @@ export default function EditorChatPanel({
             placeholder={placeholder}
             disabled={sending}
             aria-label={ariaLabel}
+            aria-autocomplete="list"
+            aria-expanded={commandsOpen}
+            aria-controls={commandsOpen ? "chat-command-menu" : undefined}
+            aria-activedescendant={
+              activeCommand ? `chat-command-${activeCommand.key}` : undefined
+            }
             className="max-h-[140px] min-h-[2.5rem] resize-none border-0 bg-transparent px-2 py-2 text-base shadow-none focus-visible:border-0 focus-visible:ring-0 md:text-sm"
             rows={1}
           />
