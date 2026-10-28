@@ -4,7 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from app.services.ats import ATS_CHECK_NAMES, analyze_pdf
+from app.services.ats import (
+    ATS_CHECK_NAMES,
+    _dates_machine_readable,
+    analyze_pdf,
+)
 from app.services.typst_compile import compile_typst, typst_available
 
 FIXTURES = Path(__file__).resolve().parents[1] / "docs" / "scoring" / "fixtures"
@@ -92,6 +96,42 @@ def test_fonts_embedded_fails_when_basefont_has_no_file():
     report = analyze_pdf(pdf, typst_source="")
     got = {c["name"]: c["passed"] for c in report["checks"]}
     assert got["fonts_embedded"] is False
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # Every range resolves: both accepted formats, open or closed.
+        ("2021-03 — 2024-06", True),
+        ("Mar 2021 — Jun 2024", True),
+        ("2018-09 — 2022-06\n2022-07 — Present", True),
+        ("Sept 2019 to May 2023", True),
+        ("2018-09 — 2022-06\n2022-07 — 至今", True),
+        ("2018-09 — 2022-06\n2022-07 — 现在", True),
+        # Year-only ranges are the common real-world extraction failure, and
+        # one current role saying Present must not rescue the rest.
+        ("2018 — 2022\n2022 — Present", False),
+        ("2021-2024", False),
+        # One unresolvable range is enough to fail: this is all-of, not any-of.
+        ("2018-09 — 2022-06\n2021 — 2024", False),
+        # Forms that blank the vendor's Dates field.
+        ("Summer 2020", False),
+        ("Summer 2020 — Fall 2021", False),
+        ("Jun '21 — Aug '24", False),
+        ("2021-03 — 2024", False),
+        # Nothing date-shaped to read.
+        ("", False),
+        ("No dates anywhere on this page", False),
+        # A year in prose is not a date entry, and must neither pass nor fail
+        # the page on its own.
+        ("Won ICPC 2022, presented at NeurIPS 2023. Mar 2021 — Jun 2024", True),
+        ("Won ICPC 2022 and presented the results", False),
+    ],
+)
+def test_dates_machine_readable_requires_every_range_to_resolve(
+    text: str, expected: bool
+):
+    assert _dates_machine_readable(text) is expected
 
 
 @pytest.mark.skipif(

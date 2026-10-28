@@ -24,7 +24,7 @@ ATS_CHECK_HINTS = {
     "single_column": "Single-column layout",
     "contact_in_body": "Name and email in the body (not header/footer only)",
     "standard_headings": "Standard headings (Experience / Education)",
-    "dates_machine_readable": "Machine-readable dates (YYYY-MM or Present)",
+    "dates_machine_readable": "Every date range resolves to a month (YYYY-MM or Mon YYYY)",
     "no_embedded_images_as_text": "Name/contact is not image-only",
     "fonts_embedded": "Fonts embedded",
     "parse_roundtrip_ok": "Extract recovers source text",
@@ -34,8 +34,37 @@ NAME_LET_RE = re.compile(r'#let\s+name\s*=\s*"([^"]*)"')
 EMAIL_LET_RE = re.compile(r'#let\s+email\s*=\s*"([^"]*)"')
 AUTHOR_RE = re.compile(r"author:\s*(?:name|\"([^\"]+)\")")
 EMAIL_IN_TEXT_RE = re.compile(r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", re.I)
-DATE_RE = re.compile(r"\b\d{4}-(0[1-9]|1[0-2])\b")
-PRESENT_RE = re.compile(r"(Present|present|至今|现在)")
+# Month names in the form ATS vendors' own guidance prescribes ("Mar 2021").
+_MONTH_NAME_SRC = (
+    r"Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?"
+    r"|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?"
+)
+
+# One ordered pass over the extracted text yields every date-shaped token; the
+# group that matched says whether it resolves to a month. Order is load-bearing:
+# YYYY-MM must be tried before a bare year so "2018-09" is one token rather than
+# the year 2018 followed by stray digits.
+DATE_TOKEN_RE = re.compile(
+    r"(?P<year_month>\b\d{4}-(?:0[1-9]|1[0-2])\b)"
+    rf"|(?P<month_name>\b(?:{_MONTH_NAME_SRC})\.?[ \t]+\d{{4}}\b)"
+    r"|(?P<season>\b(?:Spring|Summer|Fall|Autumn|Winter)[ \t]+\d{4}\b)"
+    r"|(?P<apostrophe_year>(?<!\w)['\u2019]\d{2}\b)"
+    r"|(?P<present>\bpresent\b|至今|现在)"
+    r"|(?P<year>\b(?:19|20)\d{2}\b)",
+    re.IGNORECASE,
+)
+
+# What may sit between the two endpoints of one range. Horizontal whitespace
+# only: a dash across a line break is more likely a bullet than a range.
+RANGE_SEP_RE = re.compile(
+    r"[ \t]*(?:[-\u2010\u2013\u2014\u2212~]+|to|until|through|至)[ \t]*",
+    re.IGNORECASE,
+)
+
+# Tokens that pin down both a month and a year. "Present" closes an open range
+# but cannot open one, and a bare year never resolves on its own.
+RESOLVED_DATE_KINDS = frozenset({"year_month", "month_name"})
+UNRESOLVED_DATE_KINDS = frozenset({"season", "apostrophe_year"})
 
 EDU_HEADINGS = ("education", "學歷", "教育经历", "教育經歷", "教育")
 EXP_HEADINGS = ("experience", "work experience", "工作經歷", "工作经历")
@@ -259,10 +288,45 @@ def _standard_headings(typst_source: str, text: str) -> bool:
     return has_edu and has_exp
 
 
+def _date_entries(text: str) -> list[bool]:
+    """One bool per date entry found in the text: did it resolve to a month?
+
+    An entry is a range ("2021-03 – 2024-06") or a lone date ("Summer 2020").
+    A lone year or a lone "Present" is prose — "ICPC 2022", "present the
+    results" — so it is neither an entry nor a failure.
+    """
+    tokens = list(DATE_TOKEN_RE.finditer(text))
+    entries: list[bool] = []
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+        if nxt is not None and RANGE_SEP_RE.fullmatch(text[token.end() : nxt.start()]):
+            opens = token.lastgroup in RESOLVED_DATE_KINDS
+            closes = nxt.lastgroup in RESOLVED_DATE_KINDS or nxt.lastgroup == "present"
+            entries.append(opens and closes)
+            i += 2
+            continue
+        if token.lastgroup in RESOLVED_DATE_KINDS:
+            entries.append(True)
+        elif token.lastgroup in UNRESOLVED_DATE_KINDS:
+            entries.append(False)
+        i += 1
+    return entries
+
+
 def _dates_machine_readable(text: str) -> bool:
+    """Every date entry must resolve to a month and a year.
+
+    This is all-of, not any-of. A vendor extractor that cannot resolve a range
+    leaves its Dates field blank, and a blank required field can keep the
+    application out of recruiter search entirely — so one current role saying
+    "Present" must not rescue a resume whose other ranges are year-only.
+    """
     if not text:
         return False
-    return bool(DATE_RE.search(text) or PRESENT_RE.search(text))
+    entries = _date_entries(text)
+    return bool(entries) and all(entries)
 
 
 def _pdf_has_images(pdf_bytes: bytes) -> bool:
