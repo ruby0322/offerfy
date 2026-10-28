@@ -437,7 +437,7 @@
       "single_column": "Single-column layout",
       "contact_in_body": "Name and email in the body (not header/footer only)",
       "standard_headings": "Standard headings (Experience / Education)",
-      "dates_machine_readable": "Machine-readable dates (YYYY-MM or Present)",
+      "dates_machine_readable": "Machine-readable dates (YYYY-MM or Mon YYYY)",
       "no_embedded_images_as_text": "Name/contact is not image-only",
       "fonts_embedded": "Fonts embedded",
       "parse_roundtrip_ok": "Extract recovers source text"
@@ -447,7 +447,7 @@
       "single_column": "Parsers read top to bottom. Two columns often scramble jobs and dates.",
       "contact_in_body": "Name and email in the header or footer are often dropped.",
       "standard_headings": "Parsers look for Experience and Education. Custom titles get skipped.",
-      "dates_machine_readable": "Use YYYY-MM or Present. Month names often don't parse into a timeline.",
+      "dates_machine_readable": "Every range needs a month and a year — 2021-03 or Mar 2021, ending Present. Year-only ranges and \u201cSummer 2020\u201d leave the ATS dates field blank.",
       "no_embedded_images_as_text": "If the name is a picture, ATS cannot tell who you are.",
       "fonts_embedded": "Unembedded fonts can extract as missing or garbled glyphs.",
       "parse_roundtrip_ok": "Extracted text should match the page, including your name."

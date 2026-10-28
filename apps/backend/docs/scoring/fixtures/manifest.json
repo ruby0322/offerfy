@@ -449,7 +449,23 @@
       }
     },
     {
-      "file": "trap_month_name_dates.typ",
+      "file": "trap_year_only_dates.typ",
+      "locale": "en",
+      "name": "Year Only Person",
+      "email": "year.only@example.com",
+      "expected": {
+        "text_extractable": true,
+        "single_column": true,
+        "contact_in_body": true,
+        "standard_headings": true,
+        "dates_machine_readable": false,
+        "no_embedded_images_as_text": true,
+        "fonts_embedded": true,
+        "parse_roundtrip_ok": true
+      }
+    },
+    {
+      "file": "en_good_month_names.typ",
       "locale": "en",
       "name": "Month Name Person",
       "email": "month.name@example.com",
@@ -458,7 +474,7 @@
         "single_column": true,
         "contact_in_body": true,
         "standard_headings": true,
-        "dates_machine_readable": false,
+        "dates_machine_readable": true,
         "no_embedded_images_as_text": true,
         "fonts_embedded": true,
         "parse_roundtrip_ok": true
