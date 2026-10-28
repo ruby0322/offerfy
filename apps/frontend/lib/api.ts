@@ -442,6 +442,13 @@ export type Usage = {
   limit_credits: number | null;
   used_credits: number;
   remaining_credits: number | null;
+  /**
+   * The split behind limit_credits: the published number for this tier, plus
+   * whatever this person has been granted on top of it. /v1/usage/tiers knows
+   * nothing about grants, so compare against tier_credits, not limit_credits.
+   */
+  tier_credits: number | null;
+  granted_credits: number;
   turn_limit: number | null;
   turns_used: number;
   turns_remaining: number | null;
@@ -915,6 +922,12 @@ export type AdminUserUsage = {
   turns_used: number;
   turn_limit: number | null;
   remaining_credits: number | null;
+  /**
+   * The split behind limit_credits, both already folded into it. Shown to
+   * explain a ceiling that is not the tier's.
+   */
+  tier_credits: number | null;
+  granted_credits: number;
   reset_at: string;
   refusals: number;
   unmeasured_rounds: number;
@@ -961,6 +974,24 @@ export type AdminUserResume = {
   message_count: number;
 };
 
+export type AdminQuotaGrant = {
+  id: string;
+  credits: number;
+  reason: string;
+  detail: string | null;
+  starts_at: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+  issued_by: string | null;
+  created_at: string;
+  /**
+   * Whether this one counts for the current window. Server-side, because the
+   * rule is overlap with the week rather than "valid right now" -- a grant
+   * that lapsed on Wednesday still covers the week it lapsed in.
+   */
+  active: boolean;
+};
+
 export type AdminUserDetail = {
   id: string;
   email: string;
@@ -970,6 +1001,8 @@ export type AdminUserDetail = {
   created_at: string;
   resumes: AdminUserResume[];
   usage: AdminUserUsage;
+  /** Every grant ever issued, newest first -- lapsed and revoked included. */
+  grants: AdminQuotaGrant[];
 };
 
 export type AdminResumeListItem = {
@@ -1069,6 +1102,32 @@ export async function adminUsage(params: { top?: number } = {}): Promise<AdminUs
 
 export async function adminUser(id: string): Promise<AdminUserDetail> {
   return apiJson(`/api/v1/admin/users/${id}`);
+}
+
+export async function adminIssueGrant(
+  userId: string,
+  payload: {
+    credits: number;
+    reason: string;
+    detail?: string | null;
+    /** ISO 8601; a bare date is read as UTC midnight. Omit for open-ended. */
+    expires_at?: string | null;
+  },
+): Promise<AdminQuotaGrant> {
+  return apiJson(`/api/v1/admin/users/${userId}/grants`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+/** Revokes, never deletes: the grant stays in the history with revoked_at set. */
+export async function adminRevokeGrant(
+  userId: string,
+  grantId: string,
+): Promise<AdminQuotaGrant> {
+  return apiJson(`/api/v1/admin/users/${userId}/grants/${grantId}`, {
+    method: "DELETE",
+  });
 }
 
 export async function adminResumes(params: {

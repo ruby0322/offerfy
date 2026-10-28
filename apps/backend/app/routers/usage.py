@@ -49,6 +49,8 @@ def read_usage(
         limit_credits=bal.limit_credits,
         used_credits=bal.used_credits,
         remaining_credits=bal.remaining_credits,
+        tier_credits=bal.tier_credits,
+        granted_credits=bal.granted_credits,
         turn_limit=bal.turn_limit,
         turns_used=bal.turns_used,
         turns_remaining=bal.turns_remaining,
