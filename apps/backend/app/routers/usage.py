@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.deps import get_current_user, owner_context
 from app.models import User
-from app.schemas import UsageOut, UsageTierOut, UsageTiersOut
+from app.schemas import UsageGrantOut, UsageOut, UsageTierOut, UsageTiersOut
+from app.services.grants import all_grants, grant_status
 from app.services.usage import (
     CREDIT_UUSD,
     EDIT_UUSD,
@@ -41,6 +42,26 @@ def read_usage(
     user, guest = owner_context(request, response, db, user, ensure=False)
     bal = balance(db, user, guest)
     tier = TIERS[bal.tier]
+    # One extra indexed lookup on a small table, and only for a signed-in
+    # caller -- a guest cannot hold a grant, so the common case costs nothing.
+    # Worth it here rather than on its own endpoint: a ceiling and the reason
+    # for it must not be fetchable a week apart.
+    grants = (
+        []
+        if user is None
+        else [
+            UsageGrantOut(
+                credits=row.credits,
+                reason=row.reason,
+                status=grant_status(row),
+                starts_at=row.starts_at.isoformat(),
+                expires_at=(
+                    None if row.expires_at is None else row.expires_at.isoformat()
+                ),
+            )
+            for row in all_grants(db, user=user)
+        ]
+    )
     return UsageOut(
         tier=bal.tier,
         enforced=limits_enabled(),
@@ -51,6 +72,7 @@ def read_usage(
         remaining_credits=bal.remaining_credits,
         tier_credits=bal.tier_credits,
         granted_credits=bal.granted_credits,
+        grants=grants,
         turn_limit=bal.turn_limit,
         turns_used=bal.turns_used,
         turns_remaining=bal.turns_remaining,

@@ -449,6 +449,11 @@ export type Usage = {
    */
   tier_credits: number | null;
   granted_credits: number;
+  /**
+   * Every grant this person has held, newest first; empty for a guest. Carries
+   * no operator note and no issuer -- see UsageGrantOut on the server for why.
+   */
+  grants: UsageGrant[];
   turn_limit: number | null;
   turns_used: number;
   turns_remaining: number | null;
@@ -459,6 +464,22 @@ export type Usage = {
 };
 
 /** The structured body of a 429 from the chat endpoint. */
+export type GrantStatus = "active" | "scheduled" | "expired" | "revoked";
+
+export type UsageGrant = {
+  credits: number;
+  /** The enum, not prose: render it in this app's words, per locale. */
+  reason: string;
+  /**
+   * Server-computed. "scheduled" means it starts after this week ends, not
+   * later today -- the rule is overlap with the window, so a grant issued
+   * mid-week is already active. Never re-derive this from the dates.
+   */
+  status: GrantStatus;
+  starts_at: string;
+  expires_at: string | null;
+};
+
 export type UsageRefusal = {
   limit: "weekly_turns" | "weekly_credits" | "burst" | "global_ceiling" | "guest_pool";
   detail: string;
@@ -985,10 +1006,11 @@ export type AdminQuotaGrant = {
   issued_by: string | null;
   created_at: string;
   /**
-   * Whether this one counts for the current window. Server-side, because the
-   * rule is overlap with the week rather than "valid right now" -- a grant
-   * that lapsed on Wednesday still covers the week it lapsed in.
+   * Server-computed, from the same rule the person's own /v1/usage reads --
+   * overlap with the week, not "valid right now", so a grant that lapsed on
+   * Wednesday still covers the week it lapsed in. Never re-derive it here.
    */
+  status: GrantStatus;
   active: boolean;
 };
 

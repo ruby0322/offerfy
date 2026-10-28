@@ -31,14 +31,18 @@ function reasonKey(reason: string) {
   }
 }
 
-/** Mirrors services.grants: revoked beats everything, then the window rule. */
+/** The server decides; this only names it. See UsageGrant.status. */
 function statusKey(grant: AdminQuotaGrant) {
-  if (grant.revoked_at) return "grantsStatusRevoked" as const;
-  if (grant.active) return "grantsStatusActive" as const;
-  if (new Date(grant.starts_at).getTime() > Date.now()) {
-    return "grantsStatusPending" as const;
+  switch (grant.status) {
+    case "revoked":
+      return "grantsStatusRevoked" as const;
+    case "scheduled":
+      return "grantsStatusPending" as const;
+    case "expired":
+      return "grantsStatusLapsed" as const;
+    default:
+      return "grantsStatusActive" as const;
   }
-  return "grantsStatusLapsed" as const;
 }
 
 function day(value: string) {
@@ -235,8 +239,7 @@ export default function QuotaGrants({ userId, grants, usage, onChanged }: Props)
                   {/* Only where it would do something. A lapsed grant cannot
                       come back -- expires_at is in the past and a grant is
                       never edited -- so Revoke there is dead UI. */}
-                  {statusKey(row) === "grantsStatusActive" ||
-                  statusKey(row) === "grantsStatusPending" ? (
+                  {row.status === "active" || row.status === "scheduled" ? (
                     <Button
                       variant="ghost"
                       size="sm"

@@ -53,6 +53,14 @@ export default function UsageCard() {
             ? t("usageThisWeekEdits", { used, limit: limit ?? 0 })
             : t("usageThisWeekCredits", { used, limit: limit ?? 0 })}
         </p>
+        {/* The meter above counts against a ceiling that includes grants, so
+            without this the limit there has no explanation on this page. The
+            detail lives on /plan; this is the pointer. */}
+        {usage.granted_credits > 0 ? (
+          <p className="text-xs leading-5 text-muted-foreground">
+            {t("usageGrantedLine", { granted: usage.granted_credits })}
+          </p>
+        ) : null}
         <p className="text-xs leading-5 text-muted-foreground">
           {t("usageTierLine", { tier: tierName })}
           {usage.enforced ? ` ${t("usageResetLine", { date: reset.toLocaleDateString() })}` : ""}

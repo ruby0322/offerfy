@@ -228,6 +228,10 @@ class UsageOut(BaseModel):
     # comparing the two would otherwise see a contradiction.
     tier_credits: int | None
     granted_credits: int
+    # Every grant this person has held, newest first; empty for a guest, who
+    # cannot hold one. Carried on the balance rather than its own endpoint so a
+    # ceiling and its explanation can never be fetched a week apart.
+    grants: list["UsageGrantOut"] = []
     turn_limit: int | None
     turns_used: int
     turns_remaining: int | None
@@ -236,6 +240,30 @@ class UsageOut(BaseModel):
     # Rounds the provider reported no usage for, charged at a fallback. Shown
     # because a meter that is guessing should say so.
     unmeasured_rounds: int
+
+
+class UsageGrantOut(BaseModel):
+    """One grant, as the person who holds it may see it.
+
+    Deliberately narrower than the admin shape. `detail` is an operator's note
+    written for whoever reads it in six months -- shorthand, ticket numbers, a
+    cohort name -- and `issued_by` is a colleague's address; neither is written
+    with this reader in mind, so neither is sent. What is left is what someone
+    needs to understand their own ceiling: how much, roughly why, and for how
+    long.
+
+    Expired and revoked grants are included. Someone whose allowance dropped is
+    owed the reason, and the same argument that puts them on the admin page
+    puts them here.
+    """
+
+    credits: int
+    # The enum, not prose. The client renders it in its own words, because the
+    # admin wording ('Manual') means nothing to the person who received it.
+    reason: str
+    status: Literal["active", "scheduled", "expired", "revoked"]
+    starts_at: str
+    expires_at: str | None
 
 
 class UsageTierOut(BaseModel):
