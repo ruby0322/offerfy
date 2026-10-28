@@ -9,7 +9,10 @@ import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import { useToast } from "@/components/Toaster";
 import CompileErrorDialog from "@/components/editor/CompileErrorDialog";
 import CreateTailorDialog, { type TailorDraft } from "@/components/editor/CreateTailorDialog";
-import EditorChatPanel, { type ChatSuggestion } from "@/components/editor/EditorChatPanel";
+import EditorChatPanel, {
+  type ChatCommand,
+  type ChatSuggestion,
+} from "@/components/editor/EditorChatPanel";
 import EditorHeader from "@/components/editor/EditorHeader";
 import EditorHistoryPanel from "@/components/editor/EditorHistoryPanel";
 import EditorMobileLayout from "@/components/editor/EditorMobileLayout";
@@ -1129,6 +1132,76 @@ export default function EditorShell({ resumeId }: Props) {
           { key: "bullets", label: t("suggestBulletsLabel"), prompt: t("suggestBulletsPrompt") },
           { key: "ats", label: t("suggestAtsLabel"), prompt: t("suggestAtsPrompt") },
         ];
+  // The `/` menu. Unlike the openers above it stays available for the whole
+  // conversation and on a tailor, because the user asks for it by typing. The
+  // order is the order it is offered in: write it, sharpen it, check it, then
+  // the two that spin off work of their own.
+  const chatCommands: ChatCommand[] | undefined = chatUnavailable
+    ? undefined
+    : [
+        {
+          key: "fill",
+          label: t("suggestFillLabel"),
+          description: t("cmdFillDesc"),
+          prompt: t("suggestFillPrompt"),
+        },
+        {
+          key: "bullets",
+          label: t("suggestBulletsLabel"),
+          description: t("cmdBulletsDesc"),
+          prompt: t("suggestBulletsPrompt"),
+        },
+        {
+          key: "numbers",
+          label: t("cmdNumbersLabel"),
+          description: t("cmdNumbersDesc"),
+          prompt: t("cmdNumbersPrompt"),
+        },
+        {
+          key: "plain",
+          label: t("cmdPlainLabel"),
+          description: t("cmdPlainDesc"),
+          prompt: t("cmdPlainPrompt"),
+        },
+        {
+          key: "proofread",
+          label: t("cmdProofreadLabel"),
+          description: t("cmdProofreadDesc"),
+          prompt: t("cmdProofreadPrompt"),
+        },
+        {
+          key: "ats",
+          label: t("suggestAtsLabel"),
+          description: t("cmdAtsDesc"),
+          prompt: t("suggestAtsPrompt"),
+        },
+        {
+          key: "review",
+          label: t("cmdReviewLabel"),
+          description: t("cmdReviewDesc"),
+          prompt: t("cmdReviewPrompt"),
+        },
+        {
+          key: "onepage",
+          label: t("cmdOnePageLabel"),
+          description: t("cmdOnePageDesc"),
+          prompt: t("cmdOnePagePrompt"),
+        },
+        {
+          key: "jd",
+          label: t("cmdJdLabel"),
+          description: t("cmdJdDesc"),
+          prompt: t("cmdJdPrompt"),
+          needsInput: true,
+        },
+        {
+          key: "tailor",
+          label: t("cmdTailorLabel"),
+          description: t("cmdTailorDesc"),
+          prompt: t("cmdTailorPrompt"),
+          needsInput: true,
+        },
+      ];
   const masterTitle =
     family && family.master.id !== resumeId ? family.master.title : title;
   const tailorCount = family && family.master.id === resumeId ? family.tailors.length : 0;
@@ -1245,6 +1318,10 @@ export default function EditorShell({ resumeId }: Props) {
           onRestoreEdit={onRestoreEdit}
           familyActions={familyActions}
           suggestions={chatSuggestions}
+          commands={chatCommands}
+          commandsTitle={t("cmdMenuTitle")}
+          commandsNeedsInput={t("cmdNeedsInput")}
+          commandsHint={t("cmdHint")}
           focusKey={chatFocusKey}
           usage={usagePanel}
         />
