@@ -71,6 +71,15 @@ type Props = {
   streamingText?: string | null;
   reasoningText?: string | null;
   thinkingLabel?: string;
+  /**
+   * True once the running turn has produced something other than thinking --
+   * a tool call or a word of the answer. Used to tell "we are still waiting"
+   * apart from "this step is under way and the model is not narrating it",
+   * which are the same three bouncing dots otherwise. See `workingLabel`.
+   */
+  turnProgressed?: boolean;
+  workingLabel?: string;
+  noReasoningLabel?: string;
   draft: string;
   onDraftChange: (value: string) => void;
   attachment: File | null;
@@ -145,6 +154,9 @@ export default function EditorChatPanel({
   streamingText,
   reasoningText,
   thinkingLabel,
+  turnProgressed,
+  workingLabel,
+  noReasoningLabel,
   draft,
   onDraftChange,
   attachment,
@@ -446,16 +458,42 @@ export default function EditorChatPanel({
                 </motion.div>
               ))}
             </AnimatePresence>
-            {reasoningText ? (
+            {/* The thinking panel, and the honest version of it being empty.
+                No model fills it reliably: measured over 8 live turns each,
+                claude-haiku-5-5 carried a reasoning summary on 5, gpt-6.1-terra
+                on 3 and gpt-6-luna on 1, and every row came back silent on a
+                plain structural edit (see model_catalog._OPENAI_REASONING).
+                So the empty case is the common case on every row, and it used
+                to render as three anonymous bouncing dots with no panel at
+                all -- which reads as a feature that broke rather than as a
+                step the model did not narrate. It is one element in both
+                states, so a summary that arrives late fills the panel already
+                on screen instead of appearing from nowhere. */}
+            {reasoningText || (sending && !streamingText) ? (
               <div className="min-w-0 rounded-md border border-dashed border-border/60 bg-muted/30 px-3 py-2">
-                {thinkingLabel ? (
+                {(reasoningText ? thinkingLabel : workingLabel) ? (
                   <p className="mb-1 text-[0.7rem] font-medium uppercase tracking-wide text-muted-foreground">
-                    {thinkingLabel}
+                    {reasoningText ? thinkingLabel : workingLabel}
                   </p>
                 ) : null}
-                <p className="max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
-                  {reasoningText}
-                </p>
+                {reasoningText ? (
+                  <p className="max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                    {reasoningText}
+                  </p>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <LoadingMessage />
+                    {/* Only once a tool call or a word of the answer has
+                        landed. Before that there is nothing to explain the
+                        absence of -- and a summary may still arrive in a
+                        later round, so this says "step", not "turn". */}
+                    {turnProgressed && noReasoningLabel ? (
+                      <p className="text-xs leading-relaxed text-muted-foreground">
+                        {noReasoningLabel}
+                      </p>
+                    ) : null}
+                  </div>
+                )}
               </div>
             ) : null}
             {streamingText ? (
@@ -469,7 +507,8 @@ export default function EditorChatPanel({
                 />
               </div>
             ) : null}
-            {sending && !streamingText && !reasoningText ? <LoadingMessage /> : null}
+            {/* The bare dots used to live here. They are now inside the panel
+                above, which owns every waiting state of a running turn. */}
             {/* Last line of the transcript, because that is where the reader
                 is after every turn -- the divider that explains this sits
                 where the trim happens, which can be fifty messages up. */}

@@ -6,9 +6,13 @@ behave differently for reasons nobody could see, and the choice in the picker
 should turn on what a model is, not on what we happened to tell it.
 
 That is a claim about *this file*, not a promise that every model behaves
-alike. One measured difference it cannot paper over: the Claude rows stream
-their thinking into the editor's panel and the GPT-6.1 rows do not, because
-that generation returns no reasoning summary at all. See
+alike. The measured difference it cannot paper over is how reliably a model
+narrates its reasoning into the editor's thinking panel: over 8 live turns
+each, haiku carried a summary on 5, gpt-6.1-terra on 3 and gpt-6-luna on 1,
+and every row came back silent on a plain structural edit. It is a difference
+of degree on every model rather than a capability one row lacks -- an earlier
+note here said the GPT-6.1 rows could not do it at all, which a one-sentence
+question suggests and a real editing turn disproves. See
 model_catalog._OPENAI_REASONING.
 
 The one thing that is *not* here is each provider's reasoning configuration,

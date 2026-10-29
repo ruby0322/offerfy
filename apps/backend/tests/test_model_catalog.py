@@ -132,12 +132,35 @@ def test_the_measurement_belongs_to_the_model_it_was_taken_on():
 
 
 def test_a_dearer_model_costs_more_per_edit_and_buys_fewer():
-    """The whole claim the public cost table makes, checked once."""
-    cheap = usage.edit_uusd("gpt-6-luna")
+    """The whole claim the public cost table makes, checked once.
+
+    Three distinct price points rather than one either side of the reference:
+    the reference is the *cheapest* selectable row, so there is nothing below
+    it to compare against and an assertion written as `cheap < reference`
+    would be unsatisfiable rather than wrong.
+    """
     reference = usage.edit_uusd(model_catalog.REFERENCE_MODEL)
-    dear = usage.edit_uusd("claude-opus-5-5")
-    assert cheap < reference < dear
-    assert usage.cost_weight("gpt-6-luna") < 1.0 < usage.cost_weight("claude-opus-5-5")
+    dearer = usage.edit_uusd("gpt-6.1-terra")
+    dearest = usage.edit_uusd("claude-opus-5-5")
+    assert reference < dearer < dearest
+    assert 1.0 < usage.cost_weight("gpt-6.1-terra") < usage.cost_weight(
+        "claude-opus-5-5"
+    )
+
+
+def test_two_rows_at_the_same_price_weigh_the_same():
+    """`gpt-6-luna` and `claude-haiku-5-5` are priced identically, column for
+    column, across two providers -- so the table must quote them identically.
+
+    Worth pinning because the reference model is one of the two: a weight that
+    read 1.0 for the default and anything else for its twin would mean the
+    arithmetic had picked up the model's identity somewhere it should only
+    have read its rates.
+    """
+    assert model_catalog.BY_ID["gpt-6-luna"].prices == (
+        model_catalog.BY_ID["claude-haiku-5-5"].prices
+    )
+    assert usage.cost_weight("gpt-6-luna") == usage.cost_weight("claude-haiku-5-5")
 
 
 def test_an_unknown_model_is_quoted_as_the_fewest_edits():

@@ -146,19 +146,37 @@ class ModelSpec:
 
 # OpenAI reasoning settings for the resume-editing loop.
 #
-# **`summary` buys nothing on GPT-6.1 and is kept only for older models.**
-# It was measured on gpt-5.6, where `detailed` surfaced a visible summary 3/3
-# against `auto`'s 2/3 at the same ~430 chars. On gpt-6.1-terra, checked
-# against the live API on 2026-10-29, both settings return `summary: []` and
-# emit no `response.reasoning_summary_text.delta` at all -- while still
-# billing reasoning tokens (27 on a one-sentence question). The model thinks;
-# it just will not show its work.
+# **`summary` does work on GPT-6.1, but only on some turns.** It was measured
+# on gpt-5.6, where `detailed` surfaced a visible summary 3/3 against `auto`'s
+# 2/3 at the same ~430 chars. A measurement on 2026-10-29 then found
+# gpt-6.1-terra returning `summary: []` with no
+# `response.reasoning_summary_text.delta` at all, and concluded the generation
+# never shows its work.
 #
-# So the editor's thinking panel stays empty on the GPT-6.1 rows and fills on
-# the Claude ones, which is a real behavioural difference between models in
-# the picker and not only a cost one. Left in rather than removed: it is
-# accepted without error, it costs nothing to send, and it is what an older
-# model or a proxy serving one would need.
+# **That conclusion was too strong and is corrected here.** It was taken on a
+# one-sentence question, and it reproduces exactly in that condition -- but on
+# a real resume-editing turn through `llm.turn`, terra streams ~500-600 chars
+# of summary. Re-measured 2026-10-29 over 8 live turns each on two task
+# shapes:
+#
+#     gpt-6.1-terra     3/8 turns carried a summary  (2/4 on a bullet rewrite)
+#     claude-haiku-5-5  5/8                          (4/4 on a bullet rewrite)
+#     gpt-6-luna        1/8                          (1/4)
+#
+# So whether the panel fills is a property of the *turn*, not of the model.
+# Every selectable row came back silent on all three structural-edit passes,
+# including both Claude rows; terra also billed reasoning tokens with no
+# summary in 2 of 4 rewrite passes, which is the real residue of the original
+# finding -- it sometimes thinks without narrating.
+#
+# The product consequence is therefore not "pick the model that narrates".
+# There is no such model. It is that the editor must read honestly when a turn
+# produces no summary, whichever model is running -- see
+# `apps/frontend/components/editor/EditorChatPanel.tsx`.
+#
+# `summary` is left in rather than removed: it is accepted without error, it
+# costs nothing to send, it demonstrably still fires on 6.1, and it is what an
+# older model or a proxy serving one would need.
 #
 # Effort is `low` because nothing measured justified more, and it still does
 # real work on 6.1 -- the reasoning tokens above are billed either way, so
@@ -354,7 +372,34 @@ BY_ID: dict[str, ModelSpec] = {spec.id: spec for spec in MODELS}
 # other model's cost is quoted relative to. Both are deliberately the same
 # row: "1x" on the public table has to mean "what the default costs", or the
 # column is unreadable.
-DEFAULT_MODEL = "gpt-6.1-terra"
+#
+# **Chosen on measured edit quality and measured cost, 2026-10-29**, against
+# `gpt-6.1-terra` (the previous default) and `gpt-6-luna`: 8 live turns each
+# through `llm.turn.aiter_chat_edit` on the same resume, two task shapes --
+# an open-ended bullet rewrite and a precise structural edit.
+#
+#   * **Precise edits are a tie.** All three produced byte-identical correct
+#     source on all three structural passes. No errors and no failed edits
+#     anywhere, on any row.
+#   * **Open-ended rewriting is not.** Haiku led bullets with the outcome and
+#     a real verb ("Accelerated", "Hardened", "Established"); terra hedged
+#     into "Targeted faster payments API performance" in 3 of 4 passes, which
+#     is a *weaker* bullet than the one it replaced and the opposite of what
+#     was asked. Haiku over-claimed once in 4 ("in production"), caught it
+#     itself, fixed it in a second edit and told the user -- which terra's
+#     hedging avoids by never claiming anything.
+#   * **Cost: haiku is ~5x cheaper on a measured turn** ($0.0012 vs $0.0062
+#     mean, priced through usage.event_cost_uusd), and 9.3x cheaper on the
+#     published per-edit figure, which assumes a heavier token mix. Either
+#     number stretches the instance ceilings in `app.config` by most of an
+#     order of magnitude, and those ceilings are the launch-day constraint.
+#   * It is also the fastest (4.0s vs 10.2s mean on the structural task) and
+#     the fewest rounds (3.0 vs 4.7); terra does that edit in two passes.
+#
+# **What did *not* decide it: the editor's thinking panel.** The premise this
+# change was opened to settle -- that the GPT-6.1 rows never fill it -- does
+# not survive a real editing turn. See `_OPENAI_REASONING`.
+DEFAULT_MODEL = "claude-haiku-5-5"
 REFERENCE_MODEL = DEFAULT_MODEL
 
 # Picker order. Cheapest first within a family, families newest first, which

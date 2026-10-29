@@ -17,7 +17,7 @@ from app.deps import SESSION_COOKIE, _sign
 from app.models import LlmCall, User
 from app.services.typst_compile import typst_available
 from tests.openai_script import ScriptedOpenAI, llm_message, llm_usage, tool_call
-from app.services import model_catalog
+from app.services import model_catalog, model_choice, usage
 from tests.test_chat import post_chat
 
 
@@ -84,7 +84,13 @@ def test_each_round_records_its_own_token_counts(
     assert [row.purpose for row in rows] == ["chat", "chat", "chat"]
     assert [row.round_index for row in rows] == [0, 1, 2]
     assert [row.resume_id for row in rows] == [created["id"]] * 3
-    assert [row.model for row in rows] == [model_catalog.DEFAULT_MODEL] * 3
+    # Every round of one turn is billed to the same model -- which is the
+    # claim here, not which model that is. Read from `model_choice`, because
+    # this test sets only `openai_enabled` and the catalogue default is an
+    # Anthropic row, so the model this turn ran on is deliberately not it.
+    ran_on = model_choice.default_model(usage.GUEST)
+    assert [row.model for row in rows] == [ran_on] * 3
+    assert model_catalog.BY_ID[ran_on].provider == model_catalog.OPENAI
     assert [row.prefer_full_source for row in rows] == [False, False, False]
     assert [row.input_tokens for row in rows] == [1850, 5200, 6100]
     assert [row.cached_tokens for row in rows] == [0, 1792, 5120]
