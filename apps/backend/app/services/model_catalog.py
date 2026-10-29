@@ -144,13 +144,25 @@ class ModelSpec:
 # The catalogue
 # --------------------------------------------------------------------------
 
-# OpenAI reasoning settings for the resume-editing loop. `summary: detailed`
-# is what makes the thinking visible, which is the point: over three runs each
-# against the live API, `auto` surfaced a summary in only 2/3 at low effort
-# while `detailed` managed 3/3, at the same length (~430 chars) and no extra
-# latency.
+# OpenAI reasoning settings for the resume-editing loop.
 #
-# Effort is `low` because nothing measured justified more. The tempting theory
+# **`summary` buys nothing on GPT-6.1 and is kept only for older models.**
+# It was measured on gpt-5.6, where `detailed` surfaced a visible summary 3/3
+# against `auto`'s 2/3 at the same ~430 chars. On gpt-6.1-terra, checked
+# against the live API on 2026-10-29, both settings return `summary: []` and
+# emit no `response.reasoning_summary_text.delta` at all -- while still
+# billing reasoning tokens (27 on a one-sentence question). The model thinks;
+# it just will not show its work.
+#
+# So the editor's thinking panel stays empty on the GPT-6.1 rows and fills on
+# the Claude ones, which is a real behavioural difference between models in
+# the picker and not only a cost one. Left in rather than removed: it is
+# accepted without error, it costs nothing to send, and it is what an older
+# model or a proxy serving one would need.
+#
+# Effort is `low` because nothing measured justified more, and it still does
+# real work on 6.1 -- the reasoning tokens above are billed either way, so
+# this is the lever that keeps them few. The tempting theory
 # was that deliberation would pay for itself by avoiding the edit retries the
 # turn loop already handles. It does not: on a real two-change edit request
 # both `low` and `medium` spent the entire tool-round budget (6/6 each), so

@@ -2,9 +2,14 @@
 
 Provider-neutral on purpose. Both adapters send the same system prompt and the
 same nudges -- a prompt that drifted per provider would make the two models
-behave differently for reasons nobody could see, and the whole point of the
-picker is that the choice is about cost and capability rather than about which
-instructions a model happens to be given.
+behave differently for reasons nobody could see, and the choice in the picker
+should turn on what a model is, not on what we happened to tell it.
+
+That is a claim about *this file*, not a promise that every model behaves
+alike. One measured difference it cannot paper over: the Claude rows stream
+their thinking into the editor's panel and the GPT-6.1 rows do not, because
+that generation returns no reasoning summary at all. See
+model_catalog._OPENAI_REASONING.
 
 The one thing that is *not* here is each provider's reasoning configuration,
 which is genuinely provider-shaped and lives on ModelSpec.options.
