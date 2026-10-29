@@ -54,9 +54,8 @@ def test_a_cache_write_is_always_one_and_a_quarter_times_input():
 # over-billed Sonnet and Opus by nearly double on the input line. Checked
 # against the published pricing page on 2026-10-29.
 CACHE_READ_RATIO = {
-    "gpt-6.1-terra": 10,
-    "gpt-6.1-sol": 10,
-    "gpt-6.1-luna": 10,
+    "gpt-6.1-terra": 20,
+    "gpt-6.1-sol": 20,
     "gpt-5.6-terra": 10,
     "gpt-5.6-sol": 10,
     "gpt-5.6-luna": 10,
@@ -113,19 +112,32 @@ def test_the_default_and_the_reference_model_are_selectable_by_everyone():
 
 def test_the_reference_model_weighs_exactly_one():
     assert usage.cost_weight(model_catalog.REFERENCE_MODEL) == 1.0
-    assert usage.edit_uusd(model_catalog.REFERENCE_MODEL) == usage.EDIT_UUSD
-    # And no argument means the reference, so the pre-picker figure is
-    # unchanged rather than silently re-based on the dearest model.
-    assert usage.edit_uusd() == usage.EDIT_UUSD
+    # No argument means the reference, never the dearest model.
+    assert usage.edit_uusd() == usage.edit_uusd(model_catalog.REFERENCE_MODEL)
+
+
+def test_the_measurement_belongs_to_the_model_it_was_taken_on():
+    """EDIT_UUSD is a number measured on one model, not on whichever model
+    happens to be the default.
+
+    Conflating the two was a real bug: the measurement was taken on
+    gpt-5.6-terra, the default moved to gpt-6.1-terra at half the price, and
+    every published "about N edits" then understated an allowance by about
+    half. Only the model named here may read back the raw constant.
+    """
+    assert usage.edit_uusd(usage.EDIT_MEASURED_ON) == usage.EDIT_UUSD
+    assert usage.EDIT_MEASURED_ON in usage.PRICES
+    # And the reference is a different model, or this test proves nothing.
+    assert usage.EDIT_MEASURED_ON != model_catalog.REFERENCE_MODEL
 
 
 def test_a_dearer_model_costs_more_per_edit_and_buys_fewer():
     """The whole claim the public cost table makes, checked once."""
-    cheap = usage.edit_uusd("gpt-6.1-luna")
+    cheap = usage.edit_uusd("gpt-6-luna")
     reference = usage.edit_uusd(model_catalog.REFERENCE_MODEL)
     dear = usage.edit_uusd("claude-opus-5-5")
     assert cheap < reference < dear
-    assert usage.cost_weight("gpt-6.1-luna") < 1.0 < usage.cost_weight("claude-opus-5-5")
+    assert usage.cost_weight("gpt-6-luna") < 1.0 < usage.cost_weight("claude-opus-5-5")
 
 
 def test_an_unknown_model_is_quoted_as_the_fewest_edits():
@@ -152,7 +164,7 @@ def test_the_tier_order_matches_the_usage_module():
 @pytest.mark.parametrize(
     "tier,expected",
     [
-        ("guest", {"gpt-6.1-terra", "gpt-6.1-luna", "claude-haiku-5-5"}),
+        ("guest", {"gpt-6.1-terra", "gpt-6-luna", "claude-haiku-5-5"}),
         ("registered", None),
         ("matching", None),
     ],
@@ -179,7 +191,7 @@ def test_a_guest_only_gets_the_cheaper_models(tier, expected):
 def test_a_tier_we_do_not_know_fails_closed():
     """A renamed tier must not open every model."""
     opus = model_catalog.BY_ID["claude-opus-5-5"]
-    luna = model_catalog.BY_ID["gpt-6.1-luna"]
+    luna = model_catalog.BY_ID["gpt-6-luna"]
     assert model_catalog.allowed_for(opus, "something-new") is False
     # Models open to everyone stay open, which is what keeps the product
     # working rather than dark, while the restricted ones stay shut.

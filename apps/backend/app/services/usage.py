@@ -111,31 +111,40 @@ EDIT_UUSD = 36_000
 EDIT_MIX = {"fresh": 2_352, "cached": 9_375, "cache_write": 2_349, "output": 141}
 EDIT_ROUNDS = 2.57
 
+# The model EDIT_UUSD was measured on, which is **not** the model the figures
+# are quoted against. It has to be written down separately, and conflating the
+# two was a real bug: the measurement was taken on gpt-5.6-terra, the default
+# then became gpt-6.1-terra, and gpt-6.1-terra is half the price -- so every
+# published "about N edits" was understating what an allowance buys by about
+# half, in the safe direction but by a lot.
+#
+# Keep this pointing at whichever model the 36,000 was actually measured on.
+# Moving the default does not move it; only taking a fresh measurement does.
+EDIT_MEASURED_ON = "gpt-5.6-terra"
+
 
 def edit_uusd(model: str | None = None) -> int:
     """What one AI edit costs on `model`, in micro-USD.
 
-    EDIT_UUSD is a measurement taken on one model. Every other model's figure
+    EDIT_UUSD is a measurement taken on EDIT_MEASURED_ON. Every model's figure
     is that measurement scaled by the ratio of the two models' prices over the
     measured token mix -- so a model that is 5x the price reads as 5x the cost
     and a fifth of the edits, from the same rates the meter bills with.
 
     Scaling rather than pricing the mix outright keeps EDIT_UUSD's deliberate
     conservatism (see its comment: it quotes the heavier 2.57-round sample)
-    applied evenly across the table instead of only to the reference model.
+    applied evenly across the table instead of only to one row.
 
     An unknown model lands on the fallback price, which is the dearest row, so
     it is quoted as the fewest edits rather than the most. `None` means the
-    reference model -- that is what "one edit" meant before models could be
-    chosen, and it keeps `edit_uusd() == EDIT_UUSD` true by construction
-    rather than by coincidence.
+    reference model, which is what the tier table quotes.
     """
     name = (model or "").strip() or model_catalog.REFERENCE_MODEL
-    reference = price_uusd(model_catalog.REFERENCE_MODEL, **EDIT_MIX)
-    if reference <= 0:  # pragma: no cover -- a zero-priced reference row
+    measured_on = price_uusd(EDIT_MEASURED_ON, **EDIT_MIX)
+    if measured_on <= 0:  # pragma: no cover -- a zero-priced measurement row
         return EDIT_UUSD
     mine = price_uusd(name, **EDIT_MIX)
-    return max(1, round(EDIT_UUSD * mine / reference))
+    return max(1, round(EDIT_UUSD * mine / measured_on))
 
 
 def cost_weight(model: str | None) -> float:

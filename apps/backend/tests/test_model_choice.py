@@ -24,7 +24,7 @@ from tests.test_usage import _signed_in
 
 SONNET = "claude-sonnet-5-5"
 OPUS = "claude-opus-5-5"
-LUNA = "gpt-6.1-luna"
+LUNA = "gpt-6-luna"
 
 
 @pytest.fixture

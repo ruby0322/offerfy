@@ -178,29 +178,26 @@ MODELS: tuple[ModelSpec, ...] = (
         id="gpt-6.1-terra",
         provider=OPENAI,
         label="GPT-6.1 Terra",
-        prices=_rates(1_750_000, 10_000_000, 175_000),
+        # $1 / $0.05 cached / $1.25 write / $5 out per MTok, short-context
+        # band. The long-context band is exactly 2x on every column; the
+        # threshold is well above a bounded round here, for the same reason
+        # and with the same caveat as claude-haiku-5-5 below.
+        prices=_rates(1_000_000, 5_000_000, 50_000),
         selectable=True,
         min_tier="guest",
         aliases=("terra", "gpt-6.1", "gpt6.1-terra"),
+        verified="2026-10-29",
         options=_OPENAI_REASONING,
     ),
     ModelSpec(
         id="gpt-6.1-sol",
         provider=OPENAI,
         label="GPT-6.1 Sol",
-        prices=_rates(3_500_000, 17_500_000, 350_000),
+        # $2 / $0.10 cached / $2.50 write / $10 out per MTok, short-context.
+        prices=_rates(2_000_000, 10_000_000, 100_000),
         selectable=True,
         aliases=("sol", "gpt6.1-sol"),
-        options=_OPENAI_REASONING,
-    ),
-    ModelSpec(
-        id="gpt-6.1-luna",
-        provider=OPENAI,
-        label="GPT-6.1 Luna",
-        prices=_rates(150_000, 900_000, 15_000),
-        selectable=True,
-        min_tier="guest",
-        aliases=("luna", "gpt6.1-luna"),
+        verified="2026-10-29",
         options=_OPENAI_REASONING,
     ),
     # --- Anthropic --------------------------------------------------------
@@ -301,20 +298,26 @@ MODELS: tuple[ModelSpec, ...] = (
         verified="2026-10-24",
         options=_OPENAI_REASONING,
     ),
-    # read_layout's vision questions only. The Decisions endpoint takes this
-    # model and no other, so it is never selectable -- but its calls are
-    # metered like any other, which is why it needs a price here.
+    # Two jobs. It is the only model the Decisions endpoint takes, so
+    # read_layout's vision questions run on it whatever the caller picked --
+    # and it is also the cheap OpenAI model in the picker.
+    #
+    # It is in the picker because `gpt-6.1-luna` is not a real model: the 6.1
+    # generation is Sol and Terra only, confirmed against the provider's own
+    # model list on 2026-10-29. This is the cheapest OpenAI model that exists,
+    # so it takes the place the imagined one was holding.
     ModelSpec(
         id="gpt-6-luna",
         provider=OPENAI,
         label="GPT-6 Luna",
-        prices=Prices(
-            input=100_000,
-            cached=10_000,
-            cache_write=125_000,
-            output=500_000,
-        ),
-        verified="2026-10-24",
+        # $0.10 / $0.01 cached / $0.125 write / $0.50 out per MTok. Re-checked
+        # against the pricing page on 2026-10-29, unchanged since 10-24.
+        prices=_rates(100_000, 500_000, 10_000),
+        selectable=True,
+        min_tier="guest",
+        aliases=("luna", "gpt-6 luna", "gpt6-luna"),
+        verified="2026-10-29",
+        options=_OPENAI_REASONING,
     ),
 )
 
@@ -324,7 +327,6 @@ MODELS: tuple[ModelSpec, ...] = (
 FAMILY_OF = {
     "gpt-6.1-terra": "gpt-6.1",
     "gpt-6.1-sol": "gpt-6.1",
-    "gpt-6.1-luna": "gpt-6.1",
     "claude-haiku-5-5": "claude-5.5",
     "claude-sonnet-5-5": "claude-5.5",
     "claude-opus-5-5": "claude-5.5",
@@ -349,7 +351,7 @@ REFERENCE_MODEL = DEFAULT_MODEL
 # interleaving them by cost would scramble it.
 SELECTABLE_ORDER = (
     "gpt-6.1-terra",
-    "gpt-6.1-luna",
+    "gpt-6-luna",
     "gpt-6.1-sol",
     "claude-haiku-5-5",
     "claude-sonnet-5-5",

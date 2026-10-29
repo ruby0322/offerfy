@@ -897,6 +897,10 @@ def test_published_edits_come_from_the_measured_cost_not_the_credit(
     once the history trim cut a turn to a third of its old cost, publishing
     `credits` as the edit count understated by ~3x -- the page said "about 20"
     where the budget bought about 55.
+
+    Quoted against the *reference* model via `edit_uusd()`, not the raw
+    EDIT_UUSD: that constant belongs to the model it was measured on, which is
+    a different and dearer one. See usage.EDIT_MEASURED_ON.
     """
     rows = {r["name"]: r for r in client.get("/v1/usage/tiers").json()["tiers"]}
 
@@ -905,7 +909,7 @@ def test_published_edits_come_from_the_measured_cost_not_the_credit(
 
     for name in ("registered", "matching"):
         tier = usage.TIERS[name]
-        exact = tier.credits * usage.CREDIT_UUSD / usage.EDIT_UUSD
+        exact = tier.credits * usage.CREDIT_UUSD / usage.edit_uusd()
         published = rows[name]["approx_edits"]
         # Rounded to the nearest 5 and never zero.
         assert published % 5 == 0 and published >= 5
@@ -943,6 +947,6 @@ def test_the_edits_left_estimate_falls_back_to_a_measured_turn(
     user = _signed_in(client, db_session, sub="sub-fallback")
     body = client.get("/v1/usage").json()
     tier = usage.TIERS[usage.REGISTERED]
-    expected = tier.credits * usage.CREDIT_UUSD // usage.EDIT_UUSD
+    expected = tier.credits * usage.CREDIT_UUSD // usage.edit_uusd()
     assert body["approx_edits_left"] == expected > tier.credits
     assert user is not None
