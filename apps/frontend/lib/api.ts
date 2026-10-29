@@ -1,4 +1,4 @@
-import type { UsageTierRow, UsageTiers } from "@/lib/usage-tiers";
+import type { ModelRow, ModelTable, UsageTierRow, UsageTiers } from "@/lib/usage-tiers";
 
 export class ApiError extends Error {
   status: number;
@@ -430,6 +430,10 @@ export type UsageTier = "guest" | "registered" | "matching";
 // bundle.
 export type { UsageTierRow, UsageTiers };
 
+// Same argument as above: the model catalogue has one shape, declared once in
+// lib/usage-tiers.ts because the indexable pages fetch it on the server.
+export type { ModelRow, ModelTable };
+
 /** GET /v1/usage. Credits, never micro-USD — see the backend's UsageOut. */
 export type Usage = {
   tier: UsageTier;
@@ -457,6 +461,14 @@ export type Usage = {
   turn_limit: number | null;
   turns_used: number;
   turns_remaining: number | null;
+  /**
+   * Which model `approx_edits_left` is quoted against: this person's current
+   * choice. Sent because that figure is meaningless without it -- the same
+   * balance is worth five edits on the dearest model and fifty on the
+   * cheapest, so showing the number alone would be showing one that silently
+   * changed meaning when they used the picker.
+   */
+  model: string;
   /** The number people actually read, from their own trailing cost per turn. */
   approx_edits_left: number | null;
   exhausted: boolean;
@@ -509,6 +521,31 @@ export async function fetchUsageTierTable(): Promise<UsageTiers> {
 }
 
 /**
+ * The model catalogue, with what each one costs and whether this caller may
+ * have it. Browser-side twin of lib/usage-tiers.fetchModelTable.
+ *
+ * One endpoint serves the editor's picker and the public cost table, so the
+ * two cannot disagree about what a model costs -- the same argument the tier
+ * table makes for the allowances.
+ */
+export async function fetchModels(): Promise<ModelTable> {
+  return apiJson<ModelTable>("/api/v1/models");
+}
+
+/**
+ * Record a pick. Returns the whole table, so what the picker shows as
+ * selected always comes from the server that stored it rather than from
+ * optimistic local state that a 400 would leave stale.
+ */
+export async function putSelectedModel(model: string): Promise<ModelTable> {
+  return apiJson<ModelTable>("/api/v1/models/selection", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model }),
+  });
+}
+
+/**
  * Pull the structured refusal out of an ApiError, or null if it is not one.
  *
  * FastAPI nests a dict detail under `detail`, and `errorMessage` has already
@@ -541,6 +578,13 @@ export type ChatStreamEvent =
 
 export type ChatSendOptions = {
   preferFullSource?: boolean;
+  /**
+   * Run this one turn on a named model. Normally omitted: the picker stores
+   * the choice server-side, so the server already knows. Passing it switches
+   * the stored preference too, which is what stops the picker and the turn
+   * disagreeing about which model ran.
+   */
+  model?: string;
 };
 
 function parseSseBlock(block: string): ChatStreamEvent | null {
@@ -576,11 +620,15 @@ export async function sendChat(
     if (options?.preferFullSource) {
       form.append("prefer_full_source", "true");
     }
+    if (options?.model) {
+      form.append("model", options.model);
+    }
     init.body = form;
   } else {
     init.body = JSON.stringify({
       message,
       ...(options?.preferFullSource ? { prefer_full_source: true } : {}),
+      ...(options?.model ? { model: options.model } : {}),
     });
   }
   const res = await apiFetch(`/api/v1/resumes/${id}/chat`, init);

@@ -5,11 +5,12 @@ import { AnimatePresence, motion, type Variants } from "framer-motion";
 import { ArrowDown, Paperclip, Send, X } from "lucide-react";
 import ChatMessageCard, { type FamilyCardActions } from "@/components/editor/ChatMessageCard";
 import LoadingMessage from "@/components/editor/LoadingMessage";
+import ModelPicker, { type ModelPickerLabels } from "@/components/editor/ModelPicker";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import UsageLimitCard from "@/components/editor/UsageLimitCard";
 import UsageMeter from "@/components/UsageMeter";
-import type { ChatMessage, Usage, UsageRefusal } from "@/lib/api";
+import type { ChatMessage, ModelTable, Usage, UsageRefusal } from "@/lib/api";
 import {
   commandTerm,
   filterCommands,
@@ -104,6 +105,17 @@ type Props = {
    *  rather than spread over nine props: the shell owns the copy, as it does
    *  for every other label here. */
   usage?: UsagePanelProps;
+  /** Which model the next turn runs on, and how to change it. Absent leaves
+   *  the composer without a picker, which is what happens when the catalogue
+   *  fetch failed -- the turn still runs, on the server's own resolution. */
+  models?: ModelPanelProps;
+};
+
+export type ModelPanelProps = {
+  table: ModelTable | null;
+  labels: ModelPickerLabels;
+  onSelect: (model: string) => void;
+  footer?: React.ReactNode;
 };
 
 export type UsagePanelProps = {
@@ -159,6 +171,7 @@ export default function EditorChatPanel({
   commandsHint,
   focusKey,
   usage,
+  models,
 }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -621,6 +634,15 @@ export default function EditorChatPanel({
             rows={1}
           />
           <div className="chat-composer-row">
+            {models ? (
+              <ModelPicker
+                table={models.table}
+                labels={models.labels}
+                disabled={sending}
+                onSelect={models.onSelect}
+                footer={models.footer}
+              />
+            ) : null}
             <button
               type="button"
               className="chat-composer-tool"

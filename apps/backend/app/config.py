@@ -27,7 +27,26 @@ class Settings(BaseSettings):
     google_client_secret: str | None = None
     openai_api_key: str | None = None
     openai_base_url: str | None = None
-    openai_model: str = "gpt-5.6-terra"
+    # Anthropic is the second provider; see app.services.llm.providers. Both
+    # keys are optional and independent: a deployment with only one set gets a
+    # working picker with a shorter list, because
+    # services.model_choice.offered() filters out models whose provider has no
+    # credential rather than offering one that would 502.
+    anthropic_api_key: str | None = None
+    anthropic_base_url: str | None = None
+    # The fallback model, for a caller who has chosen nothing. Normally left
+    # unset so app.services.model_catalog.DEFAULT_MODEL decides -- the
+    # catalogue is where a model's price and label live, so letting it own the
+    # default too means one place to change. Set this only to pin a model the
+    # catalogue does not list, which is how a proxy serving its own ids is
+    # reached; such a model is priced as the dearest row in the catalogue.
+    #
+    # `openai_model` is the name this setting had when there was one provider.
+    # Still read, because .env.production on the host sets it and a deploy
+    # that silently reverted to the catalogue default would change what every
+    # turn costs. `chat_model` wins where both are set.
+    chat_model: str | None = None
+    openai_model: str | None = None
     # read_layout's vision questions. The Decisions endpoint takes this
     # model only; it is a setting so a rename at GA is a config change.
     openai_decisions_model: str = "gpt-6-luna"
@@ -47,6 +66,19 @@ class Settings(BaseSettings):
     # outage, so both are surfaced on the admin overview.
     global_weekly_ceiling_uusd: int = 150_000_000
     guest_weekly_ceiling_uusd: int = 40_000_000
+
+    def pinned_chat_model(self) -> str | None:
+        """The operator's model pin, or None to let the catalogue decide.
+
+        One accessor so that the `CHAT_MODEL` / `OPENAI_MODEL` precedence is
+        written down once. Returning None rather than a default keeps the
+        catalogue the single source of that default -- a second copy here is
+        how the published model and the called one come to disagree.
+        """
+        for value in (self.chat_model, self.openai_model):
+            if (value or "").strip():
+                return value.strip()
+        return None
 
     def s3_configured(self) -> bool:
         return all(

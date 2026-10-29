@@ -435,7 +435,15 @@
     "usageSignIn": "使用 Google 登录",
     "usageOpenSettings": "打开设置",
     "usageLearnMore": "用量说明",
-    "usageDismiss": "继续编辑"
+    "usageDismiss": "继续编辑",
+    "modelPickerTitle": "模型",
+    "modelPickerHeading": "由哪个模型回应你",
+    "modelEditsLeft": "还可编辑约 {count} 次",
+    "modelCost": "{weight} 倍",
+    "modelIsDefault": "默认",
+    "modelLockedRegistered": "登录后可以使用",
+    "modelLockedMatching": "开启匹配后可以使用",
+    "modelLearnMore": "为什么各模型用量不同"
   },
   "share": {
     "brand": "Offerfy",
@@ -959,6 +967,28 @@
         ]
       }
     ]
+  },
+  "models": {
+    "heading": "模型与各自的用量",
+    "intro": "你可以自己选择由哪个模型回应，而每个模型的用量并不相同。同一份额度适用于全部模型，所以越便宜的模型能用得越久，越强的模型则消耗得越快。下表的数字都是相对于默认模型；要换模型，用消息框旁边的菜单。",
+    "unavailable": "目前读不到各模型的用量数字。与其印出可能跟实际计算不一致的数字，我们宁可先不显示——请重新加载。",
+    "colModel": "模型",
+    "colCost": "每次编辑的用量",
+    "colEdits_registered": "每周可编辑次数（有账号）",
+    "colEdits_matching": "每周可编辑次数（你的方案）",
+    "colAvailable": "你可以使用",
+    "costTimes": "{weight} 倍",
+    "editsAbout": "约 {count} 次",
+    "availableYes": "可以",
+    "unlockedBy_guest": "可以",
+    "unlockedBy_registered": "登录后可用",
+    "unlockedBy_matching": "开启匹配后可用",
+    "yours": "当前使用",
+    "isDefault": "默认",
+    "tableNote_registered": "「每次编辑的用量」是相对默认模型的倍数，不是价格——这些都不用付钱。编辑次数是把每周额度除以该模型实际量到的单次编辑用量，所以两栏是联动的：选了用量五倍的模型，可编辑的次数大约就只有五分之一。",
+    "tableNote_matching": "「每次编辑的用量」是相对默认模型的倍数，不是价格——这些都不用付钱。编辑次数是把你的每周额度除以该模型实际量到的单次编辑用量，所以两栏是联动的：选了用量五倍的模型，可编辑的次数大约就只有五分之一。",
+    "guestNote": "没有账号时，额度算的是编辑次数而不是用量，所以选哪个模型都不会改变可用次数——这也是比较贵的模型需要账号的原因。上表的次数是有账号后会拿到的。",
+    "provisionalNote": "最新几个模型的公布费率还在确认，表中部分数字为暂定值。真正从你的额度扣掉的，一律是依该次对话实际用量计算，不是依这张表。"
   },
   "pricing": {
     "metaTitle": "方案 — Offerfy",

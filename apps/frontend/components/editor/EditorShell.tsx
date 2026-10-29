@@ -24,7 +24,7 @@ import ResumeFamilyMenu from "@/components/editor/ResumeFamilyMenu";
 import type { FamilyCardActions } from "@/components/editor/ChatMessageCard";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useRouter } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 import { NARROW_SCREEN, useMediaQuery, useVisualViewportHeight } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 import {
@@ -37,6 +37,7 @@ import {
   deleteResume,
   dismissMemory,
   exportPdf,
+  fetchModels,
   fetchUsage,
   getAtsReport,
   getChatMessages,
@@ -48,6 +49,7 @@ import {
   listMemory,
   publishResume,
   putResumeSource,
+  putSelectedModel,
   sendChat,
   type AtsReport,
   type ChatMessage,
@@ -61,7 +63,7 @@ import {
   typstCompileDetail,
   usageRefusalOf,
 } from "@/lib/api";
-import type { AuthUser, Usage, UsageRefusal } from "@/lib/api";
+import type { AuthUser, ModelRow, ModelTable, Usage, UsageRefusal } from "@/lib/api";
 import { formatUserAttachmentMessage, parseToolPayload } from "@/lib/chat-tools";
 import type { AtsCheckName } from "@/lib/ats-checks";
 import { peekPendingCreate, takePendingCreate } from "@/lib/pending-create";
@@ -168,6 +170,12 @@ export default function EditorShell({ resumeId }: Props) {
   // `quota` frame every turn ends with -- no polling.
   const [usage, setUsage] = useState<Usage | null>(null);
   const [refusal, setRefusal] = useState<UsageRefusal | null>(null);
+  // The model catalogue and this person's pick of it. Server-owned: the
+  // selection lives on their account (or their guest session), so there is
+  // nothing to remember in the browser and nothing for a stale localStorage
+  // value to disagree with. Null means the fetch failed, which costs the
+  // picker and not the turn.
+  const [models, setModels] = useState<ModelTable | null>(null);
   const [leftTab, setLeftTab] = useState(() =>
     peekPendingUpload(resumeId) || peekPendingCreate(resumeId)
       ? "chat"
@@ -342,6 +350,13 @@ export default function EditorShell({ resumeId }: Props) {
     fetchUsage()
       .then((next) => {
         if (live) setUsage(next);
+      })
+      .catch(() => undefined);
+    // Same rule: no picker is better than no editor. Deliberately not awaited
+    // together with the balance -- either one failing must not cost the other.
+    fetchModels()
+      .then((next) => {
+        if (live) setModels(next);
       })
       .catch(() => undefined);
     return () => {
@@ -1101,6 +1116,78 @@ export default function EditorShell({ resumeId }: Props) {
     };
   }, [refusal, t, usage]);
 
+  /**
+   * Switching model. Optimistic on the id and authoritative on the result:
+   * the dropdown closes on the click, and the table it then shows is the one
+   * the server stored. A refusal (a guest reaching for a model their tier may
+   * not have) rolls back to whatever the server says, rather than leaving the
+   * picker claiming a model the next turn would not use.
+   *
+   * The balance is refetched too, because `approx_edits_left` is quoted
+   * against the chosen model -- the same allowance is worth five edits on the
+   * dearest and fifty on the cheapest, so leaving the old figure beside the
+   * new model name would be showing a number that had quietly changed meaning.
+   */
+  const onSelectModel = useCallback(
+    async (model: string) => {
+      setModels((prev) => (prev ? { ...prev, selected: model } : prev));
+      try {
+        const next = await putSelectedModel(model);
+        setModels(next);
+      } catch {
+        await fetchModels()
+          .then(setModels)
+          .catch(() => undefined);
+        return;
+      }
+      await fetchUsage()
+        .then(setUsage)
+        .catch(() => undefined);
+    },
+    [],
+  );
+
+  const modelPanel = useMemo(() => {
+    /** How many edits this person's remaining balance buys on one model.
+     *
+     * Scaled from the server's own figure for the selected model by the ratio
+     * of the two models' cost weights, rather than fetched per model: the
+     * balance is one number and the weights are published, so this is the
+     * same arithmetic /v1/usage does, done once for each row. Suppressed on a
+     * turn-capped tier, where the count does not vary by model at all. */
+    const editsLeft = (row: ModelRow): string | null => {
+      if (!usage || usage.turn_limit !== null) return null;
+      const left = usage.approx_edits_left;
+      if (typeof left !== "number") return null;
+      const current = models?.models.find((item) => item.id === usage.model);
+      const base = current?.cost_weight ?? 1;
+      if (!row.cost_weight || !base) return null;
+      const scaled = Math.max(0, Math.round((left * base) / row.cost_weight));
+      return t("modelEditsLeft", { count: scaled });
+    };
+    return {
+      table: models,
+      onSelect: onSelectModel,
+      labels: {
+        title: t("modelPickerTitle"),
+        heading: t("modelPickerHeading"),
+        editsLeft,
+        cost: (row: ModelRow) => t("modelCost", { weight: row.cost_weight }),
+        locked: (row: ModelRow) =>
+          row.min_tier === "matching"
+            ? t("modelLockedMatching")
+            : t("modelLockedRegistered"),
+        isDefault: t("modelIsDefault"),
+        learnMore: t("modelLearnMore"),
+      },
+      footer: (
+        <Link href="/usage" className="underline underline-offset-2">
+          {t("modelLearnMore")}
+        </Link>
+      ),
+    };
+  }, [models, onSelectModel, t, usage]);
+
   if (loadError) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground">
@@ -1324,6 +1411,7 @@ export default function EditorShell({ resumeId }: Props) {
           commandsHint={t("cmdHint")}
           focusKey={chatFocusKey}
           usage={usagePanel}
+          models={modelPanel}
         />
       </TabsContent>
       <TabsContent

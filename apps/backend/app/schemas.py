@@ -97,6 +97,13 @@ class AtsReport(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     prefer_full_source: bool = False
+    # Which model to run this turn on. None means "whatever this caller has
+    # chosen", which is the normal case -- the picker stores the choice
+    # server-side, so the field exists for a client that wants one turn on a
+    # different model without changing the preference. An id this caller may
+    # not have is a 400, never a silent substitution: see
+    # services.model_choice.require_offered.
+    model: str | None = None
 
 
 class ChatMessageOut(BaseModel):
@@ -235,6 +242,12 @@ class UsageOut(BaseModel):
     turn_limit: int | None
     turns_used: int
     turns_remaining: int | None
+    # Which model the `approx_edits_left` below is quoted against: this
+    # caller's current choice. Sent because that figure is meaningless without
+    # it -- the same balance is worth five edits on the dearest model and fifty
+    # on the cheapest, so a client showing the number alone would be showing
+    # one that silently changed meaning when the person used the picker.
+    model: str
     approx_edits_left: int | None
     exhausted: bool
     # Rounds the provider reported no usage for, charged at a fallback. Shown
@@ -299,6 +312,69 @@ class UsageTiersOut(BaseModel):
     # without re-deriving the rule.
     reset_at: str
     enforced: bool
+
+
+class ModelOut(BaseModel):
+    """One model, as the picker and the public cost table see it.
+
+    Carries no price. That is deliberate: a per-token rate is not a number
+    anyone can act on -- nobody knows how many tokens their resume is -- and
+    publishing one would invite someone to do the arithmetic the meter already
+    does. `cost_weight` and `approx_edits` are the same information in the
+    units the product actually bills in.
+    """
+
+    id: str
+    # The product name. Not localised -- these are proper nouns.
+    label: str
+    provider: Literal["openai", "anthropic"]
+    # The generation, for grouping the picker: 'gpt-6.1', 'claude-5.5'.
+    family: str
+    # What one AI edit on this model costs relative to the default, which is
+    # 1.0 by definition. The column the public table reads as "1x" / "5x".
+    cost_weight: float
+    # How many edits a week's allowance buys on this model, per cost-capped
+    # tier. Keyed by tier name; the guest tier is absent because it is capped
+    # on a count of turns rather than on cost, so its figure does not vary by
+    # model -- which is itself why guests get only the cheaper models.
+    approx_edits: dict[str, int]
+    # The cheapest tier allowed to pick this. See model_catalog.ModelSpec.
+    min_tier: Literal["guest", "registered", "matching"]
+    # Whether the *caller* may pick it. Sent as well as `min_tier` so the
+    # picker can show a locked row with a reason rather than hiding a model
+    # and leaving someone unable to discover that upgrading unlocks it.
+    available: bool
+    # True when these prices were seeded from a neighbouring generation rather
+    # than confirmed against the provider's pricing page. Surfaced rather than
+    # buried so the figures above can be read with the right confidence.
+    prices_provisional: bool
+
+
+class ModelTableOut(BaseModel):
+    """The model catalogue, for the picker and for /usage, /pricing and /plan.
+
+    Both audiences are served by one endpoint on purpose. The picker needs to
+    know what this caller may choose and what they have chosen; the public
+    table needs the same rows with the same cost figures. Two endpoints would
+    be two chances for the picker to offer a model the published table prices
+    differently.
+    """
+
+    models: list[ModelOut]
+    # What this caller's next turn will run on: their stored choice, or the
+    # default for their tier.
+    selected: str
+    # The tier default, so the picker can mark it.
+    default: str
+    # The model every `cost_weight` is relative to. Equal to `default` today
+    # and sent separately because the two are different claims.
+    reference: str
+    # The caller's tier, so a locked row can name what unlocks it.
+    tier: Literal["guest", "registered", "matching"]
+
+
+class ModelSelection(BaseModel):
+    model: str
 
 
 class ConsentUpdate(BaseModel):

@@ -64,6 +64,16 @@ class User(Base):
     website: Mapped[str | None] = mapped_column(String(255), nullable=True)
     bio: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Which model this person's chat turns run on. NULL means "whatever the
+    # tier default is", which is the honest representation of never having
+    # chosen -- a column pre-filled with today's default would freeze that
+    # default for everyone who signed up before it changed.
+    #
+    # Validated on read, not only on write: see services.model_choice. A
+    # preference that this person's tier may no longer have, or whose provider
+    # lost its credential, falls back rather than failing a turn.
+    chat_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     # Which resume feeds this person's talent profile. Required because kind
     # defaults to 'master' for every resume, so "the master resume" is not a
     # thing a user has one of. It lives here rather than on TalentProfile so
@@ -96,6 +106,13 @@ class GuestSession(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     key_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     locale: Mapped[str] = mapped_column(String(16), nullable=False, default="zh-TW")
+    # A guest picks a model too, and it is stored here rather than in the
+    # browser for the same reason the quota is: this row already exists per
+    # cookie, so the server need not trust a model id a client remembered.
+    # Guests are limited to the cheaper models -- see ModelSpec.min_tier, which
+    # explains why that restriction is about the shape of their cap and not
+    # about them.
+    chat_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

@@ -17,6 +17,7 @@ from app.deps import SESSION_COOKIE, _sign
 from app.models import LlmCall, User
 from app.services.typst_compile import typst_available
 from tests.openai_script import ScriptedOpenAI, llm_message, llm_usage, tool_call
+from app.services import model_catalog
 from tests.test_chat import post_chat
 
 
@@ -35,7 +36,7 @@ def _calls(db_session) -> list[LlmCall]:
 def _skip_real_compiles(monkeypatch) -> None:
     """Keep `verify_compile` cheap and identical with or without the Typst CLI."""
     monkeypatch.setattr(
-        "app.services.llm.compile_digest", lambda source: {"compile": {"ok": True}}
+        "app.services.llm.turn.compile_digest", lambda source: {"compile": {"ok": True}}
     )
 
 
@@ -83,7 +84,7 @@ def test_each_round_records_its_own_token_counts(
     assert [row.purpose for row in rows] == ["chat", "chat", "chat"]
     assert [row.round_index for row in rows] == [0, 1, 2]
     assert [row.resume_id for row in rows] == [created["id"]] * 3
-    assert [row.model for row in rows] == ["gpt-5.6-terra"] * 3
+    assert [row.model for row in rows] == [model_catalog.DEFAULT_MODEL] * 3
     assert [row.prefer_full_source for row in rows] == [False, False, False]
     assert [row.input_tokens for row in rows] == [1850, 5200, 6100]
     assert [row.cached_tokens for row in rows] == [0, 1792, 5120]
@@ -323,7 +324,7 @@ def test_a_vision_answer_is_billed_separately_from_its_round(
             },
         }
 
-    monkeypatch.setattr("app.services.llm.read_layout_report", stubbed_report)
+    monkeypatch.setattr("app.services.llm.turn.read_layout_report", stubbed_report)
     scripted = ScriptedOpenAI(
         [
             llm_message(
@@ -389,7 +390,7 @@ def test_a_vision_call_that_reported_nothing_still_records(
     async def stubbed_report(source, args):
         return {"pages": 1, "visual": visual}
 
-    monkeypatch.setattr("app.services.llm.read_layout_report", stubbed_report)
+    monkeypatch.setattr("app.services.llm.turn.read_layout_report", stubbed_report)
     scripted = ScriptedOpenAI(
         [
             llm_message(
@@ -436,7 +437,7 @@ def test_a_vision_call_that_never_happened_records_nothing(
     async def stubbed_report(source, args):
         return report
 
-    monkeypatch.setattr("app.services.llm.read_layout_report", stubbed_report)
+    monkeypatch.setattr("app.services.llm.turn.read_layout_report", stubbed_report)
     scripted = ScriptedOpenAI(
         [
             llm_message(

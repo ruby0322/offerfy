@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
+import ModelCostTable from "@/components/ModelCostTable";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
 import UsageMeter from "@/components/UsageMeter";
@@ -9,9 +10,11 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Link, useRouter } from "@/i18n/navigation";
 import {
+  fetchModels,
   fetchUsage,
   fetchUsageTierTable,
   getMe,
+  type ModelTable,
   type Usage,
   type UsageGrant,
   type UsageTier,
@@ -87,10 +90,12 @@ function blurbKey(tier: UsageTier) {
 export default function PlanView() {
   const t = useTranslations("plan");
   const tCommon = useTranslations("common");
+  const tModels = useTranslations("models");
   const locale = useLocale();
   const router = useRouter();
   const [usage, setUsage] = useState<Usage | null>(null);
   const [tiers, setTiers] = useState<UsageTiers | null>(null);
+  const [models, setModels] = useState<ModelTable | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -105,13 +110,15 @@ export default function PlanView() {
         // In parallel, and the table is allowed to fail on its own: the
         // balance is why someone opened this page, and losing the comparison
         // should not cost them that.
-        const [balance, table] = await Promise.all([
+        const [balance, table, catalogue] = await Promise.all([
           fetchUsage(),
           fetchUsageTierTable().catch(() => null),
+          fetchModels().catch(() => null),
         ]);
         if (cancelled) return;
         setUsage(balance);
         setTiers(table);
+        setModels(catalogue);
       } catch {
         if (!cancelled) setError(t("loadFailed"));
       }
@@ -341,6 +348,27 @@ export default function PlanView() {
                       </li>
                     ))}
                   </ul>
+                </CardContent>
+              </Card>
+            ) : null}
+
+            {models ? (
+              <Card className="mt-6">
+                <CardHeader>
+                  <CardTitle>{tModels("heading")}</CardTitle>
+                  <CardDescription>{tModels("intro")}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {/* The one page with a reader to be specific about, so this
+                      is the only place the table marks a row as theirs and
+                      quotes the figures against their own tier. The control
+                      itself stays in the editor's composer, where the message
+                      the model will answer is actually written. */}
+                  <ModelCostTable
+                    table={models}
+                    tier={usage.tier}
+                    selected={usage.model}
+                  />
                 </CardContent>
               </Card>
             ) : null}

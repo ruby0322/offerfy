@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_session_factory
+from app.services import model_catalog
 from app.models import (
     GuestSession,
     LlmCall,
@@ -47,43 +48,20 @@ logger = logging.getLogger(__name__)
 # Prices
 # --------------------------------------------------------------------------
 
-# micro-USD per 1M tokens. Verified against developers.openai.com/api/docs/pricing
-# on 2026-10-24; terra's input and output both fell 20% on 2026-07-30, so any
-# $2.50/$15.00 figure found elsewhere is pre-cut.
+# Prices live in app.services.model_catalog, with every other fact about a
+# model: its provider, its product label and whether it may be picked. They
+# were a dict here before model selection existed, and splitting them from the
+# catalogue would mean a model could be offered in the picker without being
+# priceable by the meter -- which is a free turn, discovered from the invoice.
 #
-# `cache_write` is the 30-minute TTL rate, which is 1.25x input (12h is 2.5x).
-# Unlike `cached`, it is not a discount on something else -- it is an extra
-# charge on top of the read, and it measured 20-45% of a turn.
+# `PRICES` stays as the name the rest of this module reads, now derived. A
+# model the catalogue does not list is priced as the most expensive one it
+# does: never free, because OPENAI_MODEL and CHAT_MODEL are config strings an
+# operator can change, and an unknown name must not open an unmetered tier.
 PRICES: dict[str, dict[str, int]] = {
-    "gpt-5.6-terra": {
-        "input": 2_000_000,
-        "cached": 200_000,
-        "cache_write": 2_500_000,
-        "output": 12_000_000,
-    },
-    "gpt-5.6-sol": {
-        "input": 4_000_000,
-        "cached": 400_000,
-        "cache_write": 5_000_000,
-        "output": 20_000_000,
-    },
-    "gpt-5.6-luna": {
-        "input": 200_000,
-        "cached": 20_000,
-        "cache_write": 250_000,
-        "output": 1_200_000,
-    },
-    "gpt-6-luna": {
-        "input": 100_000,
-        "cached": 10_000,
-        "cache_write": 125_000,
-        "output": 500_000,
-    },
+    spec.id: spec.prices.as_dict() for spec in model_catalog.MODELS
 }
 
-# A model we do not recognise is priced as the most expensive one we do. Never
-# free: an unknown name must not open a free tier, and OPENAI_MODEL is a config
-# string anyone can change.
 _FALLBACK_MODEL = max(PRICES, key=lambda name: PRICES[name]["input"])
 
 # What one round costs when the provider reported no usage at all. Measured
@@ -120,6 +98,59 @@ CREDIT_UUSD = 70_000
 # published "about N" hold up when turns get more complex, and under-promising
 # an allowance costs nothing.
 EDIT_UUSD = 36_000
+
+# The token mix EDIT_UUSD was measured on, per round, and the rounds a turn
+# takes. Written down so that what one edit costs on a *different* model can be
+# derived from that model's real rates rather than guessed at: see
+# `edit_uusd`. These are the numbers in the comment above, in a form the
+# arithmetic can read.
+#
+# They describe one turn on the reference model. They are not a budget and
+# nothing is enforced against them -- the meter always bills the tokens the
+# provider actually reported. Their only job is the "about N edits" figure.
+EDIT_MIX = {"fresh": 2_352, "cached": 9_375, "cache_write": 2_349, "output": 141}
+EDIT_ROUNDS = 2.57
+
+
+def edit_uusd(model: str | None = None) -> int:
+    """What one AI edit costs on `model`, in micro-USD.
+
+    EDIT_UUSD is a measurement taken on one model. Every other model's figure
+    is that measurement scaled by the ratio of the two models' prices over the
+    measured token mix -- so a model that is 5x the price reads as 5x the cost
+    and a fifth of the edits, from the same rates the meter bills with.
+
+    Scaling rather than pricing the mix outright keeps EDIT_UUSD's deliberate
+    conservatism (see its comment: it quotes the heavier 2.57-round sample)
+    applied evenly across the table instead of only to the reference model.
+
+    An unknown model lands on the fallback price, which is the dearest row, so
+    it is quoted as the fewest edits rather than the most. `None` means the
+    reference model -- that is what "one edit" meant before models could be
+    chosen, and it keeps `edit_uusd() == EDIT_UUSD` true by construction
+    rather than by coincidence.
+    """
+    name = (model or "").strip() or model_catalog.REFERENCE_MODEL
+    reference = price_uusd(model_catalog.REFERENCE_MODEL, **EDIT_MIX)
+    if reference <= 0:  # pragma: no cover -- a zero-priced reference row
+        return EDIT_UUSD
+    mine = price_uusd(name, **EDIT_MIX)
+    return max(1, round(EDIT_UUSD * mine / reference))
+
+
+def cost_weight(model: str | None) -> float:
+    """What one edit on `model` costs relative to the reference model.
+
+    The number the public table shows as "1x" / "5x". Derived from the same
+    arithmetic as `edit_uusd` so the two columns of that table cannot
+    disagree, and rounded to two places because this is a comparison, not a
+    price.
+    """
+    reference = edit_uusd(model_catalog.REFERENCE_MODEL)
+    if reference <= 0:  # pragma: no cover
+        return 1.0
+    return round(edit_uusd(model) / reference, 2)
+
 
 # --------------------------------------------------------------------------
 # Tiers
@@ -597,6 +628,7 @@ def approx_edits_left(
     guest: GuestSession | None,
     bal: Balance,
     *,
+    model: str | None = None,
     now: datetime | None = None,
 ) -> int | None:
     """How many more edits the remaining balance is worth, for this person.
@@ -605,15 +637,29 @@ def approx_edits_left(
     constant, so the fairness is visible: someone writing short prompts against
     a short resume really does get more edits out of the same allowance. Falls
     back to the reference edit before they have enough history to average.
+
+    `model` is the one they are about to spend it on, and it only matters
+    before that history exists -- a fresh account looking at Opus has to be
+    told it buys a handful of edits rather than the default model's fifty. Once
+    there is a trailing mean it supersedes the guess, including the model: what
+    they actually spent is a better predictor than any list price, and it
+    already carries whichever models they spent it on.
+
+    The trailing mean is therefore *not* re-scaled by a model switch. That is
+    deliberate but imperfect: someone who spent a week on Luna and switches to
+    Opus is quoted too many edits until the mean catches up. Rescaling would
+    need per-model counters, which the weekly counter table does not keep, and
+    the figure is labelled "about" in every place it is shown.
     """
     if bal.turns_remaining is not None:
         return max(bal.turns_remaining, 0)
     if bal.remaining_uusd is None:
         return None
-    # EDIT_UUSD, not CREDIT_UUSD: before someone has history we have to guess
-    # what *their* turn will cost, and the measured cost of a turn is the guess.
-    # Using the credit here understated by ~3x once the history trim landed.
-    per_turn = EDIT_UUSD
+    # The measured cost of a turn on the model in question, not CREDIT_UUSD:
+    # before someone has history we have to guess what *their* turn will cost,
+    # and that measurement is the guess. Using the credit here understated by
+    # ~3x once the history trim landed.
+    per_turn = edit_uusd(model)
     if bal.turns_used >= 3 and bal.used_uusd > 0:
         per_turn = max(bal.used_uusd // bal.turns_used, 1)
     return max(bal.remaining_uusd, 0) // per_turn
@@ -835,6 +881,14 @@ def quota_event(bal: Balance, edits_left: int | None) -> dict:
     and never relays because telemetry is not the client's business. That
     decision stands. This carries no token counts, no model name and no dollar
     figures -- only what someone is entitled to ask about.
+
+    `approx_edits_left` is now model-dependent -- the same balance is worth
+    five edits on the dearest model and fifty on the cheapest -- but the model
+    is deliberately still not sent. The client set it and knows it; adding it
+    here would put a provider's model id in a frame whose whole point is that
+    it carries nothing of ours, and tests/test_usage.py holds that line.
+    `GET /v1/usage` names the model, because that response is fetched on its
+    own with no such history.
     """
     return {
         "type": "quota",

@@ -41,7 +41,7 @@ EXPECTED_CALL_SITES = {
     ("routers/chat.py", "aiter_chat_edit"),       # the turn + the repair loop
     ("routers/talent_me.py", "build_profile"),    # pointer change + refresh
     ("jobs/refresh_profiles.py", "build_profile"),  # nightly, system_guard
-    ("services/llm.py", "read_layout_report"),    # inside aiter_chat_edit
+    ("services/llm/turn.py", "read_layout_report"),  # inside aiter_chat_edit
     ("services/layout.py", "vision_report"),      # inside read_layout_report
 }
 
@@ -89,7 +89,7 @@ def test_every_module_that_calls_a_billable_function_imports_the_seam():
     """
     exempt = {
         # Reached from inside aiter_chat_edit, which its caller wraps.
-        "services/llm.py",
+        "services/llm/turn.py",
         "services/layout.py",
     }
     for rel, _name in _call_sites():

@@ -7,14 +7,15 @@ from app.db import get_db
 from app.deps import get_current_user, owner_context
 from app.models import User
 from app.schemas import UsageGrantOut, UsageOut, UsageTierOut, UsageTiersOut
+from app.services import model_choice
 from app.services.grants import all_grants, grant_status
 from app.services.usage import (
     CREDIT_UUSD,
-    EDIT_UUSD,
     GUEST,
     TIERS,
     approx_edits_left,
     balance,
+    edit_uusd,
     limits_enabled,
     window_end,
 )
@@ -42,6 +43,12 @@ def read_usage(
     user, guest = owner_context(request, response, db, user, ensure=False)
     bal = balance(db, user, guest)
     tier = TIERS[bal.tier]
+    # The meter has to be quoted against the model it will actually be spent
+    # on. The same balance is worth five edits on the dearest model and fifty
+    # on the cheapest, so reporting one number with no model attached would be
+    # reporting a figure that silently changed meaning the moment someone used
+    # the picker.
+    chosen = model_choice.selected(db, user, guest, tier=bal.tier)
     # One extra indexed lookup on a small table, and only for a signed-in
     # caller -- a guest cannot hold a grant, so the common case costs nothing.
     # Worth it here rather than on its own endpoint: a ceiling and the reason
@@ -76,7 +83,8 @@ def read_usage(
         turn_limit=bal.turn_limit,
         turns_used=bal.turns_used,
         turns_remaining=bal.turns_remaining,
-        approx_edits_left=approx_edits_left(db, user, guest, bal),
+        approx_edits_left=approx_edits_left(db, user, guest, bal, model=chosen),
+        model=chosen,
         exhausted=bal.exhausted,
         unmeasured_rounds=bal.unmeasured_rounds,
     )
@@ -111,7 +119,11 @@ def read_tiers():
         if tier.turns is not None:
             approx = tier.turns
         else:
-            exact = (tier.credits or 0) * CREDIT_UUSD / EDIT_UUSD
+            # On the reference model. Every other model's figure is on
+            # /v1/models, because an allowance in edits is only meaningful
+            # once you say which model is spending it -- that is the whole
+            # point of the cost table the public pages now carry.
+            exact = (tier.credits or 0) * CREDIT_UUSD / edit_uusd()
             approx = max(5, int(round(exact / 5) * 5))
         tiers.append(
             UsageTierOut(

@@ -251,6 +251,15 @@ textarea {
   line-height: 1.7;
 }
 
+/* The notes under the model cost table. They appear both inside
+   .legal-article (which spaces its own paragraphs) and inside a Card on /plan
+   (which does not), so the spacing travels with the component rather than
+   depending on where it lands. Matches .legal-article section p above. */
+.model-note {
+  margin-top: 1rem;
+  line-height: 1.7;
+}
+
 .legal-article h2 {
   margin-top: 2.25rem;
   font-size: 1.25rem;
@@ -1522,6 +1531,60 @@ textarea {
   .chat-composer-send {
     width: 2.75rem;
     height: 2.75rem;
+  }
+}
+
+/* The model picker. A pill rather than an icon button, because the current
+   model's name is the useful part -- an icon alone would mean opening the menu
+   to find out what is answering you. */
+.chat-composer-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 11rem;
+  height: 2.5rem;
+  padding: 0 0.55rem;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.chat-composer-model:hover:not(:disabled) {
+  color: var(--clay);
+  background: var(--hover);
+}
+
+.chat-composer-model:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.chat-composer-model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-composer-model-cost {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+@media (max-width: 899px) {
+  .chat-composer-model {
+    height: 2.75rem;
+    /* The composer row is attach + model + send on a phone, and send is
+       pushed right by margin-left:auto. Capping this keeps the name from
+       squeezing the two buttons that must stay thumb-sized. */
+    max-width: 8rem;
   }
 }
 

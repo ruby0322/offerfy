@@ -435,7 +435,15 @@
     "usageSignIn": "使用 Google 登入",
     "usageOpenSettings": "開啟設定",
     "usageLearnMore": "用量說明",
-    "usageDismiss": "繼續編輯"
+    "usageDismiss": "繼續編輯",
+    "modelPickerTitle": "模型",
+    "modelPickerHeading": "由哪個模型回應你",
+    "modelEditsLeft": "還可編輯約 {count} 次",
+    "modelCost": "{weight} 倍",
+    "modelIsDefault": "預設",
+    "modelLockedRegistered": "登入後可以使用",
+    "modelLockedMatching": "開啟媒合後可以使用",
+    "modelLearnMore": "為什麼各模型用量不同"
   },
   "share": {
     "brand": "Offerfy",
@@ -959,6 +967,28 @@
         ]
       }
     ]
+  },
+  "models": {
+    "heading": "模型與各自的用量",
+    "intro": "你可以自己選擇要由哪個模型回應，而每個模型的用量並不相同。同一份額度適用於全部模型，所以越便宜的模型能用得越久，越強的模型則消耗得越快。下表的數字都是相對於預設模型；要換模型，用訊息框旁邊的選單。",
+    "unavailable": "目前讀不到各模型的用量數字。與其印出可能跟實際計算不一致的數字，我們寧可先不顯示——請重新載入。",
+    "colModel": "模型",
+    "colCost": "每次編輯的用量",
+    "colEdits_registered": "每週可編輯次數（有帳號）",
+    "colEdits_matching": "每週可編輯次數（你的方案）",
+    "colAvailable": "你可以使用",
+    "costTimes": "{weight} 倍",
+    "editsAbout": "約 {count} 次",
+    "availableYes": "可以",
+    "unlockedBy_guest": "可以",
+    "unlockedBy_registered": "登入後可用",
+    "unlockedBy_matching": "開啟媒合後可用",
+    "yours": "目前使用",
+    "isDefault": "預設",
+    "tableNote_registered": "「每次編輯的用量」是相對預設模型的倍數，不是價格——這些都不用付錢。編輯次數是把每週額度除以該模型實際量到的單次編輯用量，所以兩欄是連動的：選了用量五倍的模型，可編輯的次數大約就只有五分之一。",
+    "tableNote_matching": "「每次編輯的用量」是相對預設模型的倍數，不是價格——這些都不用付錢。編輯次數是把你的每週額度除以該模型實際量到的單次編輯用量，所以兩欄是連動的：選了用量五倍的模型，可編輯的次數大約就只有五分之一。",
+    "guestNote": "沒有帳號時，額度算的是編輯次數而不是用量，所以選哪個模型都不會改變可用次數——這也是比較貴的模型需要帳號的原因。上表的次數是有帳號後會拿到的。",
+    "provisionalNote": "最新幾個模型的公告費率還在確認，表中部分數字為暫定值。真正從你的額度扣掉的，一律是依該次對話實際用量計算，不是依這張表。"
   },
   "pricing": {
     "metaTitle": "方案 — Offerfy",
