@@ -1078,7 +1078,6 @@ export default function EditorShell({ resumeId }: Props) {
 
   const usagePanel = useMemo(() => {
     const countCapped = usage?.turn_limit != null;
-    const editsLeft = usage?.approx_edits_left;
     const nextTier = refusal?.next_tier;
     return {
       usage,
@@ -1094,12 +1093,6 @@ export default function EditorShell({ resumeId }: Props) {
               used: usage?.used_credits ?? 0,
               limit: usage?.limit_credits ?? 0,
             }),
-        // Suppressed when it would only restate the bar: on a turn-capped tier,
-        // "about 3 edits left" beside "1 of 4 AI edits" is one fact twice.
-        editsLeft:
-          !countCapped && typeof editsLeft === "number"
-            ? t("usageEditsLeft", { count: editsLeft })
-            : null,
         reset: t("usageResets"),
         limitTitle: t("usageLimitTitle"),
         offer: nextTier
@@ -1123,10 +1116,11 @@ export default function EditorShell({ resumeId }: Props) {
    * not have) rolls back to whatever the server says, rather than leaving the
    * picker claiming a model the next turn would not use.
    *
-   * The balance is refetched too, because `approx_edits_left` is quoted
-   * against the chosen model -- the same allowance is worth five edits on the
-   * dearest and fifty on the cheapest, so leaving the old figure beside the
-   * new model name would be showing a number that had quietly changed meaning.
+   * The balance is deliberately NOT refetched. It used to be, because the
+   * meter quoted an estimate of edits left that depended on the chosen model
+   * -- so switching changed the number without any spend. The meter now shows
+   * credits actually spent, which a model switch cannot move, so the refetch
+   * would be a request that could only return what the client already has.
    */
   const onSelectModel = useCallback(
     async (model: string) => {
@@ -1138,40 +1132,30 @@ export default function EditorShell({ resumeId }: Props) {
         await fetchModels()
           .then(setModels)
           .catch(() => undefined);
-        return;
       }
-      await fetchUsage()
-        .then(setUsage)
-        .catch(() => undefined);
     },
     [],
   );
 
   const modelPanel = useMemo(() => {
-    /** How many edits this person's remaining balance buys on one model.
+    /* The picker deliberately carries no "about N edits left" per row.
      *
-     * Scaled from the server's own figure for the selected model by the ratio
-     * of the two models' cost weights, rather than fetched per model: the
-     * balance is one number and the weights are published, so this is the
-     * same arithmetic /v1/usage does, done once for each row. Suppressed on a
-     * turn-capped tier, where the count does not vary by model at all. */
-    const editsLeft = (row: ModelRow): string | null => {
-      if (!usage || usage.turn_limit !== null) return null;
-      const left = usage.approx_edits_left;
-      if (typeof left !== "number") return null;
-      const current = models?.models.find((item) => item.id === usage.model);
-      const base = current?.cost_weight ?? 1;
-      if (!row.cost_weight || !base) return null;
-      const scaled = Math.max(0, Math.round((left * base) / row.cost_weight));
-      return t("modelEditsLeft", { count: scaled });
-    };
+     * It used to, scaled from this person's balance by each model's cost
+     * weight -- which inherits the flaw in that balance figure: it divides by
+     * their own trailing cost per turn, so right after a model switch it is
+     * badly wrong in whichever direction they switched. Measured live on
+     * 2026-10-29: 43 edits quoted for Haiku against its published 793.
+     *
+     * A number that moves because of what you picked *last* is the worst
+     * thing to put next to the control for picking the next one. The relative
+     * cost chip stays, because that is a published rate and does not depend
+     * on history, and the full table is a click away under the menu. */
     return {
       table: models,
       onSelect: onSelectModel,
       labels: {
         title: t("modelPickerTitle"),
         heading: t("modelPickerHeading"),
-        editsLeft,
         cost: (row: ModelRow) => t("modelCost", { weight: row.cost_weight }),
         locked: (row: ModelRow) =>
           row.min_tier === "matching"
@@ -1186,7 +1170,7 @@ export default function EditorShell({ resumeId }: Props) {
         </Link>
       ),
     };
-  }, [models, onSelectModel, t, usage]);
+  }, [models, onSelectModel, t]);
 
   if (loadError) {
     return (

@@ -36,8 +36,6 @@ export type ModelPickerLabels = {
   title: string;
   /** Heading above the list. */
   heading: string;
-  /** "≈{count} edits left on this one". Null hides the line. */
-  editsLeft: (row: ModelRow) => string | null;
   /** The relative-cost chip, e.g. "1x" / "5x". */
   cost: (row: ModelRow) => string;
   /** Why a locked row is locked, and what unlocks it. */
@@ -92,7 +90,11 @@ export default function ModelPicker({
         <DropdownMenuLabel>{labels.heading}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {table.models.map((row) => {
-          const editsLeft = labels.editsLeft(row);
+          const subtitle = row.available
+            ? row.id === table.default
+              ? labels.isDefault
+              : null
+            : labels.locked(row);
           return (
             <DropdownMenuItem
               key={row.id}
@@ -122,13 +124,14 @@ export default function ModelPicker({
                   {labels.cost(row)}
                 </span>
               </span>
-              <span className="text-xs leading-snug text-muted-foreground">
-                {row.available
-                  ? [editsLeft, row.id === table.default ? labels.isDefault : null]
-                      .filter(Boolean)
-                      .join(" · ")
-                  : labels.locked(row)}
-              </span>
+              {/* Only when there is something to say. An always-rendered
+                  subtitle was fine while every row carried an edits estimate;
+                  with that gone most rows have no second line at all. */}
+              {subtitle ? (
+                <span className="text-xs leading-snug text-muted-foreground">
+                  {subtitle}
+                </span>
+              ) : null}
             </DropdownMenuItem>
           );
         })}

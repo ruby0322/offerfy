@@ -124,7 +124,6 @@ export type UsagePanelProps = {
   onDismissRefusal: () => void;
   labels: {
     meter: string;
-    editsLeft: string | null;
     reset: string;
     limitTitle: string;
     offer: string | null;
@@ -534,7 +533,6 @@ export default function EditorChatPanel({
           <UsageMeter
             usage={usage.usage}
             label={usage.labels.meter}
-            editsLeftLabel={usage.labels.editsLeft}
             resetLabel={usage.labels.reset}
           />
         ) : null}

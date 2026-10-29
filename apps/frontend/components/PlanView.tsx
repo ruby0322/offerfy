@@ -150,7 +150,6 @@ export default function PlanView() {
       ? usage.turns_remaining
       : usage.remaining_credits
     : null;
-  const editsLeft = usage?.approx_edits_left ?? null;
   const current = usage ? (tiers?.tiers.find((row) => row.name === usage.tier) ?? null) : null;
 
   return (
@@ -239,15 +238,6 @@ export default function PlanView() {
                         countCapped
                           ? t("meterEdits", { used, limit: limit ?? 0 })
                           : t("meterCredits", { used, limit: limit ?? 0 })
-                      }
-                      // Dropped on a turn-capped tier: "3 of 8 AI edits" is
-                      // already the edit count, so the estimate would repeat
-                      // it. And at zero, "about 0 more edits" says worse what
-                      // a full bar has already said.
-                      editsLeftLabel={
-                        !countCapped && editsLeft !== null && editsLeft > 0
-                          ? t("editsLeft", { count: editsLeft })
-                          : null
                       }
                       resetLabel={t("resetsOn", { date: dateFmt(usage.reset_at) })}
                     />
