@@ -269,7 +269,25 @@ class AnthropicConversation(Conversation):
         payload: dict[str, Any] = {
             "model": self.spec.id,
             "max_tokens": MAX_TOKENS,
-            "system": system,
+            # A list rather than a bare string, solely to carry the cache
+            # breakpoint. This API does **not** cache automatically the way the
+            # Responses API does: without `cache_control` every round re-bills
+            # the whole prefix at the full input rate, which measured 7,714
+            # uncached input tokens on a turn whose user message was one line.
+            #
+            # The breakpoint goes here, at the end of the system prompt,
+            # because the render order is tools -> system -> messages: one
+            # marker at the end of `system` therefore caches the tool
+            # definitions *and* the prompt, which is the whole stable prefix
+            # and all but a few hundred of those tokens. `extra_system` is
+            # appended by the caller before this runs and is stable per turn.
+            "system": [
+                {
+                    "type": "text",
+                    "text": system,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
             "messages": self.messages,
             "stream": True,
             **(self.spec.options or {}),

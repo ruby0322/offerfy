@@ -227,7 +227,9 @@ def test_the_request_carries_what_this_api_requires(
     body = scripted.requests[0]
     # The four shape differences from the Responses API, all in one place.
     assert body["max_tokens"] == adapter.MAX_TOKENS  # required, no default
-    assert "You edit a Typst resume" in body["system"]  # not `instructions`
+    # `system` is a block list, not a string, and that is not cosmetic: it is
+    # the only place the cache breakpoint can go. See the next test.
+    assert "You edit a Typst resume" in body["system"][0]["text"]
     assert "instructions" not in body
     assert body["messages"][0]["role"] == "user"
     assert body["stream"] is True
@@ -549,6 +551,37 @@ def test_the_wrap_up_round_keeps_the_tool_list(
     assert last["tools"], "the tool list was dropped on the wrap-up round"
 
 
+def test_the_stable_prefix_is_marked_for_caching(
+    client: TestClient, on_sonnet, monkeypatch
+):
+    """Without this the turn still works -- it just costs about 11x.
+
+    This API does not cache automatically the way the Responses API does.
+    Measured against the live endpoint on 2026-10-29: the same round billed
+    7,714 uncached input tokens without the breakpoint and 7,620 cached reads
+    with it, 19,262 vs 1,736 micro-USD. The whole published cost table assumes
+    a cache-heavy mix, so losing this marker does not just cost money, it
+    makes the table wrong.
+
+    It sits at the end of `system` because the render order is
+    tools -> system -> messages: one marker there covers the tool definitions
+    and the prompt, which is the entire stable prefix.
+    """
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    scripted = ScriptedAnthropic([anthropic_message(blocks=[text_block("ok")])])
+    monkeypatch.setattr(
+        "app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted
+    )
+    post_chat(client, created["id"], json={"message": "hi"})
+
+    system = scripted.requests[0]["system"]
+    assert isinstance(system, list) and len(system) == 1
+    assert system[0]["cache_control"] == {"type": "ephemeral"}
+    # And the tools are still sent on the same request, or the breakpoint
+    # covers a prefix that does not include them.
+    assert scripted.requests[0]["tools"]
+
+
 def test_the_two_providers_send_the_same_system_prompt(
     client: TestClient, on_sonnet, monkeypatch
 ):
@@ -562,7 +595,7 @@ def test_the_two_providers_send_the_same_system_prompt(
         "app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted
     )
     post_chat(client, created["id"], json={"message": "hi"})
-    assert scripted.requests[0]["system"].startswith(SYSTEM_PROMPT)
+    assert scripted.requests[0]["system"][0]["text"].startswith(SYSTEM_PROMPT)
 
 
 def test_an_unconfigured_provider_cannot_be_reached(
