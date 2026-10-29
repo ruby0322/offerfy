@@ -26,7 +26,13 @@ from app.services.templates import is_template_switch_message, parse_preview_spe
 from app.services.typst_compile import compile_status
 from app.services.metering import metered, preflight
 from app.services import model_choice
-from app.services.usage import approx_edits_left, balance, quota_event, tier_of
+from app.services.usage import (
+    approx_edits_left,
+    balance,
+    event_cost_uusd,
+    quota_event,
+    tier_of,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +186,13 @@ def _persist_usage(
         kind = event.get("purpose") or purpose
         if kind not in LLM_CALL_PURPOSES:
             kind = purpose
+        # Priced here, at today's rates, and stored on the row -- so that
+        # correcting a price later moves what new rounds cost and not what old
+        # ones did. The meter computes the same figure from the same event
+        # through the same function, so the two writes agree by construction
+        # rather than by being handed a shared value; they stay separate
+        # because they have different durabilities. See models.LlmCall.
+        cost, _ = event_cost_uusd(event)
         db.add(
             LlmCall(
                 resume_id=resume_id,
@@ -195,6 +208,7 @@ def _persist_usage(
                 reasoning_tokens=event.get("reasoning_tokens"),
                 cache_write_tokens=event.get("cache_write_tokens"),
                 source_chars=int(event.get("source_chars") or 0),
+                cost_uusd=cost,
             )
         )
         db.commit()

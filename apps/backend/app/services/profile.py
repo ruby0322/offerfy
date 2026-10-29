@@ -59,6 +59,7 @@ from app.services.llm import _output_text, _responses_url
 from app.services.llm.providers import openai as openai_provider
 from app.services.model_catalog import DEFAULT_MODEL, spec_or_passthrough
 from app.services.memory import accepted_memory_texts
+from app.services.usage import event_cost_uusd
 from app.services.revisions import published_source
 
 logger = logging.getLogger(__name__)
@@ -242,6 +243,10 @@ def record_build_spend(db: Session, user: User, result, meter) -> None:
     """
     if not result.model or result.resume_id is None:
         return
+    # Same rule as the chat router: priced once, here, at today's rates. The
+    # meter below recomputes it from the same usage dict through the same
+    # function, so the row and the counter cannot disagree.
+    cost, _ = event_cost_uusd({"model": result.model, **result.usage})
     try:
         db.add(
             LlmCall(
@@ -254,6 +259,7 @@ def record_build_spend(db: Session, user: User, result, meter) -> None:
                 cached_tokens=result.usage.get("cached_tokens"),
                 output_tokens=result.usage.get("output_tokens"),
                 source_chars=result.source_chars,
+                cost_uusd=cost,
             )
         )
         db.commit()

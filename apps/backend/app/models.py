@@ -496,6 +496,21 @@ class LlmCall(Base):
     # Length of the Typst source entering this round, to correlate cost with
     # document size.
     source_chars: Mapped[int] = mapped_column(nullable=False, default=0)
+    # What this round cost, in micro-USD, priced at the rates in force when it
+    # ran. Written by whoever writes the row; never recomputed.
+    #
+    # The token columns above are the *evidence*; this is the *invoice*. They
+    # have to be separate because a price list changes and a token count does
+    # not: re-pricing history at today's rates made `usage.reconcile` report a
+    # gap for every row on a model whose price had been corrected, which is a
+    # false alarm on the one signal that catches genuinely unmetered spend.
+    #
+    # NULL means a row written before this column existed. `round_cost_uusd`
+    # falls back to pricing it live, which is the old behaviour and the best
+    # that can be done for a cost nobody recorded -- it is deliberately not
+    # backfilled, because a backfill would be exactly the retroactive pricing
+    # this column exists to stop.
+    cost_uusd: Mapped[int | None] = mapped_column(nullable=True)
 
 
 USAGE_SUBJECT_KINDS = ("user", "guest", "network")

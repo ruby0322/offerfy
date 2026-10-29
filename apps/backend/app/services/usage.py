@@ -330,7 +330,24 @@ def event_cost_uusd(event: dict) -> tuple[int, bool]:
 def round_cost_uusd(row: LlmCall) -> tuple[int, bool]:
     """What one `LlmCall` row billed, and whether it was measured at all.
 
-    Two subsets to get right, and each is a double-charge if it is not:
+    **Prefers the cost recorded on the row.** `cost_uusd` is written once, at
+    the rates in force when the round ran, and reading it back is what keeps
+    the cost of history still while a price list moves. Every consumer --
+    the admin cost report, the per-model breakdown, `reconcile` -- comes
+    through here, so they all get that for free and none of them has to know
+    the column exists.
+
+    A NULL `cost_uusd` is a row written before the column did, and falls
+    through to pricing it live from its token counts. That is the old
+    behaviour, kept rather than backfilled: inventing a historical price is
+    the exact thing the column exists to stop. See models.LlmCall.cost_uusd.
+
+    `measured` is still derived from the tokens either way, because the
+    question it answers -- did the provider tell us anything -- is a property
+    of the evidence, not of the invoice.
+
+    Pricing live, two subsets to get right, and each is a double-charge if it
+    is not:
 
       - `cached_tokens` is a slice of `input_tokens`, nested under
         `input_tokens_details`. Only the remainder bills at the input rate.
@@ -340,6 +357,9 @@ def round_cost_uusd(row: LlmCall) -> tuple[int, bool]:
     `cache_write_tokens` is the exception that proves the rule: it is not a
     slice of anything, so it is added.
     """
+    stored = getattr(row, "cost_uusd", None)
+    if stored is not None:
+        return int(stored), row.input_tokens is not None
     return _cost_from_counts(
         row.model,
         row.input_tokens,
@@ -489,21 +509,19 @@ def reconcile(
     by construction, so it has to be observable instead. Surfaced on the admin
     overview.
 
-    **A third cause, and the one that is not a bug: a price changed.** The
-    counters hold what was billed at the time; this re-prices every row at
-    today's rates, because `PRICES` is read live from the catalogue and
-    `LlmCall` stores token counts rather than money. So editing a model's
-    price retroactively moves the right-hand number and invents a gap for
-    every window that already has rows on that model. Measured: correcting
-    claude-opus-5-5 from the seeded $5/$25 to the published $4/$20 moved one
-    round from 34,653 to 25,848 uUSD, an 8,805 uUSD phantom gap.
+    **A price change used to be a third cause, and is not any more.** The
+    counters hold what was billed at the time, while this once re-priced every
+    row at today's rates -- so correcting a model's price invented a gap for
+    every window holding rows on it (measured: claude-opus-5-5 from a seeded
+    $5/$25 to the published $4/$20 moved one round 34,653 -> 25,848 uUSD).
+    `llm_calls.cost_uusd` now records the price at write time and
+    `round_cost_uusd` reads it back, so both sides of this comparison stand
+    still together. `tests/test_usage.py` pins that.
 
-    This matters because a false positive here teaches people to ignore the
-    one signal that catches real unmetered spend. Before correcting a price,
-    expect gaps on the current window and say so; after a reset they clear on
-    their own. The real fix is to store the priced cost on the row at write
-    time so history is priced once -- a column and a migration, deliberately
-    not done here because it changes what `LlmCall` is for.
+    The exception is rows older than migration 023, which have no recorded
+    cost and are still priced live. They are not backfilled on purpose; see
+    models.LlmCall.cost_uusd. A price correction can still move those, so a
+    gap confined to old rows after one is the known-benign case.
     """
     gaps: list[tuple[str, str, int, int]] = []
     rows = db.execute(
