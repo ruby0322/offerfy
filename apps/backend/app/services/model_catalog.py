@@ -71,18 +71,28 @@ class Prices:
         }
 
 
-def _rates(input_uusd: int, output_uusd: int) -> Prices:
-    """Both providers' cache rates are fixed multiples of the input rate.
+def _rates(input_uusd: int, output_uusd: int, cached_uusd: int) -> Prices:
+    """One rate derived, one spelled out, and the split is the lesson.
 
-    OpenAI: cached reads 0.1x, 30-minute cache writes 1.25x (12h is 2.5x, and
-    is deliberately not modelled -- see usage._usage_counts). Anthropic: cache
-    reads 0.1x, 5-minute cache writes 1.25x. The same two multipliers, so one
-    helper covers both and a hand-typed cache rate cannot drift from the input
-    rate it is a multiple of.
+    The **cache write** multiplier is genuinely stable: 1.25x the input rate on
+    every row of both providers' published tables (OpenAI's 30-minute TTL,
+    Anthropic's 5-minute; the 12h/1h writes are 2.5x and 2x and are
+    deliberately not modelled -- see usage._usage_counts for why guessing the
+    longer TTL is the wrong direction to err in). Deriving it means a
+    hand-typed figure cannot drift from the rate it is a multiple of.
+
+    The **cache read** rate is not stable and must be passed in. It was 0.1x
+    of input for years, which this helper used to assume -- and the assumption
+    was wrong by a factor of two the moment it met a real price list: the
+    Claude 5.5 generation reads cached tokens at 0.05x (Sonnet $2 -> $0.10,
+    Opus $4 -> $0.20) while Haiku 5.5 is still 0.1x ($0.10 -> $0.01). Cached
+    reads are ~80% of a turn's input here, so halving that rate is not a
+    rounding error, and a helper that quietly papered over it would have
+    over-billed two of the five models people can pick.
     """
     return Prices(
         input=input_uusd,
-        cached=input_uusd // 10,
+        cached=cached_uusd,
         cache_write=input_uusd * 125 // 100,
         output=output_uusd,
     )
@@ -113,9 +123,6 @@ class ModelSpec:
     # Alternative spellings accepted from config and from a client. The id
     # itself and its space-separated form are matched without being listed.
     aliases: tuple[str, ...] = ()
-    # Shown under the label in the picker; a key into the message files
-    # rather than prose, because this text is translated.
-    blurb_key: str = ""
     # When these prices were last checked against the provider's own pricing
     # page, ISO date. None means seeded from a neighbouring generation and not
     # yet confirmed -- which `GET /v1/models` reports as `prices_provisional`
@@ -171,32 +178,29 @@ MODELS: tuple[ModelSpec, ...] = (
         id="gpt-6.1-terra",
         provider=OPENAI,
         label="GPT-6.1 Terra",
-        prices=_rates(1_750_000, 10_000_000),
+        prices=_rates(1_750_000, 10_000_000, 175_000),
         selectable=True,
         min_tier="guest",
         aliases=("terra", "gpt-6.1", "gpt6.1-terra"),
-        blurb_key="terra",
         options=_OPENAI_REASONING,
     ),
     ModelSpec(
         id="gpt-6.1-sol",
         provider=OPENAI,
         label="GPT-6.1 Sol",
-        prices=_rates(3_500_000, 17_500_000),
+        prices=_rates(3_500_000, 17_500_000, 350_000),
         selectable=True,
         aliases=("sol", "gpt6.1-sol"),
-        blurb_key="sol",
         options=_OPENAI_REASONING,
     ),
     ModelSpec(
         id="gpt-6.1-luna",
         provider=OPENAI,
         label="GPT-6.1 Luna",
-        prices=_rates(150_000, 900_000),
+        prices=_rates(150_000, 900_000, 15_000),
         selectable=True,
         min_tier="guest",
         aliases=("luna", "gpt6.1-luna"),
-        blurb_key="luna",
         options=_OPENAI_REASONING,
     ),
     # --- Anthropic --------------------------------------------------------
@@ -204,20 +208,48 @@ MODELS: tuple[ModelSpec, ...] = (
         id="claude-sonnet-5-5",
         provider=ANTHROPIC,
         label="Claude Sonnet 5.5",
-        prices=_rates(2_000_000, 10_000_000),
+        # $2 / $0.10 cached / $2.50 write / $10 out per MTok.
+        prices=_rates(2_000_000, 10_000_000, 100_000),
         selectable=True,
         aliases=("sonnet", "sonnet 5.5", "claude sonnet 5.5", "claude-sonnet-5.5"),
-        blurb_key="sonnet",
+        verified="2026-10-29",
         options=_ANTHROPIC_THINKING,
     ),
     ModelSpec(
         id="claude-opus-5-5",
         provider=ANTHROPIC,
         label="Claude Opus 5.5",
-        prices=_rates(5_000_000, 25_000_000),
+        # $4 / $0.20 cached / $5 write / $20 out per MTok. Note this is
+        # *cheaper* than Claude Opus 5 ($5/$25), which is what it was seeded
+        # from -- a newer model in the same tier came down in price, so the
+        # seeded figure over-billed it by 25%.
+        prices=_rates(4_000_000, 20_000_000, 200_000),
         selectable=True,
         aliases=("opus", "opus 5.5", "claude opus 5.5", "claude-opus-5.5"),
-        blurb_key="opus",
+        verified="2026-10-29",
+        options=_ANTHROPIC_THINKING,
+    ),
+    ModelSpec(
+        id="claude-haiku-5-5",
+        provider=ANTHROPIC,
+        label="Claude Haiku 5.5",
+        # $0.10 / $0.01 cached / $0.125 write / $0.50 out per MTok, which is
+        # the cheapest row in the catalogue -- below gpt-6.1-luna.
+        #
+        # **These are the rates for prompts up to 100,000 tokens.** Above that
+        # the whole request jumps to a 5x band ($0.50 / $0.05 / $0.625 /
+        # $2.50), and billing the cheap band for an expensive request would
+        # under-charge by 5x. What keeps us in the cheap band is
+        # app.services.chat_window, which bounds the history sent to the
+        # provider: a measured round is ~12k tokens and the observed worst
+        # case is well under 100k. That makes this price a *dependency* on the
+        # window staying bounded -- if that bound is ever raised, this row has
+        # to be re-checked or split in two.
+        prices=_rates(100_000, 500_000, 10_000),
+        selectable=True,
+        min_tier="guest",
+        aliases=("haiku", "haiku 5.5", "claude haiku 5.5", "claude-haiku-5.5"),
+        verified="2026-10-29",
         options=_ANTHROPIC_THINKING,
     ),
     # --- Priceable but not offered ----------------------------------------
@@ -293,6 +325,7 @@ FAMILY_OF = {
     "gpt-6.1-terra": "gpt-6.1",
     "gpt-6.1-sol": "gpt-6.1",
     "gpt-6.1-luna": "gpt-6.1",
+    "claude-haiku-5-5": "claude-5.5",
     "claude-sonnet-5-5": "claude-5.5",
     "claude-opus-5-5": "claude-5.5",
     "gpt-5.6-terra": "gpt-5.6",
@@ -318,6 +351,7 @@ SELECTABLE_ORDER = (
     "gpt-6.1-terra",
     "gpt-6.1-luna",
     "gpt-6.1-sol",
+    "claude-haiku-5-5",
     "claude-sonnet-5-5",
     "claude-opus-5-5",
 )

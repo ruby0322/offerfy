@@ -33,16 +33,46 @@ def test_every_model_has_an_adapter():
         assert providers.for_spec(spec) is not None, spec.id
 
 
-def test_cache_rates_are_the_published_multiples_of_the_input_rate():
-    """0.1x to read, 1.25x to write, on both providers.
+def test_a_cache_write_is_always_one_and_a_quarter_times_input():
+    """The one cache multiplier that has held on every row of both tables.
 
     Hand-typed cache rates are how a price table drifts from itself: the
     numbers look plausible at a glance and the error only shows up in a bill.
+    This one is derived in `_rates` rather than typed, and this guards that.
     """
     for spec in model_catalog.MODELS:
-        rates = spec.prices
-        assert rates.cached == rates.input // 10, spec.id
-        assert rates.cache_write == rates.input * 125 // 100, spec.id
+        assert spec.prices.cache_write == spec.prices.input * 125 // 100, spec.id
+
+
+# What each model charges to *read* a cached token, as a fraction of its input
+# rate. Spelled out per model rather than asserted as one ratio, because it is
+# not one ratio -- and an earlier version of this file assumed it was.
+#
+# That assumption was wrong by a factor of two the moment it met a real price
+# list: the Claude 5.5 generation reads at 0.05x where everything before it
+# read at 0.1x. Cached tokens are ~80% of a turn's input here, so the error
+# over-billed Sonnet and Opus by nearly double on the input line. Checked
+# against the published pricing page on 2026-10-29.
+CACHE_READ_RATIO = {
+    "gpt-6.1-terra": 10,
+    "gpt-6.1-sol": 10,
+    "gpt-6.1-luna": 10,
+    "gpt-5.6-terra": 10,
+    "gpt-5.6-sol": 10,
+    "gpt-5.6-luna": 10,
+    "gpt-6-luna": 10,
+    "claude-haiku-5-5": 10,
+    "claude-sonnet-5-5": 20,
+    "claude-opus-5-5": 20,
+}
+
+
+def test_every_model_states_its_own_cache_read_rate():
+    """No model may be added without someone looking its read rate up."""
+    assert set(CACHE_READ_RATIO) == {spec.id for spec in model_catalog.MODELS}
+    for spec in model_catalog.MODELS:
+        divisor = CACHE_READ_RATIO[spec.id]
+        assert spec.prices.cached == spec.prices.input // divisor, spec.id
 
 
 def test_output_costs_more_than_input():
@@ -122,7 +152,7 @@ def test_the_tier_order_matches_the_usage_module():
 @pytest.mark.parametrize(
     "tier,expected",
     [
-        ("guest", {"gpt-6.1-terra", "gpt-6.1-luna"}),
+        ("guest", {"gpt-6.1-terra", "gpt-6.1-luna", "claude-haiku-5-5"}),
         ("registered", None),
         ("matching", None),
     ],
