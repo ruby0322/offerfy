@@ -41,12 +41,13 @@ class Settings(BaseSettings):
     # catalogue does not list, which is how a proxy serving its own ids is
     # reached; such a model is priced as the dearest row in the catalogue.
     #
-    # `openai_model` is the name this setting had when there was one provider.
-    # Still read, because .env.production on the host sets it and a deploy
-    # that silently reverted to the catalogue default would change what every
-    # turn costs. `chat_model` wins where both are set.
+    # Replaces `OPENAI_MODEL`, which is deliberately no longer read: with two
+    # providers a setting named after one of them could not name a model from
+    # the other, so honouring it would have meant a config key that silently
+    # worked for half the catalogue. The host's .env/.env.production were
+    # migrated to CHAT_MODEL on 2026-10-29; `extra="ignore"` above means a
+    # stale OPENAI_MODEL elsewhere is inert rather than an error.
     chat_model: str | None = None
-    openai_model: str | None = None
     # read_layout's vision questions. The Decisions endpoint takes this
     # model only; it is a setting so a rename at GA is a config change.
     openai_decisions_model: str = "gpt-6-luna"
@@ -70,15 +71,17 @@ class Settings(BaseSettings):
     def pinned_chat_model(self) -> str | None:
         """The operator's model pin, or None to let the catalogue decide.
 
-        One accessor so that the `CHAT_MODEL` / `OPENAI_MODEL` precedence is
-        written down once. Returning None rather than a default keeps the
-        catalogue the single source of that default -- a second copy here is
-        how the published model and the called one come to disagree.
+        An accessor rather than reading the field, so that "unset and blank
+        mean the same thing" is written down once -- `CHAT_MODEL=` in an env
+        file is how the host says "no pin", and a caller comparing the field
+        to None would read that empty string as a model name.
+
+        Returning None rather than a default keeps the catalogue the single
+        source of that default; a second copy here is how the published model
+        and the called one come to disagree.
         """
-        for value in (self.chat_model, self.openai_model):
-            if (value or "").strip():
-                return value.strip()
-        return None
+        pinned = (self.chat_model or "").strip()
+        return pinned or None
 
     def s3_configured(self) -> bool:
         return all(

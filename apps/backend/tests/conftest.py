@@ -5,11 +5,10 @@ import os
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 os.environ["APP_ENV"] = "development"
 os.environ.setdefault("AUTH_TOKEN_SECRET", "test-secret-for-unit-tests")
-# Both model pins blanked, so tests run on model_catalog.DEFAULT_MODEL rather
+# The model pin blanked, so tests run on model_catalog.DEFAULT_MODEL rather
 # than on whatever the repo .env pins. setdefault is not enough: the .env is
 # read by app.config, and a pin naming a model the guest tier may not have
 # would quietly change which model half these tests exercise.
-os.environ["OPENAI_MODEL"] = ""
 os.environ["CHAT_MODEL"] = ""
 os.environ["OPENAI_API_KEY"] = ""
 os.environ["ANTHROPIC_API_KEY"] = ""

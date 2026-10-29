@@ -265,17 +265,30 @@ def test_an_operator_pin_a_guest_may_not_have_is_ignored_for_them(
         get_settings.cache_clear()
 
 
-def test_the_legacy_openai_model_setting_is_still_read(monkeypatch):
-    """`.env.production` on the host sets OPENAI_MODEL. A deploy that silently
-    reverted to the catalogue default would change what every turn costs."""
+def test_the_old_openai_model_setting_is_ignored(monkeypatch):
+    """`OPENAI_MODEL` is no longer read, and a stale one must stay inert.
+
+    It named one provider, so with two it could not name half the catalogue.
+    The host's env files were migrated to `CHAT_MODEL` on 2026-10-29, but a
+    stale copy may survive in a developer's `.env`, in docker-compose, or in
+    the k8s manifests nothing applies -- and a pin that quietly came back to
+    life would change what every turn costs and which models are offered.
+    """
     from app.config import get_settings
 
     monkeypatch.setenv("OPENAI_MODEL", "gpt-5.6-terra")
     monkeypatch.setenv("CHAT_MODEL", "")
     get_settings.cache_clear()
     try:
-        assert get_settings().pinned_chat_model() == "gpt-5.6-terra"
-        # And CHAT_MODEL wins where both are set.
+        assert get_settings().pinned_chat_model() is None
+        assert model_choice.default_model(usage.REGISTERED) == model_catalog.DEFAULT_MODEL
+        # Blank and unset mean the same thing: `CHAT_MODEL=` is how an env
+        # file says "no pin", and reading it as a model name would send an
+        # empty string to the provider.
+        monkeypatch.delenv("CHAT_MODEL")
+        get_settings.cache_clear()
+        assert get_settings().pinned_chat_model() is None
+        # And CHAT_MODEL is what does get read.
         monkeypatch.setenv("CHAT_MODEL", OPUS)
         get_settings.cache_clear()
         assert get_settings().pinned_chat_model() == OPUS
