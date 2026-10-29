@@ -479,6 +479,22 @@ def reconcile(
     meter. The second is the failure the context-manager seam cannot rule out
     by construction, so it has to be observable instead. Surfaced on the admin
     overview.
+
+    **A third cause, and the one that is not a bug: a price changed.** The
+    counters hold what was billed at the time; this re-prices every row at
+    today's rates, because `PRICES` is read live from the catalogue and
+    `LlmCall` stores token counts rather than money. So editing a model's
+    price retroactively moves the right-hand number and invents a gap for
+    every window that already has rows on that model. Measured: correcting
+    claude-opus-5-5 from the seeded $5/$25 to the published $4/$20 moved one
+    round from 34,653 to 25,848 uUSD, an 8,805 uUSD phantom gap.
+
+    This matters because a false positive here teaches people to ignore the
+    one signal that catches real unmetered spend. Before correcting a price,
+    expect gaps on the current window and say so; after a reset they clear on
+    their own. The real fix is to store the priced cost on the row at write
+    time so history is priced once -- a column and a migration, deliberately
+    not done here because it changes what `LlmCall` is for.
     """
     gaps: list[tuple[str, str, int, int]] = []
     rows = db.execute(
