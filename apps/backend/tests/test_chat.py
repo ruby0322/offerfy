@@ -5,7 +5,7 @@ import threading
 
 import pytest
 
-from app.services import model_catalog
+from app.services import model_catalog, model_choice, usage
 from app.services.templates import apply_prompt
 from app.services.typst_compile import typst_available
 from tests.openai_script import (
@@ -15,6 +15,19 @@ from tests.openai_script import (
     tool_call,
     web_search_call,
 )
+
+# The catalogue row the `ScriptedOpenAI` tests below drive, named rather than
+# inherited from `model_catalog.DEFAULT_MODEL`.
+#
+# The scripted client only speaks the Responses API, so these tests have
+# always needed an OpenAI row -- they just used to get one for free, because
+# the default was one. It no longer is, and a test that calls the turn loop
+# without naming a model now resolves to the Anthropic adapter and raises
+# 503 instead of exercising anything. What these tests are about is the turn
+# loop, the transcript shape and the telemetry, none of which is a claim
+# about which model a caller is given; that claim lives in
+# tests/test_model_choice.py.
+OPENAI_ROW = "gpt-6.1-terra"
 
 
 def parse_sse(text: str) -> list[dict]:
@@ -113,12 +126,18 @@ def test_a_proxy_model_is_honoured_but_priced_as_the_dearest_one():
 
 
 def test_each_model_asks_for_visible_reasoning_in_its_own_dialect():
-    """Thinking has to be visible on both providers, or half the picker goes
-    quiet mid-turn. The two vendors spell the request differently and neither
-    returns a summary by default."""
+    """Both providers must be *asked* for visible thinking, or half the picker
+    goes quiet mid-turn. The two vendors spell the request differently and
+    neither returns a summary by default.
+
+    Asking is all this can pin. Whether a summary comes back is measured, not
+    configured, and it varies by turn on every row -- see
+    model_catalog._OPENAI_REASONING for the counts. Dropping either setting
+    would guarantee silence, which is why they are guarded here.
+    """
     openai = model_catalog.BY_ID["gpt-6.1-terra"].options
     assert openai == {"reasoning": {"effort": "low", "summary": "detailed"}}
-    # `detailed` is the part that makes thinking visible at all -- guard it.
+    # `detailed` is what asks for a summary at all -- guard it.
     assert openai["reasoning"]["summary"] == "detailed"
 
     anthropic = model_catalog.BY_ID["claude-sonnet-5-5"].options
@@ -226,10 +245,18 @@ def test_chat_read_then_search_replace_and_second_read(
     assert "@preview/basic-resume:0.2.9" in body["typst_source"]
     assert 'paper: "a4"' in body["typst_source"]
     assert 'accent-color: "#26428b"' in body["typst_source"]
-    # The catalogue default, because conftest pins nothing. The picker's
-    # whole job is that this can change per caller, so it is read from the
-    # catalogue rather than written out again here.
-    assert scripted.requests[0]["model"] == model_catalog.DEFAULT_MODEL
+    # Whatever this deployment offers a caller who has chosen nothing, read
+    # from `model_choice` rather than written out: the picker's whole job is
+    # that it varies per caller and per deployment.
+    #
+    # Here that is deliberately *not* the catalogue default. Only
+    # `openai_enabled` is set, and the catalogue default is an Anthropic row,
+    # so `model_choice` drops it for want of a credential and falls to the
+    # cheapest row this deployment can reach. The assertion that matters for
+    # this test is that whatever it landed on speaks the API being scripted.
+    ran_on = scripted.requests[0]["model"]
+    assert ran_on == model_choice.default_model(usage.GUEST)
+    assert model_catalog.BY_ID[ran_on].provider == model_catalog.OPENAI
     assert scripted.requests[0]["reasoning"]["effort"] == "low"
     assert scripted.requests[0]["reasoning"]["summary"] == "detailed"
     tool_types = [row.get("type") for row in scripted.requests[0].get("tools") or []]
@@ -1437,7 +1464,9 @@ def test_chat_reserved_round_answers_when_tools_eat_the_budget(
 
     async def collect():
         out = []
-        async for ev in llm_module.aiter_llm_turn([{"role": "user", "content": "go"}], "SRC", max_rounds=2):
+        async for ev in llm_module.aiter_llm_turn(
+            [{"role": "user", "content": "go"}], "SRC", model=OPENAI_ROW, max_rounds=2
+        ):
             out.append(ev)
         return out
 
@@ -1467,7 +1496,10 @@ def test_chat_reserved_round_is_not_spent_when_the_turn_ends_early(
         return [
             ev
             async for ev in llm_module.aiter_llm_turn(
-                [{"role": "user", "content": "go"}], "SRC", max_rounds=6
+                [{"role": "user", "content": "go"}],
+                "SRC",
+                model=OPENAI_ROW,
+                max_rounds=6,
             )
         ]
 

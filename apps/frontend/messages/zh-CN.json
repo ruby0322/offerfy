@@ -418,6 +418,8 @@
     "settingsDanger": "危险区域",
     "settingsDelete": "删除这份简历",
     "settingsDeleteTailor": "删除这份定制版",
+    "working": "处理中",
+    "noReasoning": "此模型不会显示这个步骤的推理过程。",
     "thinking": "思考中",
     "contextTrimmed": "较早的消息不会发送给 AI",
     "contextTrimmedHint": "为了控制每次回复的成本，这条线以上的 {count} 条消息不会放进请求。AI 仍会收到这段对话的开头、这条线以下的全部内容，以及你的简历本身，没有任何消息被删除。如果它好像忘了某件事，再说一次就好。",

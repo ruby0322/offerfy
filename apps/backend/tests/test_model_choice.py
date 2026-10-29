@@ -25,6 +25,7 @@ from tests.test_usage import _signed_in
 SONNET = "claude-sonnet-5-5"
 OPUS = "claude-opus-5-5"
 LUNA = "gpt-6-luna"
+TERRA = "gpt-6.1-terra"
 
 
 @pytest.fixture
@@ -69,13 +70,18 @@ def test_the_table_quotes_a_relative_cost_and_an_edit_count(
     reference = rows[model_catalog.REFERENCE_MODEL]
     assert reference["cost_weight"] == 1.0
 
-    # Cheaper model: lower weight, more edits. Dearer: the reverse.
-    assert rows[LUNA]["cost_weight"] < 1.0 < rows[OPUS]["cost_weight"]
+    # Dearer model: higher weight, fewer edits. The reference is the cheapest
+    # selectable row, so both comparisons run upwards from it -- there is no
+    # row below it to put on the other side.
+    assert 1.0 < rows[TERRA]["cost_weight"] < rows[OPUS]["cost_weight"]
     assert (
-        rows[LUNA]["approx_edits"]["registered"]
-        > reference["approx_edits"]["registered"]
+        reference["approx_edits"]["registered"]
+        > rows[TERRA]["approx_edits"]["registered"]
         > rows[OPUS]["approx_edits"]["registered"]
     )
+    # Priced identically to the reference across providers, so quoted
+    # identically. See test_model_catalog.
+    assert rows[LUNA]["cost_weight"] == reference["cost_weight"]
     # The guest tier is absent from every row: it is capped on a count of
     # turns, so its figure does not vary by model. Listing one would be a
     # number that does not mean what the column header says.
@@ -218,14 +224,28 @@ def test_a_retired_model_in_the_column_falls_back(
 def test_a_model_whose_provider_lost_its_key_falls_back(
     client: TestClient, openai_enabled, db_session
 ):
-    """No ANTHROPIC_API_KEY, and someone's column says Sonnet."""
+    """No ANTHROPIC_API_KEY, and someone's column says Sonnet.
+
+    Two hops, and since the catalogue default became an Anthropic row the
+    second one is reachable from the first: the stored Sonnet is dropped
+    because its provider has no key, and then the *default* is dropped for
+    the same reason, leaving the cheapest model this deployment can actually
+    run. Both are `model_choice` branches that were documented and untested
+    while the default happened to be an OpenAI row.
+    """
     user = User(google_sub="sub-keyless", email="k@example.com", locale="en")
     user.chat_model = SONNET
     db_session.add(user)
     db_session.commit()
-    assert model_choice.selected(
-        db_session, user, None, tier=usage.REGISTERED
-    ) == model_catalog.DEFAULT_MODEL
+    offerable = model_choice.offered(usage.REGISTERED)
+    assert model_catalog.DEFAULT_MODEL not in {spec.id for spec in offerable}
+    cheapest = min(offerable, key=lambda spec: spec.prices.input).id
+    assert (
+        model_choice.selected(db_session, user, None, tier=usage.REGISTERED)
+        == cheapest
+    )
+    # Never a model whose provider is unconfigured, which is the whole point.
+    assert model_catalog.BY_ID[cheapest].provider == model_catalog.OPENAI
 
 
 def test_an_operator_pin_outside_the_catalogue_is_honoured(

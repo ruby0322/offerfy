@@ -602,11 +602,24 @@ def test_an_unconfigured_provider_cannot_be_reached(
     client: TestClient, openai_enabled, db_session, monkeypatch
 ):
     """No Anthropic key means no Anthropic rows in the picker, so there is no
-    way to select one -- which is better than offering a model that 502s."""
+    way to select one -- which is better than offering a model that 502s.
+
+    The catalogue default is itself an Anthropic row, so this also covers what
+    such a deployment runs *instead*: the cheapest model it can actually
+    reach, never the published default. Nothing here reads
+    `model_catalog.DEFAULT_MODEL`, because in this configuration that is
+    precisely the model that must not be chosen.
+    """
     from tests.test_usage import _signed_in
 
     _signed_in(client, db_session, sub="sub-no-anthropic")
     table = client.get("/v1/models").json()
     assert {row["provider"] for row in table["models"]} == {"openai"}
     assert client.put("/v1/models/selection", json={"model": SONNET}).status_code == 400
-    assert table["selected"] == model_catalog.DEFAULT_MODEL
+    offered = {row["id"] for row in table["models"]}
+    assert model_catalog.DEFAULT_MODEL not in offered
+    assert table["selected"] in offered
+    assert table["selected"] == min(
+        (model_catalog.BY_ID[name] for name in offered),
+        key=lambda spec: spec.prices.input,
+    ).id

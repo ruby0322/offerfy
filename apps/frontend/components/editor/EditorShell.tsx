@@ -161,6 +161,11 @@ export default function EditorShell({ resumeId }: Props) {
   // The model's summary of its own thinking. Shown while the turn runs, never
   // persisted: it is not something the assistant said to the user.
   const [reasoningText, setReasoningText] = useState<string | null>(null);
+  // Whether the running turn has produced anything but thinking yet -- a tool
+  // call or a word of the answer. The chat panel needs it to tell "still
+  // waiting" apart from "working, and not narrating it", because most turns
+  // on most models carry no reasoning summary at all.
+  const [turnProgressed, setTurnProgressed] = useState(false);
   const [draft, setDraft] = useState(() => loadComposerDraft(resumeId));
   const [attachment, setAttachment] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
@@ -543,6 +548,9 @@ export default function EditorShell({ resumeId }: Props) {
     setSheetOpen(true);
     sendingRef.current = true;
     setSending(true);
+    // A fresh turn has narrated nothing yet. Reset here rather than on `done`
+    // so a turn that dies without one still starts the next one clean.
+    setTurnProgressed(false);
     setMessages((prev) => [
       ...prev,
       withMessageId({
@@ -579,6 +587,7 @@ export default function EditorShell({ resumeId }: Props) {
         }
         if (event.type === "delta") {
           setChatUnavailable(false);
+          setTurnProgressed(true);
           pushDelta(event.text);
           return;
         }
@@ -589,6 +598,7 @@ export default function EditorShell({ resumeId }: Props) {
         }
         if (event.type === "tool" || event.type === "assistant") {
           setChatUnavailable(false);
+          setTurnProgressed(true);
           if (event.type === "assistant") {
             // The real message supersedes the provisional bubble. Clearing and
             // appending in one invocation keeps it to a single paint, so the
@@ -1369,6 +1379,9 @@ export default function EditorShell({ resumeId }: Props) {
           scrollToLatestLabel={t("scrollToLatest")}
           streamingText={streamingText}
           reasoningText={reasoningText}
+          turnProgressed={turnProgressed}
+          workingLabel={t("working")}
+          noReasoningLabel={t("noReasoning")}
           thinkingLabel={t("thinking")}
           draft={draft}
           onDraftChange={onDraftChange}
