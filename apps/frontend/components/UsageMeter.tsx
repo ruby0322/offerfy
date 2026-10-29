@@ -6,8 +6,6 @@ type Props = {
   usage: Usage | null;
   /** "{used} of {limit} credits this week" / "{used} of {limit} AI edits" */
   label: string;
-  /** "about {n} edits left" */
-  editsLeftLabel: string | null;
   /** "resets Monday" */
   resetLabel: string;
 };
@@ -21,8 +19,19 @@ type Props = {
  *
  * Renders nothing when limits are not enforced (development), rather than
  * drawing an empty meter that means nothing.
+ *
+ * It shows what has been *spent*, and deliberately no longer shows an
+ * estimate of what is left in edits. That estimate divides the remaining
+ * balance by the person's own trailing cost per turn, which is a good
+ * predictor until they switch models and a bad one straight afterwards:
+ * measured live on 2026-10-29, an account that had spent three turns on Opus
+ * and Sol was told it had 43 edits left on Haiku, whose own published figure
+ * is 793. Credits spent is measured; edits left was a guess wearing the same
+ * typeface. The per-model table on /usage, /pricing and /plan is where the
+ * "how far does this go" question is answered now, from published rates
+ * rather than from one person's recent history.
  */
-export default function UsageMeter({ usage, label, editsLeftLabel, resetLabel }: Props) {
+export default function UsageMeter({ usage, label, resetLabel }: Props) {
   if (!usage || !usage.enforced) return null;
 
   // Exactly one side of the tier is capped: a guest on a turn count, an
@@ -49,7 +58,6 @@ export default function UsageMeter({ usage, label, editsLeftLabel, resetLabel }:
       </div>
       <p className="usage-meter-text">
         <span>{label}</span>
-        {editsLeftLabel ? <span className="usage-meter-dim">{editsLeftLabel}</span> : null}
         <span className="usage-meter-dim">{resetLabel}</span>
       </p>
     </div>

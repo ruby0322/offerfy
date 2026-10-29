@@ -12,6 +12,7 @@ from app.routers import (
     health,
     jobs,
     memory,
+    models,
     resumes,
     shares,
     talent,
@@ -45,6 +46,7 @@ def create_app() -> FastAPI:
     application.include_router(talent.router)
     application.include_router(talent_me.router)
     application.include_router(usage.router)
+    application.include_router(models.router)
     return application
 
 

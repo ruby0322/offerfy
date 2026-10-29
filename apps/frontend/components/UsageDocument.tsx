@@ -1,10 +1,11 @@
 import { getTranslations } from "next-intl/server";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
+import ModelCostTable from "@/components/ModelCostTable";
 import JsonLd from "@/components/seo/JsonLd";
 import { Link } from "@/i18n/navigation";
 import { organizationJsonLd } from "@/lib/seo";
-import { fetchUsageTiers } from "@/lib/usage-tiers";
+import { fetchModelTable, fetchUsageTiers } from "@/lib/usage-tiers";
 
 type Section = { heading: string; paragraphs: string[] };
 
@@ -24,7 +25,10 @@ type Section = { heading: string; paragraphs: string[] };
 export default async function UsageDocument() {
   const t = await getTranslations("usage");
   const common = await getTranslations("legal");
-  const tiers = await fetchUsageTiers();
+  const tModels = await getTranslations("models");
+  // Both fetched on the server, so a crawler sees the numbers in the HTML.
+  // Independently, so one unreachable endpoint does not blank the other.
+  const [tiers, models] = await Promise.all([fetchUsageTiers(), fetchModelTable()]);
 
   const free = t.raw("freeItems") as string[];
   const costlier = t.raw("costlierItems") as string[];
@@ -91,6 +95,26 @@ export default async function UsageDocument() {
               <p>{t("tiersUnavailable")}</p>
             )}
             <p>{t("tiersNote")}</p>
+          </section>
+
+          {/* After the tiers, deliberately. The allowance is the first fact --
+              what you get -- and this is the second: that the models spend it
+              at different rates. Reversed, a reader meets a cost multiplier
+              before they know what it is a multiple of.
+
+              `tier` is the guest tier here: this page is public and
+              unauthenticated, so the figures are quoted against what an
+              account gets and ModelCostTable says so. */}
+          <section>
+            <h2 className="font-display">{tModels("heading")}</h2>
+            <p>{tModels("intro")}</p>
+            {models ? (
+              <ModelCostTable table={models} tier="guest" />
+            ) : (
+              /* Same rule as the tier table above: we will not print a cost
+                 figure that might not be the one being billed. */
+              <p>{tModels("unavailable")}</p>
+            )}
           </section>
 
           <section>

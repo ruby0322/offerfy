@@ -27,7 +27,27 @@ class Settings(BaseSettings):
     google_client_secret: str | None = None
     openai_api_key: str | None = None
     openai_base_url: str | None = None
-    openai_model: str = "gpt-5.6-terra"
+    # Anthropic is the second provider; see app.services.llm.providers. Both
+    # keys are optional and independent: a deployment with only one set gets a
+    # working picker with a shorter list, because
+    # services.model_choice.offered() filters out models whose provider has no
+    # credential rather than offering one that would 502.
+    anthropic_api_key: str | None = None
+    anthropic_base_url: str | None = None
+    # The fallback model, for a caller who has chosen nothing. Normally left
+    # unset so app.services.model_catalog.DEFAULT_MODEL decides -- the
+    # catalogue is where a model's price and label live, so letting it own the
+    # default too means one place to change. Set this only to pin a model the
+    # catalogue does not list, which is how a proxy serving its own ids is
+    # reached; such a model is priced as the dearest row in the catalogue.
+    #
+    # Replaces `OPENAI_MODEL`, which is deliberately no longer read: with two
+    # providers a setting named after one of them could not name a model from
+    # the other, so honouring it would have meant a config key that silently
+    # worked for half the catalogue. The host's .env/.env.production were
+    # migrated to CHAT_MODEL on 2026-10-29; `extra="ignore"` above means a
+    # stale OPENAI_MODEL elsewhere is inert rather than an error.
+    chat_model: str | None = None
     # read_layout's vision questions. The Decisions endpoint takes this
     # model only; it is a setting so a rename at GA is a config change.
     openai_decisions_model: str = "gpt-6-luna"
@@ -47,6 +67,21 @@ class Settings(BaseSettings):
     # outage, so both are surfaced on the admin overview.
     global_weekly_ceiling_uusd: int = 150_000_000
     guest_weekly_ceiling_uusd: int = 40_000_000
+
+    def pinned_chat_model(self) -> str | None:
+        """The operator's model pin, or None to let the catalogue decide.
+
+        An accessor rather than reading the field, so that "unset and blank
+        mean the same thing" is written down once -- `CHAT_MODEL=` in an env
+        file is how the host says "no pin", and a caller comparing the field
+        to None would read that empty string as a model name.
+
+        Returning None rather than a default keeps the catalogue the single
+        source of that default; a second copy here is how the published model
+        and the called one come to disagree.
+        """
+        pinned = (self.chat_model or "").strip()
+        return pinned or None
 
     def s3_configured(self) -> bool:
         return all(

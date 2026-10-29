@@ -5,7 +5,7 @@ import threading
 
 import pytest
 
-from app.services.llm import completions_tool_extras, normalize_openai_model
+from app.services import model_catalog
 from app.services.templates import apply_prompt
 from app.services.typst_compile import typst_available
 from tests.openai_script import (
@@ -88,22 +88,45 @@ def _system_blobs(requests: list[dict]) -> str:
     return "\n".join(parts)
 
 
-def test_normalize_openai_model_maps_display_names():
-    assert normalize_openai_model("GPT-5.6 Terra") == "gpt-5.6-terra"
-    assert normalize_openai_model("gpt-5.6-terra") == "gpt-5.6-terra"
-    assert normalize_openai_model("GPT-5.6 Sol") == "gpt-5.6-sol"
-    assert normalize_openai_model("custom-proxy-model") == "custom-proxy-model"
-    assert normalize_openai_model("") == "gpt-5.6-terra"
+def test_model_names_resolve_from_their_product_spellings():
+    """A label a human would type has to reach the right catalogue row."""
+    assert model_catalog.resolve("GPT-6.1 Terra").id == "gpt-6.1-terra"
+    assert model_catalog.resolve("gpt-6.1-terra").id == "gpt-6.1-terra"
+    assert model_catalog.resolve("sol").id == "gpt-6.1-sol"
+    assert model_catalog.resolve("Claude Sonnet 5.5").id == "claude-sonnet-5-5"
+    assert model_catalog.resolve("opus").id == "claude-opus-5-5"
+    # Not in the catalogue, so not resolvable. The *config* path accepts it
+    # anyway (see below); a client-supplied name does not.
+    assert model_catalog.resolve("custom-proxy-model") is None
+    assert model_catalog.resolve("") is None
 
 
-def test_gpt56_asks_for_visible_reasoning():
-    """Effort is low and the summary is detailed; see the docstring for why."""
-    expected = {"reasoning": {"effort": "low", "summary": "detailed"}}
-    assert completions_tool_extras("gpt-5.6-terra") == expected
-    assert completions_tool_extras("gpt-5.6-sol") == expected
+def test_a_proxy_model_is_honoured_but_priced_as_the_dearest_one():
+    """OPENAI_BASE_URL may serve its own ids. That must not be a cheap tier."""
+    spec = model_catalog.spec_or_passthrough("custom-proxy-model")
+    assert spec.id == "custom-proxy-model"
+    assert spec.selectable is False
+    dearest = max(model_catalog.MODELS, key=lambda row: row.prices.input)
+    assert spec.prices == dearest.prices
+    # An empty pin is not a proxy model; it is no pin at all.
+    assert model_catalog.spec_or_passthrough("").id == model_catalog.DEFAULT_MODEL
+
+
+def test_each_model_asks_for_visible_reasoning_in_its_own_dialect():
+    """Thinking has to be visible on both providers, or half the picker goes
+    quiet mid-turn. The two vendors spell the request differently and neither
+    returns a summary by default."""
+    openai = model_catalog.BY_ID["gpt-6.1-terra"].options
+    assert openai == {"reasoning": {"effort": "low", "summary": "detailed"}}
     # `detailed` is the part that makes thinking visible at all -- guard it.
-    assert completions_tool_extras("gpt-5.6-terra")["reasoning"]["summary"] == "detailed"
-    assert completions_tool_extras("gpt-4o") == {}
+    assert openai["reasoning"]["summary"] == "detailed"
+
+    anthropic = model_catalog.BY_ID["claude-sonnet-5-5"].options
+    # `adaptive` is the only on-mode on this generation, and `summarized` is
+    # the opt-in: the default is `omitted`, which streams empty thinking text.
+    assert anthropic["thinking"] == {"type": "adaptive", "display": "summarized"}
+    # Effort lives in output_config, not at the top level.
+    assert anthropic["output_config"] == {"effort": "low"}
 
 
 def test_chat_503_without_key(client: TestClient):
@@ -203,7 +226,10 @@ def test_chat_read_then_search_replace_and_second_read(
     assert "@preview/basic-resume:0.2.9" in body["typst_source"]
     assert 'paper: "a4"' in body["typst_source"]
     assert 'accent-color: "#26428b"' in body["typst_source"]
-    assert scripted.requests[0]["model"] == "gpt-5.6-terra"
+    # The catalogue default, because conftest pins nothing. The picker's
+    # whole job is that this can change per caller, so it is read from the
+    # catalogue rather than written out again here.
+    assert scripted.requests[0]["model"] == model_catalog.DEFAULT_MODEL
     assert scripted.requests[0]["reasoning"]["effort"] == "low"
     assert scripted.requests[0]["reasoning"]["summary"] == "detailed"
     tool_types = [row.get("type") for row in scripted.requests[0].get("tools") or []]
@@ -1048,7 +1074,7 @@ def test_compile_digest_runs_off_request_thread(
         seen.append(threading.get_ident())
         return {"compile": {"ok": True}}
 
-    monkeypatch.setattr("app.services.llm.compile_digest", wrapped)
+    monkeypatch.setattr("app.services.llm.turn.compile_digest", wrapped)
     scripted = ScriptedOpenAI(
         [
             llm_message(tool_calls=[tool_call("read_typst", {}, "read-1")]),
@@ -1712,7 +1738,7 @@ def test_chat_repair_loop_history_is_bounded_too(
 
     # The repair loop is driven by compile verdicts, not by the Typst CLI.
     monkeypatch.setattr(
-        "app.services.llm.compile_digest", lambda source: {"compile": {"ok": True}}
+        "app.services.llm.turn.compile_digest", lambda source: {"compile": {"ok": True}}
     )
     verdicts = iter([{"ok": False, "error": "boom"}, {"ok": True}])
     monkeypatch.setattr(

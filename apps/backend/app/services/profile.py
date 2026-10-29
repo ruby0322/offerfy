@@ -55,13 +55,11 @@ from app.schemas import (
 from app.services.account import display_name_of
 from app.services.consent import has_consent, has_consent_many
 from app.services.family import family_master
-from app.services.llm import (
-    _output_text,
-    _responses_url,
-    llm_configured,
-    normalize_openai_model,
-)
+from app.services.llm import _output_text, _responses_url
+from app.services.llm.providers import openai as openai_provider
+from app.services.model_catalog import DEFAULT_MODEL, spec_or_passthrough
 from app.services.memory import accepted_memory_texts
+from app.services.usage import event_cost_uusd
 from app.services.revisions import published_source
 
 logger = logging.getLogger(__name__)
@@ -245,6 +243,10 @@ def record_build_spend(db: Session, user: User, result, meter) -> None:
     """
     if not result.model or result.resume_id is None:
         return
+    # Same rule as the chat router: priced once, here, at today's rates. The
+    # meter below recomputes it from the same usage dict through the same
+    # function, so the row and the counter cannot disagree.
+    cost, _ = event_cost_uusd({"model": result.model, **result.usage})
     try:
         db.add(
             LlmCall(
@@ -257,6 +259,7 @@ def record_build_spend(db: Session, user: User, result, meter) -> None:
                 cached_tokens=result.usage.get("cached_tokens"),
                 output_tokens=result.usage.get("output_tokens"),
                 source_chars=result.source_chars,
+                cost_uusd=cost,
             )
         )
         db.commit()
@@ -499,11 +502,29 @@ async def build_profile(db: Session, user: User) -> ProfileBuildResult:
     if bundle is None:
         return ProfileBuildResult(error="no_source")
     resume, revision_id, source, facts = bundle
-    if not llm_configured():
-        return ProfileBuildResult(error="llm_not_configured", resume_id=resume.id)
-
+    # Runs on the OpenAI Responses API regardless of what anyone picked in
+    # the editor, and the model is the configured default rather than this
+    # person's choice. Two reasons, and both are about the output rather than
+    # the cost: this call has to return JSON that validates against
+    # TalentProfilePayload, and `_request_body` shapes a Responses-API
+    # structured-output request to get it. A profile build is also not an
+    # interaction anyone is watching, so there is nothing for a preference to
+    # be a preference about.
+    #
+    # It is still metered like any other call, which is why the model id below
+    # is recorded: see jobs/refresh_profiles.py and the system_guard it holds.
     settings = get_settings()
-    model = normalize_openai_model(settings.openai_model)
+    if not openai_provider.OpenAIProvider().configured():
+        return ProfileBuildResult(error="llm_not_configured", resume_id=resume.id)
+    pinned = spec_or_passthrough(settings.pinned_chat_model() or DEFAULT_MODEL)
+    # An operator pin is honoured only when it names an OpenAI model. Pinning
+    # an Anthropic one must not take the matching feature down with it, and
+    # falling back to the catalogue default is better than refusing: this call
+    # has one job, and the default model does it.
+    spec = pinned if pinned.provider == openai_provider.NAME else spec_or_passthrough(
+        DEFAULT_MODEL
+    )
+    model = spec.id
     url = _responses_url(settings.openai_base_url or "https://api.openai.com/v1")
     headers = {
         "Authorization": f"Bearer {settings.openai_api_key}",

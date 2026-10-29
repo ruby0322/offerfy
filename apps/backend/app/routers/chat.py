@@ -25,7 +25,14 @@ from app.services.s3 import put_object
 from app.services.templates import is_template_switch_message, parse_preview_spec, template_api_block
 from app.services.typst_compile import compile_status
 from app.services.metering import metered, preflight
-from app.services.usage import approx_edits_left, balance, quota_event
+from app.services import model_choice
+from app.services.usage import (
+    approx_edits_left,
+    balance,
+    event_cost_uusd,
+    quota_event,
+    tier_of,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +99,15 @@ def _context_notice(rows: list[ChatMessage]) -> dict | None:
     }
 
 
-async def _parse_chat_input(request: Request) -> tuple[str, str | None, bytes | None, bool]:
+async def _parse_chat_input(
+    request: Request,
+) -> tuple[str, str | None, bytes | None, bool, str | None]:
+    """The message, the attachment, and the two per-turn options.
+
+    `model` is returned as whatever arrived, unvalidated: this function reads a
+    request and nothing more. services.model_choice decides whether the caller
+    may have it, and raises 400 if not.
+    """
     content_type = (request.headers.get("content-type") or "").lower()
     if "multipart/form-data" in content_type:
         form = await request.form()
@@ -102,6 +117,7 @@ async def _parse_chat_input(request: Request) -> tuple[str, str | None, bytes | 
             "true",
             "yes",
         }
+        chosen = str(form.get("model") or "").strip() or None
         upload = form.get("file")
         filename: str | None = None
         data: bytes | None = None
@@ -111,13 +127,13 @@ async def _parse_chat_input(request: Request) -> tuple[str, str | None, bytes | 
             filename = Path(raw_name).name
             payload = await read()
             data = payload if isinstance(payload, (bytes, bytearray)) else None
-        return message, filename, data, prefer_full
+        return message, filename, data, prefer_full, chosen
     try:
         payload = await request.json()
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid chat request") from exc
     body = ChatRequest.model_validate(payload)
-    return body.message, None, None, body.prefer_full_source
+    return body.message, None, None, body.prefer_full_source, body.model
 
 
 def _persist_tool(db: Session, resume_id: str, trace: dict) -> ChatMessage:
@@ -170,6 +186,13 @@ def _persist_usage(
         kind = event.get("purpose") or purpose
         if kind not in LLM_CALL_PURPOSES:
             kind = purpose
+        # Priced here, at today's rates, and stored on the row -- so that
+        # correcting a price later moves what new rounds cost and not what old
+        # ones did. The meter computes the same figure from the same event
+        # through the same function, so the two writes agree by construction
+        # rather than by being handed a shared value; they stay separate
+        # because they have different durabilities. See models.LlmCall.
+        cost, _ = event_cost_uusd(event)
         db.add(
             LlmCall(
                 resume_id=resume_id,
@@ -185,6 +208,7 @@ def _persist_usage(
                 reasoning_tokens=event.get("reasoning_tokens"),
                 cache_write_tokens=event.get("cache_write_tokens"),
                 source_chars=int(event.get("source_chars") or 0),
+                cost_uusd=cost,
             )
         )
         db.commit()
@@ -221,7 +245,9 @@ async def chat(
     # the check passed, and the only thing `metered` accepts.
     guard = preflight(db, user=user, guest=guest, purpose="chat")
 
-    message, filename, data, prefer_full_source = await _parse_chat_input(request)
+    message, filename, data, prefer_full_source, requested_model = await _parse_chat_input(
+        request
+    )
     message = (message or "").strip()
     if data is not None and filename:
         if not allowed_upload(filename):
@@ -234,6 +260,19 @@ async def chat(
         raise HTTPException(status_code=400, detail="Message or file required")
     if not llm_configured():
         raise HTTPException(status_code=503, detail="Chat is not configured")
+
+    # Resolved before the stream opens, for the same reason the quota is: a
+    # model this caller may not have is an ordinary 400 rather than an error
+    # frame on a stream that then has to end. An explicit choice is also
+    # *stored* here, so the picker on the next page load agrees with the model
+    # this turn ran on -- the alternative is a client that thinks it switched
+    # and a server that did not.
+    tier = tier_of(db, user, guest)
+    if requested_model:
+        model_choice.choose(db, user, guest, tier=tier, name=requested_model)
+    model = model_choice.selected(
+        db, user, guest, tier=tier, requested=requested_model
+    )
 
     stored = stored_user_message(message, filename)
     llm_content: str | list[dict] = stored
@@ -362,6 +401,7 @@ async def chat(
                 async for event in aiter_chat_edit(
                     messages,
                     original_source,
+                    model=model,
                     prefer_full_source=prefer_full_source,
                     extra_system=extra,
                     verify_compile=True,
@@ -408,6 +448,7 @@ async def chat(
                     async for event in aiter_chat_edit(
                         repair_messages,
                         new_source,
+                        model=model,
                         prefer_full_source=True,
                         extra_system=extra,
                         verify_compile=True,
@@ -421,7 +462,11 @@ async def chat(
                 # lost without costing an answer, and so may this.
                 try:
                     bal = balance(db, user, guest)
-                    yield _sse(quota_event(bal, approx_edits_left(db, user, guest, bal)))
+                    yield _sse(
+                        quota_event(
+                            bal, approx_edits_left(db, user, guest, bal, model=model)
+                        )
+                    )
                 except Exception:
                     logger.warning("quota frame failed", exc_info=True)
                     db.rollback()

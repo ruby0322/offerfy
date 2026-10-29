@@ -1,10 +1,11 @@
 import { getTranslations } from "next-intl/server";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
+import ModelCostTable from "@/components/ModelCostTable";
 import JsonLd from "@/components/seo/JsonLd";
 import { Link } from "@/i18n/navigation";
 import { organizationJsonLd } from "@/lib/seo";
-import { fetchUsageTiers, type UsageTierRow } from "@/lib/usage-tiers";
+import { fetchModelTable, fetchUsageTiers, type UsageTierRow } from "@/lib/usage-tiers";
 
 /**
  * The pricing page of a product with no prices.
@@ -26,7 +27,8 @@ import { fetchUsageTiers, type UsageTierRow } from "@/lib/usage-tiers";
  */
 export default async function PricingPage() {
   const t = await getTranslations("pricing");
-  const tiers = await fetchUsageTiers();
+  const tModels = await getTranslations("models");
+  const [tiers, models] = await Promise.all([fetchUsageTiers(), fetchModelTable()]);
 
   const included = t.raw("includedItems") as string[];
   const notes = t.raw("notes") as { heading: string; body: string }[];
@@ -79,6 +81,21 @@ export default async function PricingPage() {
           )}
 
           <div className="pricing-prose">
+            {/* The question a pricing page with no prices still owes an
+                answer to: if it is free, what is the limit made of? The
+                allowance is in the cards above; this is the rate the models
+                spend it at. Quoted against an account, which is what the
+                cards describe. */}
+            <section>
+              <h2 className="font-display">{tModels("heading")}</h2>
+              <p>{tModels("intro")}</p>
+              {models ? (
+                <ModelCostTable table={models} tier="registered" />
+              ) : (
+                <p>{tModels("unavailable")}</p>
+              )}
+            </section>
+
             <section>
               <h2 className="font-display">{t("includedHeading")}</h2>
               <p>{t("includedIntro")}</p>

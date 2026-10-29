@@ -57,16 +57,6 @@ export default function NavUsage() {
   const limit = countCapped ? usage.turn_limit : usage.limit_credits;
   if (limit === null || limit <= 0) return null;
 
-  // A turn-capped tier's own "3 of 4" already is the edit count, so the
-  // estimate would just repeat it. At zero it is dropped too: "about 0 more
-  // edits" is a worse way to say what the full bar and "20 of 20" already say,
-  // and unlike the editor there is no limit card here to carry the meaning.
-  const editsLeft = usage.approx_edits_left;
-  const editsLeftLabel =
-    !countCapped && typeof editsLeft === "number" && editsLeft > 0
-      ? t("usageEditsLeft", { count: editsLeft })
-      : null;
-
   // The separator trails the meter rather than leading it: the identity row
   // above already closes with one, and a leading separator here would double it
   // up the moment the fetch landed.
@@ -76,7 +66,6 @@ export default function NavUsage() {
         <UsageMeter
           usage={usage}
           label={countCapped ? t("usageEdits", { used, limit }) : t("usageCredits", { used, limit })}
-          editsLeftLabel={editsLeftLabel}
           resetLabel={t("usageResets")}
         />
       </div>

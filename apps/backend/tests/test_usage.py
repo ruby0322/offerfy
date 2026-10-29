@@ -97,6 +97,14 @@ def _spend(
                 output_tokens=output_tokens,
                 cache_write_tokens=cache_write_tokens,
                 created_at=when or datetime.now(timezone.utc),
+                # Priced at write, exactly as routers/chat._persist_usage does.
+                cost_uusd=usage.event_cost_uusd({
+                    "model": "gpt-5.6-terra",
+                    "input_tokens": input_tokens,
+                    "cached_tokens": cached_tokens,
+                    "output_tokens": output_tokens,
+                    "cache_write_tokens": cache_write_tokens,
+                })[0],
             )
         )
         db_session.commit()
@@ -897,6 +905,10 @@ def test_published_edits_come_from_the_measured_cost_not_the_credit(
     once the history trim cut a turn to a third of its old cost, publishing
     `credits` as the edit count understated by ~3x -- the page said "about 20"
     where the budget bought about 55.
+
+    Quoted against the *reference* model via `edit_uusd()`, not the raw
+    EDIT_UUSD: that constant belongs to the model it was measured on, which is
+    a different and dearer one. See usage.EDIT_MEASURED_ON.
     """
     rows = {r["name"]: r for r in client.get("/v1/usage/tiers").json()["tiers"]}
 
@@ -905,7 +917,7 @@ def test_published_edits_come_from_the_measured_cost_not_the_credit(
 
     for name in ("registered", "matching"):
         tier = usage.TIERS[name]
-        exact = tier.credits * usage.CREDIT_UUSD / usage.EDIT_UUSD
+        exact = tier.credits * usage.CREDIT_UUSD / usage.edit_uusd()
         published = rows[name]["approx_edits"]
         # Rounded to the nearest 5 and never zero.
         assert published % 5 == 0 and published >= 5
@@ -943,6 +955,77 @@ def test_the_edits_left_estimate_falls_back_to_a_measured_turn(
     user = _signed_in(client, db_session, sub="sub-fallback")
     body = client.get("/v1/usage").json()
     tier = usage.TIERS[usage.REGISTERED]
-    expected = tier.credits * usage.CREDIT_UUSD // usage.EDIT_UUSD
+    expected = tier.credits * usage.CREDIT_UUSD // usage.edit_uusd()
     assert body["approx_edits_left"] == expected > tier.credits
     assert user is not None
+
+
+# --------------------------------------------------------------------------
+# history is priced once
+# --------------------------------------------------------------------------
+
+
+def test_a_stored_cost_is_read_back_instead_of_re_priced(monkeypatch):
+    """The whole point of the column: a price list may move, history may not."""
+    row = _row(model="claude-opus-5-5", input_tokens=11_727, cached_tokens=9_375,
+               cache_write_tokens=2_349, output_tokens=141)
+    live, measured = usage.round_cost_uusd(row)
+    assert measured is True
+
+    row.cost_uusd = live
+    monkeypatch.setitem(usage.PRICES, "claude-opus-5-5",
+                        {"input": 5_000_000, "cached": 500_000,
+                         "cache_write": 6_250_000, "output": 25_000_000})
+    # Live pricing would now say something else; the row does not move.
+    assert usage._cost_from_counts(
+        row.model, row.input_tokens, row.cached_tokens,
+        row.output_tokens, row.cache_write_tokens)[0] != live
+    assert usage.round_cost_uusd(row) == (live, True)
+
+
+def test_a_row_without_a_stored_cost_is_still_priced_live():
+    """Rows written before the column existed. Deliberately not backfilled."""
+    row = _row(input_tokens=10_000, cached_tokens=8_000, output_tokens=100)
+    assert row.cost_uusd is None
+    live, measured = usage.round_cost_uusd(row)
+    assert live > 0 and measured is True
+
+
+def test_a_stored_zero_is_a_cost_not_a_missing_one():
+    """0 is a real answer for a round that billed almost nothing, and must not
+    read as 'nobody recorded this'."""
+    row = _row(input_tokens=1, output_tokens=0)
+    row.cost_uusd = 0
+    assert usage.round_cost_uusd(row) == (0, True)
+
+
+def test_an_unmeasured_round_keeps_saying_so_even_with_a_stored_cost():
+    """`measured` is a property of the evidence, not of the invoice: it has to
+    stay derived from the tokens, or the unmeasured counter stops counting."""
+    row = _row(input_tokens=None)
+    live, measured = usage.round_cost_uusd(row)
+    assert (live, measured) == (usage.FALLBACK_ROUND_UUSD, False)
+    row.cost_uusd = live
+    assert usage.round_cost_uusd(row) == (usage.FALLBACK_ROUND_UUSD, False)
+
+
+def test_a_price_change_no_longer_invents_a_reconciliation_gap(
+    client: TestClient, db_session, monkeypatch
+):
+    """The failure this column was added for, end to end.
+
+    Before it, correcting a model's price moved `llm_call_cost` while the
+    counters stood still, and `reconcile` reported that as spend that had
+    bypassed the meter -- on the admin overview, where a false positive
+    teaches people to ignore the one signal that catches a real one.
+    """
+    user = _signed_in(client, db_session, sub="sub-reprice")
+    _spend(db_session, user=user, turns=1, input_tokens=11_727,
+           cached_tokens=9_375, cache_write_tokens=2_349, output_tokens=141)
+    start = usage.window_start()
+    assert usage.reconcile(db_session, window_start=start) == []
+
+    monkeypatch.setitem(usage.PRICES, "gpt-5.6-terra",
+                        {"input": 9_000_000, "cached": 900_000,
+                         "cache_write": 11_250_000, "output": 45_000_000})
+    assert usage.reconcile(db_session, window_start=start) == []

@@ -5,8 +5,13 @@ import os
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 os.environ["APP_ENV"] = "development"
 os.environ.setdefault("AUTH_TOKEN_SECRET", "test-secret-for-unit-tests")
-os.environ.setdefault("OPENAI_MODEL", "gpt-5.6-terra")
+# The model pin blanked, so tests run on model_catalog.DEFAULT_MODEL rather
+# than on whatever the repo .env pins. setdefault is not enough: the .env is
+# read by app.config, and a pin naming a model the guest tier may not have
+# would quietly change which model half these tests exercise.
+os.environ["CHAT_MODEL"] = ""
 os.environ["OPENAI_API_KEY"] = ""
+os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["OFFERFY_SKIP_TEMPLATE_PREFETCH"] = "1"
 
 # Same reasoning as DATABASE_URL above, for object storage. Without these the
@@ -37,6 +42,20 @@ def _clear_settings_cache():
 @pytest.fixture
 def openai_enabled(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture
+def anthropic_enabled(monkeypatch):
+    """A credential for the second provider, and nothing else.
+
+    Separate from `openai_enabled` on purpose: the two keys are independent,
+    and services.model_choice.offered() filters the picker by which one is
+    present. A fixture that set both would make it impossible to test that.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

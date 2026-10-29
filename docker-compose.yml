@@ -105,7 +105,13 @@ services:
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.6-terra}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      # No default: app.services.model_catalog.DEFAULT_MODEL owns it, and a
+      # second copy of the default here is how the two come to disagree.
+      # Replaces OPENAI_MODEL, which is no longer read -- a setting named
+      # after one provider could not name a model from the other.
+      CHAT_MODEL: ${CHAT_MODEL:-}
       BACKEND_INTERNAL_URL: http://backend:8000
       TYPST_PACKAGE_PATH: /app/typst/packages
       TYPST_FONT_PATHS: /app/fonts
