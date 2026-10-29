@@ -688,11 +688,19 @@ def approx_edits_left(
     they actually spent is a better predictor than any list price, and it
     already carries whichever models they spent it on.
 
-    The trailing mean is therefore *not* re-scaled by a model switch. That is
-    deliberate but imperfect: someone who spent a week on Luna and switches to
-    Opus is quoted too many edits until the mean catches up. Rescaling would
-    need per-model counters, which the weekly counter table does not keep, and
-    the figure is labelled "about" in every place it is shown.
+    The trailing mean is therefore *not* re-scaled by a model switch, and it
+    is wrong in both directions until it catches up. Observed live on
+    2026-10-29, four turns on one account: after three turns on Opus and Sol,
+    switching to Haiku quoted 43 edits where Haiku's own published figure is
+    793 -- an 18x understatement, because the mean still remembers the
+    expensive turns. The opposite switch overstates by the same mechanism.
+
+    Rescaling would need per-model counters, which the weekly counter table
+    does not keep. Left as is because the alternative is worse: the person's
+    own history is a better predictor than a list price for everything except
+    the turn right after a switch, the figure is labelled "about" everywhere
+    it is shown, and /plan puts the per-model table beside it. Worth
+    revisiting if people switch models often, which nothing measures yet.
     """
     if bal.turns_remaining is not None:
         return max(bal.turns_remaining, 0)
