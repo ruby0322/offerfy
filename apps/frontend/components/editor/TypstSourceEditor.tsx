@@ -39,12 +39,26 @@ function editorTheme(dark: boolean) {
         color: "var(--muted)",
         border: "none",
       },
-      ".cm-activeLine": { backgroundColor: "var(--hover)" },
+      // Translucent, not var(--hover): drawSelection paints the selection into a
+      // layer at a negative z-index, behind .cm-content, so an opaque line
+      // background hides the selection on whichever line holds the cursor --
+      // which is every line of a single-line selection.
+      ".cm-activeLine": { backgroundColor: "color-mix(in srgb, var(--ink) 6%, transparent)" },
       ".cm-activeLineGutter": { backgroundColor: "var(--paper)" },
       ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--ink)" },
-      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
-        backgroundColor: "var(--rule)",
+      // Both depths are needed, and the focused one carries an extra .cm-editor
+      // only to outweigh drawSelection's own
+      // "&light.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground",
+      // which is five classes deep and would otherwise win with its default lilac.
+      ".cm-selectionLayer .cm-selectionBackground": {
+        backgroundColor: "var(--selection)",
       },
+      "&.cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground": {
+        backgroundColor: "var(--selection)",
+      },
+      // Only reachable in the no-drawSelection path: drawSelection forces native
+      // ::selection transparent at Prec.highest with !important.
+      ".cm-content ::selection": { backgroundColor: "var(--selection)" },
     },
     { dark },
   );
