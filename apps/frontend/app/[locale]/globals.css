@@ -12,6 +12,9 @@
   --cta: var(--clay);
   --cta-ink: #f6f1e8;
   --hover: color-mix(in srgb, var(--ink) 6%, var(--paper));
+  /* Text selection. One formula for both themes -- --clay and --sheet both
+     flip in .dark -- and it has to stay readable under --ink either way. */
+  --selection: color-mix(in srgb, var(--clay) 32%, var(--sheet));
   --success: #2f6f5e;
   --background: var(--paper);
   --foreground: var(--ink);
