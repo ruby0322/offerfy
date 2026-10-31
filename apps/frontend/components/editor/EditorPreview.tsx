@@ -2,13 +2,16 @@
 
 import { ReactNode, useState } from "react";
 import ZoomToolbar from "@/components/editor/ZoomToolbar";
+import PreviewTextLayer from "@/components/editor/PreviewTextLayer";
 import AtsStrip from "@/components/editor/AtsStrip";
 import { Button } from "@/components/ui/button";
 import type { AtsCheckName } from "@/lib/ats-checks";
-import type { AtsReport } from "@/lib/api";
+import type { AtsReport, PreviewTextLayer as TextLayer } from "@/lib/api";
 
 type Props = {
   previewUrls: string[];
+  /** Parallel to `previewUrls` where it is known; short or empty otherwise. */
+  textLayers?: TextLayer[];
   previewAlt: string;
   previewError: string;
   report: AtsReport | null;
@@ -23,6 +26,7 @@ type Props = {
 
 export default function EditorPreview({
   previewUrls,
+  textLayers,
   previewAlt,
   previewError,
   report,
@@ -56,19 +60,30 @@ export default function EditorPreview({
           </div>
           <div className="flex justify-center px-4 pt-2 pb-4">
             {previewUrls.length > 0 ? (
-              <div className="origin-top" style={{ transform: `scale(${scale})` }}>
+              <div
+                className="w-full max-w-[52rem] origin-top"
+                style={{ transform: `scale(${scale})` }}
+              >
                 <div className="flex flex-col gap-4">
                   {previewUrls.map((url, index) => (
+                    // The page box is the text layer's container: its own width
+                    // is what the overlay's cqw lengths resolve against, so it
+                    // has to be exactly the image's width.
                     <div
                       key={url}
-                      className="overflow-hidden rounded-lg border border-rule bg-sheet"
+                      className="relative w-full overflow-hidden rounded-lg border border-rule bg-sheet"
+                      style={{ containerType: "inline-size" }}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={url}
                         alt={`${previewAlt} ${index + 1}`}
-                        className="block h-auto w-[min(100%,52rem)]"
+                        className="block h-auto w-full select-none"
+                        draggable={false}
                       />
+                      {textLayers?.[index] ? (
+                        <PreviewTextLayer layer={textLayers[index]} />
+                      ) : null}
                     </div>
                   ))}
                 </div>

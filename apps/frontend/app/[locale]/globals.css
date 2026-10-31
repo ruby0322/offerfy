@@ -2004,3 +2004,12 @@ textarea {
   background: var(--paper);
   color: var(--ink);
 }
+
+/* The compiled preview is a picture of the page with a transparent copy of its
+   text laid over the top, so the selection highlight paints *over* the glyphs
+   instead of behind them. It has to stay translucent or it would hide the very
+   words it marks -- and that rules out the opaque --selection token the source
+   editor uses. */
+.preview-text-layer ::selection {
+  background: color-mix(in srgb, var(--clay) 30%, transparent);
+}

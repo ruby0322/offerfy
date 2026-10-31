@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from app.services.starter import resolve_font_paths, resolve_package_path
+from app.services.text_layer import extract_text_layer
 
 _TYPST_BIN_CANDIDATES = (
     os.environ.get("TYPST_BIN"),
@@ -131,6 +132,26 @@ def compile_typst_pages(
         if fallback.is_file():
             return [_svg_bytes(fallback)]
         raise HTTPException(status_code=500, detail="Typst produced no output")
+
+
+def compile_preview_pages(source: str) -> dict:
+    """The preview: one SVG per page, plus the text that makes it selectable.
+
+    Typst SVG draws glyph outlines and carries no text, so the selectable copy
+    comes from compiling the same source to PDF and reading the text back out.
+    That half is best effort: a PDF compile that fails, or text that cannot be
+    read, costs the selection and leaves the preview itself intact.
+    """
+    pages = [blob.decode("utf-8") for blob in compile_typst_pages(source, "svg")]
+    try:
+        layers = extract_text_layer(compile_typst(source, "pdf"))
+    except Exception:
+        layers = []
+    if len(layers) != len(pages):
+        # The two compiles disagreed about pagination. A layer over the wrong
+        # page is worse than no layer at all.
+        layers = []
+    return {"pages": pages, "text_layers": layers}
 
 
 def compile_status(source: str) -> dict:

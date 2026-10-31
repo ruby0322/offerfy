@@ -55,6 +55,8 @@ import {
   type ChatMessage,
   type ImportStatus,
   type MemoryItem,
+  type PreviewPages,
+  type PreviewTextLayer,
   type Resume,
   type ResumeFamily,
   type ResumeKind,
@@ -149,6 +151,7 @@ export default function EditorShell({ resumeId }: Props) {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+  const [textLayers, setTextLayers] = useState<PreviewTextLayer[]>([]);
   const [ats, setAts] = useState<AtsReport | null>(null);
   const [status, setStatus] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -304,18 +307,18 @@ export default function EditorShell({ resumeId }: Props) {
     [],
   );
 
-  const setPreviewPages = useCallback((svgs: string[]) => {
+  const setPreviewPages = useCallback((preview: PreviewPages) => {
     for (const url of previewObjectUrls.current) URL.revokeObjectURL(url);
-    const urls = svgs.map((svg) =>
+    const urls = preview.pages.map((svg) =>
       URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" })),
     );
     previewObjectUrls.current = urls;
     setPreviewUrls(urls);
+    setTextLayers(preview.textLayers);
   }, []);
 
   const refreshPreview = useCallback(async () => {
-    const pages = await getPreviewPages(resumeId);
-    setPreviewPages(pages);
+    setPreviewPages(await getPreviewPages(resumeId));
     setCompileError(null);
   }, [resumeId, setPreviewPages]);
 
@@ -428,9 +431,9 @@ export default function EditorShell({ resumeId }: Props) {
         if (cancelled) return;
         setLoaded(true);
         try {
-          const pages = await getPreviewPages(resumeId);
+          const preview = await getPreviewPages(resumeId);
           if (!cancelled) {
-            setPreviewPages(pages);
+            setPreviewPages(preview);
             setCompileError(null);
           }
         } catch (err) {
@@ -1294,6 +1297,7 @@ export default function EditorShell({ resumeId }: Props) {
   const previewPane = (
     <EditorPreview
       previewUrls={previewUrls}
+      textLayers={textLayers}
       previewAlt={t("preview")}
       previewError={t("previewError")}
       report={ats}

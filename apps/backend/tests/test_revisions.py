@@ -202,11 +202,11 @@ def test_restore_within_coalesce_window_keeps_prior_revision(client: TestClient,
 def test_backfill_existing_share_keeps_preview_source(client: TestClient, db_session, monkeypatch):
     seen: list[str] = []
 
-    def _pages(source, fmt):
+    def _pages(source):
         seen.append(source)
-        return [b"<svg>page</svg>"]
+        return {"pages": ["<svg>page</svg>"], "text_layers": []}
 
-    monkeypatch.setattr("app.routers.shares.compile_typst_pages", _pages)
+    monkeypatch.setattr("app.routers.shares.compile_preview_pages", _pages)
     created = client.post("/v1/resumes", json={"locale": "en", "title": "Old"}).json()
     resume_id = created["id"]
     original = created["typst_source"]
@@ -285,11 +285,11 @@ def test_first_public_auto_pins_draft(client: TestClient, db_session):
 def test_public_preview_ignores_draft_until_publish(client: TestClient, db_session, monkeypatch):
     seen: list[str] = []
 
-    def _pages(source, fmt):
+    def _pages(source):
         seen.append(source)
-        return [b"<svg>page</svg>"]
+        return {"pages": ["<svg>page</svg>"], "text_layers": []}
 
-    monkeypatch.setattr("app.routers.shares.compile_typst_pages", _pages)
+    monkeypatch.setattr("app.routers.shares.compile_preview_pages", _pages)
     user = _make_user(db_session, sub="sub-pub-draft", email="pubd@example.com")
     cookies = _session_cookie(user)
     created = client.post(

@@ -9,6 +9,8 @@ import {
   exportPublicPdf,
   getPublicPreviewPages,
   getPublicShare,
+  type PreviewPages,
+  type PreviewTextLayer,
 } from "@/lib/api";
 
 type Props = {
@@ -21,18 +23,20 @@ export default function ShareView({ token }: Props) {
   const t = useTranslations("share");
   const [title, setTitle] = useState("");
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+  const [textLayers, setTextLayers] = useState<PreviewTextLayer[]>([]);
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [previewError, setPreviewError] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const previewObjectUrls = useRef<string[]>([]);
 
-  const setPreviewPages = useCallback((svgs: string[]) => {
+  const setPreviewPages = useCallback((preview: PreviewPages) => {
     for (const url of previewObjectUrls.current) URL.revokeObjectURL(url);
-    const urls = svgs.map((svg) =>
+    const urls = preview.pages.map((svg) =>
       URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" })),
     );
     previewObjectUrls.current = urls;
     setPreviewUrls(urls);
+    setTextLayers(preview.textLayers);
   }, []);
 
   useEffect(() => {
@@ -47,15 +51,15 @@ export default function ShareView({ token }: Props) {
       setStatus("loading");
       setPreviewError(false);
       setTitle("");
-      setPreviewPages([]);
+      setPreviewPages({ pages: [], textLayers: [] });
       try {
         const meta = await getPublicShare(token);
         if (cancelled) return;
         setTitle(meta.title);
         setStatus("ok");
         try {
-          const pages = await getPublicPreviewPages(token);
-          if (!cancelled) setPreviewPages(pages);
+          const preview = await getPublicPreviewPages(token);
+          if (!cancelled) setPreviewPages(preview);
         } catch {
           if (!cancelled) setPreviewError(true);
         }
@@ -111,6 +115,7 @@ export default function ShareView({ token }: Props) {
       <div className="min-h-0 flex-1">
         <EditorPreview
           previewUrls={previewUrls}
+          textLayers={textLayers}
           previewAlt={t("preview")}
           previewError={
             status === "error" || previewError ? t("previewError") : ""

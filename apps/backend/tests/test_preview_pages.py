@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.services.typst_compile import (
+    compile_preview_pages,
     compile_typst,
     compile_typst_pages,
     sanitize_typst_svg,
@@ -117,3 +118,60 @@ def test_compile_png_ppi_doubles_pixel_width():
     w72 = Image.open(BytesIO(lo[0])).size[0]
     w144 = Image.open(BytesIO(hi[0])).size[0]
     assert w144 == pytest.approx(w72 * 2, rel=0.05)
+
+
+SELECTABLE = """
+#set page(width: 10cm, height: 8cm, margin: 8pt)
+#text(size: 20pt)[Ada Lovelace]
+
+Analytical Engine
+"""
+
+
+def _span_texts(layer: dict) -> list[str]:
+    return [span["text"] for span in layer["spans"]]
+
+
+def test_preview_pages_carry_a_text_layer_per_page():
+    preview = compile_preview_pages(TWO_PAGE)
+    assert len(preview["text_layers"]) == len(preview["pages"]) == 2
+    assert "First page" in _span_texts(preview["text_layers"][0])
+    assert "Second page" in _span_texts(preview["text_layers"][1])
+
+
+def test_text_layer_coordinates_match_the_svg_viewbox():
+    """The overlay only lines up if a span's units are the SVG's own units."""
+    preview = compile_preview_pages(SELECTABLE)
+    layer = preview["text_layers"][0]
+    svg = preview["pages"][0]
+    view_box = re.search(r'viewBox="0 0 ([0-9.]+) ([0-9.]+)"', svg)
+    assert view_box
+    assert layer["width"] == pytest.approx(float(view_box.group(1)), rel=1e-3)
+    assert layer["height"] == pytest.approx(float(view_box.group(2)), rel=1e-3)
+
+    name = next(s for s in layer["spans"] if s["text"] == "Ada Lovelace")
+    # Measured from the top edge, inside the 8pt margin, and set at 20pt.
+    assert name["x"] == pytest.approx(8, abs=1)
+    assert 0 < name["y"] < 30
+    assert name["size"] == pytest.approx(20, abs=0.1)
+    assert name["width"] > name["size"]
+
+
+def test_preview_endpoint_returns_text_layers(client: TestClient):
+    created = client.post("/v1/resumes", json={"locale": "en", "title": "Pick"}).json()
+    client.put(f"/v1/resumes/{created['id']}", json={"typst_source": SELECTABLE})
+    body = client.get(f"/v1/resumes/{created['id']}/preview").json()
+    assert len(body["text_layers"]) == 1
+    assert "Ada Lovelace" in _span_texts(body["text_layers"][0])
+
+
+def test_text_layer_is_skipped_rather_than_fatal(monkeypatch):
+    """Losing the text must cost the selection, not the preview."""
+    import app.services.typst_compile as module
+
+    monkeypatch.setattr(
+        module, "extract_text_layer", lambda _pdf: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    preview = compile_preview_pages(ONE_PAGE)
+    assert len(preview["pages"]) == 1
+    assert preview["text_layers"] == []
