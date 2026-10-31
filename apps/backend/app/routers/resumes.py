@@ -40,7 +40,10 @@ from app.services.revisions import (
 )
 from app.services.s3 import delete_object, put_object
 from app.services.starter import default_title, generate_starter, title_from_filename
-from app.services.typst_compile import compile_typst, compile_typst_pages
+from app.services.typst_compile import (
+    compile_preview_pages,
+    compile_typst,
+)
 
 router = APIRouter()
 
@@ -442,8 +445,7 @@ def compile_resume(
 
 
 def _preview_pages(source: str) -> PreviewPages:
-    blobs = compile_typst_pages(source, "svg")
-    return PreviewPages(pages=[blob.decode("utf-8") for blob in blobs])
+    return PreviewPages(**compile_preview_pages(source))
 
 
 @router.get("/v1/resumes/{resume_id}/preview", response_model=PreviewPages)

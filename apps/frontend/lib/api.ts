@@ -292,12 +292,80 @@ export async function deleteMemory(itemId: string): Promise<void> {
   }
 }
 
-export async function getPreviewPages(id: string): Promise<string[]> {
-  const data = await apiJson<unknown>(`/api/v1/resumes/${id}/preview`);
-  if (data && typeof data === "object" && Array.isArray((data as { pages?: unknown }).pages)) {
-    return (data as { pages: unknown[] }).pages.filter((page): page is string => typeof page === "string");
+export type PreviewTextSpan = {
+  text: string;
+  /** Left edge, in the page SVG's own units -- one unit is one PDF point. */
+  x: number;
+  /** Top edge of the line, measured down from the top of the page. */
+  y: number;
+  width: number;
+  height: number;
+  /** Font size the line is set in, in the same units. */
+  size: number;
+};
+
+/** One page's text, for laying a selectable copy over the picture of it. */
+export type PreviewTextLayer = {
+  width: number;
+  height: number;
+  spans: PreviewTextSpan[];
+};
+
+export type PreviewPages = {
+  /** One SVG document per page. */
+  pages: string[];
+  /** Parallel to `pages`, or empty when the text could not be recovered. */
+  textLayers: PreviewTextLayer[];
+};
+
+function finiteNumber(record: Record<string, unknown>, key: string): number {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function parseTextLayer(value: unknown): PreviewTextLayer | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.spans)) return null;
+  const spans: PreviewTextSpan[] = [];
+  for (const entry of record.spans) {
+    if (!entry || typeof entry !== "object") continue;
+    const span = entry as Record<string, unknown>;
+    if (typeof span.text !== "string") continue;
+    spans.push({
+      text: span.text,
+      x: finiteNumber(span, "x"),
+      y: finiteNumber(span, "y"),
+      width: finiteNumber(span, "width"),
+      height: finiteNumber(span, "height"),
+      size: finiteNumber(span, "size"),
+    });
   }
-  return [];
+  return {
+    width: finiteNumber(record, "width"),
+    height: finiteNumber(record, "height"),
+    spans,
+  };
+}
+
+function parsePreviewPages(data: unknown): PreviewPages {
+  const empty: PreviewPages = { pages: [], textLayers: [] };
+  if (!data || typeof data !== "object") return empty;
+  const record = data as Record<string, unknown>;
+  if (!Array.isArray(record.pages)) return empty;
+  const pages = record.pages.filter((page): page is string => typeof page === "string");
+  const raw = Array.isArray(record.text_layers) ? record.text_layers : [];
+  const layers = raw.map(parseTextLayer);
+  // The layers are positional, so they are only usable as a complete set: one
+  // missing entry would shift every page after it onto the wrong text.
+  const aligned =
+    layers.length === pages.length &&
+    layers.every((layer): layer is PreviewTextLayer => layer !== null);
+  return { pages, textLayers: aligned ? (layers as PreviewTextLayer[]) : [] };
+}
+
+export async function getPreviewPages(id: string): Promise<PreviewPages> {
+  return parsePreviewPages(await apiJson<unknown>(`/api/v1/resumes/${id}/preview`));
 }
 
 export async function compileResume(
@@ -381,14 +449,10 @@ export async function getPublicShare(token: string): Promise<PublicShare> {
   return apiJson<PublicShare>(`/api/v1/shares/${encodeURIComponent(token)}`);
 }
 
-export async function getPublicPreviewPages(token: string): Promise<string[]> {
-  const data = await apiJson<unknown>(
-    `/api/v1/shares/${encodeURIComponent(token)}/preview`,
+export async function getPublicPreviewPages(token: string): Promise<PreviewPages> {
+  return parsePreviewPages(
+    await apiJson<unknown>(`/api/v1/shares/${encodeURIComponent(token)}/preview`),
   );
-  if (data && typeof data === "object" && Array.isArray((data as { pages?: unknown }).pages)) {
-    return (data as { pages: unknown[] }).pages.filter((page): page is string => typeof page === "string");
-  }
-  return [];
 }
 
 export async function exportPublicPdf(token: string): Promise<Blob> {

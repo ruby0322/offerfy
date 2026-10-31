@@ -122,8 +122,19 @@ def test_get_resume_includes_created_at(client: TestClient):
 
 def test_public_share_meta_preview_export(client: TestClient, db_session, monkeypatch):
     monkeypatch.setattr(
-        "app.routers.shares.compile_typst_pages",
-        lambda source, fmt: [b"<svg>page</svg>"],
+        "app.routers.shares.compile_preview_pages",
+        lambda source: {
+            "pages": ["<svg>page</svg>"],
+            "text_layers": [
+                {
+                    "width": 100,
+                    "height": 200,
+                    "spans": [
+                        {"text": "Public Me", "x": 1, "y": 2, "width": 30, "height": 4, "size": 4}
+                    ],
+                }
+            ],
+        },
     )
     monkeypatch.setattr(
         "app.routers.shares.compile_typst",
@@ -153,6 +164,9 @@ def test_public_share_meta_preview_export(client: TestClient, db_session, monkey
     preview = anon.get(f"/v1/shares/{token}/preview")
     assert preview.status_code == 200
     assert preview.json()["pages"] == ["<svg>page</svg>"]
+    # The shared page is selectable too: the text travels with the picture.
+    layer = preview.json()["text_layers"][0]
+    assert [span["text"] for span in layer["spans"]] == ["Public Me"]
 
     export = anon.get(f"/v1/shares/{token}/export")
     assert export.status_code == 200

@@ -14,7 +14,11 @@ from app.models import Resume, ResumeShare, User
 from app.schemas import PreviewPages, PublicShareOut, ShareState, ShareUpdate
 from app.services.og_image import compose_og_png, og_cache_get, og_cache_put, og_etag
 from app.services.revisions import build_share_state, pin_current_draft, published_source
-from app.services.typst_compile import compile_typst, compile_typst_pages
+from app.services.typst_compile import (
+    compile_preview_pages,
+    compile_typst,
+    compile_typst_pages,
+)
 
 router = APIRouter()
 
@@ -125,8 +129,7 @@ def public_share(token: str, db: Session = Depends(get_db)):
 @router.get("/v1/shares/{token}/preview", response_model=PreviewPages)
 def public_preview(token: str, db: Session = Depends(get_db)):
     _resume, source = _published_or_404(token, db)
-    blobs = compile_typst_pages(source, "svg")
-    return PreviewPages(pages=[blob.decode("utf-8") for blob in blobs])
+    return PreviewPages(**compile_preview_pages(source))
 
 
 @router.get("/v1/shares/{token}/export")
