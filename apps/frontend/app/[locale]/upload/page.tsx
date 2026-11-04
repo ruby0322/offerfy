@@ -6,8 +6,7 @@ import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
 import Dropzone from "@/components/upload/Dropzone";
 import { useRouter } from "@/i18n/navigation";
-import { ApiError, uploadResume } from "@/lib/api";
-import { stashPendingUpload } from "@/lib/pending-upload";
+import { ApiError, startImport, uploadResume } from "@/lib/api";
 
 export default function UploadPage() {
   const t = useTranslations("upload");
@@ -21,7 +20,12 @@ export default function UploadPage() {
     setError(null);
     try {
       const resume = await uploadResume({ file, locale });
-      stashPendingUpload(resume.id, file);
+      // The import is server-owned from here: nothing about the file itself
+      // needs to survive in the browser, so a reload between this call and
+      // the first chat turn costs nothing. Only navigate once it is
+      // actually running -- an editor with no import to show progress for
+      // is the exact "looks stuck" failure this replaces.
+      await startImport(resume.id);
       router.push(`/editor/${resume.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("error"));

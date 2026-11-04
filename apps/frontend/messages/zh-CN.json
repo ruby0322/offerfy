@@ -300,7 +300,6 @@
     "cmdTailorPrompt": "用 create_tailor 针对下面这个岗位做一份定制版简历。标题请写出公司与职位，并把岗位内容放进 target_context，让新版本打开时就知道自己是为什么而写。\n\n岗位与岗位描述：\n",
     "guestSaveNudge": "已下载。这份简历只存在这个浏览器，登录才能保存。",
     "chatNotConfigured": "未设置 OpenAI",
-    "importFillPrompt": "请用这份上传的简历填入 basic-resume 模板。先调用 read_typst，再用完整 source 调用 apply_typst_edit。对应姓名、email、学历、工作、项目与技能。保留 basic-resume 套件、A4 纸张与 accent 颜色。",
     "importTitle": "正在导入简历",
     "importPlanFound": "找到 {total} 个待导入的部分",
     "importWorking": "正在读取您的简历…",

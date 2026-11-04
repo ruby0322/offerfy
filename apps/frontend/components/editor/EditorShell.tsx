@@ -73,7 +73,6 @@ import { formatUserAttachmentMessage, parseToolPayload } from "@/lib/chat-tools"
 import type { AtsCheckName } from "@/lib/ats-checks";
 import { importTurnStartsAt, toImportView, type ImportSnapshot } from "@/lib/import-progress";
 import { peekPendingCreate, takePendingCreate } from "@/lib/pending-create";
-import { peekPendingUpload, takePendingUpload } from "@/lib/pending-upload";
 
 const TypstSourceEditor = dynamic(
   () => import("@/components/editor/TypstSourceEditor"),
@@ -189,9 +188,7 @@ export default function EditorShell({ resumeId }: Props) {
   // picker and not the turn.
   const [models, setModels] = useState<ModelTable | null>(null);
   const [leftTab, setLeftTab] = useState(() =>
-    peekPendingUpload(resumeId) || peekPendingCreate(resumeId)
-      ? "chat"
-      : (loadEditorTab(resumeId) ?? "typst"),
+    peekPendingCreate(resumeId) ? "chat" : (loadEditorTab(resumeId) ?? "typst"),
   );
   // A phone cannot hold the source and the preview side by side. There the
   // resume is the page and the tools ride in a sheet pulled up over it.
@@ -419,6 +416,16 @@ export default function EditorShell({ resumeId }: Props) {
   // On mount: pick up whatever import run (if any) this resume has, and
   // keep following it if it is still running. This is what makes a reload
   // mid-import re-attach instead of losing the card.
+  //
+  // It also replaces the old pending-upload handoff's other job: landing a
+  // freshly uploaded resume on the chat tab, where the progress card lives,
+  // instead of the Typst source. There is no longer a client-side marker
+  // for "this upload is fresh" -- the server-owned import record is one --
+  // so any import this resume has ever had, combined with this being the
+  // first visit this session (no tab saved yet), is what opens chat. Once
+  // that happens the save below means every later mount reads "chat"
+  // straight out of `loadEditorTab` and this branch no longer fires, so the
+  // user's own later tab choice is never overridden.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -428,6 +435,10 @@ export default function EditorShell({ resumeId }: Props) {
         importAppliedRef.current = snap.applied;
         setImportSnapshot(snap);
         if (snap.status === "running") attachImportStream();
+        if (loadEditorTab(resumeId) == null) {
+          setLeftTab("chat");
+          saveEditorTab(resumeId, "chat");
+        }
       } catch {
         /* import status is optional; the editor works without it */
       }
@@ -895,7 +906,6 @@ export default function EditorShell({ resumeId }: Props) {
   useEffect(() => {
     if (!loaded || kind !== "tailor") return;
     if (messages.length > 0 || kickstartedRef.current) return;
-    if (peekPendingUpload(resumeId)) return;
     const prompt = t("tailorKickstartPrompt", {
       role: targetLabel || t("tailorKickstartRoleUnknown"),
       context: targetContext || t("tailorKickstartContextUnknown"),
@@ -918,18 +928,6 @@ export default function EditorShell({ resumeId }: Props) {
     if (!takePendingCreate(resumeId)) return;
     saveEditorTab(resumeId, "chat");
   }, [resumeId]);
-
-  useEffect(() => {
-    if (!loaded) return;
-    if (!peekPendingUpload(resumeId)) return;
-    const prompt = t("importFillPrompt");
-    const handle = window.setTimeout(() => {
-      const file = takePendingUpload(resumeId);
-      if (!file) return;
-      void sendUserChatRef.current(prompt, file, { preferFullSource: true });
-    }, 0);
-    return () => window.clearTimeout(handle);
-  }, [loaded, resumeId, t]);
 
   function onDraftChange(value: string) {
     setDraft(value);

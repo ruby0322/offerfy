@@ -300,7 +300,6 @@
     "cmdTailorPrompt": "用 create_tailor 針對下面這個職位做一份客製版履歷。標題請寫出公司與職稱，並把職缺內容放進 target_context，讓新版本開啟時就知道自己是為什麼而寫。\n\n職位與職缺描述：\n",
     "guestSaveNudge": "已下載。這份履歷只存在這個瀏覽器，登入才能保存。",
     "chatNotConfigured": "未設定 OpenAI",
-    "importFillPrompt": "請用這份上傳的履歷填入 basic-resume 模板。先呼叫 read_typst，再用完整 source 呼叫 apply_typst_edit。對應姓名、email、學歷、工作、專案與技能。保留 basic-resume 套件、A4 紙張與 accent 顏色。",
     "importTitle": "匯入履歷中",
     "importPlanFound": "找到 {total} 個待匯入的區塊",
     "importWorking": "正在讀取您的履歷…",
