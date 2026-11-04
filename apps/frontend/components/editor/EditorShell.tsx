@@ -72,7 +72,12 @@ import type { AuthUser, ModelRow, ModelTable, Usage, UsageRefusal } from "@/lib/
 import { formatUserAttachmentMessage, parseToolPayload } from "@/lib/chat-tools";
 import type { AtsCheckName } from "@/lib/ats-checks";
 import { loadEditorTab, saveEditorTab } from "@/lib/editor-tab";
-import { importTurnStartsAt, toImportView, type ImportSnapshot } from "@/lib/import-progress";
+import {
+  importSourceChanged,
+  importTurnStartsAt,
+  toImportView,
+  type ImportSnapshot,
+} from "@/lib/import-progress";
 import { peekPendingCreate, takePendingCreate } from "@/lib/pending-create";
 
 const TypstSourceEditor = dynamic(
@@ -373,28 +378,62 @@ export default function EditorShell({ resumeId }: Props) {
     refreshAfterSourceChangeRef.current = refreshAfterSourceChange;
   }, [refreshAfterSourceChange]);
 
-  // Opens the live stream for a running import and keeps the latest
-  // snapshot in state. When `applied` increases between snapshots, a
-  // section just landed, so the preview is repainted -- that is what makes
-  // it grow section by section instead of jumping once at the very end.
+  // One import snapshot, applied to the editor.
+  //
+  // `applied` growing means a section just landed, so the resume's source on
+  // the server is no longer what `source` holds. The terminal `done`
+  // snapshot adopts it too: the run's last edit can arrive in the very frame
+  // that ends it, and a stream that drops just before it would otherwise
+  // never see `applied` grow for that section.
+  //
+  // **Adopting the source is the load-bearing part, not the repaint.**
+  // `refreshAfterSourceChange` reads everything back from the server, so the
+  // preview, the PDF and the ATS report are all correct while `source` still
+  // holds the pre-import starter template this mount loaded. Every write
+  // path -- `flushSave` on leave/switch/new-tailor, and the 400ms autosave
+  // -- PUTs that state verbatim, which lands inside `set_draft_source`'s
+  // 120s coalesce window and overwrites the import's own revision in place,
+  // so history cannot recover it either. Pulling the authoritative source in
+  // and guarding it with `skipTimers`, exactly as the chat turn's `source`
+  // frame does, is what stops a finished import being silently replaced by
+  // the template it started from.
+  const onImportSnapshot = useCallback(
+    async (next: ImportSnapshot) => {
+      setImportSnapshot(next);
+      const sourceChanged = importSourceChanged(next, importAppliedRef.current);
+      importAppliedRef.current = next.applied;
+      if (sourceChanged) {
+        try {
+          const fresh = await getResume(resumeId);
+          skipTimers.current = true;
+          setSource(fresh.typst_source || "");
+          setUpdatedAt(fresh.updated_at || "");
+          setUnpublishedChanges(fresh.unpublished_changes ?? true);
+          try {
+            await refreshAfterSourceChangeRef.current();
+          } finally {
+            skipTimers.current = false;
+          }
+        } catch {
+          /* the next snapshot tries again, and the import itself is
+             unaffected -- it writes the source server-side */
+        }
+      }
+    },
+    [resumeId],
+  );
+
+  // Opens the live stream for a running import and feeds every snapshot
+  // through `onImportSnapshot`.
   const attachImportStream = useCallback(() => {
     importAbortRef.current?.abort();
     const controller = new AbortController();
     importAbortRef.current = controller;
-    void streamImport(
-      resumeId,
-      async (next) => {
-        setImportSnapshot(next);
-        const grew = next.applied > importAppliedRef.current;
-        importAppliedRef.current = next.applied;
-        if (grew) await refreshAfterSourceChangeRef.current();
-      },
-      controller.signal,
-    ).catch(() => {
+    void streamImport(resumeId, onImportSnapshot, controller.signal).catch(() => {
       /* a dropped connection just stops updating the card; a reload
          re-attaches via the mount effect below */
     });
-  }, [resumeId]);
+  }, [onImportSnapshot, resumeId]);
 
   // On mount: pick up whatever import run (if any) this resume has, and
   // keep following it if it is still running. This is what makes a reload
@@ -450,6 +489,10 @@ export default function EditorShell({ resumeId }: Props) {
     () => (importSnapshot ? toImportView(importSnapshot) : undefined),
     [importSnapshot],
   );
+  // While a run is live the server owns `resume.typst_source`: it is being
+  // rewritten section by section, and `source` here is only as fresh as the
+  // last snapshot that adopted it. Read by `flushSave`.
+  const importRunning = importView?.mode === "running";
 
   useEffect(() => {
     let live = true;
@@ -904,6 +947,14 @@ export default function EditorShell({ resumeId }: Props) {
   }
 
   async function flushSave(): Promise<boolean> {
+    // Belt and braces for the clobber `onImportSnapshot` fixes at the source:
+    // during an import there is nothing of the person's to flush, and writing
+    // our copy of `source` back would overwrite the sections the agent has
+    // applied since the last snapshot we adopted. "Nothing to flush" is not a
+    // failure, so the caller still leaves, switches or creates its tailor --
+    // the same way a chat send in flight blocks those callers rather than
+    // letting them write a half-streamed source.
+    if (importRunning) return true;
     skipTimers.current = true;
     try {
       const saved = await putResumeSource(resumeId, { typst_source: source });

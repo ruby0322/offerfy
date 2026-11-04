@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ImportSnapshot, ImportStepStatus } from "./import-progress";
-import { importTurnStartsAt, toImportView } from "./import-progress";
+import { importSourceChanged, importTurnStartsAt, toImportView } from "./import-progress";
 
 function step(
   key: string,
@@ -110,4 +110,31 @@ test("steps preserve key, label, status and detail", () => {
     detail: "working",
     unlabelled: false,
   });
+});
+
+// --------------------------------------------------------------------------
+// importSourceChanged -- the rule behind adopting the server's source
+// --------------------------------------------------------------------------
+
+test("a snapshot whose applied count grew means the source moved", () => {
+  assert.equal(importSourceChanged(snap({ applied: 3 }), 2), true);
+});
+
+test("a snapshot that only bumped version leaves the source alone", () => {
+  // A plan declaration bumps `version` without applying anything.
+  assert.equal(importSourceChanged(snap({ version: 9, applied: 2 }), 2), false);
+});
+
+test("the terminal done snapshot always means the source moved", () => {
+  // The run's last edit can land in the same write that ends the run, so
+  // `done` must not depend on having seen `applied` grow.
+  assert.equal(importSourceChanged(snap({ status: "done", applied: 2 }), 2), true);
+});
+
+test("a failed run that applied nothing new leaves the source alone", () => {
+  assert.equal(importSourceChanged(snap({ status: "failed", applied: 2 }), 2), false);
+});
+
+test("a failed run that applied a section still means the source moved", () => {
+  assert.equal(importSourceChanged(snap({ status: "failed", applied: 3 }), 2), true);
 });

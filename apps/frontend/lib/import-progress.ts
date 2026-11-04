@@ -66,3 +66,21 @@ export function toImportView(snap: ImportSnapshot): ImportView {
 export function importTurnStartsAt(snap: ImportSnapshot): number {
   return Date.parse(snap.started_at);
 }
+
+/**
+ * Whether this snapshot means the resume's source on the server has moved on
+ * from the copy the editor is holding, so the editor must adopt the server's.
+ *
+ * `seenApplied` is the `applied` count of the last snapshot already accounted
+ * for. A higher one means another section landed.
+ *
+ * `done` counts as changed on its own, whatever `applied` says. The run's last
+ * edit can land in the same write that ends the run, and a stream that
+ * reconnects or drops a frame can miss the growth entirely -- and the cost of
+ * being wrong is asymmetric: one redundant fetch against an import that is
+ * silently replaced by whatever stale source the editor still holds (see
+ * `EditorShell`'s `onImportSnapshot`).
+ */
+export function importSourceChanged(snap: ImportSnapshot, seenApplied: number): boolean {
+  return snap.applied > seenApplied || snap.status === "done";
+}
