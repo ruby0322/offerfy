@@ -89,6 +89,14 @@ type Props = {
   onSubmit: (event: FormEvent) => void;
   sending: boolean;
   placeholder: string;
+  /**
+   * Why the composer is closed for a reason other than a turn in flight --
+   * today, an import still writing this resume, where a second turn would put
+   * two agents on one document. Rendered in place of the placeholder, so the
+   * person reads a reason instead of meeting a control that does nothing.
+   * Absent or empty leaves the composer open.
+   */
+  composerBlockedReason?: string | null;
   sendLabel: string;
   emptyHint: string;
   ariaLabel: string;
@@ -179,6 +187,7 @@ export default function EditorChatPanel({
   onSubmit,
   sending,
   placeholder,
+  composerBlockedReason,
   sendLabel,
   emptyHint,
   ariaLabel,
@@ -334,8 +343,13 @@ export default function EditorChatPanel({
     }, 50);
   }
 
+  // Closed, not busy: `sending` already covers "a turn is running". This is
+  // something outside the composer holding the door, and it carries its own
+  // sentence (see `composerBlockedReason`).
+  const composerBlocked = Boolean(composerBlockedReason);
+
   function canSend() {
-    return Boolean(draft.trim() || attachment) && !sending;
+    return Boolean(draft.trim() || attachment) && !sending && !composerBlocked;
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -722,8 +736,8 @@ export default function EditorChatPanel({
                 acceptFile(file);
               }
             }}
-            placeholder={placeholder}
-            disabled={sending}
+            placeholder={composerBlockedReason || placeholder}
+            disabled={sending || composerBlocked}
             aria-label={ariaLabel}
             aria-autocomplete="list"
             aria-expanded={commandsOpen}
@@ -747,7 +761,7 @@ export default function EditorChatPanel({
             <button
               type="button"
               className="chat-composer-tool"
-              disabled={sending}
+              disabled={sending || composerBlocked}
               aria-label={attachLabel}
               title={`${attachLabel} · ${attachHint}`}
               onClick={() => fileRef.current?.click()}
@@ -759,7 +773,7 @@ export default function EditorChatPanel({
               type="file"
               className="hidden"
               accept={ACCEPT}
-              disabled={sending}
+              disabled={sending || composerBlocked}
               onChange={(event) => {
                 acceptFile(event.target.files?.[0]);
                 event.target.value = "";

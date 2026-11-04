@@ -314,6 +314,7 @@
     "importErrorUploadMissing": "我們無法讀取您上傳的檔案。",
     "importErrorUnexpected": "匯入過程中發生問題。",
     "importActionError": "目前無法開始匯入，請稍後再試一次。",
+    "importComposerBusy": "正在匯入您的履歷，完成後即可開始對話。",
     "loadError": "無法載入履歷。",
     "previewError": "預覽編譯失敗。",
     "mobileAsk": "請 AI 修改這份履歷…",

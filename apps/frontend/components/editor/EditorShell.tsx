@@ -73,9 +73,13 @@ import { formatUserAttachmentMessage, parseToolPayload } from "@/lib/chat-tools"
 import type { AtsCheckName } from "@/lib/ats-checks";
 import { loadEditorTab, saveEditorTab } from "@/lib/editor-tab";
 import {
+  emptyImportCursor,
+  importBlocksSave,
   importCardIndex,
-  importSourceChanged,
   importTurnStartsAt,
+  nextImportCursor,
+  planImportAdopt,
+  seedImportCursor,
   toImportView,
   type ImportSnapshot,
 } from "@/lib/import-progress";
@@ -239,14 +243,12 @@ export default function EditorShell({ resumeId }: Props) {
   const kickstartedRef = useRef(false);
   const savePromptedRef = useRef(false);
   const previewObjectUrls = useRef<string[]>([]);
-  // The last `applied` count seen from an import snapshot. Compared against
-  // the next one to tell "a section just landed" from "the plan was just
-  // declared" -- both bump `version`, but only the former should repaint.
-  const importAppliedRef = useRef(0);
-  // The last `version` seen from an import snapshot. Every write the runner
-  // makes bumps it, which is what tells the editor there may be new `tool` or
-  // `assistant` rows to re-read.
-  const importVersionRef = useRef(0);
+  // How much of the running import this mount has taken in: the `applied`
+  // count whose source landed in `source`, the `version` whose transcript was
+  // read back, and whether an adopt is still owed. A ref rather than state
+  // because every save path has to read it at call time -- `outstanding` goes
+  // up and comes down inside one `onImportSnapshot` call, between renders.
+  const importCursorRef = useRef(emptyImportCursor());
   // The stream this mount opened, so a remount (or a retry) aborts the old
   // one before starting a new one rather than leaving two running.
   const importAbortRef = useRef<AbortController | null>(null);
@@ -405,20 +407,64 @@ export default function EditorShell({ resumeId }: Props) {
   // `refreshAfterSourceChange` reads everything back from the server, so the
   // preview, the PDF and the ATS report are all correct while `source` still
   // holds the pre-import starter template this mount loaded. Every write
-  // path -- `flushSave` on leave/switch/new-tailor, and the 400ms autosave
-  // -- PUTs that state verbatim, which lands inside `set_draft_source`'s
-  // 120s coalesce window and overwrites the import's own revision in place,
-  // so history cannot recover it either. Pulling the authoritative source in
-  // and guarding it with `skipTimers`, exactly as the chat turn's `source`
-  // frame does, is what stops a finished import being silently replaced by
-  // the template it started from.
+  // path -- `flushSave` on leave/switch/new-tailor, `sendUserChat`'s pre-turn
+  // PUT, and the 400ms autosave -- PUTs that state verbatim, which lands
+  // inside `set_draft_source`'s 120s coalesce window and overwrites the
+  // import's own revision in place, so history cannot recover it either.
+  // Pulling the authoritative source in and guarding it with `skipTimers`,
+  // exactly as the chat turn's `source` frame does, is what stops a finished
+  // import being silently replaced by the template it started from.
+  //
+  // `importCursorRef` is what makes that safe rather than merely likely:
+  //
+  // - The adopt is marked outstanding **before** the fetch and cleared only
+  //   once `setSource` has run, so `importBlocksSave` refuses every write for
+  //   exactly as long as this buffer is behind the server's -- including the
+  //   two round trips after the terminal frame has already flipped
+  //   `importRunning` off.
+  // - `applied` advances only once the adopt lands, so a transient
+  //   `getResume` failure is genuinely retried by the next frame. On the
+  //   terminal frame there is no next frame and nothing retries: the flag
+  //   then stays up and the save paths keep refusing for the rest of the
+  //   session. That costs the person a stale preview until they reload; the
+  //   alternative cost them the import.
+  // - The adopt runs **before** the transcript read, because a round trip
+  //   between the two is a window in which the run is no longer "running"
+  //   and `source` is still the pre-import template.
   const onImportSnapshot = useCallback(
     async (next: ImportSnapshot) => {
       setImportSnapshot(next);
-      const sourceChanged = importSourceChanged(next, importAppliedRef.current);
-      const versionAdvanced = next.version > importVersionRef.current;
-      importAppliedRef.current = next.applied;
-      importVersionRef.current = next.version;
+      const plan = planImportAdopt(next, importCursorRef.current);
+      if (plan.adoptSource) {
+        importCursorRef.current = { ...importCursorRef.current, outstanding: true };
+        let adopted = false;
+        try {
+          const fresh = await getResume(resumeId);
+          skipTimers.current = true;
+          setSource(fresh.typst_source || "");
+          setUpdatedAt(fresh.updated_at || "");
+          setUnpublishedChanges(fresh.unpublished_changes ?? true);
+          adopted = true;
+          try {
+            await refreshAfterSourceChangeRef.current();
+          } finally {
+            skipTimers.current = false;
+          }
+        } catch {
+          /* the import itself is unaffected -- it writes the source
+             server-side. The cursor stays in debt, which both asks the next
+             frame to retry and keeps every save path from writing this stale
+             buffer over the run's own work. */
+        } finally {
+          importCursorRef.current = nextImportCursor(
+            next,
+            importCursorRef.current,
+            adopted ? "adopted" : "failed",
+          );
+        }
+      } else {
+        importCursorRef.current = nextImportCursor(next, importCursorRef.current, "not-needed");
+      }
       // The runner writes its `tool` and `assistant` rows straight to the
       // database -- nothing streams them, and `setMessages` is otherwise only
       // called at mount and inside `sendUserChat`. Without this the person
@@ -426,30 +472,13 @@ export default function EditorShell({ resumeId }: Props) {
       // closing summary unless they reload. `version` is the signal: it is
       // bumped by every write the runner makes, including the ones that
       // persist those rows.
-      if (versionAdvanced) {
+      if (plan.readTranscript) {
         try {
           const history = await getChatMessages(resumeId);
           setMessages(history.messages.map(withMessageId));
           setContextCut(history.contextCut);
         } catch {
-          /* the next snapshot re-reads it, and so does a reload */
-        }
-      }
-      if (sourceChanged) {
-        try {
-          const fresh = await getResume(resumeId);
-          skipTimers.current = true;
-          setSource(fresh.typst_source || "");
-          setUpdatedAt(fresh.updated_at || "");
-          setUnpublishedChanges(fresh.unpublished_changes ?? true);
-          try {
-            await refreshAfterSourceChangeRef.current();
-          } finally {
-            skipTimers.current = false;
-          }
-        } catch {
-          /* the next snapshot tries again, and the import itself is
-             unaffected -- it writes the source server-side */
+          /* a later frame re-reads it, and so does a reload */
         }
       }
     },
@@ -479,8 +508,7 @@ export default function EditorShell({ resumeId }: Props) {
         if (cancelled || !snap) return;
         // Seeded, not replayed: this mount has just loaded the source and the
         // transcript, so the snapshot it starts from is already accounted for.
-        importAppliedRef.current = snap.applied;
-        importVersionRef.current = snap.version;
+        importCursorRef.current = seedImportCursor(snap);
         setImportSnapshot(snap);
         if (snap.status === "running") attachImportStream();
       } catch {
@@ -524,8 +552,9 @@ export default function EditorShell({ resumeId }: Props) {
     setImportActionPending(true);
     try {
       const snap = await startImport(resumeId);
-      importAppliedRef.current = snap.applied;
-      importVersionRef.current = snap.version;
+      // A run that has just started has written nothing yet, so this clears
+      // any debt the previous run left behind as well.
+      importCursorRef.current = seedImportCursor(snap);
       setImportSnapshot(snap);
       attachImportStream();
     } catch {
@@ -760,6 +789,14 @@ export default function EditorShell({ resumeId }: Props) {
     ) => {
     const trimmed = text.trim();
     if ((!trimmed && !file) || sendingRef.current) return;
+    // A turn started while the import is still running is two agents editing
+    // one resume: both write through `set_draft_source`, inside whose 120s
+    // coalesce window the loser's sections disappear without a revision to
+    // recover them. The composer is disabled for the same reason, but every
+    // programmatic caller -- the tailor kickstart, a template, "fix with AI",
+    // the compile-error question -- arrives here too, so the refusal belongs
+    // here and not only in the UI.
+    if (importRunning) return;
     // Every AI turn comes through here — kickstart, "fix with AI", the
     // compile-error question, a template. On a phone the turn would stream out
     // of sight unless the sheet comes up with it.
@@ -778,9 +815,15 @@ export default function EditorShell({ resumeId }: Props) {
       }),
     ]);
     try {
-      skipTimers.current = true;
-      const saved = await putResumeSource(resumeId, { typst_source: source });
-      if (saved.updated_at) setUpdatedAt(saved.updated_at);
+      // The pre-turn PUT, skipped while an import's adopt is outstanding:
+      // `source` is then known to be the older document, and sending it would
+      // overwrite the sections the import wrote. The turn runs against the
+      // server's copy instead, which is the one the person is looking at.
+      if (!importBlocksSave(importView?.mode, importCursorRef.current)) {
+        skipTimers.current = true;
+        const saved = await putResumeSource(resumeId, { typst_source: source });
+        if (saved.updated_at) setUpdatedAt(saved.updated_at);
+      }
     } catch (err) {
       skipTimers.current = false;
       const message = err instanceof ApiError ? err.message : t("chatError");
@@ -969,6 +1012,8 @@ export default function EditorShell({ resumeId }: Props) {
     [
       clearReasoning,
       clearStream,
+      importRunning,
+      importView,
       pushDelta,
       pushReasoning,
       refreshAfterSourceChange,
@@ -1019,14 +1064,17 @@ export default function EditorShell({ resumeId }: Props) {
   }
 
   async function flushSave(): Promise<boolean> {
-    // Belt and braces for the clobber `onImportSnapshot` fixes at the source:
-    // during an import there is nothing of the person's to flush, and writing
-    // our copy of `source` back would overwrite the sections the agent has
-    // applied since the last snapshot we adopted. "Nothing to flush" is not a
+    // The clobber `onImportSnapshot` fixes at the source, refused here as
+    // well: while the run is live there is nothing of the person's to flush
+    // and writing our copy of `source` back would overwrite the sections the
+    // agent has applied since the last snapshot we adopted -- and while an
+    // adopt is outstanding our copy is known to be the older document, which
+    // outlasts the run by however long the adopt takes to land (or forever,
+    // if it failed on the terminal frame). "Nothing to flush" is not a
     // failure, so the caller still leaves, switches or creates its tailor --
     // the same way a chat send in flight blocks those callers rather than
     // letting them write a half-streamed source.
-    if (importRunning) return true;
+    if (importBlocksSave(importView?.mode, importCursorRef.current)) return true;
     skipTimers.current = true;
     try {
       const saved = await putResumeSource(resumeId, { typst_source: source });
@@ -1594,6 +1642,7 @@ export default function EditorShell({ resumeId }: Props) {
           onSubmit={onChat}
           sending={sending}
           placeholder={t("composerPlaceholder")}
+          composerBlockedReason={importRunning ? t("importComposerBusy") : null}
           sendLabel={sending ? t("sending") : t("send")}
           emptyHint={chatEmptyHint}
           ariaLabel={t("tabChat")}

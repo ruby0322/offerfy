@@ -311,6 +311,7 @@
     "importErrorUploadMissing": "We could not read the file you uploaded.",
     "importErrorUnexpected": "Something went wrong partway through the import.",
     "importActionError": "Could not start the import just now. Try again in a moment.",
+    "importComposerBusy": "Your resume is still being imported. You can chat once it finishes.",
     "loadError": "Could not load this resume.",
     "previewError": "Preview compile failed.",
     "mobileAsk": "Ask AI to edit this resume…",
