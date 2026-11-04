@@ -275,7 +275,10 @@ def test_a_broken_telemetry_insert_does_not_break_the_turn(
     created = client.post("/v1/resumes", json={"locale": "en"}).json()
     _skip_real_compiles(monkeypatch)
 
-    monkeypatch.setattr("app.routers.chat.LlmCall", broken)
+    # `persist_usage` moved out of the router into
+    # `app.services.chat_messages` so the import runner could call the same
+    # function; the row is built there now.
+    monkeypatch.setattr("app.services.chat_messages.LlmCall", broken)
     scripted = ScriptedOpenAI(
         [
             llm_message(

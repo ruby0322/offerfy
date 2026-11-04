@@ -9,12 +9,12 @@ needs a run reuses one run per resume rather than starting a second.
 
 import pytest
 
-from app.models import ChatMessage, GuestSession, Resume, ResumeImportStep
-from app.services import import_run
+from app.models import ChatMessage, GuestSession, LlmCall, Resume, ResumeImportStep
+from app.services import import_run, usage
 from app.services.import_runner import run_import
 from app.services.import_tools import DECLARE_PLAN_TOOL
 from app.services.llm.prompts import EDIT_TOOL
-from tests.openai_script import ScriptedOpenAI, llm_message, tool_call
+from tests.openai_script import ScriptedOpenAI, llm_message, llm_usage, tool_call
 
 # ScriptedOpenAI only speaks the Responses API, so every scripted test
 # names an OpenAI catalogue row explicitly rather than relying on
@@ -347,3 +347,52 @@ async def test_runner_uses_its_own_round_budget(db_session, resume, run, monkeyp
     assert seen["prefer_full_source"] is False
     assert seen["timeout"] == 180.0
     assert seen["verify_compile"] is True
+
+
+async def test_import_cost_lands_in_telemetry_and_in_the_counter(
+    db_session, resume, run, monkeypatch, openai_enabled
+):
+    """The pair is the invariant, not either half.
+
+    `app.services.usage.reconcile` compares `usage_counters.uusd` against the
+    `LlmCall`-derived total per subject per window, so a path that moves the
+    counter without writing the rows reports a gap on the admin overview for
+    that window forever -- and a gap that is always there is an alarm nobody
+    can read. The import bills under its own purpose rather than inside the
+    chat total, following the compile-repair loop's 'repair'.
+    """
+    _stub_upload(monkeypatch)
+    scripted = ScriptedOpenAI(
+        [
+            llm_message(
+                tool_calls=[tool_call("read_typst", {}, "read-1")],
+                usage=llm_usage(input_tokens=10_000, cached_tokens=0, output_tokens=40),
+            ),
+            llm_message(
+                content="Imported.",
+                usage=llm_usage(input_tokens=12_000, cached_tokens=4_000, output_tokens=120),
+            ),
+        ]
+    )
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    await run_import(db_session, resume, run, model=OPENAI_ROW)
+
+    db_session.rollback()
+    calls = db_session.query(LlmCall).all()
+    assert len(calls) == 2
+    assert {c.purpose for c in calls} == {"import"}
+    assert {c.guest_session_id for c in calls} == {resume.guest_session_id}
+    assert {c.resume_id for c in calls} == {resume.id}
+    billed = sum(c.cost_uusd for c in calls)
+    assert billed > 0
+
+    window = usage.window_start()
+    counted, _turns, unmeasured = usage.counter_totals(
+        db_session, kind="guest", subject_id=resume.guest_session_id, window_start=window
+    )
+    assert counted == billed
+    assert unmeasured == 0
+    # The reconciliation itself, which is the thing that would have been
+    # permanently noisy with the rows missing.
+    assert usage.reconcile(db_session, window_start=window) == []

@@ -402,7 +402,11 @@ class JobIngestRun(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")
 
 
-LLM_CALL_PURPOSES = ("chat", "repair", "vision", "profile")
+# 'import' is deliberately its own purpose rather than hiding inside the chat
+# total, for the same reason the compile-repair loop bills as 'repair': an
+# import spends real provider tokens on work the person did not type, and the
+# admin overview's by-purpose breakdown is where that has to be visible.
+LLM_CALL_PURPOSES = ("chat", "repair", "vision", "profile", "import")
 
 
 class LlmCall(Base):
@@ -418,7 +422,7 @@ class LlmCall(Base):
     __tablename__ = "llm_calls"
     __table_args__ = (
         CheckConstraint(
-            "purpose IN ('chat', 'repair', 'vision', 'profile')",
+            "purpose IN ('chat', 'repair', 'vision', 'profile', 'import')",
             name="llm_call_purpose_values",
         ),
         # Not an XOR: a row whose subject has been erased has neither, the same

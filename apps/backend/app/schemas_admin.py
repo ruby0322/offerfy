@@ -153,7 +153,7 @@ class AdminUsageOverview(BaseModel):
     top_subjects: list[AdminUsageSubject]
     refusals: list[AdminUsageRefusal]
     gaps: list[AdminUsageGap]
-    # Cost this window by purpose: chat, repair, vision, profile.
+    # Cost this window by purpose: chat, repair, vision, profile, import.
     by_purpose: list[tuple[str, int]]
 
 

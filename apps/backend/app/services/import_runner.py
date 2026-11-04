@@ -30,7 +30,10 @@ Event translation, one round at a time:
   `app.routers.chat`'s `relay()` does for the live chat turn.
 - `kind == "assistant"` is persisted (`persist_assistant_message`).
 - `kind == "usage"` is billed through the metering seam (see below) and
-  never turned into a chat row.
+  never turned into a chat row. Both halves of it: the counter
+  (`meter.record`) and the `LlmCall` row (`persist_usage`, under
+  `IMPORT_PURPOSE`). Writing one without the other is what
+  `app.services.usage.reconcile` reports as an admin gap.
 - every event, whatever its kind, calls `touch()` so the run's heartbeat
   stays fresh -- that is what lets a reconnecting client (and
   `import_run.is_stale`) tell a live import from one whose worker died.
@@ -56,7 +59,11 @@ from sqlalchemy.orm import Session
 
 from app.models import GuestSession, Resume, ResumeImport, User
 from app.services.attachment import llm_content_for_upload
-from app.services.chat_messages import persist_assistant_message, persist_tool_message
+from app.services.chat_messages import (
+    persist_assistant_message,
+    persist_tool_message,
+    persist_usage,
+)
 from app.services.extract import extract_upload_text
 from app.services.import_run import advance, fail, finish, touch
 from app.services.import_tools import import_tool_handlers, import_tool_specs
@@ -78,6 +85,12 @@ logger = logging.getLogger(__name__)
 # rather than a configuration one.
 MAX_ROUNDS = 14
 TIMEOUT_SECONDS = 180.0
+
+# What an import's model calls are billed as on `LlmCall`. Its own purpose
+# rather than "chat", following the compile-repair loop's "repair": an import
+# spends tokens on work the person never typed, so the admin overview's
+# by-purpose breakdown has to be able to show it. See models.LLM_CALL_PURPOSES.
+IMPORT_PURPOSE = "import"
 
 IMPORT_INSTRUCTION = (
     "Import this uploaded resume into the Typst document.\n\n"
@@ -105,9 +118,26 @@ def _upload_filename(run: ResumeImport) -> str:
     return Path(run.file_key or "").name
 
 
-def _owner_guard(db: Session, resume: Resume):
+def _owner(db: Session, resume: Resume) -> tuple[User | None, GuestSession | None]:
+    """Who this import bills to. Both halves of the metering seam need it."""
     user = db.get(User, resume.user_id) if resume.user_id else None
     guest = db.get(GuestSession, resume.guest_session_id) if resume.guest_session_id else None
+    return user, guest
+
+
+def _owner_guard(user: User | None, guest: GuestSession | None):
+    """The guard for one import.
+
+    `purpose` stays `"chat"` here while the `LlmCall` row this import writes
+    carries `"import"`, and the two are deliberately different. A Guard's
+    purpose is not telemetry: `metering.Meter.record` uses it to decide
+    whether a round counts as a *turn* against the weekly turn allowance
+    (`purpose == "chat" and round_index == 0`), and `usage_counters` has no
+    purpose column to tell them apart afterwards. Moving this to `"import"`
+    would quietly stop an import consuming a turn -- a limit change dressed
+    up as a telemetry one. The visible-cost requirement is satisfied by the
+    `LlmCall` row, which is what the admin by-purpose breakdown reads.
+    """
     return system_guard(
         user=user,
         guest=guest,
@@ -133,8 +163,8 @@ async def run_import(
         )
         messages = [{"role": "user", "content": content}]
 
-        guard = _owner_guard(db, resume)
-        async with metered(guard) as meter:
+        user, guest = _owner(db, resume)
+        async with metered(_owner_guard(user, guest)) as meter:
             async for event in aiter_chat_edit(
                 messages,
                 resume.typst_source,
@@ -149,6 +179,13 @@ async def run_import(
                 touch(db, run)
                 kind = event.get("kind")
                 if kind == "usage":
+                    # Both halves, exactly as the chat router does them: the
+                    # counter (durable, enforces the allowance) and the
+                    # LlmCall row (telemetry, priced at today's rates). A path
+                    # that moves one without the other shows up in
+                    # `usage.reconcile` as an admin gap for that window
+                    # forever -- see `persist_usage`'s docstring.
+                    persist_usage(db, resume.id, event, IMPORT_PURPOSE, user=user, guest=guest)
                     meter.record(event)
                 elif kind == "tool":
                     trace = event["trace"]

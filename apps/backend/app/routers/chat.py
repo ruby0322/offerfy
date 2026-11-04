@@ -7,10 +7,14 @@ import logging
 
 from app.db import get_db
 from app.deps import get_current_user, load_resume_for_owner, owner_context
-from app.models import LLM_CALL_PURPOSES, ChatMessage, GuestSession, LlmCall, User
+from app.models import ChatMessage, User
 from app.schemas import ChatMessageOut, ChatRequest
 from app.services.attachment import llm_content_for_upload, stored_user_message
-from app.services.chat_messages import persist_assistant_message, persist_tool_message
+from app.services.chat_messages import (
+    persist_assistant_message,
+    persist_tool_message,
+    persist_usage,
+)
 from app.services.chat_window import window_history
 from app.services.extract import MAX_UPLOAD_BYTES, allowed_upload, extract_upload_text
 from app.services.family_tools import (
@@ -30,7 +34,6 @@ from app.services import model_choice
 from app.services.usage import (
     approx_edits_left,
     balance,
-    event_cost_uusd,
     quota_event,
     tier_of,
 )
@@ -138,65 +141,6 @@ def _tailor_created(trace: dict) -> dict | None:
             "title": result.get("title") or "",
         }
     return None
-
-
-def _persist_usage(
-    db: Session,
-    resume_id: str,
-    event: dict,
-    purpose: str,
-    *,
-    user: User | None,
-    guest: GuestSession | None,
-) -> None:
-    """Record what one model call billed, and who it billed to.
-
-    Nothing here may fail a turn: a shape we did not expect or a database that
-    will not take the row is a warning and a lost metric, never a lost chat
-    response. The rollback matters as much as the log -- the same Session goes
-    on to persist tool traces and the draft source after this.
-
-    The owner is written in rather than left to be joined through resume_id
-    later. Both routes from that column to an owner lose the attribution --
-    resume deletion nulls it, and /v1/auth/claim reassigns it -- and the quota
-    this feeds would reset with them. See models.LlmCall.user_id.
-    """
-    try:
-        kind = event.get("purpose") or purpose
-        if kind not in LLM_CALL_PURPOSES:
-            kind = purpose
-        # Priced here, at today's rates, and stored on the row -- so that
-        # correcting a price later moves what new rounds cost and not what old
-        # ones did. The meter computes the same figure from the same event
-        # through the same function, so the two writes agree by construction
-        # rather than by being handed a shared value; they stay separate
-        # because they have different durabilities. See models.LlmCall.
-        cost, _ = event_cost_uusd(event)
-        db.add(
-            LlmCall(
-                resume_id=resume_id,
-                user_id=user.id if user is not None else None,
-                guest_session_id=guest.id if user is None and guest is not None else None,
-                purpose=kind,
-                model=str(event.get("model") or "")[:128],
-                round_index=int(event.get("round_index") or 0),
-                prefer_full_source=bool(event.get("prefer_full_source")),
-                input_tokens=event.get("input_tokens"),
-                cached_tokens=event.get("cached_tokens"),
-                output_tokens=event.get("output_tokens"),
-                reasoning_tokens=event.get("reasoning_tokens"),
-                cache_write_tokens=event.get("cache_write_tokens"),
-                source_chars=int(event.get("source_chars") or 0),
-                cost_uusd=cost,
-            )
-        )
-        db.commit()
-    except Exception:
-        logger.warning("llm usage telemetry failed", exc_info=True)
-        try:
-            db.rollback()
-        except Exception:
-            logger.warning("llm usage telemetry rollback failed", exc_info=True)
 
 
 @router.post("/v1/resumes/{resume_id}/chat")
@@ -319,7 +263,7 @@ async def chat(
                     # counter the limit is enforced against. Per round rather than
                     # per turn, because the whole cost model is built on the
                     # per-round token mix.
-                    _persist_usage(db, resume.id, event, purpose, user=user, guest=guest)
+                    persist_usage(db, resume.id, event, purpose, user=user, guest=guest)
                     meter.record(event)
                 elif kind == "delta":
                     # Display only: nothing is persisted until the assistant event lands.
@@ -428,7 +372,7 @@ async def chat(
                     ):
                         async for frame in relay(event):
                             yield frame
-                # After the last _persist_usage has committed, so the number the
+                # After the last persist_usage has committed, so the number the
                 # client is handed is the number in the database. Telemetry may be
                 # lost without costing an answer, and so may this.
                 try:
