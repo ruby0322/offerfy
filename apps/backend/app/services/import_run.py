@@ -13,9 +13,20 @@ a write that forgot to bump it would freeze the progress card while the
 resume keeps changing underneath it, and the bug would look like a frontend
 problem instead of a backend one.
 
-`MAX_STEPS` and `LABEL_MAX` are not used in this module. They are the next
-task's contract for sanitising an agent-declared plan (`declare_plan`) and
-are declared here because the brief fixes them as values this module owns.
+`MAX_STEPS` and `LABEL_MAX` bound `declare_plan`'s sanitising of an
+agent-declared plan: a plan is clamped to at most `MAX_STEPS` steps, and
+each label is truncated to `LABEL_MAX` characters, before anything is
+written -- a malformed plan must never reach the database.
+
+`declare_plan` and `advance` are where the plan and the agent's actual
+edits are allowed to drift apart without failing the import: a plan can be
+redeclared mid-run (keys that survive keep their status; the LLM's section
+list is not fixed up front), an edit can name a step absent from the plan
+(appended as a new `done` step), and an edit can carry no step name at all
+(synthesised a `key` so a second one does not collide on
+`UNIQUE(import_id, key)`). Every one of these has a defined, non-fatal
+outcome, because our code never enumerates section names -- the agent's
+plan is the only list that exists.
 
 `start_run`'s "is one already running" check is a query followed by an
 insert, which is not atomic by itself: offerfy-api runs uvicorn with two
@@ -186,3 +197,127 @@ def snapshot(db: Session, resume_id: str) -> dict | None:
         "started_at": _aware(run.created_at).isoformat(),
         "stale": run.status == "running" and is_stale(run),
     }
+
+
+def _sanitise_plan(steps: list[dict]) -> list[tuple[str, str]]:
+    """Validate and bound a raw agent-declared plan.
+
+    Drops entries whose key or label is not a non-empty string,
+    de-duplicates by key keeping the first occurrence, truncates labels to
+    `LABEL_MAX`, and keeps at most `MAX_STEPS`. Runs entirely before any row
+    is written, so a malformed plan can never reach the database.
+    """
+    cleaned: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for entry in steps:
+        if not isinstance(entry, dict):
+            continue
+        key = entry.get("key")
+        label = entry.get("label")
+        if not isinstance(key, str) or not key:
+            continue
+        if not isinstance(label, str) or not label:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append((key, label[:LABEL_MAX]))
+        if len(cleaned) == MAX_STEPS:
+            break
+    return cleaned
+
+
+def declare_plan(db: Session, run: ResumeImport, steps: list[dict]) -> list[ResumeImportStep]:
+    """Replace `run`'s step list with a sanitised version of `steps`.
+
+    Called more than once on the same run -- the agent is allowed to
+    redeclare its plan mid-import -- this replaces the row set while
+    preserving the `status` of any key that survives into the new plan, so
+    a step already marked `done` does not get reset to `pending` just
+    because the plan was redeclared. Of the keys that do not survive, the
+    first gets `active` and the rest `pending`, matching a fresh plan.
+    """
+    cleaned = _sanitise_plan(steps)
+
+    existing_status = {
+        step.key: step.status
+        for step in db.query(ResumeImportStep)
+        .filter(ResumeImportStep.import_id == run.id)
+        .all()
+    }
+    db.query(ResumeImportStep).filter(ResumeImportStep.import_id == run.id).delete()
+
+    new_steps: list[ResumeImportStep] = []
+    for seq, (key, label) in enumerate(cleaned):
+        status = existing_status.get(key)
+        if status is None:
+            status = "active" if seq == 0 else "pending"
+        step = ResumeImportStep(import_id=run.id, seq=seq, key=key, label=label, status=status)
+        db.add(step)
+        new_steps.append(step)
+
+    _bump(run)
+    db.commit()
+    return new_steps
+
+
+def advance(
+    db: Session, run: ResumeImport, step_key: str | None, detail: str | None = None
+) -> None:
+    """Record one completed edit, whether or not it matches the plan.
+
+    The common case: `step_key` names a step from the declared plan. That
+    step is marked `done` and the next `pending` step (by declared order)
+    becomes `active`, advancing the progress card's pointer.
+
+    Two drift cases never fail the import:
+    - `step_key` names no step in the plan (the agent edited a section it
+      never declared, or declared under a different key). It is appended
+      as a new `done` step instead, and the plan's own pointer is left
+      alone -- this is a side-channel edit, not plan progression.
+    - `step_key` is `None` or empty (the agent edited without naming a
+      step at all). A key is synthesised as `edit-{run.applied + 1}` --
+      never the literal `""`, which would collide with a second unlabelled
+      edit on `UNIQUE(import_id, key)` and abort the whole import -- with
+      an empty `label`, which is the frontend's cue (Task 8) to render its
+      own fallback wording rather than guess at a translation here.
+    """
+    synthesised = not step_key
+    key = step_key if not synthesised else f"edit-{run.applied + 1}"
+
+    step = (
+        db.query(ResumeImportStep)
+        .filter(ResumeImportStep.import_id == run.id, ResumeImportStep.key == key)
+        .first()
+    )
+
+    if step is not None:
+        step.status = "done"
+        if detail is not None:
+            step.detail = detail
+        next_step = (
+            db.query(ResumeImportStep)
+            .filter(ResumeImportStep.import_id == run.id, ResumeImportStep.status == "pending")
+            .order_by(ResumeImportStep.seq)
+            .first()
+        )
+        if next_step is not None:
+            next_step.status = "active"
+    else:
+        seq = (
+            db.query(ResumeImportStep).filter(ResumeImportStep.import_id == run.id).count()
+        )
+        db.add(
+            ResumeImportStep(
+                import_id=run.id,
+                seq=seq,
+                key=key,
+                label="" if synthesised else key,
+                status="done",
+                detail=detail,
+            )
+        )
+
+    run.applied += 1
+    _bump(run)
+    db.commit()
