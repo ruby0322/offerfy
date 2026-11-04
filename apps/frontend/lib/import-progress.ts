@@ -7,6 +7,23 @@
 
 export type ImportStepStatus = "pending" | "active" | "done" | "skipped";
 
+/**
+ * The reserved step key the backend writes for its own render-verification
+ * step (`app.services.import_run.set_render_check`) -- never a key the
+ * model declared or named. The model's `declare_import_plan` and
+ * `apply_typst_edit`'s `step` argument are both sanitised server-side to
+ * refuse this exact string (see `import_run.py`'s `_sanitise_plan` and
+ * `advance`), so a step carrying this key is always the server-owned one,
+ * never a coincidence.
+ *
+ * This takes precedence over the plain `unlabelled` rule below: the
+ * backend writes this step with an empty `label` on purpose (the
+ * translated text lives here, in `ImportProgressCard.tsx`, not on the
+ * server), and the generic "unnamed edit" wording `unlabelled` triggers
+ * would be wrong for it.
+ */
+export const RENDER_CHECK_KEY = "__render_check";
+
 export type ImportSnapshot = {
   import_id: string;
   status: "running" | "done" | "failed";
@@ -29,6 +46,14 @@ export type ImportViewStep = {
   status: ImportStepStatus;
   detail: string | null;
   unlabelled: boolean;
+  /** This is the server-owned render-check step (see `RENDER_CHECK_KEY`),
+   *  not a plan step the model declared. */
+  renderCheck: boolean;
+  /** Only meaningful when `renderCheck` is true: the check is mid-repair
+   *  rather than mid-verify. `set_render_check` writes this as
+   *  `status="active", detail="repairing"` -- there is no dedicated schema
+   *  value for it (see that function's docstring for why). */
+  repairing: boolean;
 };
 
 export type ImportView = {
@@ -43,13 +68,21 @@ export type ImportView = {
 export function toImportView(snap: ImportSnapshot): ImportView {
   const mode = snap.status === "running" && snap.stale ? "stale" : snap.status;
 
-  const steps: ImportViewStep[] = snap.steps.map((step) => ({
-    key: step.key,
-    label: step.label,
-    status: step.status,
-    detail: step.detail,
-    unlabelled: step.label === "",
-  }));
+  const steps: ImportViewStep[] = snap.steps.map((step) => {
+    const renderCheck = step.key === RENDER_CHECK_KEY;
+    return {
+      key: step.key,
+      label: step.label,
+      status: step.status,
+      detail: step.detail,
+      // The render-check step's empty label is deliberate (see
+      // RENDER_CHECK_KEY) and must never fall into the generic
+      // "unnamed edit" rendering `unlabelled` triggers for everything else.
+      unlabelled: step.label === "" && !renderCheck,
+      renderCheck,
+      repairing: renderCheck && step.detail === "repairing",
+    };
+  });
 
   const doneCount = steps.filter((step) => step.status === "done").length;
 
@@ -82,11 +115,17 @@ export function importErrorKey(error: string | null): ImportErrorKey | null {
 
 /** A literal union, not `string`: next-intl types `t()` against the message
  *  catalogue, so a widened return here would not be callable with it. */
-export type ImportErrorKey = "importErrorUploadMissing" | "importErrorUnexpected";
+export type ImportErrorKey =
+  | "importErrorUploadMissing"
+  | "importErrorUnexpected"
+  | "importErrorRenderCheckFailed";
 
 const IMPORT_ERROR_KEYS: Record<string, ImportErrorKey> = {
   upload_missing: "importErrorUploadMissing",
   unexpected: "importErrorUnexpected",
+  // `import_runner.RENDER_CHECK_FAILED` -- `verify_render` was still not
+  // `ok` after the gate's own repair attempts ran out.
+  render_check_failed: "importErrorRenderCheckFailed",
 };
 
 export function importTurnStartsAt(snap: ImportSnapshot): number {
