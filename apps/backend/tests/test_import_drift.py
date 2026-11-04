@@ -12,6 +12,7 @@ import pytest
 
 from app.models import GuestSession, Resume, ResumeImportStep
 from app.services.import_run import (
+    KEY_MAX,
     LABEL_MAX,
     MAX_STEPS,
     advance,
@@ -127,3 +128,45 @@ def test_unlabelled_edits_work_without_any_plan(db_session, run):
     advance(db_session, run, None)
     finish(db_session, run)
     assert run.status == "done" and run.applied == 1
+
+
+def test_plan_truncates_long_key_to_column_width(db_session, run):
+    long_key = "k" * (KEY_MAX + 20)
+    kept = declare_plan(db_session, run, [{"key": long_key, "label": "A"}])
+    assert len(kept) == 1
+    assert len(kept[0].key) <= KEY_MAX
+    assert kept[0].key == long_key[:KEY_MAX]
+
+
+def test_plan_truncation_collision_keeps_first_not_integrity_error(db_session, run):
+    # Two keys distinct before truncation, identical after -- truncating
+    # must happen before de-duplication, or this reaches the database as
+    # a UNIQUE(import_id, key) violation instead of collapsing to one step.
+    prefix = "k" * KEY_MAX
+    kept = declare_plan(
+        db_session,
+        run,
+        [{"key": prefix + "AAA", "label": "First"}, {"key": prefix + "BBB", "label": "Second"}],
+    )
+    assert [s.label for s in kept] == ["First"]
+    assert kept[0].key == prefix
+
+
+def test_advance_truncates_long_step_key(db_session, run):
+    long_key = "s" * (KEY_MAX + 20)
+    advance(db_session, run, long_key)
+    rows = _steps(db_session, run)
+    assert len(rows) == 1
+    assert rows[0].key == long_key[:KEY_MAX]
+    assert len(rows[0].key) <= KEY_MAX
+
+
+def test_advance_unplanned_named_step_uses_key_as_label(db_session, run):
+    # Ruling: a step the model did name keeps its own key as the label,
+    # even though it was not in the declared plan -- falling back to the
+    # frontend's generic "unnamed step" wording would discard information
+    # the model actually gave us. Only a truly unnamed edit gets label="".
+    advance(db_session, run, "surprise")
+    rows = _steps(db_session, run)
+    assert rows[0].key == "surprise"
+    assert rows[0].label == "surprise"

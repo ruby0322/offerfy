@@ -13,10 +13,16 @@ a write that forgot to bump it would freeze the progress card while the
 resume keeps changing underneath it, and the bug would look like a frontend
 problem instead of a backend one.
 
-`MAX_STEPS` and `LABEL_MAX` bound `declare_plan`'s sanitising of an
-agent-declared plan: a plan is clamped to at most `MAX_STEPS` steps, and
-each label is truncated to `LABEL_MAX` characters, before anything is
-written -- a malformed plan must never reach the database.
+`MAX_STEPS`, `LABEL_MAX` and `KEY_MAX` bound `declare_plan`'s (and
+`advance`'s) sanitising of agent-supplied text: a plan is clamped to at
+most `MAX_STEPS` steps, each label is truncated to `LABEL_MAX` characters
+and each key to `KEY_MAX` -- matching the `ResumeImportStep.key` column
+width, which SQLite does not enforce but Postgres does -- before anything
+is written. A malformed plan must never reach the database. Keys are
+truncated *before* de-duplication: two distinct long keys can truncate to
+the same short one, and de-duplicating first would let that pair reach the
+database as a `UNIQUE(import_id, key)` violation instead of being
+collapsed into one step the way the sanitiser is supposed to.
 
 `declare_plan` and `advance` are where the plan and the agent's actual
 edits are allowed to drift apart without failing the import: a plan can be
@@ -49,9 +55,12 @@ from sqlalchemy.orm import Session
 
 from app.models import Resume, ResumeImport, ResumeImportStep, _utcnow
 
-# The next task's contract for `declare_plan`, not read here.
+# Sanitising bounds for `declare_plan` and `advance`. `KEY_MAX` matches
+# `ResumeImportStep.key`'s column width (`String(64)`) -- see the module
+# docstring for why that must be enforced here, not just in the schema.
 MAX_STEPS = 12
 LABEL_MAX = 120
+KEY_MAX = 64
 
 # How long a run may go without a heartbeat before it is considered dead --
 # e.g. its worker process crashed or was killed -- and may be superseded by a
@@ -203,9 +212,17 @@ def _sanitise_plan(steps: list[dict]) -> list[tuple[str, str]]:
     """Validate and bound a raw agent-declared plan.
 
     Drops entries whose key or label is not a non-empty string,
-    de-duplicates by key keeping the first occurrence, truncates labels to
-    `LABEL_MAX`, and keeps at most `MAX_STEPS`. Runs entirely before any row
-    is written, so a malformed plan can never reach the database.
+    truncates each key to `KEY_MAX` and each label to `LABEL_MAX`,
+    de-duplicates by (truncated) key keeping the first occurrence, and
+    keeps at most `MAX_STEPS`. Runs entirely before any row is written, so
+    a malformed plan can never reach the database.
+
+    Truncation happens *before* de-duplication on purpose: two distinct
+    keys longer than `KEY_MAX` can truncate to the same value, and
+    de-duplicating on the untruncated key would let that pair both reach
+    the database -- which then violates `UNIQUE(import_id, key)` instead
+    of being collapsed into the single step the sanitiser is supposed to
+    produce.
     """
     cleaned: list[tuple[str, str]] = []
     seen: set[str] = set()
@@ -218,6 +235,7 @@ def _sanitise_plan(steps: list[dict]) -> list[tuple[str, str]]:
             continue
         if not isinstance(label, str) or not label:
             continue
+        key = key[:KEY_MAX]
         if key in seen:
             continue
         seen.add(key)
@@ -274,16 +292,23 @@ def advance(
     - `step_key` names no step in the plan (the agent edited a section it
       never declared, or declared under a different key). It is appended
       as a new `done` step instead, and the plan's own pointer is left
-      alone -- this is a side-channel edit, not plan progression.
+      alone -- this is a side-channel edit, not plan progression. Its
+      `label` is the (truncated) key itself, not `""`: the model did name
+      this step, so falling back to the frontend's generic wording would
+      discard information the model actually gave us.
     - `step_key` is `None` or empty (the agent edited without naming a
       step at all). A key is synthesised as `edit-{run.applied + 1}` --
       never the literal `""`, which would collide with a second unlabelled
       edit on `UNIQUE(import_id, key)` and abort the whole import -- with
       an empty `label`, which is the frontend's cue (Task 8) to render its
       own fallback wording rather than guess at a translation here.
+
+    A model-supplied `step_key` is truncated to `KEY_MAX` before it is
+    used for either lookup or insert, for the same column-width reason
+    `declare_plan` truncates a declared key.
     """
     synthesised = not step_key
-    key = step_key if not synthesised else f"edit-{run.applied + 1}"
+    key = f"edit-{run.applied + 1}" if synthesised else step_key[:KEY_MAX]
 
     step = (
         db.query(ResumeImportStep)
@@ -312,7 +337,7 @@ def advance(
                 import_id=run.id,
                 seq=seq,
                 key=key,
-                label="" if synthesised else key,
+                label="" if synthesised else key[:LABEL_MAX],
                 status="done",
                 detail=detail,
             )
