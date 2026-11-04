@@ -170,3 +170,49 @@ def test_advance_unplanned_named_step_uses_key_as_label(db_session, run):
     rows = _steps(db_session, run)
     assert rows[0].key == "surprise"
     assert rows[0].label == "surprise"
+
+
+def _active_count(db_session, run):
+    return sum(1 for s in _steps(db_session, run) if s.status == "active")
+
+
+def test_redeclare_after_advance_leaves_exactly_one_active(db_session, run):  # Finding 1
+    # [a, b] -> advance(a) -> a=done, b=active. Redeclare [a, c]: a keeps
+    # its preserved "done", c is new and not first so it would default to
+    # "pending" -- without the invariant repair, nothing would be active
+    # while the run is still running.
+    declare_plan(db_session, run, [{"key": "a", "label": "A"}, {"key": "b", "label": "B"}])
+    advance(db_session, run, "a")
+    declare_plan(db_session, run, [{"key": "a", "label": "A"}, {"key": "c", "label": "C"}])
+    assert _active_count(db_session, run) == 1
+
+
+def test_repeated_advance_on_same_key_is_idempotent(db_session, run):  # Finding 2
+    declare_plan(
+        db_session,
+        run,
+        [{"key": "a", "label": "A"}, {"key": "b", "label": "B"}, {"key": "c", "label": "C"}],
+    )
+    advance(db_session, run, "a")
+    applied_after_first = run.applied
+
+    advance(db_session, run, "a")
+
+    assert _active_count(db_session, run) == 1
+    assert run.applied == applied_after_first
+
+
+def test_one_active_invariant_holds_through_a_normal_walk(db_session, run):
+    declare_plan(
+        db_session,
+        run,
+        [{"key": "a", "label": "A"}, {"key": "b", "label": "B"}, {"key": "c", "label": "C"}],
+    )
+    for key in ("a", "b", "c"):
+        advance(db_session, run, key)
+        steps = _steps(db_session, run)
+        active = sum(1 for s in steps if s.status == "active")
+        pending = sum(1 for s in steps if s.status == "pending")
+        assert active <= 1
+        if pending:
+            assert active == 1

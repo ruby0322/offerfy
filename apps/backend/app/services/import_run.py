@@ -34,6 +34,27 @@ list is not fixed up front), an edit can name a step absent from the plan
 outcome, because our code never enumerates section names -- the agent's
 plan is the only list that exists.
 
+**The one-active invariant**, which both functions are responsible for
+maintaining: while a run's status is `running`, if any step is still
+`pending`, exactly one step is `active` -- that is the progress card's
+"current step" pointer, and there must be exactly one of it, never zero
+(the card would show no current step) and never two (the card wouldn't
+know which to highlight). When no `pending` step remains, zero `active` is
+correct: there is nothing left to point at. (`finish` converts every
+`pending`/`active` step to `skipped`, so the invariant stops applying the
+moment the run is no longer `running`.) `declare_plan` can *break* this by
+redeclaring a plan where every surviving key keeps a non-`active` status
+(e.g. preserved `done`) and every new key defaults to `pending` -- so it
+repairs the invariant after building the new list: if nothing ended up
+`active` and something is `pending`, the first `pending` step is promoted.
+`advance` can break it by being called twice for the same already-`done`
+key (a retried or duplicated tool call): naively re-running "promote the
+next `pending` step" a second time would promote *another* step on top of
+the one already promoted the first time, leaving two `active`. `advance`
+instead guards against this at the entry: a step that is already `done`
+is a no-op, so it never re-promotes and never double-counts
+`run.applied`.
+
 `start_run`'s "is one already running" check is a query followed by an
 insert, which is not atomic by itself: offerfy-api runs uvicorn with two
 workers sharing only Postgres, so two concurrent calls for the same resume
@@ -254,6 +275,14 @@ def declare_plan(db: Session, run: ResumeImport, steps: list[dict]) -> list[Resu
     a step already marked `done` does not get reset to `pending` just
     because the plan was redeclared. Of the keys that do not survive, the
     first gets `active` and the rest `pending`, matching a fresh plan.
+
+    Preserving status can leave the one-active invariant (see the module
+    docstring) violated: e.g. plan `[a, b]`, `a` advanced to `done` and
+    `b` promoted to `active`, then redeclared as `[a, c]` -- `a` keeps
+    `done` and `c` defaults to `pending` (it is new, and not first), so
+    nothing is `active` even though `c` is still waiting. The pass below
+    repairs exactly that: if the rebuilt list has no `active` step but has
+    a `pending` one, the first `pending` step is promoted.
     """
     cleaned = _sanitise_plan(steps)
 
@@ -273,6 +302,12 @@ def declare_plan(db: Session, run: ResumeImport, steps: list[dict]) -> list[Resu
         step = ResumeImportStep(import_id=run.id, seq=seq, key=key, label=label, status=status)
         db.add(step)
         new_steps.append(step)
+
+    if not any(step.status == "active" for step in new_steps):
+        for step in new_steps:
+            if step.status == "pending":
+                step.status = "active"
+                break
 
     _bump(run)
     db.commit()
@@ -306,6 +341,17 @@ def advance(
     A model-supplied `step_key` is truncated to `KEY_MAX` before it is
     used for either lookup or insert, for the same column-width reason
     `declare_plan` truncates a declared key.
+
+    Idempotent for a repeated call on an already-`done` key -- a retried
+    or duplicated tool call hits this, the same failure mode `start_run`
+    already defends against for run creation. Without the guard, "promote
+    the next `pending` step" is not idempotent: a second call would
+    promote a *different* step on top of the one the first call already
+    promoted, leaving two `active` and violating the one-active invariant
+    (see the module docstring). A no-op call also does not increment
+    `run.applied`: it counts edits applied, drives the frontend's preview
+    refresh, and counting a retry would trigger a pointless recompile and
+    inflate the card's progress.
     """
     synthesised = not step_key
     key = f"edit-{run.applied + 1}" if synthesised else step_key[:KEY_MAX]
@@ -317,6 +363,8 @@ def advance(
     )
 
     if step is not None:
+        if step.status == "done":
+            return
         step.status = "done"
         if detail is not None:
             step.detail = detail
