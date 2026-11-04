@@ -4,6 +4,7 @@ import test from "node:test";
 import type { ImportSnapshot, ImportStepStatus } from "./import-progress";
 import {
   importCardIndex,
+  importErrorKey,
   importSourceChanged,
   importTurnStartsAt,
   toImportView,
@@ -219,4 +220,28 @@ test("a user message exactly at the turn start is the next turn", () => {
   // The import writes no user row, so a `user` row sharing the run's own
   // timestamp cannot belong to the import.
   assert.equal(importCardIndex([msg("user", "2026-11-04T12:00:00+00:00")], TURN), 0);
+});
+
+// --------------------------------------------------------------------------
+// importErrorKey -- no raw backend text in a trilingual card
+// --------------------------------------------------------------------------
+
+test("no error means no key", () => {
+  assert.equal(importErrorKey(null), null);
+  assert.equal(importErrorKey(""), null);
+});
+
+test("each known code maps to its own key", () => {
+  assert.equal(importErrorKey("upload_missing"), "importErrorUploadMissing");
+  assert.equal(importErrorKey("unexpected"), "importErrorUnexpected");
+});
+
+test("an unrecognised code falls back rather than being shown as text", () => {
+  // The leak this replaces: a raw message, untranslated, naming an internal
+  // storage key.
+  assert.equal(
+    importErrorKey("could not read the uploaded file ('uploads/a/b/c.pdf')"),
+    "importErrorUnexpected",
+  );
+  assert.equal(importErrorKey("superseded: heartbeat went stale"), "importErrorUnexpected");
 });

@@ -105,8 +105,12 @@ only state both workers can see, so in-memory progress is not an option and a
 snapshot read from the database is the simplest thing that is actually correct.
 
 `heartbeat_at` is bumped on every write. A row still `running` whose heartbeat is
-older than 60s means the task died — the API restarted under it — and the card
-offers Resume instead of spinning forever.
+older than `STALE_AFTER_SECONDS` means the task died — the API restarted under
+it — and the card offers Resume instead of spinning forever. That threshold is
+**240s**, not the 60s first written here: `aiter_chat_edit`'s 180s timeout is a
+*per-chunk read* budget, so a long time-to-first-token is permitted and silent,
+and a threshold below it declared a merely slow run dead — which let two agents
+write the same resume concurrently once the person pressed Resume.
 
 ## How the model declares and advances its own steps
 
@@ -177,13 +181,16 @@ import writes **no user row at all**.
 **States.**
 
 - `running` — step list, `n of N`, elapsed time, progress bar.
-- `done` — collapses to one line with the count; the original file stays
-  attached to the step in history.
+- `done` — collapses to one line with the count. It promises nothing about
+  the original file: nothing renders it (see "What this does not include"), so
+  the card must not say it is attached anywhere.
 - `failed` — what failed, which steps were saved, an explicit assurance that
   nothing the person had was lost, and Retry, which starts a fresh import from
   the same `file_key`.
-- `stale` — `running` with a heartbeat older than 60s. Says the server restarted,
-  names how many sections were saved, offers Resume.
+- `stale` — `running` with a heartbeat older than `STALE_AFTER_SECONDS` (240s).
+  Says the server restarted, names how many sections were saved, offers Resume.
+  The stream terminates on it: nothing reaps such a row, so a stream that
+  waited for `done`/`failed` polled forever and every reload added another.
 
 **Progressive preview.** When a snapshot shows the source changed, the editor
 runs the same `refreshPreview()` + `compileResume()` + `refreshAts()` sequence

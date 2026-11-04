@@ -63,6 +63,32 @@ export function toImportView(snap: ImportSnapshot): ImportView {
   };
 }
 
+/**
+ * The i18n key for an import's stored error code, or null if there is none.
+ *
+ * `resume_imports.error` holds a code (see `import_runner.py`'s
+ * `UPLOAD_MISSING` / `UNEXPECTED`), not a sentence: the card renders in three
+ * languages, and the raw text it used to show was both untranslated and a
+ * leak -- `could not read the uploaded file
+ * ('uploads/<owner>/<resume>/<name>.pdf')` published our storage-key shape to
+ * whoever hit it. An unrecognised code falls back to the generic key rather
+ * than being shown as-is, so a code added on the server can never surface as
+ * bare text here.
+ */
+export function importErrorKey(error: string | null): ImportErrorKey | null {
+  if (!error) return null;
+  return IMPORT_ERROR_KEYS[error] ?? "importErrorUnexpected";
+}
+
+/** A literal union, not `string`: next-intl types `t()` against the message
+ *  catalogue, so a widened return here would not be callable with it. */
+export type ImportErrorKey = "importErrorUploadMissing" | "importErrorUnexpected";
+
+const IMPORT_ERROR_KEYS: Record<string, ImportErrorKey> = {
+  upload_missing: "importErrorUploadMissing",
+  unexpected: "importErrorUnexpected",
+};
+
 export function importTurnStartsAt(snap: ImportSnapshot): number {
   return Date.parse(snap.started_at);
 }

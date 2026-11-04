@@ -98,6 +98,13 @@ function withMessageId(message: ChatMessage): ChatMessage {
   return message.id ? message : { ...message, id: newMessageId() };
 }
 
+/** `resumes.import_status` as a snapshot implies it. The settings panel and
+ *  the three admin pages read that column; this is what keeps the value they
+ *  show from being whatever it was at mount for the rest of the session. */
+function importStatusOf(snap: ImportSnapshot): ImportStatus {
+  return snap.status === "running" ? "pending" : snap.status;
+}
+
 const composerDraftKey = (id: string) => `offerfy:composer:${id}`;
 
 function loadComposerDraft(id: string): string {
@@ -222,6 +229,9 @@ export default function EditorShell({ resumeId }: Props) {
   // the backend still returns that last snapshot, so "done" renders too).
   const [importSnapshot, setImportSnapshot] = useState<ImportSnapshot | null>(null);
   const [importElapsedSeconds, setImportElapsedSeconds] = useState(0);
+  // A Retry/Resume click in flight. Keeps the card's button inert, so a
+  // double click cannot race itself into the 409 the backend answers.
+  const [importActionPending, setImportActionPending] = useState(false);
   const router = useRouter();
   const skipTimers = useRef(true);
   const sendingRef = useRef(false);
@@ -483,24 +493,35 @@ export default function EditorShell({ resumeId }: Props) {
     };
   }, [attachImportStream, resumeId]);
 
+  // When the run opened and whether it is still going -- the only two things
+  // the clock below needs. Both primitives, so a snapshot that changes
+  // nothing else does not restart the interval: depending on the snapshot
+  // object tore the 1s timer down and rebuilt it about two and a half times
+  // a second, which is the poll rate, not the tick rate.
+  const importStartedMs = useMemo(
+    () => (importSnapshot ? importTurnStartsAt(importSnapshot) : null),
+    [importSnapshot],
+  );
+  const importRunStatus = importSnapshot?.status;
+
   // Ticks the footer's elapsed-time readout while the run is live; holds
   // still once it is not, so "12s elapsed" does not keep climbing after the
   // turn has already finished or failed.
   useEffect(() => {
-    if (!importSnapshot) return;
-    const startedAt = importTurnStartsAt(importSnapshot);
+    if (importStartedMs === null) return;
     const tick = () =>
-      setImportElapsedSeconds(Math.max(0, Math.round((Date.now() - startedAt) / 1000)));
+      setImportElapsedSeconds(Math.max(0, Math.round((Date.now() - importStartedMs) / 1000)));
     tick();
-    if (importSnapshot.status !== "running") return;
+    if (importRunStatus !== "running") return;
     const handle = window.setInterval(tick, 1000);
     return () => window.clearInterval(handle);
-  }, [importSnapshot]);
+  }, [importRunStatus, importStartedMs]);
 
   // Both the stale card's "Resume" and the failed card's "Retry" call the
   // same endpoint -- the backend tells the two apart by what it finds on
   // the row, not by which button was pressed.
   const onImportAction = useCallback(async () => {
+    setImportActionPending(true);
     try {
       const snap = await startImport(resumeId);
       importAppliedRef.current = snap.applied;
@@ -508,9 +529,15 @@ export default function EditorShell({ resumeId }: Props) {
       setImportSnapshot(snap);
       attachImportStream();
     } catch {
-      /* the card's own action stays up, so trying again costs one more click */
+      // Swallowing this entirely meant a 409 -- or anything else -- produced
+      // no feedback at all, so the button read as doing nothing. The toast
+      // is ours, not the backend's sentence: "an import is already running
+      // for resume <uuid>" is not something to show anyone.
+      toast(t("importActionError"));
+    } finally {
+      setImportActionPending(false);
     }
-  }, [attachImportStream, resumeId]);
+  }, [attachImportStream, resumeId, t, toast]);
 
   const importView = useMemo(
     () => (importSnapshot ? toImportView(importSnapshot) : undefined),
@@ -520,6 +547,13 @@ export default function EditorShell({ resumeId }: Props) {
   // rather than below every later message forever -- `getImport` keeps
   // returning the last run's snapshot, so a finished import's collapsed card
   // would otherwise stay pinned to the bottom of the pane on every visit.
+  // What the settings panel shows. Derived rather than stored: the
+  // `importStatus` state is read once from the resume row at mount and was
+  // never updated again, so a run that finished during the session left it
+  // reading "Pending" for the rest of it. A live snapshot is the better
+  // answer whenever there is one -- it is the same row's status, fresher.
+  const effectiveImportStatus = importSnapshot ? importStatusOf(importSnapshot) : importStatus;
+
   const importCardAt = useMemo(
     () =>
       importSnapshot
@@ -1582,6 +1616,7 @@ export default function EditorShell({ resumeId }: Props) {
           importView={importView}
           importElapsedSeconds={importElapsedSeconds}
           importCardIndex={importCardAt}
+          importActionPending={importActionPending}
           onImportRetry={onImportAction}
           onImportResume={onImportAction}
         />
@@ -1602,7 +1637,7 @@ export default function EditorShell({ resumeId }: Props) {
           createdAt={createdAt}
           source={resumeSource}
           resumeLocale={resumeLocale}
-          importStatus={importStatus}
+          importStatus={effectiveImportStatus}
           onTitleChange={setTitle}
           onShareState={onShareState}
           unpublishedChanges={unpublishedChanges}

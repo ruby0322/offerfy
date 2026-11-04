@@ -4,13 +4,17 @@ import { useTranslations } from "next-intl";
 import { AlertTriangle, Check, Circle, Loader2, Minus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { ImportView, ImportViewStep } from "@/lib/import-progress";
+import { importErrorKey, type ImportView, type ImportViewStep } from "@/lib/import-progress";
 
 type Props = {
   view: ImportView;
   /** Seconds since the import turn started. Owned by the caller, which polls
    *  a clock rather than this component doing its own timer. */
   elapsedSeconds: number;
+  /** A Retry/Resume click is still in flight. The button goes inert so a
+   *  second click cannot start a second run (the backend answers the second
+   *  one 409, which is correct and useless to look at). */
+  actionPending?: boolean;
   onRetry: () => void;
   onResume: () => void;
 };
@@ -68,9 +72,18 @@ function HeaderIcon({ mode }: { mode: ImportView["mode"] }) {
  * to the bottom of the chat turn so tool messages keep appending above it.
  * Mounted by `EditorShell`, which owns the snapshot and the clock.
  */
-export default function ImportProgressCard({ view, elapsedSeconds, onRetry, onResume }: Props) {
+export default function ImportProgressCard({
+  view,
+  elapsedSeconds,
+  actionPending,
+  onRetry,
+  onResume,
+}: Props) {
   const t = useTranslations("editor");
   const { mode, steps, doneCount, totalCount, error, showPlan } = view;
+  // A translated line from the stored code, never the code itself: see
+  // `importErrorKey`.
+  const errorKey = importErrorKey(error);
 
   const title =
     mode === "done"
@@ -99,6 +112,11 @@ export default function ImportProgressCard({ view, elapsedSeconds, onRetry, onRe
       <div
         data-testid="import-progress-card"
         data-mode={mode}
+        // The whole point of this card is announcing progress, and every icon
+        // in it is aria-hidden -- so without this a screen reader is told
+        // nothing at all while the import runs.
+        role="status"
+        aria-live="polite"
         className={cn(
           "w-full max-w-[90vw] rounded-lg border px-3 py-3 text-sm",
           mode === "failed" ? "border-destructive/40 bg-destructive/5" : "",
@@ -121,9 +139,9 @@ export default function ImportProgressCard({ view, elapsedSeconds, onRetry, onRe
           ) : null}
         </div>
 
-        {error ? (
+        {errorKey ? (
           <p className="mt-2 rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
-            {error}
+            {t(errorKey)}
           </p>
         ) : null}
 
@@ -157,6 +175,7 @@ export default function ImportProgressCard({ view, elapsedSeconds, onRetry, onRe
               variant="outline"
               className="ml-auto h-7 px-2.5 text-xs"
               data-testid="import-action-retry"
+              disabled={actionPending}
               onClick={onRetry}
             >
               {t("importRetry")}
@@ -169,6 +188,7 @@ export default function ImportProgressCard({ view, elapsedSeconds, onRetry, onRe
               variant="outline"
               className="ml-auto h-7 px-2.5 text-xs"
               data-testid="import-action-resume"
+              disabled={actionPending}
               onClick={onResume}
             >
               {t("importResume")}

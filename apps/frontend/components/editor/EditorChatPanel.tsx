@@ -129,6 +129,8 @@ type Props = {
    *  import's own turn. From `lib/import-progress`'s `importCardIndex`.
    *  Absent pins the card last, which is the in-flight case. */
   importCardIndex?: number;
+  /** A Retry/Resume click is in flight; the card's button goes inert. */
+  importActionPending?: boolean;
   onImportRetry?: () => void;
   onImportResume?: () => void;
 };
@@ -199,6 +201,7 @@ export default function EditorChatPanel({
   importView,
   importElapsedSeconds,
   importCardIndex,
+  importActionPending,
   onImportRetry,
   onImportResume,
 }: Props) {
@@ -462,6 +465,7 @@ export default function EditorChatPanel({
     <ImportProgressCard
       view={importView}
       elapsedSeconds={importElapsedSeconds ?? 0}
+      actionPending={importActionPending}
       onRetry={() => onImportRetry?.()}
       onResume={() => onImportResume?.()}
     />
