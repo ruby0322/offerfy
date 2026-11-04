@@ -125,14 +125,26 @@
     "error": "无法创建简历，请再试一次。"
   },
   "upload": {
-    "title": "上传现有简历",
-    "lead": "上传后会立刻进入编辑器，无需先跑分析。",
-    "drop": "将文件拖放到这里，或点击选择",
-    "hint": "PDF、PNG、JPG、WEBP、TXT、MD · 最大 10 MiB",
+    "title": "添加你的简历",
+    "lead": "拖放文件、点击选择，或直接从剪贴板粘贴——PDF、截图或纯文本都可以。提交后会直接进入编辑器，内容已经在加载。",
+    "dropHint": "或将文件拖放到这个区域的任何地方",
+    "chooseFile": "选择文件",
+    "chooseFileHint": "从设备中浏览",
+    "pasteDoor": "粘贴",
+    "pasteShortcut": "⌘V / Ctrl+V",
+    "or": "或",
+    "chipPdf": "PDF",
+    "chipPhoto": "照片或截图",
+    "chipTxt": "TXT",
+    "chipMd": "MD",
+    "chipMaxSize": "最大 10 MiB",
+    "privacy": "只有你选择、拖放或粘贴的文件会被发送——设备上的其他内容不会被动到。",
+    "blankTemplate": "或从空白模板开始",
     "uploading": "上传中…",
     "error": "无法上传文件，请再试一次。",
     "tooLarge": "文件超过 10 MiB。",
-    "badType": "不支持的文件类型。"
+    "badType": "不支持的文件类型。",
+    "tooShort": "这段内容似乎太短，不像是简历。"
   },
   "login": {
     "title": "登录 Offerfy",

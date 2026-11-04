@@ -1207,19 +1207,17 @@ textarea {
   border-radius: var(--radius);
   background: var(--paper);
   color: var(--ink);
-  padding: 3rem 1.5rem;
+  padding: 1.75rem 1.25rem;
   text-align: center;
-  cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-.rr-dropzone:hover,
 .rr-dropzone[data-active="true"] {
   border-color: var(--clay);
   background: color-mix(in srgb, var(--clay) 8%, var(--paper));
 }
 
-.rr-dropzone:disabled {
+.rr-dropzone[data-disabled="true"] {
   cursor: not-allowed;
   opacity: 0.7;
 }
@@ -1228,6 +1226,87 @@ textarea {
   width: 2.5rem;
   height: 2.5rem;
   margin: 0 auto 0.85rem;
+  color: var(--muted);
+}
+
+/* --- /upload's two doors -------------------------------------------------- */
+
+.rr-door {
+  flex: 1 1 0%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem 1rem;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ink);
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.rr-door:not([data-static="true"]):hover {
+  background: var(--hover);
+}
+
+.rr-door:disabled {
+  cursor: not-allowed;
+}
+
+.rr-door[data-static="true"] {
+  cursor: default;
+}
+
+.rr-door-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: 0 auto 0.6rem;
+  color: var(--muted);
+}
+
+.rr-door-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.rr-door-divider span {
+  padding: 0.3rem 0.6rem;
+}
+
+@media (min-width: 640px) {
+  .rr-door-divider {
+    position: relative;
+    width: 1px;
+    background: var(--rule);
+  }
+
+  .rr-door-divider span {
+    position: absolute;
+    background: var(--paper);
+    padding: 0.3rem 0.4rem;
+  }
+}
+
+.rr-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.rr-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--paper);
+  font-size: 0.75rem;
   color: var(--muted);
 }
 
