@@ -8,7 +8,7 @@ import Dropzone from "@/components/upload/Dropzone";
 import { Link, useRouter } from "@/i18n/navigation";
 import { ApiError, startImport, uploadResume } from "@/lib/api";
 import { saveEditorTab } from "@/lib/editor-tab";
-import { synthesizePastedTextFile, validatePastedText } from "@/lib/upload-intake";
+import { synthesizePastedTextFile, validateFile, validatePastedText } from "@/lib/upload-intake";
 
 const CHIP_KEYS = ["chipPdf", "chipPhoto", "chipTxt", "chipMd", "chipMaxSize"] as const;
 
@@ -87,6 +87,14 @@ export default function UploadPage() {
       const pastedFile = clipboardData.files[0];
       if (pastedFile) {
         event.preventDefault();
+        // Same gate a dropped or chosen file goes through -- a paste must
+        // not be a backdoor around the dropzone's own rules. Not subject to
+        // the paste-text length rule; that one is text-only.
+        const result = validateFile(pastedFile);
+        if (!result.ok) {
+          setError(t(result.reason));
+          return;
+        }
         setError(null);
         void onFile(pastedFile);
         return;

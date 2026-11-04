@@ -53,6 +53,7 @@ export default function Dropzone({ disabled, onFile }: Props) {
           accept(event.dataTransfer.files[0]);
         }}
       >
+        <p className="mb-3 text-xs text-muted-foreground">{t("dropHint")}</p>
         <div className="rr-doors flex flex-col items-stretch gap-3 sm:flex-row sm:gap-0">
           <button
             type="button"

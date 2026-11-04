@@ -124,6 +124,7 @@
   "upload": {
     "title": "Add your resume",
     "lead": "Drop a file, choose one, or paste it straight from your clipboard — a PDF, a screenshot, or plain text all work. You'll land in the editor with it already loading.",
+    "dropHint": "or drag a file anywhere in this box",
     "chooseFile": "Choose a file",
     "chooseFileHint": "browse your device",
     "pasteDoor": "Paste",
