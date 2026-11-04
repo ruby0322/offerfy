@@ -7,6 +7,7 @@ import type {
   ImportStepStatus,
 } from "./import-progress";
 import {
+  RENDER_CHECK_KEY,
   emptyImportCursor,
   importBlocksSave,
   importCardIndex,
@@ -95,6 +96,51 @@ test("a step with an empty label is marked unlabelled", () => {
   );
 });
 
+// --------------------------------------------------------------------------
+// The reserved render-check key -- takes precedence over `unlabelled`,
+// because the backend writes it with an empty label on purpose (the
+// translated text lives here, not on the server) and the generic
+// "unnamed edit" wording would be wrong for it.
+// --------------------------------------------------------------------------
+
+test("the render-check step is flagged renderCheck, not unlabelled", () => {
+  const v = toImportView(
+    snap({
+      status: "running",
+      steps: [
+        { key: RENDER_CHECK_KEY, label: "", status: "active", detail: null },
+        { key: "edit-1", label: "", status: "done", detail: null },
+      ],
+    }),
+  );
+  assert.deepEqual(
+    v.steps.map((s) => s.renderCheck),
+    [true, false],
+  );
+  assert.deepEqual(
+    v.steps.map((s) => s.unlabelled),
+    [false, true],
+  );
+});
+
+test("the render-check step reports repairing from its detail", () => {
+  const checking = toImportView(
+    snap({ steps: [{ key: RENDER_CHECK_KEY, label: "", status: "active", detail: null }] }),
+  ).steps[0];
+  const repairing = toImportView(
+    snap({
+      steps: [{ key: RENDER_CHECK_KEY, label: "", status: "active", detail: "repairing" }],
+    }),
+  ).steps[0];
+  const done = toImportView(
+    snap({ steps: [{ key: RENDER_CHECK_KEY, label: "", status: "done", detail: null }] }),
+  ).steps[0];
+  assert.equal(checking.renderCheck, true);
+  assert.equal(checking.repairing, false);
+  assert.equal(repairing.repairing, true);
+  assert.equal(done.repairing, false);
+});
+
 test("running without staleness stays running and keeps showPlan true", () => {
   const v = toImportView(snap({ status: "running" }));
   assert.equal(v.mode, "running");
@@ -124,6 +170,8 @@ test("steps preserve key, label, status and detail", () => {
     status: "active",
     detail: "working",
     unlabelled: false,
+    renderCheck: false,
+    repairing: false,
   });
 });
 
@@ -243,6 +291,7 @@ test("no error means no key", () => {
 test("each known code maps to its own key", () => {
   assert.equal(importErrorKey("upload_missing"), "importErrorUploadMissing");
   assert.equal(importErrorKey("unexpected"), "importErrorUnexpected");
+  assert.equal(importErrorKey("render_check_failed"), "importErrorRenderCheckFailed");
 });
 
 test("an unrecognised code falls back rather than being shown as text", () => {

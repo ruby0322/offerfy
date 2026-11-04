@@ -31,8 +31,34 @@ function StepMark({ status }: { status: ImportViewStep["status"] }) {
   return <Circle className={cn(className, "text-muted-foreground")} aria-hidden="true" />;
 }
 
-function StepRow({ step, unlabelledText }: { step: ImportViewStep; unlabelledText: string }) {
-  const label = step.unlabelled ? unlabelledText : step.label;
+type RenderCheckLabels = {
+  checking: string;
+  repairing: string;
+  done: string;
+};
+
+function StepRow({
+  step,
+  unlabelledText,
+  renderCheckLabels,
+}: {
+  step: ImportViewStep;
+  unlabelledText: string;
+  renderCheckLabels: RenderCheckLabels;
+}) {
+  // The reserved render-check step takes its label from here, never from
+  // `step.label` (which the backend deliberately leaves empty -- see
+  // `RENDER_CHECK_KEY`) and never from the generic `unlabelled` fallback,
+  // which would otherwise win first since that label is also empty.
+  const label = step.renderCheck
+    ? step.repairing
+      ? renderCheckLabels.repairing
+      : step.status === "done"
+        ? renderCheckLabels.done
+        : renderCheckLabels.checking
+    : step.unlabelled
+      ? unlabelledText
+      : step.label;
   return (
     <div
       data-testid={`import-step-${step.key}`}
@@ -106,6 +132,11 @@ export default function ImportProgressCard({
   const showBar = mode === "running" && totalCount > 0;
   const showSteps = showPlan && steps.length > 0;
   const progressPct = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+  const renderCheckLabels: RenderCheckLabels = {
+    checking: t("importRenderCheckActive"),
+    repairing: t("importRenderCheckRepairing"),
+    done: t("importRenderCheckDone"),
+  };
 
   return (
     <div className="flex w-full justify-start">
@@ -150,7 +181,12 @@ export default function ImportProgressCard({
         {showSteps ? (
           <div className="mt-2.5 space-y-1.5 pl-8">
             {steps.map((step) => (
-              <StepRow key={step.key} step={step} unlabelledText={t("importUnlabelledStep")} />
+              <StepRow
+                key={step.key}
+                step={step}
+                unlabelledText={t("importUnlabelledStep")}
+                renderCheckLabels={renderCheckLabels}
+              />
             ))}
           </div>
         ) : null}
