@@ -1,12 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ImportSnapshot, ImportStepStatus } from "./import-progress";
+import type {
+  ImportAdoptCursor,
+  ImportSnapshot,
+  ImportStepStatus,
+} from "./import-progress";
 import {
+  emptyImportCursor,
+  importBlocksSave,
   importCardIndex,
   importErrorKey,
   importSourceChanged,
   importTurnStartsAt,
+  nextImportCursor,
+  planImportAdopt,
+  seedImportCursor,
   toImportView,
 } from "./import-progress";
 
@@ -244,4 +253,117 @@ test("an unrecognised code falls back rather than being shown as text", () => {
     "importErrorUnexpected",
   );
   assert.equal(importErrorKey("superseded: heartbeat went stale"), "importErrorUnexpected");
+});
+
+// --------------------------------------------------------------------------
+// the adopt cursor -- a failed adopt must retry, and must block every save
+// --------------------------------------------------------------------------
+
+const fresh = emptyImportCursor();
+
+test("a fresh cursor has taken in nothing and owes nothing", () => {
+  assert.deepEqual(fresh, { applied: 0, version: 0, outstanding: false });
+});
+
+test("a seeded cursor accounts for the snapshot the mount already loaded", () => {
+  assert.deepEqual(seedImportCursor(snap({ applied: 2, version: 7 })), {
+    applied: 2,
+    version: 7,
+    outstanding: false,
+  });
+});
+
+test("a plan-declared frame asks for a transcript read but no adopt", () => {
+  // `applied` has not moved: the model named its sections, it has not
+  // rewritten anything yet.
+  assert.deepEqual(planImportAdopt(snap({ applied: 0, version: 1 }), fresh), {
+    adoptSource: false,
+    readTranscript: true,
+  });
+});
+
+test("a section landing asks for both", () => {
+  assert.deepEqual(planImportAdopt(snap({ applied: 1, version: 2 }), fresh), {
+    adoptSource: true,
+    readTranscript: true,
+  });
+});
+
+test("the terminal frame asks for an adopt even with applied unchanged", () => {
+  const seen: ImportAdoptCursor = { applied: 2, version: 5, outstanding: false };
+  assert.equal(
+    planImportAdopt(snap({ status: "done", applied: 2, version: 5 }), seen).adoptSource,
+    true,
+  );
+});
+
+test("a failed adopt is retried by the next snapshot, unchanged though it is", () => {
+  // THE regression this cursor exists for. One transient `getResume` failure
+  // used to be permanent: the refs had already advanced, so the next frame
+  // carrying the same `applied` decided nothing had changed and the editor
+  // served the pre-import source to every save path for the rest of the
+  // session.
+  const frame = snap({ applied: 1, version: 2 });
+  const afterFailure = nextImportCursor(frame, fresh, "failed");
+  assert.equal(afterFailure.outstanding, true);
+  assert.equal(afterFailure.applied, 0, "a failed adopt must not advance applied");
+  assert.equal(planImportAdopt(frame, afterFailure).adoptSource, true);
+  // And the retry is what clears it.
+  const afterRetry = nextImportCursor(frame, afterFailure, "adopted");
+  assert.deepEqual(afterRetry, { applied: 1, version: 2, outstanding: false });
+});
+
+test("an outstanding adopt survives a frame that asks for nothing of its own", () => {
+  const owing: ImportAdoptCursor = { applied: 0, version: 2, outstanding: true };
+  const quiet = snap({ applied: 0, version: 2 });
+  assert.deepEqual(planImportAdopt(quiet, owing), {
+    adoptSource: true,
+    readTranscript: false,
+  });
+});
+
+test("a successful adopt advances applied and clears the debt", () => {
+  const owing: ImportAdoptCursor = { applied: 0, version: 2, outstanding: true };
+  assert.deepEqual(nextImportCursor(snap({ applied: 3, version: 4 }), owing, "adopted"), {
+    applied: 3,
+    version: 4,
+    outstanding: false,
+  });
+});
+
+test("version advances whatever the adopt did", () => {
+  // A missed transcript read costs a stale message list until the next frame
+  // or a reload. It is not the resume, so it does not hold the cursor back.
+  assert.equal(nextImportCursor(snap({ version: 9 }), fresh, "failed").version, 9);
+  assert.equal(nextImportCursor(snap({ version: 9 }), fresh, "not-needed").version, 9);
+});
+
+test("neither counter ever moves backwards", () => {
+  const ahead: ImportAdoptCursor = { applied: 5, version: 9, outstanding: false };
+  const behind = snap({ applied: 2, version: 3 });
+  assert.deepEqual(nextImportCursor(behind, ahead, "adopted"), ahead);
+  assert.deepEqual(nextImportCursor(behind, ahead, "not-needed"), ahead);
+});
+
+test("a live run blocks every save path", () => {
+  assert.equal(importBlocksSave("running", fresh), true);
+});
+
+test("an outstanding adopt blocks every save path after the run is over", () => {
+  // Finding 3's window: `mode` leaves "running" on the terminal frame, which
+  // is at least one round trip before that frame's source has been adopted.
+  const owing: ImportAdoptCursor = { applied: 1, version: 3, outstanding: true };
+  assert.equal(importBlocksSave("done", owing), true);
+  assert.equal(importBlocksSave("failed", owing), true);
+  assert.equal(importBlocksSave("stale", owing), true);
+  assert.equal(importBlocksSave(undefined, owing), true);
+});
+
+test("a settled cursor lets a finished, failed or stale run save again", () => {
+  // The import is over and our buffer matches the server. Refusing here would
+  // trade a clobber for a different trap: an editor that never saves again.
+  assert.equal(importBlocksSave("done", fresh), false);
+  assert.equal(importBlocksSave("failed", fresh), false);
+  assert.equal(importBlocksSave("stale", fresh), false);
+  assert.equal(importBlocksSave(undefined, fresh), false);
 });

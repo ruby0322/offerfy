@@ -158,3 +158,123 @@ export function importCardIndex(
 export function importSourceChanged(snap: ImportSnapshot, seenApplied: number): boolean {
   return snap.applied > seenApplied || snap.status === "done";
 }
+
+/**
+ * How much of an import run this client has taken in, and whether its buffer
+ * is currently known to be behind the server.
+ *
+ * `outstanding` is the load-bearing field. An import rewrites
+ * `resume.typst_source` server-side; between deciding to adopt that source
+ * and the adopt actually landing in the editor, the editor is holding an
+ * older document than the server has -- and every save path PUTs what it
+ * holds. So the flag goes up when the adopt is *decided*, not when it starts
+ * succeeding, and comes down only once the new source has landed.
+ */
+export type ImportAdoptCursor = {
+  /** `applied` of the last snapshot whose source landed in the editor. */
+  applied: number;
+  /** `version` of the last snapshot whose transcript was read back. */
+  version: number;
+  /** A decided adopt that has not landed: the buffer is behind the server. */
+  outstanding: boolean;
+};
+
+export type ImportAdoptPlan = {
+  /** Re-read the resume and replace the editor's `source` with it. */
+  adoptSource: boolean;
+  /** Re-read the chat transcript: the runner has written rows since. */
+  readTranscript: boolean;
+};
+
+/** A cursor for a run nothing has been taken in from yet. */
+export function emptyImportCursor(): ImportAdoptCursor {
+  return { applied: 0, version: 0, outstanding: false };
+}
+
+/**
+ * A cursor seeded from a snapshot the client has *already* accounted for --
+ * the mount, which loaded the source and the transcript itself, and a freshly
+ * started run, whose snapshot predates any write.
+ */
+export function seedImportCursor(snap: ImportSnapshot): ImportAdoptCursor {
+  return { applied: snap.applied, version: snap.version, outstanding: false };
+}
+
+/**
+ * What one snapshot asks the editor to do.
+ *
+ * `adoptSource` stays true while an adopt is outstanding, whatever this
+ * snapshot says. Without that, a single failed `getResume` is permanent: the
+ * next snapshot carries the same `applied`, `importSourceChanged` returns
+ * false, and the editor keeps serving the pre-import source to every save
+ * path for the rest of the session.
+ */
+export function planImportAdopt(
+  snap: ImportSnapshot,
+  cursor: ImportAdoptCursor,
+): ImportAdoptPlan {
+  return {
+    adoptSource: cursor.outstanding || importSourceChanged(snap, cursor.applied),
+    readTranscript: snap.version > cursor.version,
+  };
+}
+
+export type ImportAdoptOutcome =
+  /** `setSource` has run with the server's copy. */
+  | "adopted"
+  /** The re-read failed; the buffer is still the old one. */
+  | "failed"
+  /** This snapshot asked for no adopt. */
+  | "not-needed";
+
+/**
+ * The cursor after acting on `snap`.
+ *
+ * `applied` advances **only** on a successful adopt, so a failed one is
+ * retried by the next snapshot through both halves of `planImportAdopt`'s
+ * disjunction rather than neither. `version` advances either way: a missed
+ * transcript re-read costs the person a stale message list until the next
+ * frame or a reload, which is not the resume.
+ */
+export function nextImportCursor(
+  snap: ImportSnapshot,
+  cursor: ImportAdoptCursor,
+  outcome: ImportAdoptOutcome,
+): ImportAdoptCursor {
+  const version = Math.max(cursor.version, snap.version);
+  if (outcome === "failed") {
+    return { applied: cursor.applied, version, outstanding: true };
+  }
+  return {
+    applied: Math.max(cursor.applied, snap.applied),
+    version,
+    outstanding: false,
+  };
+}
+
+/**
+ * Whether an import forbids PUTting the editor's `source` back right now.
+ *
+ * Two reasons, and both are needed:
+ *
+ * - **A live run.** The agent is rewriting the resume section by section and
+ *   our copy is only as fresh as the last snapshot we adopted; a write from
+ *   here lands inside `set_draft_source`'s 120s coalesce window and replaces
+ *   the import's own revision, so history cannot recover it either.
+ * - **An outstanding adopt.** `mode` leaves `running` the moment the terminal
+ *   snapshot arrives, which is one or two round trips before that snapshot's
+ *   source has been adopted -- and if the adopt failed it never will be. The
+ *   run being over is not evidence that our buffer caught up.
+ *
+ * `stale` and `failed` runs are deliberately *not* blocked by mode alone:
+ * `advance()` bumps `applied` before `set_draft_source` commits, so a dead
+ * run can legitimately sit one section ahead, and the adopt is what settles
+ * it. Blocking on the cursor covers that; blocking on the mode would refuse
+ * to save for as long as the card is on screen.
+ */
+export function importBlocksSave(
+  mode: ImportView["mode"] | undefined,
+  cursor: ImportAdoptCursor,
+): boolean {
+  return mode === "running" || cursor.outstanding;
+}
