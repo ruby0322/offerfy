@@ -149,6 +149,54 @@ def test_ordinary_formatting_noise_still_passes():
     assert result["ok"] is True
 
 
+# A realistic multi-bullet resume where the hazard sits well past the start:
+# nine ordinary achievement bullets, then an unterminated block comment
+# (its own bullet line, short enough that MIN_CANDIDATE_WORDS drops it from
+# `checked` entirely -- the same way the real bug's own broken line often
+# does), then two more bullets that it swallows. Coverage alone clears
+# RENDER_OK_THRESHOLD (9 found / 11 checked ~ 82%), but a tail of >= 2
+# consecutive misses is exactly the signature `cliff_at` exists to catch.
+TAIL_LOSS_SOURCE = (
+    "= Experience\n\n"
+    + "\n".join(
+        f"- Achievement number {n} with several distinct words describing it"
+        for n in range(1, 10)
+    )
+    + "\n- Coinbase \\@x402/*\n"
+    "- Achievement number ten with several distinct words describing it\n"
+    "- Achievement number eleven with several distinct words describing it\n"
+)
+
+
+def test_a_trailing_cliff_fails_even_though_coverage_clears_the_threshold():
+    """The defect this guards against: a contiguous tail loss that still
+    scores above RENDER_OK_THRESHOLD on raw coverage alone must not pass.
+    Coverage tolerates *scattered* misses (formatting noise); a cliff is
+    a different thing -- "everything from here on vanished" -- and must
+    fail on its own, independent of the percentage.
+    """
+    result = verify_render(TAIL_LOSS_SOURCE)
+    assert result["cliff_at"] is not None
+    assert result["coverage"] >= RENDER_OK_THRESHOLD  # the trap: this alone would pass
+    assert result["ok"] is False
+
+
+def test_a_single_scattered_miss_is_not_a_cliff():
+    """The real single-bullet repro (`REPRO_SOURCE`'s shape reduced to one
+    broken item among otherwise-fine content) has no run of >= 2 trailing
+    misses, so it is caught by the threshold, not by cliff detection --
+    both mechanisms genuinely matter, not just one of them.
+    """
+    source = (
+        "= Experience\n\n"
+        "- Achievement number one with several distinct words describing it\n"
+        "- Coinbase \\@x402 standard libraries integrated cleanly\n"
+        "- Achievement number two with several distinct words describing it\n"
+    )
+    result = verify_render(source)
+    assert result["cliff_at"] is None
+
+
 def test_coverage_is_found_over_checked():
     result = verify_render(CLEAN_SOURCE)
     assert result["found"] == result["checked"] - len(result["missing"])

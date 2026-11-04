@@ -27,8 +27,10 @@ that is in the source actually make it onto the page.
    in the PDF's normalised word stream -- Typst's own line wrapping
    collapses to a single space on both sides, so wrapping a candidate
    across two PDF lines does not cost it a match.
-5. `coverage = found / checked`. `ok = coverage >= RENDER_OK_THRESHOLD`
-   (or `True` if there was nothing to check at all).
+5. `coverage = found / checked`, and a cliff (`_cliff_index`: a trailing
+   run of >= 2 consecutive misses, in source order -- see below) is
+   computed independently. `ok = checked == 0 or (coverage >=
+   RENDER_OK_THRESHOLD and cliff_at is None)`.
 
 **Why a threshold, not "every candidate present."** Formatting noise --
 ligatures, hyphenation, a stray font substitution, the odd candidate this
@@ -39,6 +41,30 @@ not pick a convenient stopping point -- it erases the rest of the document.
 `RENDER_OK_THRESHOLD = 0.7` leaves the real failure mode (which lands at or
 near 0%) a wide margin below the line while still refusing an import that
 is mostly a cliff with a token surviving fragment at the very top.
+
+**Why the cliff is a second, independent failure condition, not just a
+detail `coverage` already captures.** On a resume with enough candidates,
+one hazard partway through can still clear the threshold on raw percentage
+alone -- measured: nine ordinary bullets, then the hazard, then two more
+bullets it swallows, scores 9/11 ~ 82% coverage, comfortably above 0.7,
+while the back quarter of the page is visibly gone. Coverage tolerates
+*scattered* misses (that is what the threshold is for); a trailing run of
+misses is a categorically different shape -- "everything from here on
+vanished" -- and is the signature of this entire bug class at *any*
+coverage level, not just a low one. The two mechanisms are complementary,
+not redundant: the original single-bullet repro, reduced to one broken
+item among otherwise-fine content, has no run of two, so it is caught by
+the threshold and not by the cliff; a tail loss on a longer document is
+caught only by the cliff. Both are needed; see
+`test_a_trailing_cliff_fails_even_though_coverage_clears_the_threshold` and
+`test_a_single_scattered_miss_is_not_a_cliff` in `tests/test_import_qa.py`.
+
+Guarding the false-positive risk this adds (a cliff now fails an import
+outright, which is new cost): `_cliff_index`'s run must be the literal
+*tail* of the candidate list in source order (nothing recovers after it)
+and at least 2 long. A single miss at the very end of the document --
+plausibly just the last candidate this module under-excludes -- is not
+enough to trip it.
 
 **False positives are the main risk** -- a false "not ok" costs the person
 a repair round for nothing. See `_candidates` for every deliberate
@@ -246,8 +272,12 @@ def verify_render(typst_source: str) -> dict:
     source's visible content actually made it onto the page.
 
     Returns a dict with at least:
-    - `ok` (bool): `coverage >= RENDER_OK_THRESHOLD`, or `True` if there was
-      nothing to check (`checked == 0`).
+    - `ok` (bool): `True` if there was nothing to check (`checked == 0`);
+      otherwise `coverage >= RENDER_OK_THRESHOLD` **and** `cliff_at is
+      None`. Both conditions are required -- see the module docstring's
+      "why the cliff is a second, independent failure condition" for why a
+      trailing run of missing candidates fails the import even when raw
+      coverage alone would have cleared the threshold.
     - `coverage` (float): `found / checked`, or `1.0` if `checked == 0`.
     - `missing` (list[str]): candidates not found, in source order.
     - `checked` (int): how many candidates were evaluated.
@@ -257,7 +287,8 @@ def verify_render(typst_source: str) -> dict:
     - `cliff_at` (str | None): the first missing candidate in a trailing
       run of two or more (see `_cliff_index`) -- "everything from here on
       is missing" is a far more actionable thing to hand an agent than an
-      unordered list.
+      unordered list. Also, independently of `coverage`, what makes `ok`
+      `False`.
     - `compile_error` (str | None): set instead of the above if the source
       did not compile at all. This should not normally happen here -- the
       import turn already runs with `verify_compile=True`, which repairs
@@ -306,13 +337,19 @@ def verify_render(typst_source: str) -> dict:
     missing = [c for c, ok in zip(candidates, found_flags) if not ok]
     coverage = 1.0 if checked == 0 else found / checked
     cliff = _cliff_index(found_flags)
+    cliff_at = candidates[cliff] if cliff is not None else None
 
     return {
-        "ok": checked == 0 or coverage >= RENDER_OK_THRESHOLD,
+        # Both conditions, not coverage alone: a trailing run of missing
+        # candidates (a cliff) fails the import even when raw coverage
+        # would have cleared the threshold on its own -- see the module
+        # docstring and `test_a_trailing_cliff_fails_even_though_coverage_`
+        # `clears_the_threshold`.
+        "ok": checked == 0 or (coverage >= RENDER_OK_THRESHOLD and cliff_at is None),
         "coverage": coverage,
         "missing": missing,
         "checked": checked,
         "found": found,
-        "cliff_at": candidates[cliff] if cliff is not None else None,
+        "cliff_at": cliff_at,
         "compile_error": None,
     }
