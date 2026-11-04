@@ -7,10 +7,20 @@ Fixtures mirror tests/test_import_tools.py: there is no shared `resume` or
 needs a run reuses one run per resume rather than starting a second.
 """
 
+from datetime import timedelta
+
 import pytest
 
-from app.models import ChatMessage, GuestSession, LlmCall, Resume, ResumeImportStep
+from app.models import (
+    ChatMessage,
+    GuestSession,
+    LlmCall,
+    Resume,
+    ResumeImportStep,
+    _utcnow,
+)
 from app.services import import_run, usage
+from app.services.import_run import STALE_AFTER_SECONDS
 from app.services.import_runner import run_import
 from app.services.import_tools import DECLARE_PLAN_TOOL
 from app.services.llm.prompts import EDIT_TOOL
@@ -396,3 +406,77 @@ async def test_import_cost_lands_in_telemetry_and_in_the_counter(
     # The reconciliation itself, which is the thing that would have been
     # permanently noisy with the rows missing.
     assert usage.reconcile(db_session, window_start=window) == []
+
+
+async def test_a_superseded_runner_stops_at_its_next_event(
+    db_session, resume, run, monkeypatch
+):
+    """The only way to stop a runner that no longer owns its resume.
+
+    `start_run` supersedes a stale run and inserts a fresh one, but nothing
+    cancels the `asyncio.Task` still driving the old one -- across two uvicorn
+    workers nothing can, because that task lives in the other process. So the
+    old runner has to notice for itself, and `touch` before every event is
+    where it does. Without it, two agents write `resume.typst_source`
+    concurrently from two sessions, each holding its own snapshot of it.
+
+    The turn is faked at the name `import_runner` imports it under, the same
+    way `test_failure_after_partial_progress_keeps_what_landed` does: there is
+    no hook on the scripted client for "another worker intervenes here".
+    """
+    _stub_upload(monkeypatch)
+    reached = []
+
+    async def fake_turn(*args, **kwargs):
+        yield {
+            "kind": "tool",
+            "trace": {
+                "name": EDIT_TOOL,
+                "arguments": {"search": "R", "replace": "R\nBasics", "step": "basics"},
+                "result": {"ok": True, "changed": True, "source": "= R\nBasics"},
+            },
+        }
+        yield {"kind": "source", "typst_source": "= R\nBasics"}
+        # The other worker: this run's heartbeat went stale, so a retry from
+        # the browser started a fresh one over it.
+        run.heartbeat_at = _utcnow() - timedelta(seconds=STALE_AFTER_SECONDS + 1)
+        db_session.flush()
+        newer = import_run.start_run(db_session, resume)
+        reached.append(newer.id)
+        yield {
+            "kind": "tool",
+            "trace": {
+                "name": EDIT_TOOL,
+                "arguments": {
+                    "search": "Basics",
+                    "replace": "Basics\nExperience",
+                    "step": "experience",
+                },
+                "result": {"ok": True, "changed": True, "source": "= R\nBasics\nExperience"},
+            },
+        }
+        # Only reachable if the runner carried on past the supersession.
+        reached.append("carried on")
+        yield {"kind": "assistant", "content": "never written"}
+
+    monkeypatch.setattr("app.services.import_runner.aiter_chat_edit", fake_turn)
+
+    await run_import(db_session, resume, run)
+
+    assert "carried on" not in reached
+    newer_id = reached[0]
+
+    db_session.rollback()
+    db_session.refresh(run)
+    db_session.refresh(resume)
+    newer = db_session.get(import_run.ResumeImport, newer_id)
+    # The old run keeps the supersession's own verdict: `fail()` from the old
+    # runner's handler must not overwrite it, bump a version nobody reads, or
+    # -- the damaging one -- mark the resume failed under the new run.
+    assert run.status == "failed"
+    assert "superseded" in (run.error or "")
+    assert run.applied == 1
+    assert newer.status == "running"
+    assert resume.import_status == "pending"
+    # And no closing message from the stopped runner.
+    assert not [m for m in _messages(db_session, resume.id) if m.content == "never written"]

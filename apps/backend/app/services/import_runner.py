@@ -36,7 +36,11 @@ Event translation, one round at a time:
   `app.services.usage.reconcile` reports as an admin gap.
 - every event, whatever its kind, calls `touch()` so the run's heartbeat
   stays fresh -- that is what lets a reconnecting client (and
-  `import_run.is_stale`) tell a live import from one whose worker died.
+  `import_run.is_stale`) tell a live import from one whose worker died. It is
+  also the chokepoint that stops a *superseded* runner: `touch` raises
+  `ImportSuperseded` once the row is no longer `running`, which is the only
+  mechanism that works across two uvicorn workers, where the old runner's
+  task is in the other process and cannot be cancelled from here.
 
 **Why this wraps `aiter_chat_edit` in `system_guard`.** The import spends
 real provider tokens exactly like a chat turn does, and
@@ -65,7 +69,7 @@ from app.services.chat_messages import (
     persist_usage,
 )
 from app.services.extract import extract_upload_text
-from app.services.import_run import advance, fail, finish, touch
+from app.services.import_run import ImportSuperseded, advance, fail, finish, touch
 from app.services.import_tools import import_tool_handlers, import_tool_specs
 from app.services.llm import aiter_chat_edit
 from app.services.llm.prompts import EDIT_TOOL
@@ -91,6 +95,16 @@ TIMEOUT_SECONDS = 180.0
 # spends tokens on work the person never typed, so the admin overview's
 # by-purpose breakdown has to be able to show it. See models.LLM_CALL_PURPOSES.
 IMPORT_PURPOSE = "import"
+
+# What goes in `resume_imports.error`: a code the progress card translates,
+# never the raw exception text. The card is the only reader of that column,
+# and it renders in three languages -- `str(exc)` there was both untranslated
+# and a leak (`could not read the uploaded file
+# ('uploads/<owner>/<resume>/<name>.pdf')` publishes our storage-key shape).
+# The raw text is logged instead, which is where it was always useful. Keep
+# these in step with `lib/import-progress.ts`'s `importErrorKey`.
+UPLOAD_MISSING = "upload_missing"
+UNEXPECTED = "unexpected"
 
 IMPORT_INSTRUCTION = (
     "Import this uploaded resume into the Typst document.\n\n"
@@ -153,7 +167,16 @@ async def run_import(
     try:
         data = get_object(run.file_key)
         if data is None:
-            fail(db, run, f"could not read the uploaded file ({run.file_key!r})")
+            # The one failure that is not an exception, so nothing else would
+            # log it: without this the run just shows up as `failed` with no
+            # trace of which key could not be read.
+            logger.warning(
+                "resume import found no readable upload resume_id=%s run_id=%s file_key=%r",
+                resume.id,
+                run.id,
+                run.file_key,
+            )
+            fail(db, run, UPLOAD_MISSING)
             return
 
         filename = _upload_filename(run)
@@ -201,12 +224,26 @@ async def run_import(
                     persist_assistant_message(db, resume.id, event["content"])
 
         finish(db, run)
-    except Exception as exc:
+    except ImportSuperseded:
+        # Not a failure: a newer run owns this resume now, and `touch` raised
+        # so this runner would stop writing over it. Nothing to record -- the
+        # supersession already wrote its own reason on the old row.
+        logger.warning(
+            "resume import superseded, stopping resume_id=%s run_id=%s",
+            resume.id,
+            run.id,
+        )
+    except Exception:
+        # The raw text goes here and nowhere else. It reaches no user-facing
+        # surface: it is untranslated in a trilingual product, and a provider
+        # message or a storage key shaped like
+        # `uploads/<owner>/<resume>/<name>.pdf` is nothing to show anyone. The
+        # card renders a translated string from the stored code instead.
         logger.exception(
             "resume import failed resume_id=%s run_id=%s", resume.id, run.id
         )
         try:
-            fail(db, run, str(exc) or exc.__class__.__name__)
+            fail(db, run, UNEXPECTED)
         except Exception:
             logger.exception(
                 "import_run.fail() itself raised; run_id=%s may be stuck running",

@@ -7,9 +7,11 @@ from app.models import GuestSession, Resume, ResumeImport, ResumeImportStep, _ut
 from app.services import import_run
 from app.services.import_run import (
     ImportAlreadyRunning,
+    ImportSuperseded,
     LABEL_MAX,
     MAX_STEPS,
     STALE_AFTER_SECONDS,
+    declare_plan,
     fail,
     finish,
     is_stale,
@@ -39,6 +41,20 @@ def resume(db_session):
 def test_constants_declared():
     assert MAX_STEPS == 12
     assert LABEL_MAX == 120
+
+
+def test_the_stale_threshold_sits_above_the_turns_own_timeout():
+    """"Stale" has to mean dead, not slow.
+
+    `import_runner.TIMEOUT_SECONDS` is a *per-chunk read* budget, so a wait
+    of nearly that long for the first token is permitted and silent. A
+    threshold below it declared such a run dead, offered Resume, and let two
+    agents write the same resume concurrently from two sessions.
+    """
+    from app.services.import_runner import TIMEOUT_SECONDS
+
+    assert STALE_AFTER_SECONDS == 240
+    assert STALE_AFTER_SECONDS > TIMEOUT_SECONDS
 
 
 def test_start_run_sets_running_and_pending_status(db_session, resume):
@@ -209,3 +225,90 @@ def test_snapshot_shape_and_stale_flag(db_session, resume):
 
 def test_snapshot_is_none_without_a_run(db_session, resume):
     assert snapshot(db_session, resume.id) is None
+
+
+# --------------------------------------------------------------------------
+# a superseded runner stops itself
+# --------------------------------------------------------------------------
+
+
+def _supersede(db_session, resume):
+    """What the *other* uvicorn worker does: age the live run out and start a
+    fresh one over it. The old run's own task is in another process and
+    cannot be cancelled from here, which is the whole reason `touch` checks.
+    """
+    old = start_run(db_session, resume)
+    old.heartbeat_at = _utcnow() - timedelta(seconds=STALE_AFTER_SECONDS + 1)
+    db_session.flush()
+    new = start_run(db_session, resume)
+    return old, new
+
+
+def test_touch_refuses_a_superseded_run(db_session, resume):
+    old, _new = _supersede(db_session, resume)
+    with pytest.raises(ImportSuperseded):
+        touch(db_session, old)
+
+
+def test_touch_on_a_superseded_run_bumps_nothing(db_session, resume):
+    old, new = _supersede(db_session, resume)
+    old_version, new_version = old.version, new.version
+    with pytest.raises(ImportSuperseded):
+        touch(db_session, old)
+    db_session.rollback()
+    db_session.refresh(old)
+    db_session.refresh(new)
+    assert old.version == old_version
+    assert new.version == new_version
+
+
+def test_fail_does_not_resurrect_a_superseded_run(db_session, resume):
+    """The old runner's exception handler calls `fail`, and it must not land.
+
+    Unguarded it would overwrite the supersession's own error and -- the
+    damaging one -- set `resume.import_status = "failed"` while the run that
+    replaced it is still pending.
+    """
+    old, new = _supersede(db_session, resume)
+    superseded_error = old.error
+
+    fail(db_session, old, "provider connection dropped")
+
+    db_session.refresh(old)
+    db_session.refresh(resume)
+    assert old.error == superseded_error
+    assert resume.import_status == "pending"
+    assert new.status == "running"
+
+
+def test_finish_does_not_complete_a_superseded_run(db_session, resume):
+    old, new = _supersede(db_session, resume)
+
+    finish(db_session, old)
+
+    db_session.refresh(old)
+    db_session.refresh(resume)
+    assert old.status == "failed"
+    assert resume.import_status == "pending"
+    assert new.status == "running"
+
+
+def test_declare_plan_from_a_superseded_runner_never_gets_that_far(db_session, resume):
+    """Deferred item 8, closed at the same chokepoint.
+
+    `declare_plan` has no status guard of its own and does not need one: the
+    runner `touch`es before every event, so a tool call from a runner that was
+    superseded minutes ago raises before its handler runs.
+    """
+    old, new = _supersede(db_session, resume)
+    with pytest.raises(ImportSuperseded):
+        touch(db_session, old)
+    # Proof that this is the guard doing the work and not declare_plan: called
+    # directly, it still writes -- which is exactly why touch has to be first.
+    declare_plan(db_session, new, [{"key": "summary", "label": "Summary"}])
+    assert (
+        db_session.query(ResumeImportStep)
+        .filter(ResumeImportStep.import_id == new.id)
+        .count()
+        == 1
+    )

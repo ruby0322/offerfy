@@ -9,13 +9,13 @@ scheduling seam (``app.routers.resumes._schedule_import``) to keep them
 deterministic and independent of model-scripting or timing.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.models import ChatMessage, Resume, ResumeImport
-from app.services.import_run import advance, declare_plan, finish
+from app.models import ChatMessage, Resume, ResumeImport, _utcnow
+from app.services.import_run import STALE_AFTER_SECONDS, advance, declare_plan, finish
 
 
 def _upload(client: TestClient, body: bytes = b"Resume body\ncontact@example.com"):
@@ -131,6 +131,32 @@ def test_stream_closes_once_the_run_is_done(client, uploaded_resume, monkeypatch
     with client.stream("GET", f"/v1/resumes/{uploaded_resume}/import/stream") as s:
         frames = [line for line in s.iter_lines() if line.startswith("data:")]
     assert len(frames) == 1
+
+
+def test_stream_closes_for_a_stale_run(client, uploaded_resume, monkeypatch, db_session):
+    """The restart case, which is the one `stale` exists for.
+
+    Nothing reaps a run left `running` by an API restart mid-import, so its
+    row never reaches `done` or `failed`. Terminating only on those two left
+    every attached client polling Postgres every 400ms forever -- and every
+    reload added another immortal stream. The frame still goes out first, so
+    the card can offer Resume.
+    """
+    _disable_scheduling(monkeypatch)
+    client.post(f"/v1/resumes/{uploaded_resume}/import")
+
+    run = _latest_run(db_session, uploaded_resume)
+    run.heartbeat_at = _utcnow() - timedelta(seconds=STALE_AFTER_SECONDS + 1)
+    db_session.commit()
+
+    with client.stream("GET", f"/v1/resumes/{uploaded_resume}/import/stream") as s:
+        frames = [line for line in s.iter_lines() if line.startswith("data:")]
+    assert len(frames) == 1
+    assert '"stale": true' in frames[0] or '"stale":true' in frames[0]
+    # Still `running` in the database -- nothing reaped it; the stream just
+    # stopped waiting for a heartbeat that is never coming.
+    db_session.refresh(run)
+    assert run.status == "running"
 
 
 def test_transcript_rows_carry_a_timestamp_the_card_can_group_by(

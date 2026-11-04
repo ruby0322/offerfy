@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from pathlib import Path
 
 from datetime import datetime, timezone
@@ -49,6 +50,8 @@ from app.services.typst_compile import (
     compile_typst,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 # How often the stream route polls for a new snapshot. See
@@ -81,6 +84,14 @@ async def _run_import_detached(resume_id: str, run_id: str, model: str | None) -
         resume = db.get(Resume, resume_id)
         run = db.get(ResumeImport, run_id)
         if resume is None or run is None:
+            # Both were just written by the route that scheduled this, so one
+            # of them missing means the resume was deleted in between. Silence
+            # here left a run stuck `running` with nothing explaining why.
+            logger.warning(
+                "import not started: resume_id=%s run_id=%s no longer exist",
+                resume_id,
+                run_id,
+            )
             return
         await run_import(db, resume, run, model=model)
     finally:
@@ -602,6 +613,18 @@ async def _stream_import_snapshots(resume_id: str):
     Emits a frame immediately, then one each time `version` changes, and
     always emits one final frame and returns once `status` is `done` or
     `failed` -- a stream that never terminates leaks a connection per reload.
+
+    **A stale run terminates the stream too.** Nothing reaps a run left
+    `running` by an API restart mid-import, so its row stays `running` in the
+    database indefinitely: without this the loop would poll Postgres every
+    400ms forever while the card showed "Import was interrupted", and every
+    reload would add another immortal stream. That restart is exactly the case
+    the `stale` state exists for, so it is a common path, not an edge one.
+    Resume still works: the client re-attaches after `startImport`.
+
+    A stale snapshot is emitted even when `version` has not moved, because a
+    dead runner is precisely one that stops bumping it -- the staleness *is*
+    the new information, and it is the client's cue to offer Resume.
     """
     factory = get_session_factory()
     last_version: int | None = None
@@ -613,10 +636,10 @@ async def _stream_import_snapshots(resume_id: str):
             session.close()
         if data is None:
             return
-        if data["version"] != last_version:
+        if data["version"] != last_version or data["stale"]:
             last_version = data["version"]
             yield sse_frame(data)
-        if data["status"] in ("done", "failed"):
+        if data["status"] in ("done", "failed") or data["stale"]:
             return
         await asyncio.sleep(IMPORT_POLL_SECONDS)
 

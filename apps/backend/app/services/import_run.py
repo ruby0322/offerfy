@@ -82,12 +82,15 @@ raises, never a raw database error.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import Resume, ResumeImport, ResumeImportStep, _utcnow
+
+logger = logging.getLogger(__name__)
 
 # Sanitising bounds for `declare_plan` and `advance`. `KEY_MAX` matches
 # `ResumeImportStep.key`'s column width (`String(64)`) -- see the module
@@ -99,11 +102,35 @@ KEY_MAX = 64
 # How long a run may go without a heartbeat before it is considered dead --
 # e.g. its worker process crashed or was killed -- and may be superseded by a
 # new run for the same resume.
-STALE_AFTER_SECONDS = 60
+#
+# **This has to sit above the turn's own timeout, not below it.**
+# `import_runner.TIMEOUT_SECONDS` is 180s and it is a *per-chunk read* budget,
+# so a 180-second wait for the first token is permitted and silent. At 60s
+# this threshold called that run dead: the card said "interrupted", the person
+# pressed Resume, and two agents then wrote `resume.typst_source` concurrently
+# from two sessions, each holding its own snapshot of it -- interleaved and
+# lost sections, plus the old runner's `finish()` landing on the new run. At
+# 240s "stale" means dead rather than merely slow.
+STALE_AFTER_SECONDS = 240
 
 
 class ImportAlreadyRunning(Exception):
     """Raised by `start_run` when a non-stale run is already in progress."""
+
+
+class ImportSuperseded(Exception):
+    """Raised by `touch` when its run is no longer the live one.
+
+    The only mechanism that can stop a superseded runner. `start_run` marks a
+    stale run `failed` and inserts a fresh one, but nothing cancels the
+    `asyncio.Task` still driving the old one -- and across two uvicorn workers
+    nothing can: the task lives in the other process's event loop. So the
+    stopping has to be something the old runner itself notices, and the only
+    thing both workers can see is Postgres. Every event of a run funnels
+    through `touch`, which makes it the one chokepoint where that check costs
+    one query and catches everything -- including a tool call (`declare_plan`)
+    arriving from a runner that was superseded minutes ago.
+    """
 
 
 def _aware(dt: datetime) -> datetime:
@@ -166,6 +193,8 @@ def start_run(db: Session, resume: Resume) -> ResumeImport:
     try:
         db.commit()
     except IntegrityError:
+        # Unscoped on purpose: the only other integrity failure reachable here
+        # is the resume_id FK, which means the resume was deleted mid-call.
         db.rollback()
         raise ImportAlreadyRunning(
             f"an import is already running for resume {resume.id}"
@@ -173,13 +202,46 @@ def start_run(db: Session, resume: Resume) -> ResumeImport:
     return run
 
 
+def _live_status(db: Session, run: ResumeImport) -> str | None:
+    """`run.status` as the database has it *now*.
+
+    Read as a column rather than off the instance: the row may have been moved
+    to `failed` by a `start_run` in the other uvicorn worker, which this
+    session's identity map knows nothing about.
+    """
+    return db.query(ResumeImport.status).filter(ResumeImport.id == run.id).scalar()
+
+
 def touch(db: Session, run: ResumeImport) -> None:
+    """Heartbeat one event of a live run -- and stop a superseded one.
+
+    Raises `ImportSuperseded` if the row is no longer `running`. The runner
+    funnels every exception into `fail()`, which is a no-op on a run it no
+    longer owns, so a superseded runner stops at its next event without
+    touching the run that replaced it. See `ImportSuperseded`.
+    """
+    if _live_status(db, run) != "running":
+        raise ImportSuperseded(
+            f"import run {run.id} is no longer running; a newer run has taken over"
+        )
     _bump(run)
     db.commit()
 
 
 def finish(db: Session, run: ResumeImport) -> None:
-    """End a run successfully. Any step not yet reached is marked skipped."""
+    """End a run successfully. Any step not yet reached is marked skipped.
+
+    A no-op on a run that is no longer `running`, for the same reason `fail`
+    is: a superseded runner reaching its last event must not write `done` --
+    on itself or, through `resume.import_status`, on the run that replaced it.
+    """
+    if _live_status(db, run) != "running":
+        logger.warning(
+            "ignoring finish() on import run %s: status is %s, not running",
+            run.id,
+            _live_status(db, run),
+        )
+        return
     unreached = (
         db.query(ResumeImportStep)
         .filter(
@@ -210,6 +272,22 @@ def _mark_failed(run: ResumeImport, error: str) -> None:
 
 
 def fail(db: Session, run: ResumeImport, error: str) -> None:
+    """End a run as failed. A no-op on a run that is no longer `running`.
+
+    The guard is what makes `ImportSuperseded` safe to raise out of `touch`:
+    the superseded runner's own exception handler calls this, and without the
+    check it would overwrite the supersession's error with its own, bump a
+    version nobody is listening to, and -- worst of the three -- set
+    `resume.import_status = "failed"` while the run that replaced it is still
+    pending.
+    """
+    if _live_status(db, run) != "running":
+        logger.warning(
+            "ignoring fail() on import run %s (%s); it is no longer running",
+            run.id,
+            error,
+        )
+        return
     _mark_failed(run, error)
     db.commit()
 
