@@ -1090,7 +1090,7 @@ class ResumeImport(Base):
     __table_args__ = (
         CheckConstraint(
             "status IN ('running', 'done', 'failed')",
-            name="resume_import_status_values",
+            name="resume_imports_status_values",
         ),
     )
 

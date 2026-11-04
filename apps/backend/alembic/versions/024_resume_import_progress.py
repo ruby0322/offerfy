@@ -61,7 +61,7 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "status IN ('running', 'done', 'failed')",
-            name="resume_import_status_values",
+            name="resume_imports_status_values",
         ),
     )
     op.create_index("ix_resume_imports_resume_id", "resume_imports", ["resume_id"])
