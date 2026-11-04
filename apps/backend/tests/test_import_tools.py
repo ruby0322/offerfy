@@ -60,20 +60,27 @@ def test_handler_persists_the_plan(db_session, run):
     assert steps[0].label == "A"
 
 
-def test_handler_accepted_count_matches_sanitised_steps(db_session, run):
+def test_handler_sanitises_and_returns_only_accepted(db_session, run):
+    # Deliberately messy input: a duplicate key and a malformed entry (empty
+    # key) that `declare_plan`'s sanitiser must drop. 4 submitted, only 2
+    # should survive -- proving `accepted` reflects the filtered count, not
+    # len(steps). The result's own shape must also carry nothing but that
+    # count: no `steps`, `key`, or `label` riding back into model context.
     handlers = import_tool_handlers(db_session, run)
     out = json.loads(
         handlers[DECLARE_PLAN_TOOL](
-            {"steps": [{"key": "a", "label": "A"}, {"key": "b", "label": "B"}]}
+            {
+                "steps": [
+                    {"key": "a", "label": "A"},
+                    {"key": "a", "label": "A duplicate"},
+                    {"key": "", "label": "x"},
+                    {"key": "b", "label": "B"},
+                ]
+            }
         )
     )
+    assert set(out.keys()) == {"accepted"}
     assert out["accepted"] == 2
-
-
-def test_handler_return_value_is_small():
-    # The result goes back into the model's own context on the next round --
-    # it must not echo the step list back.
-    assert json.loads('{"accepted": 3}') == {"accepted": 3}
 
 
 def test_edit_tool_advertises_step():
