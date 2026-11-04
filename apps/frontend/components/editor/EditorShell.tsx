@@ -707,6 +707,23 @@ export default function EditorShell({ resumeId }: Props) {
   useEffect(() => {
     if (!loaded) return;
     if (skipTimers.current) return;
+    // The third save path, and the one a person is most likely to take at the
+    // worst possible moment. If the terminal frame's adopt failed, the Typst
+    // tab is showing the pre-import starter template, the import looks lost,
+    // and the obvious response is to start typing it back in -- 400ms later
+    // this would PUT that template over the finished import. C1 again,
+    // through the one door the other two guards left open.
+    //
+    // `importView` is in the deps so a save deferred here is picked up the
+    // moment the block lifts. While the run is live, the next adopt replaces
+    // `source` wholesale anyway, so typing into the Typst tab mid-import was
+    // never going to survive -- this only stops it reaching the server first.
+    // And if the adopt is outstanding for good (a failed re-read on the
+    // terminal frame, with no later frame to retry on) the block never lifts
+    // and the typing is never written. That is the intended trade: what it
+    // would persist is a buffer we know does not match the server, and a
+    // reload recovers both the import and a working editor.
+    if (importBlocksSave(importView?.mode, importCursorRef.current)) return;
     const handle = window.setTimeout(async () => {
       try {
         setStatus(t("saving"));
@@ -727,7 +744,7 @@ export default function EditorShell({ resumeId }: Props) {
       }
     }, 400);
     return () => window.clearTimeout(handle);
-  }, [failCompile, loaded, refreshAts, refreshPreview, resumeId, source, t]);
+  }, [failCompile, importView, loaded, refreshAts, refreshPreview, resumeId, source, t]);
 
   useEffect(() => {
     if (!loaded) return;
