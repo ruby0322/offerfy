@@ -122,14 +122,25 @@
     "error": "Could not create the resume. Try again."
   },
   "upload": {
-    "title": "Upload an existing resume",
-    "lead": "After upload you go straight to the editor. No analyze-first step.",
-    "drop": "Drop a file here, or click to choose",
-    "hint": "PDF, PNG, JPG, WEBP, TXT, MD · max 10 MiB",
+    "title": "Add your resume",
+    "lead": "Drop a file, choose one, or paste it straight from your clipboard — a PDF, a screenshot, or plain text all work. You'll land in the editor with it already loading.",
+    "chooseFile": "Choose a file",
+    "chooseFileHint": "browse your device",
+    "pasteDoor": "Paste",
+    "pasteShortcut": "⌘V / Ctrl+V",
+    "or": "or",
+    "chipPdf": "PDF",
+    "chipPhoto": "a photo or screenshot",
+    "chipTxt": "TXT",
+    "chipMd": "MD",
+    "chipMaxSize": "max 10 MiB",
+    "privacy": "Only the file you choose, drop, or paste is sent — nothing else on your device is touched.",
+    "blankTemplate": "or start from a blank template",
     "uploading": "Uploading…",
     "error": "Could not upload the file. Try again.",
     "tooLarge": "File is larger than 10 MiB.",
-    "badType": "Unsupported file type."
+    "badType": "Unsupported file type.",
+    "tooShort": "That looks too short to be a resume."
   },
   "login": {
     "title": "Sign in to Offerfy",
