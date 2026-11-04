@@ -11,6 +11,7 @@ from app.deps import get_current_user, load_resume_for_owner, owner_context
 from app.models import LLM_CALL_PURPOSES, ChatMessage, GuestSession, LlmCall, User
 from app.schemas import ChatMessageOut, ChatRequest
 from app.services.attachment import llm_content_for_upload, stored_user_message
+from app.services.chat_messages import persist_assistant_message, persist_tool_message
 from app.services.chat_window import window_history
 from app.services.extract import MAX_UPLOAD_BYTES, allowed_upload, extract_upload_text
 from app.services.family_tools import (
@@ -136,18 +137,6 @@ async def _parse_chat_input(
     return body.message, None, None, body.prefer_full_source, body.model
 
 
-def _persist_tool(db: Session, resume_id: str, trace: dict) -> ChatMessage:
-    row = ChatMessage(
-        resume_id=resume_id,
-        role="tool",
-        content=json.dumps(trace, ensure_ascii=False),
-    )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    return row
-
-
 def _tailor_created(trace: dict) -> dict | None:
     if trace.get("name") != CREATE_TAILOR_TOOL:
         return None
@@ -218,14 +207,6 @@ def _persist_usage(
             db.rollback()
         except Exception:
             logger.warning("llm usage telemetry rollback failed", exc_info=True)
-
-
-def _persist_assistant(db: Session, resume_id: str, content: str) -> ChatMessage:
-    row = ChatMessage(resume_id=resume_id, role="assistant", content=content)
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    return row
 
 
 @router.post("/v1/resumes/{resume_id}/chat")
@@ -359,7 +340,7 @@ async def chat(
                     # though it had said it out loud.
                     yield _sse({"type": "reasoning", "text": event["text"]})
                 elif kind == "tool":
-                    row = _persist_tool(db, resume.id, event["trace"])
+                    row = persist_tool_message(db, resume.id, event["trace"])
                     yield _sse(
                         {
                             "type": "tool",
@@ -384,7 +365,7 @@ async def chat(
                     assistant_text = (
                         event["content"] or assistant_text or "Updated the Typst source."
                     )
-                    row = _persist_assistant(db, resume.id, assistant_text)
+                    row = persist_assistant_message(db, resume.id, assistant_text)
                     yield _sse(
                         {
                             "type": "assistant",

@@ -372,7 +372,20 @@ async def aiter_chat_edit(
     verify_compile: bool = False,
     extra_tools: list[dict] | None = None,
     tool_handlers: dict[str, Callable[[dict], str]] | None = None,
+    max_rounds: int | None = None,
+    timeout: float | None = None,
 ):
+    """The chat turn, plus the extra system text every caller of it needs.
+
+    `max_rounds` and `timeout` default to `None`, which keeps today's
+    computed values (based on `prefer_full_source` and `verify_compile`) for
+    every caller that does not pass them -- `app.routers.chat` never does, so
+    its behaviour is unchanged. `app.services.import_runner` is the first
+    caller to pass its own budget: an import works through a whole plan of
+    sections in one turn, which is a different shape of work than one chat
+    message and needs more rounds and more wall-clock time than the shared
+    default would give it.
+    """
     extra = (
         " Extracted upload text may appear as Typst comments. "
         "If the user attached a file, treat it as source material "
@@ -383,13 +396,17 @@ async def aiter_chat_edit(
         "Escape Typst special characters in strings and markup."
         + extra_system
     )
+    resolved_timeout = timeout if timeout is not None else (120.0 if prefer_full_source else 90.0)
+    resolved_max_rounds = (
+        max_rounds if max_rounds is not None else (8 if (prefer_full_source or verify_compile) else 6)
+    )
     async for event in aiter_llm_turn(
         messages,
         typst_source,
         model=model,
-        timeout=120.0 if prefer_full_source else 90.0,
+        timeout=resolved_timeout,
         extra_system=extra,
-        max_rounds=8 if (prefer_full_source or verify_compile) else 6,
+        max_rounds=resolved_max_rounds,
         prefer_full_source=prefer_full_source,
         verify_compile=verify_compile,
         extra_tools=extra_tools,
