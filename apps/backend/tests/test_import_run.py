@@ -1,8 +1,10 @@
 from datetime import timedelta
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
-from app.models import GuestSession, Resume, ResumeImportStep, _utcnow
+from app.models import GuestSession, Resume, ResumeImport, ResumeImportStep, _utcnow
+from app.services import import_run
 from app.services.import_run import (
     ImportAlreadyRunning,
     LABEL_MAX,
@@ -128,6 +130,65 @@ def test_fail_sets_error_and_resume_status(db_session, resume):
     assert run.error == "boom"
     assert resume.import_status == "failed"
     assert run.version == before_version + 1
+
+
+def test_snapshot_steps_shape_and_order(db_session, resume):
+    run = start_run(db_session, resume)
+    # Inserted out of seq order on purpose, so the order in the snapshot
+    # proves `order_by(seq)` is applied rather than happening to match
+    # insertion order.
+    db_session.add_all(
+        [
+            ResumeImportStep(
+                import_id=run.id,
+                seq=1,
+                key="experience",
+                label="Experience",
+                status="active",
+                detail="2 of 3 edits",
+            ),
+            ResumeImportStep(
+                import_id=run.id, seq=0, key="summary", label="Summary", status="done"
+            ),
+        ]
+    )
+    db_session.commit()
+
+    snap = snapshot(db_session, resume.id)
+
+    assert snap["steps"] == [
+        {"key": "summary", "label": "Summary", "status": "done", "detail": None},
+        {
+            "key": "experience",
+            "label": "Experience",
+            "status": "active",
+            "detail": "2 of 3 edits",
+        },
+    ]
+    for step in snap["steps"]:
+        assert set(step) == {"key", "label", "status", "detail"}
+
+
+def test_two_running_rows_for_same_resume_violate_db_index(db_session, resume):
+    db_session.add(ResumeImport(resume_id=resume.id, status="running"))
+    db_session.commit()
+
+    db_session.add(ResumeImport(resume_id=resume.id, status="running"))
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+    db_session.rollback()
+
+
+def test_start_run_translates_db_conflict_into_already_running(db_session, resume, monkeypatch):
+    # A real running row exists, but we make the app-level check blind to it
+    # (as if another worker's insert raced past it) to prove start_run falls
+    # back on the database's partial unique index and still raises
+    # ImportAlreadyRunning, never a raw IntegrityError.
+    start_run(db_session, resume)
+    monkeypatch.setattr(import_run, "_latest_run", lambda db, resume_id: None)
+
+    with pytest.raises(ImportAlreadyRunning):
+        start_run(db_session, resume)
 
 
 def test_snapshot_shape_and_stale_flag(db_session, resume):

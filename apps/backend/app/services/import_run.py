@@ -16,12 +16,24 @@ problem instead of a backend one.
 `MAX_STEPS` and `LABEL_MAX` are not used in this module. They are the next
 task's contract for sanitising an agent-declared plan (`declare_plan`) and
 are declared here because the brief fixes them as values this module owns.
+
+`start_run`'s "is one already running" check is a query followed by an
+insert, which is not atomic by itself: offerfy-api runs uvicorn with two
+workers sharing only Postgres, so two concurrent calls for the same resume
+(e.g. Retry double-clicked) could both read "no running row" and both try to
+insert. The real guard is the partial unique index on
+`resume_imports (resume_id) WHERE status = 'running'` (see the model and
+migration 024) -- the query above is only a fast path that avoids hitting
+that index on the common, non-racing case. Whichever caller loses the race
+sees `ImportAlreadyRunning`, translated from the `IntegrityError` the index
+raises, never a raw database error.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import Resume, ResumeImport, ResumeImportStep, _utcnow
@@ -78,18 +90,32 @@ def start_run(db: Session, resume: Resume) -> ResumeImport:
     Refuses with `ImportAlreadyRunning` if a `running` row for this resume
     already exists and is not stale. A stale `running` row is superseded: it
     is marked `failed` (its worker is presumed dead) rather than left behind
-    as a run that can never finish, and then a fresh run is started.
+    as a run that can never finish, and then a fresh run is started -- in the
+    same transaction as the supersession, so no reader can ever observe the
+    resume as `failed` moments before it becomes `pending` again.
+
+    The existing-row check is an optimisation, not the guard: the database's
+    partial unique index is. If this call loses a race with another `start_run`
+    for the same resume, the index raises `IntegrityError` on commit, which is
+    translated into `ImportAlreadyRunning` here so every caller sees the same
+    exception regardless of which path noticed the conflict.
     """
     existing = _latest_run(db, resume.id)
     if existing is not None and existing.status == "running":
         if not is_stale(existing):
             raise ImportAlreadyRunning(f"an import is already running for resume {resume.id}")
-        fail(db, existing, error="superseded: heartbeat went stale while still running")
+        _mark_failed(existing, error="superseded: heartbeat went stale while still running")
 
     run = ResumeImport(resume_id=resume.id, status="running", file_key=resume.upload_s3_key)
     resume.import_status = "pending"
     db.add(run)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise ImportAlreadyRunning(
+            f"an import is already running for resume {resume.id}"
+        ) from None
     return run
 
 
@@ -116,11 +142,21 @@ def finish(db: Session, run: ResumeImport) -> None:
     db.commit()
 
 
-def fail(db: Session, run: ResumeImport, error: str) -> None:
+def _mark_failed(run: ResumeImport, error: str) -> None:
+    """Apply the `failed` transition without committing.
+
+    Shared by `fail` (which commits on its own) and `start_run`'s
+    supersession path (which commits together with the new run, as one
+    transaction).
+    """
     run.status = "failed"
     run.error = error
     run.resume.import_status = "failed"
     _bump(run)
+
+
+def fail(db: Session, run: ResumeImport, error: str) -> None:
+    _mark_failed(run, error)
     db.commit()
 
 

@@ -65,6 +65,18 @@ def upgrade() -> None:
         ),
     )
     op.create_index("ix_resume_imports_resume_id", "resume_imports", ["resume_id"])
+    # A DB-level guard against two `running` rows for the same resume: with
+    # two uvicorn workers sharing only Postgres, a check-then-insert race in
+    # services.import_run.start_run (e.g. Retry double-clicked) must be
+    # caught here, not only by the query that ran first.
+    op.create_index(
+        "resume_imports_one_running_per_resume",
+        "resume_imports",
+        ["resume_id"],
+        unique=True,
+        postgresql_where=sa.text("status = 'running'"),
+        sqlite_where=sa.text("status = 'running'"),
+    )
 
     op.create_table(
         "resume_import_steps",
@@ -93,5 +105,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("resume_import_steps")
+    op.drop_index("resume_imports_one_running_per_resume", table_name="resume_imports")
     op.drop_index("ix_resume_imports_resume_id", table_name="resume_imports")
     op.drop_table("resume_imports")

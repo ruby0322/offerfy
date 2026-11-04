@@ -10,6 +10,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -1091,6 +1092,20 @@ class ResumeImport(Base):
         CheckConstraint(
             "status IN ('running', 'done', 'failed')",
             name="resume_imports_status_values",
+        ),
+        # A DB-level guard against two `running` rows for the same resume,
+        # not just the application-level check in services.import_run.start_run.
+        # offerfy-api runs uvicorn with two workers sharing only Postgres, so a
+        # check-then-insert race (e.g. Retry double-clicked) must be caught by
+        # the database, not just by a query that ran first. Partial unique
+        # indexes are supported by both Postgres and SQLite 3.8+, so this is
+        # enforced in tests too.
+        Index(
+            "resume_imports_one_running_per_resume",
+            "resume_id",
+            unique=True,
+            postgresql_where=text("status = 'running'"),
+            sqlite_where=text("status = 'running'"),
         ),
     )
 
