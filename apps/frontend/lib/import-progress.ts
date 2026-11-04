@@ -29,6 +29,17 @@ export type ImportSnapshot = {
   status: "running" | "done" | "failed";
   version: number;
   applied: number;
+  /**
+   * `sha256` of the resume's source as of this snapshot -- the signal the
+   * preview refresh follows (see `importSourceChanged`).
+   *
+   * Optional on the wire, not because the server omits it, but because a
+   * frontend deploy and an API deploy are two separate steps on this host:
+   * a new page can be served frames from an API that predates the field.
+   * The fallback is the old `applied` rule, which is what this file did
+   * before the field existed.
+   */
+  source_hash?: string | null;
   steps: {
     key: string;
     label: string;
@@ -184,18 +195,46 @@ export function importCardIndex(
  * Whether this snapshot means the resume's source on the server has moved on
  * from the copy the editor is holding, so the editor must adopt the server's.
  *
- * `seenApplied` is the `applied` count of the last snapshot already accounted
- * for. A higher one means another section landed.
+ * **The signal is the source's own identity, not the plan counter.** Once the
+ * cursor knows the hash of the source it is holding, that is the only thing
+ * compared: a frame whose `source_hash` differs means the resume moved,
+ * whatever `applied` says, and a frame whose hash matches means it did not.
+ * Keyed on `applied` instead, two real cases read as "nothing happened" --
+ * an edit that reuses a step key the agent already marked done (the server's
+ * `advance()` is a no-op on those, so the counter never moves) and a frame
+ * sampled in between `applied` and the source being committed. Both leave the
+ * preview exactly one edit behind, and the second one sticks until the
+ * counter happens to move again. See `app.services.import_run`'s docstring.
  *
- * `done` counts as changed on its own, whatever `applied` says. The run's last
- * edit can land in the same write that ends the run, and a stream that
- * reconnects or drops a frame can miss the growth entirely -- and the cost of
- * being wrong is asymmetric: one redundant fetch against an import that is
- * silently replaced by whatever stale source the editor still holds (see
- * `EditorShell`'s `onImportSnapshot`).
+ * Two cases have no hash to compare, and they are handled differently.
+ *
+ * **A cursor that has not adopted anything yet, against a live run.** The
+ * editor knows what it loaded but not that source's hash
+ * (`seedImportCursor`), and the frame it is looking at comes from a run that
+ * is still rewriting the resume. One adopt settles it and seeds the hash for
+ * every frame after: that is the whole cost, it is paid once per attach to a
+ * live run, and it is paid in the state where the buffer is most likely to be
+ * behind already. Waiting for `applied` instead leaves a reload mid-run on
+ * the old rule indefinitely -- a repair phase re-edits sections it has
+ * already marked done, and the counter does not move for any of them.
+ *
+ * **No hash on the wire at all** (an API older than the field): the `applied`
+ * rule stands, exactly as this file read before the field existed, `done`
+ * included -- that clause is there because a dropped frame would otherwise be
+ * missed forever, which the hash comparison handles on its own. The cost of
+ * being wrong is asymmetric either way: one redundant fetch, against an
+ * import silently replaced by whatever stale source the editor still holds
+ * (see `EditorShell`'s `onImportSnapshot`).
  */
-export function importSourceChanged(snap: ImportSnapshot, seenApplied: number): boolean {
-  return snap.applied > seenApplied || snap.status === "done";
+export function importSourceChanged(
+  snap: ImportSnapshot,
+  cursor: ImportAdoptCursor,
+): boolean {
+  if (typeof snap.source_hash === "string") {
+    if (cursor.sourceHash !== null) return snap.source_hash !== cursor.sourceHash;
+    if (snap.status === "running") return true;
+  }
+  return snap.applied > cursor.applied || snap.status === "done";
 }
 
 /**
@@ -214,6 +253,17 @@ export type ImportAdoptCursor = {
   applied: number;
   /** `version` of the last snapshot whose transcript was read back. */
   version: number;
+  /**
+   * `source_hash` of the last snapshot whose source landed in the editor,
+   * and the thing `importSourceChanged` compares against.
+   *
+   * `null` until the first successful adopt: the editor can read a source
+   * but cannot hash it, so until it has adopted one *from a snapshot* it has
+   * no hash it can honestly claim to be holding. A snapshot seen but not
+   * adopted never sets this -- that would claim a buffer the editor does not
+   * have, which is the one error this whole cursor exists to prevent.
+   */
+  sourceHash: string | null;
   /** A decided adopt that has not landed: the buffer is behind the server. */
   outstanding: boolean;
 };
@@ -227,7 +277,7 @@ export type ImportAdoptPlan = {
 
 /** A cursor for a run nothing has been taken in from yet. */
 export function emptyImportCursor(): ImportAdoptCursor {
-  return { applied: 0, version: 0, outstanding: false };
+  return { applied: 0, version: 0, sourceHash: null, outstanding: false };
 }
 
 /**
@@ -236,7 +286,19 @@ export function emptyImportCursor(): ImportAdoptCursor {
  * started run, whose snapshot predates any write.
  */
 export function seedImportCursor(snap: ImportSnapshot): ImportAdoptCursor {
-  return { applied: snap.applied, version: snap.version, outstanding: false };
+  // `sourceHash` is deliberately left unseeded. The mount loaded the source
+  // itself rather than adopting it from a snapshot, and the two reads are
+  // separate round trips: claiming this snapshot's hash would be claiming
+  // the editor holds a source it may not have seen. `applied` is the honest
+  // signal until the first real adopt sets a hash -- and an import's first
+  // edit always moves it, because no step is `done` yet for `advance` to
+  // no-op on.
+  return {
+    applied: snap.applied,
+    version: snap.version,
+    sourceHash: null,
+    outstanding: false,
+  };
 }
 
 /**
@@ -253,7 +315,7 @@ export function planImportAdopt(
   cursor: ImportAdoptCursor,
 ): ImportAdoptPlan {
   return {
-    adoptSource: cursor.outstanding || importSourceChanged(snap, cursor.applied),
+    adoptSource: cursor.outstanding || importSourceChanged(snap, cursor),
     readTranscript: snap.version > cursor.version,
   };
 }
@@ -274,6 +336,15 @@ export type ImportAdoptOutcome =
  * disjunction rather than neither. `version` advances either way: a missed
  * transcript re-read costs the person a stale message list until the next
  * frame or a reload, which is not the resume.
+ *
+ * `sourceHash` is the strictest of the three: only `"adopted"` sets it, and
+ * only from the frame that was actually adopted. It is never taken from a
+ * `"not-needed"` frame -- "this frame asked for nothing" is not evidence
+ * about what the editor holds, and recording it would silence the very next
+ * frame that does carry a change. A re-read that returned something *newer*
+ * than the frame that triggered it leaves the cursor one hash behind, which
+ * costs one redundant re-read on the next frame and converges; the opposite
+ * error loses the import.
  */
 export function nextImportCursor(
   snap: ImportSnapshot,
@@ -282,11 +353,20 @@ export function nextImportCursor(
 ): ImportAdoptCursor {
   const version = Math.max(cursor.version, snap.version);
   if (outcome === "failed") {
-    return { applied: cursor.applied, version, outstanding: true };
+    return {
+      applied: cursor.applied,
+      version,
+      sourceHash: cursor.sourceHash,
+      outstanding: true,
+    };
   }
   return {
     applied: Math.max(cursor.applied, snap.applied),
     version,
+    sourceHash:
+      outcome === "adopted" && typeof snap.source_hash === "string"
+        ? snap.source_hash
+        : cursor.sourceHash,
     outstanding: false,
   };
 }

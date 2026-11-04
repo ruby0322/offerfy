@@ -13,6 +13,28 @@ a write that forgot to bump it would freeze the progress card while the
 resume keeps changing underneath it, and the bug would look like a frontend
 problem instead of a backend one.
 
+`source_hash` is the *source* contract, and it is a different thing from
+`applied`. The editor repaints its preview when the resume's source has
+moved, so the snapshot has to carry the identity of that source -- not a
+count of plan steps. `applied` cannot stand in for it in either direction:
+
+- `advance` is a no-op on an already-`done` key (see the one-active
+  invariant below), so the agent's second, perfectly real edit to a section
+  it has already marked done does not move `applied` at all. Keyed on
+  `applied`, that edit is invisible to the preview until some *later* edit
+  moves the counter -- which is exactly "the preview is one tool call
+  behind".
+- `applied` is committed by `advance` on the edit's *tool* event, one
+  commit before `app.services.import_runner` writes the source itself, so
+  for a moment the run legitimately reports a section the resume does not
+  have yet.
+
+Keying the repaint on this hash makes both harmless, and makes a dropped
+frame self-healing: the next frame still disagrees with what the editor
+holds. `import_runner` is responsible for bumping `version` *after* the
+source commits, so the new hash is actually observable -- a snapshot nobody
+is told to re-read is the same as no snapshot.
+
 `MAX_STEPS`, `LABEL_MAX` and `KEY_MAX` bound `declare_plan`'s (and
 `advance`'s) sanitising of agent-supplied text: a plan is clamped to at
 most `MAX_STEPS` steps, each label is truncated to `LABEL_MAX` characters
@@ -89,6 +111,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import Resume, ResumeImport, ResumeImportStep, _utcnow
+from app.services.revisions import source_hash
 
 logger = logging.getLogger(__name__)
 
@@ -316,11 +339,16 @@ def snapshot(db: Session, resume_id: str) -> dict | None:
         .order_by(ResumeImportStep.seq)
         .all()
     )
+    resume = db.get(Resume, resume_id)
     return {
         "import_id": run.id,
         "status": run.status,
         "version": run.version,
         "applied": run.applied,
+        # What the editor's preview is refreshed against -- see this
+        # module's docstring. Read here, inside the same (fresh, per-poll)
+        # session as the run row, so it is always the committed source.
+        "source_hash": source_hash(resume.typst_source) if resume is not None else None,
         "steps": [
             {"key": step.key, "label": step.label, "status": step.status, "detail": step.detail}
             for step in steps
@@ -497,9 +525,12 @@ def advance(
     promote a *different* step on top of the one the first call already
     promoted, leaving two `active` and violating the one-active invariant
     (see the module docstring). A no-op call also does not increment
-    `run.applied`: it counts edits applied, drives the frontend's preview
-    refresh, and counting a retry would trigger a pointless recompile and
-    inflate the card's progress.
+    `run.applied`: it counts plan progress for the card, and counting a
+    retry would inflate it. The editor's preview is deliberately *not*
+    keyed on this counter -- it follows `snapshot()`'s `source_hash`, for
+    the reason that docstring gives: an edit that reuses an
+    already-`done` key still changes the resume, and this function is
+    blind to that by design.
     """
     truncated = step_key[:KEY_MAX] if step_key else None
     synthesised = not step_key or truncated == RENDER_CHECK_KEY

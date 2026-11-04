@@ -397,11 +397,11 @@ export default function EditorShell({ resumeId }: Props) {
 
   // One import snapshot, applied to the editor.
   //
-  // `applied` growing means a section just landed, so the resume's source on
-  // the server is no longer what `source` holds. The terminal `done`
-  // snapshot adopts it too: the run's last edit can arrive in the very frame
-  // that ends it, and a stream that drops just before it would otherwise
-  // never see `applied` grow for that section.
+  // A snapshot whose `source_hash` differs from the one this editor adopted
+  // means the resume's source on the server is no longer what `source`
+  // holds -- see `importSourceChanged`, which also covers the two cases
+  // where there is no hash to compare and the older `applied` rule stands
+  // in (nothing adopted yet, or an API that predates the field).
   //
   // **Adopting the source is the load-bearing part, not the repaint.**
   // `refreshAfterSourceChange` reads everything back from the server, so the
@@ -422,7 +422,7 @@ export default function EditorShell({ resumeId }: Props) {
   //   exactly as long as this buffer is behind the server's -- including the
   //   two round trips after the terminal frame has already flipped
   //   `importRunning` off.
-  // - `applied` advances only once the adopt lands, so a transient
+  // - The cursor advances only once the adopt lands, so a transient
   //   `getResume` failure is genuinely retried by the next frame. On the
   //   terminal frame there is no next frame and nothing retries: the flag
   //   then stays up and the save paths keep refusing for the rest of the
