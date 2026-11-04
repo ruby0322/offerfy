@@ -39,6 +39,7 @@ BILLABLE = ("aiter_chat_edit", "build_profile", "vision_report", "read_layout_re
 # transitively rather than wrapped again -- recording twice would double-bill.
 EXPECTED_CALL_SITES = {
     ("routers/chat.py", "aiter_chat_edit"),       # the turn + the repair loop
+    ("services/import_runner.py", "aiter_chat_edit"),  # one turn, system_guard
     ("routers/talent_me.py", "build_profile"),    # pointer change + refresh
     ("jobs/refresh_profiles.py", "build_profile"),  # nightly, system_guard
     ("services/llm/turn.py", "read_layout_report"),  # inside aiter_chat_edit

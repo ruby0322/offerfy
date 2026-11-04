@@ -130,6 +130,13 @@ class ChatMessageOut(BaseModel):
     id: str
     role: str
     content: str
+    # When the row was written, as an aware ISO timestamp. The client groups
+    # the transcript by it: a resume import writes no user row, so the only
+    # way to tell which messages belong to the import's turn -- and therefore
+    # where its progress card ends -- is the import's own `created_at`
+    # against these. Optional so a client that does not care can ignore it,
+    # and so a row read without one is still serialisable.
+    created_at: str | None = None
 
     model_config = {"from_attributes": True}
 

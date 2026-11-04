@@ -6,9 +6,11 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -234,6 +236,9 @@ class Resume(Base):
         cascade="all, delete-orphan",
         foreign_keys="MemoryItem.master_resume_id",
     )
+    imports: Mapped[list["ResumeImport"]] = relationship(
+        back_populates="resume", cascade="all, delete-orphan"
+    )
 
 
 class ResumeRevision(Base):
@@ -397,7 +402,11 @@ class JobIngestRun(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")
 
 
-LLM_CALL_PURPOSES = ("chat", "repair", "vision", "profile")
+# 'import' is deliberately its own purpose rather than hiding inside the chat
+# total, for the same reason the compile-repair loop bills as 'repair': an
+# import spends real provider tokens on work the person did not type, and the
+# admin overview's by-purpose breakdown is where that has to be visible.
+LLM_CALL_PURPOSES = ("chat", "repair", "vision", "profile", "import")
 
 
 class LlmCall(Base):
@@ -413,7 +422,7 @@ class LlmCall(Base):
     __tablename__ = "llm_calls"
     __table_args__ = (
         CheckConstraint(
-            "purpose IN ('chat', 'repair', 'vision', 'profile')",
+            "purpose IN ('chat', 'repair', 'vision', 'profile', 'import')",
             name="llm_call_purpose_values",
         ),
         # Not an XOR: a row whose subject has been erased has neither, the same
@@ -1068,3 +1077,85 @@ class StopUseNotice(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow, index=True
     )
+
+
+class ResumeImport(Base):
+    """One attempt at importing an uploaded resume, section by section.
+
+    Progress lives here rather than in process memory because offerfy-api
+    runs uvicorn with two workers and a reconnecting client can land on
+    either one -- only Postgres is shared between them. `heartbeat_at` lets a
+    runner that died mid-import be told apart from one still working, and
+    `version` lets a reconnecting client ask "what changed since I last
+    looked" without replaying the whole step list. `applied` is read by the
+    later snapshot payload as the count of edits the agent has made so far.
+    """
+
+    __tablename__ = "resume_imports"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running', 'done', 'failed')",
+            name="resume_imports_status_values",
+        ),
+        # A DB-level guard against two `running` rows for the same resume,
+        # not just the application-level check in services.import_run.start_run.
+        # offerfy-api runs uvicorn with two workers sharing only Postgres, so a
+        # check-then-insert race (e.g. Retry double-clicked) must be caught by
+        # the database, not just by a query that ran first. Partial unique
+        # indexes are supported by both Postgres and SQLite 3.8+, so this is
+        # enforced in tests too.
+        Index(
+            "resume_imports_one_running_per_resume",
+            "resume_id",
+            unique=True,
+            postgresql_where=text("status = 'running'"),
+            sqlite_where=text("status = 'running'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    resume_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    file_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    applied: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    heartbeat_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    resume: Mapped[Resume] = relationship(back_populates="imports")
+
+
+class ResumeImportStep(Base):
+    """One section the import agent declared it would edit, in order.
+
+    `key` is the agent's own stable name for the section (e.g. "education"),
+    unique per import so the agent can report progress on a key without the
+    runner having to guess which row that refers to. `seq` is the declared
+    order, independent of any ordering `id` would imply.
+    """
+
+    __tablename__ = "resume_import_steps"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'active', 'done', 'skipped')",
+            name="resume_import_step_status_values",
+        ),
+        UniqueConstraint("import_id", "key", name="resume_import_steps_import_id_key_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    import_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("resume_imports.id", ondelete="CASCADE"), nullable=False
+    )
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    detail: Mapped[str | None] = mapped_column(String(255), nullable=True)

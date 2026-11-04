@@ -132,6 +132,7 @@ TOOLS = [
                 "start": {"type": "integer"},
                 "end": {"type": "integer"},
                 "replacement": {"type": "string"},
+                "step": {"type": "string"},
             },
         },
     },

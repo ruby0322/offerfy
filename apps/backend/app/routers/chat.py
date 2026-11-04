@@ -3,14 +3,20 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pathlib import Path
 import asyncio
-import json
 import logging
+
+from datetime import datetime, timezone
 
 from app.db import get_db
 from app.deps import get_current_user, load_resume_for_owner, owner_context
-from app.models import LLM_CALL_PURPOSES, ChatMessage, GuestSession, LlmCall, User
+from app.models import ChatMessage, User
 from app.schemas import ChatMessageOut, ChatRequest
 from app.services.attachment import llm_content_for_upload, stored_user_message
+from app.services.chat_messages import (
+    persist_assistant_message,
+    persist_tool_message,
+    persist_usage,
+)
 from app.services.chat_window import window_history
 from app.services.extract import MAX_UPLOAD_BYTES, allowed_upload, extract_upload_text
 from app.services.family_tools import (
@@ -22,6 +28,7 @@ from app.services.llm import TEMPLATE_SWITCH_EXTRA, aiter_chat_edit, llm_configu
 from app.services.revisions import set_draft_source
 from app.services.role_card import build_role_card
 from app.services.s3 import put_object
+from app.services.sse import SSE_HEADERS, sse_frame
 from app.services.templates import is_template_switch_message, parse_preview_spec, template_api_block
 from app.services.typst_compile import compile_status
 from app.services.metering import metered, preflight
@@ -29,7 +36,6 @@ from app.services import model_choice
 from app.services.usage import (
     approx_edits_left,
     balance,
-    event_cost_uusd,
     quota_event,
     tier_of,
 )
@@ -38,19 +44,22 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-SSE_HEADERS = {
-    "Cache-Control": "no-cache, no-transform",
-    "Connection": "keep-alive",
-    "X-Accel-Buffering": "no",
-}
+
+def _iso(dt: datetime | None) -> str | None:
+    """Aware ISO, or None. SQLite drops tzinfo on round-trip, so a naive value
+    is read back as UTC -- which is what it was written as.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None or dt.utcoffset() is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
 
 
 def _message_out(row: ChatMessage) -> ChatMessageOut:
-    return ChatMessageOut(id=row.id, role=row.role, content=row.content)
-
-
-def _sse(payload: dict) -> bytes:
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
+    return ChatMessageOut(
+        id=row.id, role=row.role, content=row.content, created_at=_iso(row.created_at)
+    )
 
 
 def _history(db: Session, resume_id: str) -> list[ChatMessage]:
@@ -136,18 +145,6 @@ async def _parse_chat_input(
     return body.message, None, None, body.prefer_full_source, body.model
 
 
-def _persist_tool(db: Session, resume_id: str, trace: dict) -> ChatMessage:
-    row = ChatMessage(
-        resume_id=resume_id,
-        role="tool",
-        content=json.dumps(trace, ensure_ascii=False),
-    )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    return row
-
-
 def _tailor_created(trace: dict) -> dict | None:
     if trace.get("name") != CREATE_TAILOR_TOOL:
         return None
@@ -159,73 +156,6 @@ def _tailor_created(trace: dict) -> dict | None:
             "title": result.get("title") or "",
         }
     return None
-
-
-def _persist_usage(
-    db: Session,
-    resume_id: str,
-    event: dict,
-    purpose: str,
-    *,
-    user: User | None,
-    guest: GuestSession | None,
-) -> None:
-    """Record what one model call billed, and who it billed to.
-
-    Nothing here may fail a turn: a shape we did not expect or a database that
-    will not take the row is a warning and a lost metric, never a lost chat
-    response. The rollback matters as much as the log -- the same Session goes
-    on to persist tool traces and the draft source after this.
-
-    The owner is written in rather than left to be joined through resume_id
-    later. Both routes from that column to an owner lose the attribution --
-    resume deletion nulls it, and /v1/auth/claim reassigns it -- and the quota
-    this feeds would reset with them. See models.LlmCall.user_id.
-    """
-    try:
-        kind = event.get("purpose") or purpose
-        if kind not in LLM_CALL_PURPOSES:
-            kind = purpose
-        # Priced here, at today's rates, and stored on the row -- so that
-        # correcting a price later moves what new rounds cost and not what old
-        # ones did. The meter computes the same figure from the same event
-        # through the same function, so the two writes agree by construction
-        # rather than by being handed a shared value; they stay separate
-        # because they have different durabilities. See models.LlmCall.
-        cost, _ = event_cost_uusd(event)
-        db.add(
-            LlmCall(
-                resume_id=resume_id,
-                user_id=user.id if user is not None else None,
-                guest_session_id=guest.id if user is None and guest is not None else None,
-                purpose=kind,
-                model=str(event.get("model") or "")[:128],
-                round_index=int(event.get("round_index") or 0),
-                prefer_full_source=bool(event.get("prefer_full_source")),
-                input_tokens=event.get("input_tokens"),
-                cached_tokens=event.get("cached_tokens"),
-                output_tokens=event.get("output_tokens"),
-                reasoning_tokens=event.get("reasoning_tokens"),
-                cache_write_tokens=event.get("cache_write_tokens"),
-                source_chars=int(event.get("source_chars") or 0),
-                cost_uusd=cost,
-            )
-        )
-        db.commit()
-    except Exception:
-        logger.warning("llm usage telemetry failed", exc_info=True)
-        try:
-            db.rollback()
-        except Exception:
-            logger.warning("llm usage telemetry rollback failed", exc_info=True)
-
-
-def _persist_assistant(db: Session, resume_id: str, content: str) -> ChatMessage:
-    row = ChatMessage(resume_id=resume_id, role="assistant", content=content)
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    return row
 
 
 @router.post("/v1/resumes/{resume_id}/chat")
@@ -348,19 +278,19 @@ async def chat(
                     # counter the limit is enforced against. Per round rather than
                     # per turn, because the whole cost model is built on the
                     # per-round token mix.
-                    _persist_usage(db, resume.id, event, purpose, user=user, guest=guest)
+                    persist_usage(db, resume.id, event, purpose, user=user, guest=guest)
                     meter.record(event)
                 elif kind == "delta":
                     # Display only: nothing is persisted until the assistant event lands.
-                    yield _sse({"type": "delta", "text": event["text"]})
+                    yield sse_frame({"type": "delta", "text": event["text"]})
                 elif kind == "reasoning":
                     # Thinking, not an answer. Never persisted: it would come back as
                     # an assistant row on the next turn and be fed to the model as
                     # though it had said it out loud.
-                    yield _sse({"type": "reasoning", "text": event["text"]})
+                    yield sse_frame({"type": "reasoning", "text": event["text"]})
                 elif kind == "tool":
-                    row = _persist_tool(db, resume.id, event["trace"])
-                    yield _sse(
+                    row = persist_tool_message(db, resume.id, event["trace"])
+                    yield sse_frame(
                         {
                             "type": "tool",
                             "message": _message_out(row).model_dump(),
@@ -368,12 +298,12 @@ async def chat(
                     )
                     created = _tailor_created(event["trace"])
                     if created:
-                        yield _sse(created)
+                        yield sse_frame(created)
                 elif kind == "source":
                     new_source = event["typst_source"]
                     set_draft_source(db, resume, new_source)
                     db.commit()
-                    yield _sse(
+                    yield sse_frame(
                         {
                             "type": "source",
                             "typst_source": new_source,
@@ -384,8 +314,8 @@ async def chat(
                     assistant_text = (
                         event["content"] or assistant_text or "Updated the Typst source."
                     )
-                    row = _persist_assistant(db, resume.id, assistant_text)
-                    yield _sse(
+                    row = persist_assistant_message(db, resume.id, assistant_text)
+                    yield sse_frame(
                         {
                             "type": "assistant",
                             "message": _message_out(row).model_dump(),
@@ -397,7 +327,7 @@ async def chat(
                 # turn the user is watching rather than something they infer
                 # later from the assistant forgetting things.
                 if context_notice is not None:
-                    yield _sse(context_notice)
+                    yield sse_frame(context_notice)
                 async for event in aiter_chat_edit(
                     messages,
                     original_source,
@@ -457,12 +387,12 @@ async def chat(
                     ):
                         async for frame in relay(event):
                             yield frame
-                # After the last _persist_usage has committed, so the number the
+                # After the last persist_usage has committed, so the number the
                 # client is handed is the number in the database. Telemetry may be
                 # lost without costing an answer, and so may this.
                 try:
                     bal = balance(db, user, guest)
-                    yield _sse(
+                    yield sse_frame(
                         quota_event(
                             bal, approx_edits_left(db, user, guest, bal, model=model)
                         )
@@ -470,7 +400,7 @@ async def chat(
                 except Exception:
                     logger.warning("quota frame failed", exc_info=True)
                     db.rollback()
-                yield _sse(
+                yield sse_frame(
                     {
                         "type": "done",
                         "typst_source": new_source,
@@ -479,7 +409,7 @@ async def chat(
                 )
             except HTTPException as exc:
                 detail = exc.detail if isinstance(exc.detail, str) else "Chat request failed"
-                yield _sse({"type": "error", "detail": detail, "status": exc.status_code})
+                yield sse_frame({"type": "error", "detail": detail, "status": exc.status_code})
 
     return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
 
@@ -508,4 +438,4 @@ def list_messages(
     if notice is not None:
         response.headers["X-Context-Dropped"] = str(notice["dropped"])
         response.headers["X-Context-From"] = notice["from_message_id"]
-    return [ChatMessageOut(id=r.id, role=r.role, content=r.content) for r in rows]
+    return [_message_out(r) for r in rows]
