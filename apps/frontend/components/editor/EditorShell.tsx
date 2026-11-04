@@ -42,6 +42,7 @@ import {
   getAtsReport,
   getChatMessages,
   type ContextCut,
+  getImport,
   getMe,
   getPreviewPages,
   getResume,
@@ -51,6 +52,8 @@ import {
   putResumeSource,
   putSelectedModel,
   sendChat,
+  startImport,
+  streamImport,
   type AtsReport,
   type ChatMessage,
   type ImportStatus,
@@ -68,6 +71,7 @@ import {
 import type { AuthUser, ModelRow, ModelTable, Usage, UsageRefusal } from "@/lib/api";
 import { formatUserAttachmentMessage, parseToolPayload } from "@/lib/chat-tools";
 import type { AtsCheckName } from "@/lib/ats-checks";
+import { importTurnStartsAt, toImportView, type ImportSnapshot } from "@/lib/import-progress";
 import { peekPendingCreate, takePendingCreate } from "@/lib/pending-create";
 import { peekPendingUpload, takePendingUpload } from "@/lib/pending-upload";
 
@@ -226,6 +230,12 @@ export default function EditorShell({ resumeId }: Props) {
   const [memoryLoaded, setMemoryLoaded] = useState(false);
   const [busyMemoryId, setBusyMemoryId] = useState<string | null>(null);
   const [memoryNotice, setMemoryNotice] = useState<string | null>(null);
+  // The import turn's own card. Null once no import has ever been started
+  // for this resume (plain `create` resumes, and any `upload` resume whose
+  // import already finished before this mount's `getImport` call lands --
+  // the backend still returns that last snapshot, so "done" renders too).
+  const [importSnapshot, setImportSnapshot] = useState<ImportSnapshot | null>(null);
+  const [importElapsedSeconds, setImportElapsedSeconds] = useState(0);
   const router = useRouter();
   const skipTimers = useRef(true);
   const sendingRef = useRef(false);
@@ -233,6 +243,13 @@ export default function EditorShell({ resumeId }: Props) {
   const kickstartedRef = useRef(false);
   const savePromptedRef = useRef(false);
   const previewObjectUrls = useRef<string[]>([]);
+  // The last `applied` count seen from an import snapshot. Compared against
+  // the next one to tell "a section just landed" from "the plan was just
+  // declared" -- both bump `version`, but only the former should repaint.
+  const importAppliedRef = useRef(0);
+  // The stream this mount opened, so a remount (or a retry) aborts the old
+  // one before starting a new one rather than leaving two running.
+  const importAbortRef = useRef<AbortController | null>(null);
   const deltaBufferRef = useRef("");
   const deltaTimerRef = useRef<number | null>(null);
   const reasoningBufferRef = useRef("");
@@ -350,6 +367,109 @@ export default function EditorShell({ resumeId }: Props) {
     }
     setStatus(fallback);
   }, []);
+
+  // The trio every server-driven source change needs: repaint the preview,
+  // recompile the PDF, and refresh ATS against it. Shared by the chat
+  // `source` event and the import snapshot handler, so "the preview grows
+  // section by section" is one code path, not two that can drift apart.
+  const refreshAfterSourceChange = useCallback(async () => {
+    try {
+      await refreshPreview();
+      try {
+        await compileResume(resumeId, "pdf");
+        await refreshAts();
+      } catch (err) {
+        failCompile(err, t("previewError"));
+      }
+    } catch (err) {
+      failCompile(err, t("previewError"));
+    }
+  }, [failCompile, refreshAts, refreshPreview, resumeId, t]);
+
+  // Kept in a ref so the stream effect below does not need to restart every
+  // time this identity changes -- the same reason `sendUserChatRef` exists.
+  const refreshAfterSourceChangeRef = useRef(refreshAfterSourceChange);
+  useEffect(() => {
+    refreshAfterSourceChangeRef.current = refreshAfterSourceChange;
+  }, [refreshAfterSourceChange]);
+
+  // Opens the live stream for a running import and keeps the latest
+  // snapshot in state. When `applied` increases between snapshots, a
+  // section just landed, so the preview is repainted -- that is what makes
+  // it grow section by section instead of jumping once at the very end.
+  const attachImportStream = useCallback(() => {
+    importAbortRef.current?.abort();
+    const controller = new AbortController();
+    importAbortRef.current = controller;
+    void streamImport(
+      resumeId,
+      async (next) => {
+        setImportSnapshot(next);
+        const grew = next.applied > importAppliedRef.current;
+        importAppliedRef.current = next.applied;
+        if (grew) await refreshAfterSourceChangeRef.current();
+      },
+      controller.signal,
+    ).catch(() => {
+      /* a dropped connection just stops updating the card; a reload
+         re-attaches via the mount effect below */
+    });
+  }, [resumeId]);
+
+  // On mount: pick up whatever import run (if any) this resume has, and
+  // keep following it if it is still running. This is what makes a reload
+  // mid-import re-attach instead of losing the card.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getImport(resumeId);
+        if (cancelled || !snap) return;
+        importAppliedRef.current = snap.applied;
+        setImportSnapshot(snap);
+        if (snap.status === "running") attachImportStream();
+      } catch {
+        /* import status is optional; the editor works without it */
+      }
+    })();
+    return () => {
+      cancelled = true;
+      importAbortRef.current?.abort();
+    };
+  }, [attachImportStream, resumeId]);
+
+  // Ticks the footer's elapsed-time readout while the run is live; holds
+  // still once it is not, so "12s elapsed" does not keep climbing after the
+  // turn has already finished or failed.
+  useEffect(() => {
+    if (!importSnapshot) return;
+    const startedAt = importTurnStartsAt(importSnapshot);
+    const tick = () =>
+      setImportElapsedSeconds(Math.max(0, Math.round((Date.now() - startedAt) / 1000)));
+    tick();
+    if (importSnapshot.status !== "running") return;
+    const handle = window.setInterval(tick, 1000);
+    return () => window.clearInterval(handle);
+  }, [importSnapshot]);
+
+  // Both the stale card's "Resume" and the failed card's "Retry" call the
+  // same endpoint -- the backend tells the two apart by what it finds on
+  // the row, not by which button was pressed.
+  const onImportAction = useCallback(async () => {
+    try {
+      const snap = await startImport(resumeId);
+      importAppliedRef.current = snap.applied;
+      setImportSnapshot(snap);
+      attachImportStream();
+    } catch {
+      /* the card's own action stays up, so trying again costs one more click */
+    }
+  }, [attachImportStream, resumeId]);
+
+  const importView = useMemo(
+    () => (importSnapshot ? toImportView(importSnapshot) : undefined),
+    [importSnapshot],
+  );
 
   useEffect(() => {
     let live = true;
@@ -667,15 +787,7 @@ export default function EditorShell({ resumeId }: Props) {
           setUpdatedAt(new Date().toISOString());
           setUnpublishedChanges(true);
           try {
-            await refreshPreview();
-            try {
-              await compileResume(resumeId, "pdf");
-              await refreshAts();
-            } catch (err) {
-              failCompile(err, t("previewError"));
-            }
-          } catch (err) {
-            failCompile(err, t("previewError"));
+            await refreshAfterSourceChange();
           } finally {
             skipTimers.current = false;
           }
@@ -762,12 +874,10 @@ export default function EditorShell({ resumeId }: Props) {
     [
       clearReasoning,
       clearStream,
-      failCompile,
       pushDelta,
       pushReasoning,
-      refreshAts,
+      refreshAfterSourceChange,
       refreshMemory,
-      refreshPreview,
       resumeId,
       router,
       source,
@@ -1413,6 +1523,10 @@ export default function EditorShell({ resumeId }: Props) {
           focusKey={chatFocusKey}
           usage={usagePanel}
           models={modelPanel}
+          importView={importView}
+          importElapsedSeconds={importElapsedSeconds}
+          onImportRetry={onImportAction}
+          onImportResume={onImportAction}
         />
       </TabsContent>
       <TabsContent

@@ -4,6 +4,7 @@ import { DragEvent, FormEvent, KeyboardEvent, useEffect, useRef, useState } from
 import { AnimatePresence, motion, type Variants } from "framer-motion";
 import { ArrowDown, Paperclip, Send, X } from "lucide-react";
 import ChatMessageCard, { type FamilyCardActions } from "@/components/editor/ChatMessageCard";
+import ImportProgressCard from "@/components/editor/ImportProgressCard";
 import LoadingMessage from "@/components/editor/LoadingMessage";
 import ModelPicker, { type ModelPickerLabels } from "@/components/editor/ModelPicker";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -11,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import UsageLimitCard from "@/components/editor/UsageLimitCard";
 import UsageMeter from "@/components/UsageMeter";
 import type { ChatMessage, ModelTable, Usage, UsageRefusal } from "@/lib/api";
+import type { ImportView } from "@/lib/import-progress";
 import {
   commandTerm,
   filterCommands,
@@ -118,6 +120,13 @@ type Props = {
    *  the composer without a picker, which is what happens when the catalogue
    *  fetch failed -- the turn still runs, on the server's own resolution. */
   models?: ModelPanelProps;
+  /** The running import turn's own card, pinned to the bottom of the thread
+   *  so tool messages keep appending above it. Absent once no import has
+   *  ever been started for this resume. */
+  importView?: ImportView;
+  importElapsedSeconds?: number;
+  onImportRetry?: () => void;
+  onImportResume?: () => void;
 };
 
 export type ModelPanelProps = {
@@ -183,6 +192,10 @@ export default function EditorChatPanel({
   focusKey,
   usage,
   models,
+  importView,
+  importElapsedSeconds,
+  onImportRetry,
+  onImportResume,
 }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -495,6 +508,17 @@ export default function EditorChatPanel({
                   </div>
                 )}
               </div>
+            ) : null}
+            {/* Pinned last in the turn: mounted here, after every message and
+                the reasoning panel above, so a tool message from a running
+                import always appends above it rather than pushing past it. */}
+            {importView ? (
+              <ImportProgressCard
+                view={importView}
+                elapsedSeconds={importElapsedSeconds ?? 0}
+                onRetry={() => onImportRetry?.()}
+                onResume={() => onImportResume?.()}
+              />
             ) : null}
             {streamingText ? (
               <div className="min-w-0">
