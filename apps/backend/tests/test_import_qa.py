@@ -1,10 +1,13 @@
 """verify_render: did the compiled PDF actually show what the source says?
 
 Three fixtures anchor this module, per the task brief:
-- `REPRO_SOURCE` is the *exact* real bug, reproduced byte-for-byte from
-  `.superpowers/sdd/2026-11-04-resume-import-progress/t.typ`: an unescaped
-  `/*` opens a Typst block comment that runs to end-of-file. It must score
-  far below the threshold.
+- `REPRO_SOURCE` is the *exact* real bug, inlined byte-for-byte below (it
+  was originally handed over as a scratch file under the gitignored
+  `.superpowers/` tree -- reading it from there at collection time broke
+  this module on every checkout but the one it was authored in, which is
+  exactly the failure mode inlining it avoids): an unescaped `/*` opens a
+  Typst block comment that runs to end-of-file. It must score far below
+  the threshold.
 - `CLEAN_SOURCE` is an ordinary, correctly-escaped import result. It must
   pass.
 - `NOISY_SOURCE` has the kind of thing that is *not* a bug -- a long
@@ -15,8 +18,6 @@ These need the real `typst` binary and are skipped if it is not on the
 runner, matching the rest of the suite's existing pattern
 (`tests/test_typst_edit.py`'s `pytest.mark.skipif`).
 """
-
-from pathlib import Path
 
 import pytest
 
@@ -30,14 +31,21 @@ from app.services.typst_compile import typst_available
 
 pytestmark = pytest.mark.skipif(not typst_available(), reason="typst binary not available")
 
-REPRO_PATH = (
-    Path(__file__).resolve().parents[3]
-    / ".superpowers"
-    / "sdd"
-    / "2026-11-04-resume-import-progress"
-    / "t.typ"
-)
-REPRO_SOURCE = REPRO_PATH.read_text(encoding="utf-8")
+# The user's real failing content, preserved exactly -- the precise
+# characters (`\@x402/*`) are the point.
+REPRO_SOURCE = """\
+= Experience
+
+- Led a phased re-architecture from bespoke payment infra to Coinbase \\@x402/* standard libraries; extracted IDRX adapter logic into published npm packages: [@transx402/client] and [@transx402/server].
+
+= Education
+
+National Taiwan University, BSc Computer Science
+
+= Skills
+
+Python, TypeScript, Rust
+"""
 
 CLEAN_SOURCE = """\
 #import "@preview/basic-resume:0.2.9": *
