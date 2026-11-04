@@ -5,6 +5,8 @@ from pathlib import Path
 import asyncio
 import logging
 
+from datetime import datetime, timezone
+
 from app.db import get_db
 from app.deps import get_current_user, load_resume_for_owner, owner_context
 from app.models import ChatMessage, User
@@ -43,8 +45,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _iso(dt: datetime | None) -> str | None:
+    """Aware ISO, or None. SQLite drops tzinfo on round-trip, so a naive value
+    is read back as UTC -- which is what it was written as.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None or dt.utcoffset() is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
+
 def _message_out(row: ChatMessage) -> ChatMessageOut:
-    return ChatMessageOut(id=row.id, role=row.role, content=row.content)
+    return ChatMessageOut(
+        id=row.id, role=row.role, content=row.content, created_at=_iso(row.created_at)
+    )
 
 
 def _history(db: Session, resume_id: str) -> list[ChatMessage]:
@@ -423,4 +438,4 @@ def list_messages(
     if notice is not None:
         response.headers["X-Context-Dropped"] = str(notice["dropped"])
         response.headers["X-Context-From"] = notice["from_message_id"]
-    return [ChatMessageOut(id=r.id, role=r.role, content=r.content) for r in rows]
+    return [_message_out(r) for r in rows]

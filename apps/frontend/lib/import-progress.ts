@@ -67,6 +67,54 @@ export function importTurnStartsAt(snap: ImportSnapshot): number {
   return Date.parse(snap.started_at);
 }
 
+/** Just enough of a chat message for the grouping below. */
+export type ImportTurnMessage = {
+  role: string;
+  /** Aware ISO, from the server. */
+  created_at?: string;
+  /** Aware ISO, for a message this client appended optimistically. */
+  timestamp?: string;
+};
+
+function messageTime(message: ImportTurnMessage): number | null {
+  const raw = message.created_at ?? message.timestamp;
+  if (!raw) return null;
+  const parsed = Date.parse(raw);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+/**
+ * How many messages come before the import's progress card — i.e. where the
+ * import's own turn ends.
+ *
+ * An import writes no `user` row: the prompt is server-owned, so the first
+ * `user` message at or after the run started is the next turn, and the card
+ * belongs immediately above it. While the import is the last thing that
+ * happened there is no such message and the card is last in the transcript,
+ * which is the in-flight case — tool messages keep appending above it.
+ *
+ * This is what stops a finished import's collapsed card staying pinned below
+ * every later message, on this visit and every future one: `getImport` keeps
+ * returning the last run's snapshot forever, so without the grouping the card
+ * reads as a UI artifact stuck to the bottom of the pane.
+ *
+ * A message with no usable timestamp can never be the boundary. That is the
+ * degraded case (an older server, or a proxy that dropped the field), and it
+ * lands on "card last", which is where it was before any grouping existed.
+ */
+export function importCardIndex(
+  messages: ImportTurnMessage[],
+  turnStartsAt: number,
+): number {
+  if (!Number.isFinite(turnStartsAt)) return messages.length;
+  for (let i = 0; i < messages.length; i += 1) {
+    if (messages[i].role !== "user") continue;
+    const at = messageTime(messages[i]);
+    if (at !== null && at >= turnStartsAt) return i;
+  }
+  return messages.length;
+}
+
 /**
  * Whether this snapshot means the resume's source on the server has moved on
  * from the copy the editor is holding, so the editor must adopt the server's.

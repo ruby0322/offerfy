@@ -9,10 +9,12 @@ scheduling seam (``app.routers.resumes._schedule_import``) to keep them
 deterministic and independent of model-scripting or timing.
 """
 
+from datetime import datetime
+
 import pytest
 from fastapi.testclient import TestClient
 
-from app.models import Resume, ResumeImport
+from app.models import ChatMessage, Resume, ResumeImport
 from app.services.import_run import advance, declare_plan, finish
 
 
@@ -129,6 +131,36 @@ def test_stream_closes_once_the_run_is_done(client, uploaded_resume, monkeypatch
     with client.stream("GET", f"/v1/resumes/{uploaded_resume}/import/stream") as s:
         frames = [line for line in s.iter_lines() if line.startswith("data:")]
     assert len(frames) == 1
+
+
+def test_transcript_rows_carry_a_timestamp_the_card_can_group_by(
+    client, uploaded_resume, monkeypatch, db_session
+):
+    """An import writes no `user` row, so the only boundary between its turn
+    and whatever came before it is each message's own `created_at` against
+    the run's `started_at`. Both sides have to be aware ISO or the client
+    cannot compare them -- a naive one is read as local time in the browser,
+    which silently moves the boundary by the viewer's offset.
+    """
+    _disable_scheduling(monkeypatch)
+    client.post(f"/v1/resumes/{uploaded_resume}/import")
+    db_session.add(
+        ChatMessage(resume_id=uploaded_resume, role="assistant", content="Imported.")
+    )
+    db_session.commit()
+
+    rows = client.get(f"/v1/resumes/{uploaded_resume}/messages").json()
+    started_at = client.get(f"/v1/resumes/{uploaded_resume}/import").json()["started_at"]
+
+    assert rows
+    started = datetime.fromisoformat(started_at)
+    assert started.tzinfo is not None
+    for row in rows:
+        written = datetime.fromisoformat(row["created_at"])
+        assert written.tzinfo is not None
+        # The row landed after the run opened, so the card's grouping puts it
+        # inside the import's turn.
+        assert written >= started
 
 
 def test_import_endpoints_reject_another_owner(client, other_guest_resume):

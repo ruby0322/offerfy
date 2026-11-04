@@ -73,6 +73,7 @@ import { formatUserAttachmentMessage, parseToolPayload } from "@/lib/chat-tools"
 import type { AtsCheckName } from "@/lib/ats-checks";
 import { loadEditorTab, saveEditorTab } from "@/lib/editor-tab";
 import {
+  importCardIndex,
   importSourceChanged,
   importTurnStartsAt,
   toImportView,
@@ -232,6 +233,10 @@ export default function EditorShell({ resumeId }: Props) {
   // the next one to tell "a section just landed" from "the plan was just
   // declared" -- both bump `version`, but only the former should repaint.
   const importAppliedRef = useRef(0);
+  // The last `version` seen from an import snapshot. Every write the runner
+  // makes bumps it, which is what tells the editor there may be new `tool` or
+  // `assistant` rows to re-read.
+  const importVersionRef = useRef(0);
   // The stream this mount opened, so a remount (or a retry) aborts the old
   // one before starting a new one rather than leaving two running.
   const importAbortRef = useRef<AbortController | null>(null);
@@ -401,7 +406,25 @@ export default function EditorShell({ resumeId }: Props) {
     async (next: ImportSnapshot) => {
       setImportSnapshot(next);
       const sourceChanged = importSourceChanged(next, importAppliedRef.current);
+      const versionAdvanced = next.version > importVersionRef.current;
       importAppliedRef.current = next.applied;
+      importVersionRef.current = next.version;
+      // The runner writes its `tool` and `assistant` rows straight to the
+      // database -- nothing streams them, and `setMessages` is otherwise only
+      // called at mount and inside `sendUserChat`. Without this the person
+      // watches the card above an empty transcript and never sees the agent's
+      // closing summary unless they reload. `version` is the signal: it is
+      // bumped by every write the runner makes, including the ones that
+      // persist those rows.
+      if (versionAdvanced) {
+        try {
+          const history = await getChatMessages(resumeId);
+          setMessages(history.messages.map(withMessageId));
+          setContextCut(history.contextCut);
+        } catch {
+          /* the next snapshot re-reads it, and so does a reload */
+        }
+      }
       if (sourceChanged) {
         try {
           const fresh = await getResume(resumeId);
@@ -444,7 +467,10 @@ export default function EditorShell({ resumeId }: Props) {
       try {
         const snap = await getImport(resumeId);
         if (cancelled || !snap) return;
+        // Seeded, not replayed: this mount has just loaded the source and the
+        // transcript, so the snapshot it starts from is already accounted for.
         importAppliedRef.current = snap.applied;
+        importVersionRef.current = snap.version;
         setImportSnapshot(snap);
         if (snap.status === "running") attachImportStream();
       } catch {
@@ -478,6 +504,7 @@ export default function EditorShell({ resumeId }: Props) {
     try {
       const snap = await startImport(resumeId);
       importAppliedRef.current = snap.applied;
+      importVersionRef.current = snap.version;
       setImportSnapshot(snap);
       attachImportStream();
     } catch {
@@ -488,6 +515,17 @@ export default function EditorShell({ resumeId }: Props) {
   const importView = useMemo(
     () => (importSnapshot ? toImportView(importSnapshot) : undefined),
     [importSnapshot],
+  );
+  // Where the import's own turn ends, so the card renders at that boundary
+  // rather than below every later message forever -- `getImport` keeps
+  // returning the last run's snapshot, so a finished import's collapsed card
+  // would otherwise stay pinned to the bottom of the pane on every visit.
+  const importCardAt = useMemo(
+    () =>
+      importSnapshot
+        ? importCardIndex(messages, importTurnStartsAt(importSnapshot))
+        : undefined,
+    [importSnapshot, messages],
   );
   // While a run is live the server owns `resume.typst_source`: it is being
   // rewritten section by section, and `source` here is only as fresh as the
@@ -1543,6 +1581,7 @@ export default function EditorShell({ resumeId }: Props) {
           models={modelPanel}
           importView={importView}
           importElapsedSeconds={importElapsedSeconds}
+          importCardIndex={importCardAt}
           onImportRetry={onImportAction}
           onImportResume={onImportAction}
         />

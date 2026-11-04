@@ -125,6 +125,10 @@ type Props = {
    *  ever been started for this resume. */
   importView?: ImportView;
   importElapsedSeconds?: number;
+  /** How many messages precede the import's progress card -- the end of the
+   *  import's own turn. From `lib/import-progress`'s `importCardIndex`.
+   *  Absent pins the card last, which is the in-flight case. */
+  importCardIndex?: number;
   onImportRetry?: () => void;
   onImportResume?: () => void;
 };
@@ -194,6 +198,7 @@ export default function EditorChatPanel({
   models,
   importView,
   importElapsedSeconds,
+  importCardIndex,
   onImportRetry,
   onImportResume,
 }: Props) {
@@ -404,6 +409,64 @@ export default function EditorChatPanel({
     acceptFile(event.dataTransfer.files[0]);
   }
 
+  // One message, with the context-cut marker above it when the cut falls
+  // here. Taken out of the map body so the transcript can be rendered in two
+  // slices with the import card between them, without duplicating any of it.
+  // `index` is the message's index in `messages`, not in its slice: it only
+  // feeds the key fallback, which has to stay unique across both slices.
+  function renderMessage(message: ChatMessage, index: number) {
+    return (
+      <motion.div
+        key={message.id ?? `${message.role}-${index}-${message.timestamp ?? ""}`}
+        className="min-w-0"
+        variants={messageVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+      >
+        {/* Sits where the model's view of the chat begins. Above it
+            the messages are still here, still yours -- they are just
+            not in the request any more. */}
+        {contextCutMessageId && message.id === contextCutMessageId ? (
+          <div ref={cutMarkerRef} className="mb-3 border-t border-dashed border-border/70 pt-3">
+            <p className="text-[0.7rem] font-medium uppercase tracking-wide text-muted-foreground">
+              {contextCutTitle}
+            </p>
+            {contextCutDetail ? (
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {contextCutDetail}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+        <ChatMessageCard
+          message={message}
+          sending={sending}
+          currentSource={currentSource}
+          onRestoreEdit={onRestoreEdit}
+          familyActions={familyActions}
+        />
+      </motion.div>
+    );
+  }
+
+  // Where the import's turn ends. The shell computes it from the run's
+  // `started_at` against each message's own timestamp (`importCardIndex`);
+  // absent, or past the end of the transcript, means the import is still the
+  // latest turn and the card is pinned last.
+  const cardIndex = Math.min(
+    importCardIndex ?? messages.length,
+    messages.length,
+  );
+  const importCard = importView ? (
+    <ImportProgressCard
+      view={importView}
+      elapsedSeconds={importElapsedSeconds ?? 0}
+      onRetry={() => onImportRetry?.()}
+      onResume={() => onImportResume?.()}
+    />
+  ) : null;
+
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
       <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden px-4">
@@ -434,42 +497,20 @@ export default function EditorChatPanel({
               </div>
             ) : null}
             <AnimatePresence initial={false}>
-              {messages.map((message, index) => (
-                <motion.div
-                  key={message.id ?? `${message.role}-${index}-${message.timestamp ?? ""}`}
-                  className="min-w-0"
-                  variants={messageVariants}
-                  initial="hidden"
-                  animate="visible"
-                  exit="exit"
-                >
-                  {/* Sits where the model's view of the chat begins. Above it
-                      the messages are still here, still yours -- they are just
-                      not in the request any more. */}
-                  {contextCutMessageId && message.id === contextCutMessageId ? (
-                    <div
-                      ref={cutMarkerRef}
-                      className="mb-3 border-t border-dashed border-border/70 pt-3"
-                    >
-                      <p className="text-[0.7rem] font-medium uppercase tracking-wide text-muted-foreground">
-                        {contextCutTitle}
-                      </p>
-                      {contextCutDetail ? (
-                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                          {contextCutDetail}
-                        </p>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  <ChatMessageCard
-                    message={message}
-                    sending={sending}
-                    currentSource={currentSource}
-                    onRestoreEdit={onRestoreEdit}
-                    familyActions={familyActions}
-                  />
-                </motion.div>
-              ))}
+              {messages.slice(0, cardIndex).map((message, index) => renderMessage(message, index))}
+            </AnimatePresence>
+            {/* The import's progress card, at the end of the import's own
+                turn. While the import is the latest turn `cardIndex` is the
+                message count, so this renders empty here and the card sits
+                below the reasoning panel instead -- pinned last, with tool
+                messages appending above it. Once a later turn exists the card
+                stays where its turn ended rather than following the bottom of
+                the pane forever. */}
+            {importCard && cardIndex < messages.length ? importCard : null}
+            <AnimatePresence initial={false}>
+              {messages
+                .slice(cardIndex)
+                .map((message, index) => renderMessage(message, cardIndex + index))}
             </AnimatePresence>
             {/* The thinking panel, and the honest version of it being empty.
                 No model fills it reliably: measured over 8 live turns each,
@@ -511,15 +552,10 @@ export default function EditorChatPanel({
             ) : null}
             {/* Pinned last in the turn: mounted here, after every message and
                 the reasoning panel above, so a tool message from a running
-                import always appends above it rather than pushing past it. */}
-            {importView ? (
-              <ImportProgressCard
-                view={importView}
-                elapsedSeconds={importElapsedSeconds ?? 0}
-                onRetry={() => onImportRetry?.()}
-                onResume={() => onImportResume?.()}
-              />
-            ) : null}
+                import always appends above it rather than pushing past it.
+                Only while the import *is* the last turn -- otherwise the card
+                has already been placed at its own turn boundary above. */}
+            {importCard && cardIndex >= messages.length ? importCard : null}
             {streamingText ? (
               <div className="min-w-0">
                 <ChatMessageCard

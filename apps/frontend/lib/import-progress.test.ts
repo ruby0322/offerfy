@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ImportSnapshot, ImportStepStatus } from "./import-progress";
-import { importSourceChanged, importTurnStartsAt, toImportView } from "./import-progress";
+import {
+  importCardIndex,
+  importSourceChanged,
+  importTurnStartsAt,
+  toImportView,
+} from "./import-progress";
 
 function step(
   key: string,
@@ -137,4 +142,81 @@ test("a failed run that applied nothing new leaves the source alone", () => {
 
 test("a failed run that applied a section still means the source moved", () => {
   assert.equal(importSourceChanged(snap({ status: "failed", applied: 3 }), 2), true);
+});
+
+// --------------------------------------------------------------------------
+// importCardIndex -- the card is scoped to the import's own turn
+// --------------------------------------------------------------------------
+
+const TURN = Date.parse("2026-11-04T12:00:00+00:00");
+
+function msg(role: string, iso: string) {
+  return { role, created_at: iso };
+}
+
+test("the card sits last while the import is the latest turn", () => {
+  const messages = [
+    msg("tool", "2026-11-04T12:00:01+00:00"),
+    msg("assistant", "2026-11-04T12:00:09+00:00"),
+  ];
+  assert.equal(importCardIndex(messages, TURN), 2);
+});
+
+test("the card sits above the next user turn, not below it", () => {
+  const messages = [
+    msg("tool", "2026-11-04T12:00:01+00:00"),
+    msg("assistant", "2026-11-04T12:00:09+00:00"),
+    msg("user", "2026-11-04T12:05:00+00:00"),
+    msg("assistant", "2026-11-04T12:05:30+00:00"),
+  ];
+  assert.equal(importCardIndex(messages, TURN), 2);
+});
+
+test("a user turn before the import does not pull the card up", () => {
+  const messages = [
+    msg("user", "2026-11-04T11:00:00+00:00"),
+    msg("assistant", "2026-11-04T11:00:20+00:00"),
+    msg("tool", "2026-11-04T12:00:01+00:00"),
+  ];
+  assert.equal(importCardIndex(messages, TURN), 3);
+});
+
+test("an earlier chat turn and a later one bracket the card correctly", () => {
+  const messages = [
+    msg("user", "2026-11-04T11:00:00+00:00"),
+    msg("tool", "2026-11-04T12:00:01+00:00"),
+    msg("assistant", "2026-11-04T12:00:09+00:00"),
+    msg("user", "2026-11-04T13:00:00+00:00"),
+  ];
+  assert.equal(importCardIndex(messages, TURN), 3);
+});
+
+test("an optimistically appended user message counts as the next turn", () => {
+  // Sent from this client while the import was still running: it has no
+  // server `created_at` yet, only the `timestamp` the shell gave it.
+  const messages = [
+    msg("tool", "2026-11-04T12:00:01+00:00"),
+    { role: "user", timestamp: "2026-11-04T12:00:30+00:00" },
+  ];
+  assert.equal(importCardIndex(messages, TURN), 1);
+});
+
+test("messages without any timestamp leave the card last", () => {
+  const messages = [{ role: "user" }, { role: "assistant" }];
+  assert.equal(importCardIndex(messages, TURN), 2);
+});
+
+test("an unparseable turn start leaves the card last", () => {
+  const messages = [msg("user", "2026-11-04T13:00:00+00:00")];
+  assert.equal(importCardIndex(messages, Number.NaN), 1);
+});
+
+test("an empty transcript puts the card at index zero", () => {
+  assert.equal(importCardIndex([], TURN), 0);
+});
+
+test("a user message exactly at the turn start is the next turn", () => {
+  // The import writes no user row, so a `user` row sharing the run's own
+  // timestamp cannot belong to the import.
+  assert.equal(importCardIndex([msg("user", "2026-11-04T12:00:00+00:00")], TURN), 0);
 });

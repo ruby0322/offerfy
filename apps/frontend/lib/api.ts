@@ -138,6 +138,9 @@ export type ChatMessage = {
   id?: string;
   role: "user" | "assistant" | "system" | "tool";
   content: string;
+  /** When the server wrote the row, as aware ISO. Absent on a message this
+   *  client appended optimistically, which carries `timestamp` instead. */
+  created_at?: string;
   timestamp?: string;
 };
 
