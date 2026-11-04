@@ -6,15 +6,18 @@ from sqlalchemy.exc import IntegrityError
 from app.models import GuestSession, Resume, ResumeImport, ResumeImportStep, _utcnow
 from app.services import import_run
 from app.services.import_run import (
+    RENDER_CHECK_KEY,
     ImportAlreadyRunning,
     ImportSuperseded,
     LABEL_MAX,
     MAX_STEPS,
     STALE_AFTER_SECONDS,
+    advance,
     declare_plan,
     fail,
     finish,
     is_stale,
+    set_render_check,
     snapshot,
     start_run,
     touch,
@@ -36,6 +39,15 @@ def resume(db_session):
     db_session.add(resume)
     db_session.commit()
     return resume
+
+
+@pytest.fixture
+def run(db_session, resume):
+    """A plain running import, for tests that don't care about its own
+    lifecycle (the render-check and reserved-key tests below) -- mirrors
+    `tests/test_import_runner.py`'s fixture of the same name.
+    """
+    return start_run(db_session, resume)
 
 
 def test_constants_declared():
@@ -312,3 +324,101 @@ def test_declare_plan_from_a_superseded_runner_never_gets_that_far(db_session, r
         .count()
         == 1
     )
+
+
+# ---------------------------------------------------------------------------
+# set_render_check -- the server-owned render-verification step
+# ---------------------------------------------------------------------------
+
+
+def _step_by_key(db_session, run, key) -> ResumeImportStep | None:
+    return (
+        db_session.query(ResumeImportStep)
+        .filter(ResumeImportStep.import_id == run.id, ResumeImportStep.key == key)
+        .first()
+    )
+
+
+def test_set_render_check_appends_a_reserved_step(db_session, resume, run):
+    declare_plan(db_session, run, [{"key": "basics", "label": "Basics"}])
+    before_version = run.version
+
+    set_render_check(db_session, run, "active")
+
+    row = _step_by_key(db_session, run, RENDER_CHECK_KEY)
+    assert row is not None
+    assert row.status == "active"
+    assert row.detail is None
+    # Appended after the plan's own steps, not reordering them.
+    assert row.seq == 1
+    db_session.refresh(run)
+    assert run.version > before_version
+
+
+def test_set_render_check_updates_in_place_without_duplicating(db_session, resume, run):
+    set_render_check(db_session, run, "active")
+    set_render_check(db_session, run, "active", detail="repairing")
+    set_render_check(db_session, run, "done")
+
+    rows = (
+        db_session.query(ResumeImportStep)
+        .filter(ResumeImportStep.import_id == run.id, ResumeImportStep.key == RENDER_CHECK_KEY)
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].status == "done"
+    assert rows[0].detail is None
+
+
+def test_set_render_check_detail_round_trips(db_session, resume, run):
+    set_render_check(db_session, run, "active", detail="repairing")
+    row = _step_by_key(db_session, run, RENDER_CHECK_KEY)
+    assert row.detail == "repairing"
+
+
+# ---------------------------------------------------------------------------
+# The reserved key cannot collide with a model-chosen one.
+# ---------------------------------------------------------------------------
+
+
+def test_declare_plan_drops_a_model_declared_reserved_key(db_session, resume, run):
+    """If the model ever declares a step using our reserved key -- however
+    unlikely -- `declare_plan` must not let it occupy that slot, or the
+    render-check step and the model's own step would collide on
+    `UNIQUE(import_id, key)` the moment `set_render_check` runs.
+    """
+    steps = declare_plan(
+        db_session,
+        run,
+        [
+            {"key": RENDER_CHECK_KEY, "label": "Sneaky"},
+            {"key": "basics", "label": "Basics"},
+        ],
+    )
+    assert [s.key for s in steps] == ["basics"]
+
+
+def test_advance_with_the_reserved_key_does_not_write_into_it(db_session, resume, run):
+    """An edit naming the reserved key as its `step` (whether the model
+    typed it deliberately or it arrived truncated/coincidentally) must not
+    be treated as progress on the render-check step -- it is synthesised a
+    key instead, exactly like an edit that named no step at all.
+    """
+    advance(db_session, run, RENDER_CHECK_KEY, detail="not a real section")
+
+    # No row was ever created under the reserved key by advance() alone --
+    # only `set_render_check` is allowed to own that slot.
+    assert _step_by_key(db_session, run, RENDER_CHECK_KEY) is None
+
+    # The edit was still recorded -- just under a synthesised key instead.
+    assert run.applied == 1
+    other = db_session.query(ResumeImportStep).filter(ResumeImportStep.import_id == run.id).all()
+    assert len(other) == 1
+    assert other[0].key != RENDER_CHECK_KEY
+    assert other[0].detail == "not a real section"
+
+    # And a later, real set_render_check call still works normally.
+    set_render_check(db_session, run, "active")
+    row = _step_by_key(db_session, run, RENDER_CHECK_KEY)
+    assert row is not None
+    assert row.status == "active"

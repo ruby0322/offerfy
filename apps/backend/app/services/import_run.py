@@ -99,6 +99,17 @@ MAX_STEPS = 12
 LABEL_MAX = 120
 KEY_MAX = 64
 
+# The server-owned render-verification step `set_render_check` writes (see
+# `app.services.import_qa.verify_render` and `app.services.import_runner`,
+# which drives it). `__` is not a character either `declare_plan` or
+# `advance` ever produces on its own -- a model-supplied key is whatever
+# text the model typed, truncated, never invented from scratch -- but the
+# model's *text* could still happen to equal this exact string, so both
+# `_sanitise_plan` and `advance` check for it explicitly and refuse to let
+# it collide with the reserved slot. See the two call sites below for what
+# each one does instead.
+RENDER_CHECK_KEY = "__render_check"
+
 # How long a run may go without a heartbeat before it is considered dead --
 # e.g. its worker process crashed or was killed -- and may be superseded by a
 # new run for the same resume.
@@ -335,6 +346,15 @@ def _sanitise_plan(steps: list[dict]) -> list[tuple[str, str]]:
     the database -- which then violates `UNIQUE(import_id, key)` instead
     of being collapsed into the single step the sanitiser is supposed to
     produce.
+
+    An entry whose (truncated) key equals `RENDER_CHECK_KEY` is dropped
+    outright, same as a malformed one: that key belongs to the server-owned
+    render-verification step (`set_render_check`), and letting a declared
+    plan occupy it would either collide with `UNIQUE(import_id, key)` the
+    moment the render check runs, or -- if declared again later -- silently
+    overwrite that step's own status/detail. Dropping it here means a
+    model that happens to type this exact string loses one plan entry, not
+    the render check.
     """
     cleaned: list[tuple[str, str]] = []
     seen: set[str] = set()
@@ -348,6 +368,8 @@ def _sanitise_plan(steps: list[dict]) -> list[tuple[str, str]]:
         if not isinstance(label, str) or not label:
             continue
         key = key[:KEY_MAX]
+        if key == RENDER_CHECK_KEY:
+            continue
         if key in seen:
             continue
         seen.add(key)
@@ -460,6 +482,14 @@ def advance(
     used for either lookup or insert, for the same column-width reason
     `declare_plan` truncates a declared key.
 
+    A `step_key` that (after truncation) equals `RENDER_CHECK_KEY` is
+    treated exactly like no step name at all -- a key is synthesised
+    instead. That reserved key belongs to the server-owned render-check
+    step (`set_render_check`); writing an edit's progress into it would
+    either collide with that step's own row or stomp its status/detail the
+    next time the render check runs. The edit itself is still recorded
+    (under the synthesised key), same as any other unlabelled edit.
+
     Idempotent for a repeated call on an already-`done` key -- a retried
     or duplicated tool call hits this, the same failure mode `start_run`
     already defends against for run creation. Without the guard, "promote
@@ -471,8 +501,9 @@ def advance(
     refresh, and counting a retry would trigger a pointless recompile and
     inflate the card's progress.
     """
-    synthesised = not step_key
-    key = f"edit-{run.applied + 1}" if synthesised else step_key[:KEY_MAX]
+    truncated = step_key[:KEY_MAX] if step_key else None
+    synthesised = not step_key or truncated == RENDER_CHECK_KEY
+    key = f"edit-{run.applied + 1}" if synthesised else truncated
 
     step = (
         db.query(ResumeImportStep)
@@ -512,3 +543,63 @@ def advance(
     run.applied += 1
     _bump(run)
     db.commit()
+
+
+def set_render_check(
+    db: Session, run: ResumeImport, status: str, detail: str | None = None
+) -> ResumeImportStep:
+    """Upsert the server-owned render-verification step on the progress
+    card, under the reserved key `RENDER_CHECK_KEY`.
+
+    This is deliberately not routed through `advance` or `declare_plan`:
+    both of those are the *agent's* plan-progression protocol (sanitised,
+    bounded, driven by what the model calls), and this step is neither
+    declared nor advanced by the model -- it is written directly by
+    `app.services.import_runner`, once per render-check/repair cycle, after
+    every section the agent declared has already been applied.
+    `app.services.import_qa.verify_render` is the thing deciding what
+    `status`/`detail` to pass; see that module for the check itself.
+
+    Idempotent on the key: the first call appends a new step after
+    whatever the plan already has (`seq` = current step count, so it
+    never reorders the agent's own steps); every call after that updates
+    the same row's `status`/`detail` in place rather than inserting a
+    second one -- the `UNIQUE(import_id, key)` constraint would reject a
+    duplicate anyway, but the lookup here avoids ever hitting it.
+
+    `status` is one of `"active"` or `"done"` -- there is no dedicated
+    schema value for "repairing" (`ResumeImportStep.status`'s CHECK
+    constraint only admits `pending`/`active`/`done`/`skipped`, and adding
+    one is a migration this feature does not need). "Repairing" is
+    represented as `status="active", detail="repairing"` instead; the
+    frontend's reserved-key rendering (`lib/import-progress.ts`,
+    `components/editor/ImportProgressCard.tsx`) reads that combination to
+    show a different line than the plain "checking" one. The one-active
+    invariant documented in the module docstring is scoped to the agent's
+    own plan steps, not this one: an import in flight can legitimately
+    have one agent step still `active` for a moment while this step is
+    also `active`, which is correct, not a violation -- there is still
+    exactly one *of each kind*.
+    """
+    step = (
+        db.query(ResumeImportStep)
+        .filter(ResumeImportStep.import_id == run.id, ResumeImportStep.key == RENDER_CHECK_KEY)
+        .first()
+    )
+    if step is None:
+        seq = db.query(ResumeImportStep).filter(ResumeImportStep.import_id == run.id).count()
+        step = ResumeImportStep(
+            import_id=run.id,
+            seq=seq,
+            key=RENDER_CHECK_KEY,
+            label="",
+            status=status,
+            detail=detail,
+        )
+        db.add(step)
+    else:
+        step.status = status
+        step.detail = detail
+    _bump(run)
+    db.commit()
+    return step
