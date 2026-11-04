@@ -74,6 +74,28 @@ def put_object(
     return key
 
 
+def get_object(key: str) -> bytes | None:
+    """Read back a stored object.
+
+    Returns None for every unavailable case -- unconfigured storage, a
+    missing key, or a transport error -- rather than raising. A missing
+    upload is a condition the caller handles, not an exception.
+    """
+    settings = get_settings()
+    client = _client()
+    if client is None:
+        logger.warning("S3 not configured; cannot read object key=%s", key)
+        return None
+    try:
+        response = client.get_object(Bucket=settings.s3_bucket, Key=key)
+    except (BotoCoreError, ClientError):
+        logger.exception(
+            "S3 get_object failed: bucket=%s key=%s", settings.s3_bucket, key
+        )
+        return None
+    return response["Body"].read()
+
+
 def delete_object(key: str) -> bool:
     settings = get_settings()
     client = _client()
