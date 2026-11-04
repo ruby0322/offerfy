@@ -125,14 +125,26 @@
     "error": "無法建立履歷，請再試一次。"
   },
   "upload": {
-    "title": "上傳現有履歷",
-    "lead": "上傳後會立刻進入編輯器，無需先跑分析。",
-    "drop": "將檔案拖放到這裡，或點擊選擇",
-    "hint": "PDF、PNG、JPG、WEBP、TXT、MD · 最大 10 MiB",
+    "title": "加入你的履歷",
+    "lead": "拖放檔案、點擊選擇，或直接從剪貼簿貼上——PDF、截圖或純文字都可以。送出後會直接進入編輯器，內容已經在載入。",
+    "dropHint": "或將檔案拖放到這個區域的任何地方",
+    "chooseFile": "選擇檔案",
+    "chooseFileHint": "從裝置中瀏覽",
+    "pasteDoor": "貼上",
+    "pasteShortcut": "⌘V ／ Ctrl+V",
+    "or": "或",
+    "chipPdf": "PDF",
+    "chipPhoto": "照片或截圖",
+    "chipTxt": "TXT",
+    "chipMd": "MD",
+    "chipMaxSize": "最大 10 MiB",
+    "privacy": "只有你選擇、拖放或貼上的檔案會被送出——裝置上其他內容不會被動到。",
+    "blankTemplate": "或從空白範本開始",
     "uploading": "上傳中…",
     "error": "無法上傳檔案，請再試一次。",
     "tooLarge": "檔案超過 10 MiB。",
-    "badType": "不支援的檔案類型。"
+    "badType": "不支援的檔案類型。",
+    "tooShort": "這段內容似乎太短，不像是履歷。"
   },
   "login": {
     "title": "登入 Offerfy",
