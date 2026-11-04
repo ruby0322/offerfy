@@ -1,14 +1,15 @@
+import asyncio
 from pathlib import Path
 
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
-from fastapi.responses import Response as RawResponse
+from fastapi.responses import Response as RawResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.db import get_db
+from app.db import get_db, get_session_factory
 from app.deps import get_current_user, load_resume_for_owner, owner_context, require_user
-from app.models import GuestSession, Resume, ResumeRevision, User
+from app.models import GuestSession, Resume, ResumeImport, ResumeRevision, User
 from app.schemas import (
     AtsReport,
     CompileBody,
@@ -31,6 +32,8 @@ from app.services.extract import (
     MAX_UPLOAD_BYTES,
     allowed_upload,
 )
+from app.services.import_run import ImportAlreadyRunning, snapshot as import_snapshot, start_run
+from app.services.import_runner import run_import
 from app.services.rate_limit import enforce_guest_rate
 from app.services.revisions import (
     pin_current_draft,
@@ -39,6 +42,7 @@ from app.services.revisions import (
     build_share_state,
 )
 from app.services.s3 import delete_object, put_object
+from app.services.sse import SSE_HEADERS, sse_frame
 from app.services.starter import default_title, generate_starter, title_from_filename
 from app.services.typst_compile import (
     compile_preview_pages,
@@ -46,6 +50,52 @@ from app.services.typst_compile import (
 )
 
 router = APIRouter()
+
+# How often the stream route polls for a new snapshot. See
+# `_stream_import_snapshots` for why this must be a fresh session each poll
+# rather than one held open for the connection's lifetime.
+IMPORT_POLL_SECONDS = 0.4
+
+# Strong references to in-flight import tasks. `asyncio.create_task` does not
+# keep its task alive on its own -- a task with no reference anywhere can be
+# garbage-collected mid-flight, silently abandoning the import. Each task
+# removes itself here via a done-callback once it finishes.
+_import_tasks: set[asyncio.Task] = set()
+
+
+async def _run_import_detached(resume_id: str, run_id: str, model: str | None) -> None:
+    """Run one import on its own session, independent of the request that started it.
+
+    The route's own `Session` (from `Depends(get_db)`) is closed by FastAPI
+    at request teardown, which happens long before an import finishes. Running
+    `run_import` against that session would mean running it against a closed
+    one -- a bug that can look like it works under `TestClient` (where
+    teardown timing can differ) and then fail in production. So this opens
+    its own session from `get_session_factory()`, re-loads the resume and the
+    run by id inside it, and closes that session when done -- never touching
+    the request's session at all.
+    """
+    factory = get_session_factory()
+    db = factory()
+    try:
+        resume = db.get(Resume, resume_id)
+        run = db.get(ResumeImport, run_id)
+        if resume is None or run is None:
+            return
+        await run_import(db, resume, run, model=model)
+    finally:
+        db.close()
+
+
+def _schedule_import(resume_id: str, run_id: str, model: str | None = None) -> None:
+    """Schedule `_run_import_detached` on the running loop and keep it alive.
+
+    This is the seam route tests monkeypatch to a no-op so a POST test never
+    kicks off a real import -- see `tests/test_import_api.py`.
+    """
+    task = asyncio.create_task(_run_import_detached(resume_id, run_id, model))
+    _import_tasks.add(task)
+    task.add_done_callback(_import_tasks.discard)
 
 
 def _validate_locale(locale: str | None) -> str:
@@ -502,4 +552,86 @@ def export_pdf(
         content=data,
         media_type="application/pdf",
         headers={"Content-Disposition": 'attachment; filename="resume.pdf"'},
+    )
+
+
+@router.post("/v1/resumes/{resume_id}/import", status_code=201)
+async def start_import(
+    resume_id: str,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+):
+    resume = _owned_resume(resume_id, request, response, db, user, ensure=True)
+    if not resume.upload_s3_key:
+        raise HTTPException(status_code=400, detail="Resume has no uploaded file to import")
+    try:
+        run = start_run(db, resume)
+    except ImportAlreadyRunning as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _schedule_import(resume.id, run.id)
+    return import_snapshot(db, resume.id)
+
+
+@router.get("/v1/resumes/{resume_id}/import")
+def get_import(
+    resume_id: str,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+):
+    resume = _owned_resume(resume_id, request, response, db, user)
+    data = import_snapshot(db, resume.id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="No import for this resume")
+    return data
+
+
+async def _stream_import_snapshots(resume_id: str):
+    """Poll `import_snapshot` on a fresh session every tick, until the run ends.
+
+    `offerfy-api` runs uvicorn with two workers sharing only Postgres, so a
+    reconnecting client can land on the worker that isn't running the
+    import -- the database is the only shared state. A single session held
+    open for the whole connection would also sit in one transaction and keep
+    serving its first snapshot forever, which looks exactly like a frozen
+    import. So every poll opens, reads, and closes its own session.
+
+    Emits a frame immediately, then one each time `version` changes, and
+    always emits one final frame and returns once `status` is `done` or
+    `failed` -- a stream that never terminates leaks a connection per reload.
+    """
+    factory = get_session_factory()
+    last_version: int | None = None
+    while True:
+        session = factory()
+        try:
+            data = import_snapshot(session, resume_id)
+        finally:
+            session.close()
+        if data is None:
+            return
+        if data["version"] != last_version:
+            last_version = data["version"]
+            yield sse_frame(data)
+        if data["status"] in ("done", "failed"):
+            return
+        await asyncio.sleep(IMPORT_POLL_SECONDS)
+
+
+@router.get("/v1/resumes/{resume_id}/import/stream")
+def stream_import(
+    resume_id: str,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+):
+    resume = _owned_resume(resume_id, request, response, db, user)
+    if import_snapshot(db, resume.id) is None:
+        raise HTTPException(status_code=404, detail="No import for this resume")
+    return StreamingResponse(
+        _stream_import_snapshots(resume.id), media_type="text/event-stream", headers=SSE_HEADERS
     )

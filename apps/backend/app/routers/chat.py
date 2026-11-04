@@ -3,7 +3,6 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pathlib import Path
 import asyncio
-import json
 import logging
 
 from app.db import get_db
@@ -23,6 +22,7 @@ from app.services.llm import TEMPLATE_SWITCH_EXTRA, aiter_chat_edit, llm_configu
 from app.services.revisions import set_draft_source
 from app.services.role_card import build_role_card
 from app.services.s3 import put_object
+from app.services.sse import SSE_HEADERS, sse_frame
 from app.services.templates import is_template_switch_message, parse_preview_spec, template_api_block
 from app.services.typst_compile import compile_status
 from app.services.metering import metered, preflight
@@ -39,19 +39,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-SSE_HEADERS = {
-    "Cache-Control": "no-cache, no-transform",
-    "Connection": "keep-alive",
-    "X-Accel-Buffering": "no",
-}
-
 
 def _message_out(row: ChatMessage) -> ChatMessageOut:
     return ChatMessageOut(id=row.id, role=row.role, content=row.content)
-
-
-def _sse(payload: dict) -> bytes:
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
 
 
 def _history(db: Session, resume_id: str) -> list[ChatMessage]:
@@ -333,15 +323,15 @@ async def chat(
                     meter.record(event)
                 elif kind == "delta":
                     # Display only: nothing is persisted until the assistant event lands.
-                    yield _sse({"type": "delta", "text": event["text"]})
+                    yield sse_frame({"type": "delta", "text": event["text"]})
                 elif kind == "reasoning":
                     # Thinking, not an answer. Never persisted: it would come back as
                     # an assistant row on the next turn and be fed to the model as
                     # though it had said it out loud.
-                    yield _sse({"type": "reasoning", "text": event["text"]})
+                    yield sse_frame({"type": "reasoning", "text": event["text"]})
                 elif kind == "tool":
                     row = persist_tool_message(db, resume.id, event["trace"])
-                    yield _sse(
+                    yield sse_frame(
                         {
                             "type": "tool",
                             "message": _message_out(row).model_dump(),
@@ -349,12 +339,12 @@ async def chat(
                     )
                     created = _tailor_created(event["trace"])
                     if created:
-                        yield _sse(created)
+                        yield sse_frame(created)
                 elif kind == "source":
                     new_source = event["typst_source"]
                     set_draft_source(db, resume, new_source)
                     db.commit()
-                    yield _sse(
+                    yield sse_frame(
                         {
                             "type": "source",
                             "typst_source": new_source,
@@ -366,7 +356,7 @@ async def chat(
                         event["content"] or assistant_text or "Updated the Typst source."
                     )
                     row = persist_assistant_message(db, resume.id, assistant_text)
-                    yield _sse(
+                    yield sse_frame(
                         {
                             "type": "assistant",
                             "message": _message_out(row).model_dump(),
@@ -378,7 +368,7 @@ async def chat(
                 # turn the user is watching rather than something they infer
                 # later from the assistant forgetting things.
                 if context_notice is not None:
-                    yield _sse(context_notice)
+                    yield sse_frame(context_notice)
                 async for event in aiter_chat_edit(
                     messages,
                     original_source,
@@ -443,7 +433,7 @@ async def chat(
                 # lost without costing an answer, and so may this.
                 try:
                     bal = balance(db, user, guest)
-                    yield _sse(
+                    yield sse_frame(
                         quota_event(
                             bal, approx_edits_left(db, user, guest, bal, model=model)
                         )
@@ -451,7 +441,7 @@ async def chat(
                 except Exception:
                     logger.warning("quota frame failed", exc_info=True)
                     db.rollback()
-                yield _sse(
+                yield sse_frame(
                     {
                         "type": "done",
                         "typst_source": new_source,
@@ -460,7 +450,7 @@ async def chat(
                 )
             except HTTPException as exc:
                 detail = exc.detail if isinstance(exc.detail, str) else "Chat request failed"
-                yield _sse({"type": "error", "detail": detail, "status": exc.status_code})
+                yield sse_frame({"type": "error", "detail": detail, "status": exc.status_code})
 
     return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
 
