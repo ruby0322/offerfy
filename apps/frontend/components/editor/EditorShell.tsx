@@ -71,6 +71,7 @@ import {
 import type { AuthUser, ModelRow, ModelTable, Usage, UsageRefusal } from "@/lib/api";
 import { formatUserAttachmentMessage, parseToolPayload } from "@/lib/chat-tools";
 import type { AtsCheckName } from "@/lib/ats-checks";
+import { loadEditorTab, saveEditorTab } from "@/lib/editor-tab";
 import { importTurnStartsAt, toImportView, type ImportSnapshot } from "@/lib/import-progress";
 import { peekPendingCreate, takePendingCreate } from "@/lib/pending-create";
 
@@ -105,24 +106,6 @@ function saveComposerDraft(id: string, value: string) {
   try {
     if (value) sessionStorage.setItem(composerDraftKey(id), value);
     else sessionStorage.removeItem(composerDraftKey(id));
-  } catch {
-    /* storage can be unavailable in private mode */
-  }
-}
-
-const editorTabKey = (id: string) => `offerfy:editor-tab:${id}`;
-
-function loadEditorTab(id: string): string | null {
-  try {
-    return sessionStorage.getItem(editorTabKey(id));
-  } catch {
-    return null;
-  }
-}
-
-function saveEditorTab(id: string, tab: string) {
-  try {
-    sessionStorage.setItem(editorTabKey(id), tab);
   } catch {
     /* storage can be unavailable in private mode */
   }
@@ -416,16 +399,6 @@ export default function EditorShell({ resumeId }: Props) {
   // On mount: pick up whatever import run (if any) this resume has, and
   // keep following it if it is still running. This is what makes a reload
   // mid-import re-attach instead of losing the card.
-  //
-  // It also replaces the old pending-upload handoff's other job: landing a
-  // freshly uploaded resume on the chat tab, where the progress card lives,
-  // instead of the Typst source. There is no longer a client-side marker
-  // for "this upload is fresh" -- the server-owned import record is one --
-  // so any import this resume has ever had, combined with this being the
-  // first visit this session (no tab saved yet), is what opens chat. Once
-  // that happens the save below means every later mount reads "chat"
-  // straight out of `loadEditorTab` and this branch no longer fires, so the
-  // user's own later tab choice is never overridden.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -435,10 +408,6 @@ export default function EditorShell({ resumeId }: Props) {
         importAppliedRef.current = snap.applied;
         setImportSnapshot(snap);
         if (snap.status === "running") attachImportStream();
-        if (loadEditorTab(resumeId) == null) {
-          setLeftTab("chat");
-          saveEditorTab(resumeId, "chat");
-        }
       } catch {
         /* import status is optional; the editor works without it */
       }

@@ -7,6 +7,7 @@ import Nav from "@/components/Nav";
 import Dropzone from "@/components/upload/Dropzone";
 import { useRouter } from "@/i18n/navigation";
 import { ApiError, startImport, uploadResume } from "@/lib/api";
+import { saveEditorTab } from "@/lib/editor-tab";
 
 export default function UploadPage() {
   const t = useTranslations("upload");
@@ -26,6 +27,14 @@ export default function UploadPage() {
       // actually running -- an editor with no import to show progress for
       // is the exact "looks stuck" failure this replaces.
       await startImport(resume.id);
+      // Write the editor's remembered tab *before* navigating, the same key
+      // EditorShell reads synchronously in its useState initialiser. That
+      // makes the editor mount straight onto chat, where the progress card
+      // lives, with no flash of the Typst tab first. A storage failure here
+      // (private mode, quota) is cosmetic -- the editor just opens on
+      // whatever tab it would otherwise default to -- so it must not block
+      // the navigation.
+      saveEditorTab(resume.id, "chat");
       router.push(`/editor/${resume.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("error"));
