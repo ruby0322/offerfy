@@ -16,7 +16,7 @@ needs a Postgres check.
 """
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -81,8 +81,14 @@ def _grant(db_session, user, credits=50, **kw):
     return grant
 
 
-# A Wednesday, so there is room either side of `now` inside one window.
-MIDWEEK = datetime(2026, 10, 28, 12, 0, tzinfo=timezone.utc)
+# A Wednesday, so there is room either side of `now` inside one window --
+# anchored to the window the grants under test are actually created in, not to
+# a calendar date. `_grant` stamps starts_at from the real clock, so a fixed
+# date goes stale the moment it falls into a past window: the grant would then
+# begin after the window being read and every assertion here would measure the
+# wrong week. Derived from window_start() it stays Wednesday of *this* window
+# forever.
+MIDWEEK = usage.window_start() + timedelta(days=2, hours=12)
 
 
 # --------------------------------------------------------------------------
