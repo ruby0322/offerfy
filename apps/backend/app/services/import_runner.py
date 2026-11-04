@@ -56,6 +56,7 @@ reason instead of a silent exemption.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -69,7 +70,15 @@ from app.services.chat_messages import (
     persist_usage,
 )
 from app.services.extract import extract_upload_text
-from app.services.import_run import ImportSuperseded, advance, fail, finish, touch
+from app.services.import_qa import verify_render
+from app.services.import_run import (
+    ImportSuperseded,
+    advance,
+    fail,
+    finish,
+    set_render_check,
+    touch,
+)
 from app.services.import_tools import import_tool_handlers, import_tool_specs
 from app.services.llm import aiter_chat_edit
 from app.services.llm.prompts import EDIT_TOOL
@@ -87,8 +96,23 @@ logger = logging.getLogger(__name__)
 # feature's plan: silently inheriting chat's defaults truncates any resume
 # past about five sections, and the symptom looks like a model failure
 # rather than a configuration one.
-MAX_ROUNDS = 14
+#
+# Raised from 14 to 20 for the render-check gate below: a 7-section import
+# already spends close to the old budget (declare + read + 7 edits + close
+# is 10), and `verify_render` plus up to `MAX_RENDER_REPAIRS` repair turns
+# -- each its own read/edit/close -- needs real headroom on top of that,
+# not just the one or two rounds a compile-only retry would have cost.
+MAX_ROUNDS = 20
 TIMEOUT_SECONDS = 180.0
+
+# How many times `run_import` lets the agent try to fix a render-check
+# failure before giving up. Bounded, not retried indefinitely: each round
+# spends the person's own quota (see IMPORT_PURPOSE below), and a document
+# still failing after three honest attempts has something structurally
+# wrong that a fourth identical attempt is not going to find either --
+# see `verify_render`'s docstring for why coverage this low this
+# consistently is not noise.
+MAX_RENDER_REPAIRS = 3
 
 # What an import's model calls are billed as on `LlmCall`. Its own purpose
 # rather than "chat", following the compile-repair loop's "repair": an import
@@ -105,6 +129,9 @@ IMPORT_PURPOSE = "import"
 # these in step with `lib/import-progress.ts`'s `importErrorKey`.
 UPLOAD_MISSING = "upload_missing"
 UNEXPECTED = "unexpected"
+# Set when `verify_render` is still not `ok` after MAX_RENDER_REPAIRS
+# automatic repair attempts -- see the gate at the end of `run_import`.
+RENDER_CHECK_FAILED = "render_check_failed"
 
 IMPORT_INSTRUCTION = (
     "Import this uploaded resume into the Typst document.\n\n"
@@ -120,6 +147,12 @@ IMPORT_INSTRUCTION = (
     "apply_typst_edit's `step` argument. That is how the progress card "
     "knows which section you just finished -- there is no separate tool for "
     "reporting it.\n\n"
+    "Watch for Typst syntax that is easy to type by accident inside prose "
+    "copied from a resume: `/*` opens a comment that runs to the end of the "
+    "*whole document* (not just the line) if it is never closed with `*/`, "
+    "`@` starts a reference, and `[` opens a content block. Escape any of "
+    "these that appear in the person's own text (`\\@`, `\\[`, `\\*`) rather "
+    "than writing them bare.\n\n"
     "When every section from your plan has been applied, reply with a short "
     "summary of what you imported."
 )
@@ -160,6 +193,59 @@ def _owner_guard(user: User | None, guest: GuestSession | None):
     )
 
 
+def _render_repair_prompt(result: dict) -> str:
+    """One round's worth of feedback for a render-check repair turn.
+
+    Follows `app.routers.chat`'s compile-repair loop's shape (state what
+    went wrong, name the concrete hazards, say exactly what to do next) --
+    see that module's `while new_source != original_source and repairs < 3`
+    loop for the pattern this one is not inventing a variant of.
+
+    Two shapes, matching `verify_render`'s two failure modes:
+    - `compile_error` set: the source does not compile at all (should be
+      rare here -- the turn already runs with `verify_compile=True`, which
+      repairs this inline -- but `verify_render` can still hit it on its
+      own, e.g. a last edit landing after the turn's own last compile).
+    - otherwise, a coverage shortfall: say the number, and if there is a
+      cliff (`cliff_at`; see `verify_render`'s docstring for why that is
+      the bug's signature) lead with it and name the likely cause, because
+      "everything after X is missing" is far more actionable than an
+      unordered list of missing strings.
+    """
+    if result.get("compile_error"):
+        return (
+            "Typst compile failed while verifying the rendered page:\n"
+            f"{result['compile_error']}\n"
+            "Call read_typst first, then apply_typst_edit with the full "
+            "corrected source."
+        )
+    lines = [
+        "The rendered PDF is missing text that is present in the Typst "
+        f"source (coverage: {result['coverage']:.0%}, "
+        f"{result['found']}/{result['checked']} candidate strings found).",
+    ]
+    cliff_at = result.get("cliff_at")
+    if cliff_at:
+        lines.append(
+            "Everything from this point in the source onward is missing "
+            f'from the rendered page: "{cliff_at[:200]}". A likely cause is '
+            "an unescaped special character earlier in the document: `/*` "
+            "opens a Typst comment that runs to end-of-file, `@` starts a "
+            "reference, and `[` opens a content block. Find the one that "
+            "broke and escape it (`\\@`, `\\[`) or close the comment "
+            "(`*/`) -- do not just delete the surrounding text."
+        )
+    else:
+        lines.append("Missing strings, in source order:")
+        lines.extend(f"- {m[:200]}" for m in result.get("missing") or [])
+    lines.append(
+        "Call read_typst to see the current source, fix it so the missing "
+        "text renders, and call apply_typst_edit with the full corrected "
+        "source."
+    )
+    return "\n".join(lines)
+
+
 async def run_import(
     db: Session, resume: Resume, run: ResumeImport, *, model: str | None = None
 ) -> None:
@@ -188,42 +274,120 @@ async def run_import(
 
         user, guest = _owner(db, resume)
         async with metered(_owner_guard(user, guest)) as meter:
-            async for event in aiter_chat_edit(
-                messages,
-                resume.typst_source,
-                model=model,
-                prefer_full_source=False,
-                verify_compile=True,
-                max_rounds=MAX_ROUNDS,
-                timeout=TIMEOUT_SECONDS,
-                extra_tools=import_tool_specs(),
-                tool_handlers=import_tool_handlers(db, run),
-            ):
-                touch(db, run)
-                kind = event.get("kind")
-                if kind == "usage":
-                    # Both halves, exactly as the chat router does them: the
-                    # counter (durable, enforces the allowance) and the
-                    # LlmCall row (telemetry, priced at today's rates). A path
-                    # that moves one without the other shows up in
-                    # `usage.reconcile` as an admin gap for that window
-                    # forever -- see `persist_usage`'s docstring.
-                    persist_usage(db, resume.id, event, IMPORT_PURPOSE, user=user, guest=guest)
-                    meter.record(event)
-                elif kind == "tool":
-                    trace = event["trace"]
-                    persist_tool_message(db, resume.id, trace)
-                    if trace.get("name") == EDIT_TOOL:
-                        result = trace.get("result")
-                        if isinstance(result, dict) and result.get("changed"):
-                            advance(db, run, trace.get("arguments", {}).get("step"))
-                elif kind == "source":
-                    set_draft_source(db, resume, event["typst_source"])
-                    db.commit()
-                elif kind == "assistant":
-                    persist_assistant_message(db, resume.id, event["content"])
 
-        finish(db, run)
+            async def drain(events) -> str:
+                """Consume one turn's events -- the main import turn, or
+                one render-check repair turn -- exactly the same way: bill
+                usage, persist tool/assistant rows, advance the plan on a
+                changed edit, keep the resume's draft source current, and
+                keep the run's heartbeat alive. Returns the turn's final
+                assistant text, which a repair prompt needs so the next
+                turn's conversation reads as a continuation rather than a
+                non sequitur (see `app.routers.chat`'s compile-repair loop,
+                whose `relay` does the same bookkeeping for the same
+                reason).
+                """
+                assistant_text = ""
+                async for event in events:
+                    touch(db, run)
+                    kind = event.get("kind")
+                    if kind == "usage":
+                        # Both halves, exactly as the chat router does them:
+                        # the counter (durable, enforces the allowance) and
+                        # the LlmCall row (telemetry, priced at today's
+                        # rates). A path that moves one without the other
+                        # shows up in `usage.reconcile` as an admin gap for
+                        # that window forever -- see `persist_usage`'s
+                        # docstring.
+                        persist_usage(db, resume.id, event, IMPORT_PURPOSE, user=user, guest=guest)
+                        meter.record(event)
+                    elif kind == "tool":
+                        trace = event["trace"]
+                        persist_tool_message(db, resume.id, trace)
+                        if trace.get("name") == EDIT_TOOL:
+                            tool_result = trace.get("result")
+                            if isinstance(tool_result, dict) and tool_result.get("changed"):
+                                advance(db, run, trace.get("arguments", {}).get("step"))
+                    elif kind == "source":
+                        set_draft_source(db, resume, event["typst_source"])
+                        db.commit()
+                    elif kind == "assistant":
+                        assistant_text = event["content"] or assistant_text
+                        persist_assistant_message(db, resume.id, assistant_text)
+                return assistant_text
+
+            assistant_text = await drain(
+                aiter_chat_edit(
+                    messages,
+                    resume.typst_source,
+                    model=model,
+                    prefer_full_source=False,
+                    verify_compile=True,
+                    max_rounds=MAX_ROUNDS,
+                    timeout=TIMEOUT_SECONDS,
+                    extra_tools=import_tool_specs(),
+                    tool_handlers=import_tool_handlers(db, run),
+                )
+            )
+
+            # The gate, run immediately before finish(): a compile that
+            # exits 0 is not proof the page shows what the source says (see
+            # the module docstring and app.services.import_qa for the bug
+            # this catches). `resume.typst_source` is current here --
+            # `drain`'s "source" branch above writes it directly on every
+            # changed edit, the main turn's included.
+            set_render_check(db, run, "active")
+            render_result = await asyncio.to_thread(verify_render, resume.typst_source)
+            attempt = 0
+            while not render_result["ok"] and attempt < MAX_RENDER_REPAIRS:
+                attempt += 1
+                set_render_check(db, run, "active", detail="repairing")
+                # Fresh each attempt from the *original* `messages`, not a
+                # growing chain across attempts -- same shape as
+                # app.routers.chat's compile-repair loop, carrying forward
+                # only the latest assistant reply and the latest problem
+                # description.
+                repair_messages = [
+                    *messages,
+                    {"role": "assistant", "content": assistant_text},
+                    {"role": "user", "content": _render_repair_prompt(render_result)},
+                ]
+                assistant_text = await drain(
+                    aiter_chat_edit(
+                        repair_messages,
+                        resume.typst_source,
+                        model=model,
+                        prefer_full_source=False,
+                        verify_compile=True,
+                        max_rounds=MAX_ROUNDS,
+                        timeout=TIMEOUT_SECONDS,
+                        extra_tools=import_tool_specs(),
+                        tool_handlers=import_tool_handlers(db, run),
+                    )
+                )
+                set_render_check(db, run, "active")
+                render_result = await asyncio.to_thread(verify_render, resume.typst_source)
+
+        if render_result["ok"]:
+            set_render_check(db, run, "done")
+            finish(db, run)
+        else:
+            # Three honest attempts found nothing left to try -- see
+            # MAX_RENDER_REPAIRS. The missing list and the cliff are logged
+            # (never put in `run.error`, same rule as every other failure
+            # here -- see UPLOAD_MISSING/UNEXPECTED above), and the run ends
+            # `failed` rather than looping a fourth time for nothing.
+            logger.warning(
+                "resume import render check failed after %d repair attempt(s) "
+                "resume_id=%s run_id=%s coverage=%.2f missing=%r cliff_at=%r",
+                attempt,
+                resume.id,
+                run.id,
+                render_result.get("coverage", 0.0),
+                render_result.get("missing"),
+                render_result.get("cliff_at"),
+            )
+            fail(db, run, RENDER_CHECK_FAILED)
     except ImportSuperseded:
         # Not a failure: a newer run owns this resume now, and `touch` raised
         # so this runner would stop writing over it. Nothing to record -- the

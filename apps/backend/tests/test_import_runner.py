@@ -20,10 +20,11 @@ from app.models import (
     _utcnow,
 )
 from app.services import import_run, usage
-from app.services.import_run import STALE_AFTER_SECONDS
-from app.services.import_runner import run_import
+from app.services.import_run import RENDER_CHECK_KEY, STALE_AFTER_SECONDS
+from app.services.import_runner import RENDER_CHECK_FAILED, run_import
 from app.services.import_tools import DECLARE_PLAN_TOOL
 from app.services.llm.prompts import EDIT_TOOL
+from app.services.typst_compile import typst_available
 from tests.openai_script import ScriptedOpenAI, llm_message, llm_usage, tool_call
 
 # ScriptedOpenAI only speaks the Responses API, so every scripted test
@@ -150,8 +151,15 @@ async def test_scripted_import_walks_its_plan(db_session, resume, run, monkeypat
     db_session.refresh(run)
     assert run.status == "done"
     assert run.applied == 3
-    assert [s.status for s in _steps(db_session, run)] == ["done", "done", "done"]
-    assert [s.key for s in _steps(db_session, run)] == ["basics", "experience", "education"]
+    # Plus the server-owned render-check step the gate always appends
+    # (see test_render_check_passes_without_repair_when_clean, below).
+    assert [s.status for s in _steps(db_session, run)] == ["done", "done", "done", "done"]
+    assert [s.key for s in _steps(db_session, run)] == [
+        "basics",
+        "experience",
+        "education",
+        RENDER_CHECK_KEY,
+    ]
 
 
 async def test_import_writes_no_user_message(db_session, resume, run, monkeypatch, openai_enabled):
@@ -207,7 +215,8 @@ async def test_import_applies_sections_incrementally(db_session, resume, run, mo
     # counted once per *turn* rather than once per *changed edit* would be
     # stuck at 1 here regardless of how many sections were actually edited.
     assert run.applied == 2
-    assert [s.status for s in _steps(db_session, run)] == ["done", "done"]
+    # Plus the server-owned render-check step the gate always appends.
+    assert [s.status for s in _steps(db_session, run)] == ["done", "done", "done"]
 
 
 async def test_model_error_marks_failed_not_running(db_session, resume, run, monkeypatch, openai_enabled):
@@ -327,10 +336,11 @@ async def test_import_without_a_declared_plan_still_completes(
     assert run.status == "done"
     assert run.applied == 2
     steps = _steps(db_session, run)
-    assert [s.status for s in steps] == ["done", "done"]
+    # Plus the server-owned render-check step the gate always appends.
+    assert [s.status for s in steps] == ["done", "done", "done"]
     # Synthesised keys, never the literal "" -- see import_run.advance.
     assert all(s.key for s in steps)
-    assert len({s.key for s in steps}) == 2
+    assert len({s.key for s in steps}) == 3
 
 
 async def test_runner_uses_its_own_round_budget(db_session, resume, run, monkeypatch, openai_enabled):
@@ -353,7 +363,7 @@ async def test_runner_uses_its_own_round_budget(db_session, resume, run, monkeyp
 
     db_session.refresh(run)
     assert run.status == "done"
-    assert seen["max_rounds"] == 14
+    assert seen["max_rounds"] == 20
     assert seen["prefer_full_source"] is False
     assert seen["timeout"] == 180.0
     assert seen["verify_compile"] is True
@@ -480,3 +490,183 @@ async def test_a_superseded_runner_stops_at_its_next_event(
     assert resume.import_status == "pending"
     # And no closing message from the stopped runner.
     assert not [m for m in _messages(db_session, resume.id) if m.content == "never written"]
+
+
+# ---------------------------------------------------------------------------
+# The render-check gate: verify_render, run right before finish(), with up
+# to three automatic repair rounds.
+#
+# These need the real typst binary -- verify_render compiles for real, no
+# mocking -- same requirement as the fixtures in tests/test_import_qa.py.
+# ---------------------------------------------------------------------------
+
+render_check_pytestmark = pytest.mark.skipif(
+    not typst_available(), reason="typst binary not available"
+)
+
+# A clean two-section resume: every bullet is plain prose, nothing escapes
+# anything, and every candidate should make it onto the page untouched.
+CLEAN_SECTIONS = (
+    "= Experience\n\n"
+    "- Shipped a resilient billing pipeline that reconciles payment "
+    "provider webhooks against internal ledgers across three currencies\n\n"
+    "= Education\n\n"
+    "National Taiwan University, BSc Computer Science\n\n"
+    "= Skills\n\n"
+    "Python, TypeScript, Rust\n"
+)
+
+# The exact real bug (see .superpowers/sdd/2026-11-04-resume-import-progress
+# /t.typ and import_qa.py's module docstring): `\\@x402/*` opens a Typst
+# block comment that runs to end-of-file. Compiles clean; renders almost
+# nothing.
+BROKEN_SECTIONS = (
+    "= Experience\n\n"
+    "- Led a phased re-architecture from bespoke payment infra to Coinbase "
+    "\\@x402/* standard libraries; extracted IDRX adapter logic into "
+    "published npm packages: [@transx402/client] and [@transx402/server].\n\n"
+    "= Education\n\n"
+    "National Taiwan University, BSc Computer Science\n\n"
+    "= Skills\n\n"
+    "Python, TypeScript, Rust\n"
+)
+
+# The same content, with the hazards escaped/removed rather than left open.
+FIXED_SECTIONS = (
+    "= Experience\n\n"
+    "- Led a phased re-architecture from bespoke payment infra to Coinbase "
+    "x402 standard libraries; extracted IDRX adapter logic into published "
+    "npm packages: transx402 client and transx402 server\n\n"
+    "= Education\n\n"
+    "National Taiwan University, BSc Computer Science\n\n"
+    "= Skills\n\n"
+    "Python, TypeScript, Rust\n"
+)
+
+
+def _render_check_step(db_session, run) -> ResumeImportStep | None:
+    return (
+        db_session.query(ResumeImportStep)
+        .filter(ResumeImportStep.import_id == run.id, ResumeImportStep.key == RENDER_CHECK_KEY)
+        .first()
+    )
+
+
+@render_check_pytestmark
+async def test_render_check_passes_without_repair_when_clean(
+    db_session, resume, run, monkeypatch, openai_enabled
+):
+    _stub_upload(monkeypatch)
+    scripted = ScriptedOpenAI(
+        [
+            llm_message(
+                tool_calls=[
+                    tool_call(
+                        "apply_typst_edit",
+                        {"source": CLEAN_SECTIONS, "search": "", "replace": "", "step": "experience"},
+                        "edit-1",
+                    )
+                ]
+            ),
+            llm_message(content="Imported your resume."),
+        ]
+    )
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    await run_import(db_session, resume, run, model=OPENAI_ROW)
+
+    db_session.refresh(run)
+    assert run.status == "done"
+    check = _render_check_step(db_session, run)
+    assert check is not None
+    assert check.status == "done"
+    # No repair round ran -- the only calls billed are the main turn's own
+    # two rounds (the edit, then the closing message).
+    assert len(db_session.query(LlmCall).all()) == 2
+
+
+@render_check_pytestmark
+async def test_render_check_catches_the_real_bug_and_repairs_it(
+    db_session, resume, run, monkeypatch, openai_enabled
+):
+    _stub_upload(monkeypatch)
+    scripted = ScriptedOpenAI(
+        [
+            llm_message(
+                tool_calls=[
+                    tool_call(
+                        "apply_typst_edit",
+                        {"source": BROKEN_SECTIONS, "search": "", "replace": "", "step": "experience"},
+                        "edit-1",
+                    )
+                ]
+            ),
+            llm_message(content="Imported your resume."),
+            # The repair round: the agent reads the problem description and
+            # rewrites the source without the unterminated comment.
+            llm_message(
+                tool_calls=[
+                    tool_call(
+                        "apply_typst_edit",
+                        {"source": FIXED_SECTIONS, "search": "", "replace": ""},
+                        "edit-2",
+                    )
+                ]
+            ),
+            llm_message(content="Fixed the rendering issue."),
+        ]
+    )
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    await run_import(db_session, resume, run, model=OPENAI_ROW)
+
+    db_session.refresh(run)
+    db_session.refresh(resume)
+    assert run.status == "done"
+    assert "/*" not in resume.typst_source
+    check = _render_check_step(db_session, run)
+    assert check is not None
+    assert check.status == "done"
+    # Proof a repair round actually ran: both turns' calls were billed.
+    assert len(db_session.query(LlmCall).all()) == 4
+
+
+@render_check_pytestmark
+async def test_render_check_exhausts_three_repairs_and_fails(
+    db_session, resume, run, monkeypatch, openai_enabled
+):
+    """Three repair rounds, each one a no-op (the agent replies without
+    fixing anything), must exhaust the budget and fail the run with the
+    render-check error code -- never loop a fourth time.
+    """
+    _stub_upload(monkeypatch)
+    no_op_repair = llm_message(content="I could not find the issue.")
+    scripted = ScriptedOpenAI(
+        [
+            llm_message(
+                tool_calls=[
+                    tool_call(
+                        "apply_typst_edit",
+                        {"source": BROKEN_SECTIONS, "search": "", "replace": "", "step": "experience"},
+                        "edit-1",
+                    )
+                ]
+            ),
+            llm_message(content="Imported your resume."),
+            no_op_repair,
+            no_op_repair,
+            no_op_repair,
+        ]
+    )
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    await run_import(db_session, resume, run, model=OPENAI_ROW)
+
+    db_session.refresh(run)
+    db_session.refresh(resume)
+    assert run.status == "failed"
+    assert run.error == RENDER_CHECK_FAILED
+    assert resume.import_status == "failed"
+    # Exactly the main turn plus three repair turns -- a fourth would mean
+    # the bound was not enforced.
+    assert len(db_session.query(LlmCall).all()) == 5
