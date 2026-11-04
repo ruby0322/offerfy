@@ -42,11 +42,24 @@ maintaining: while a run's status is `running`, if any step is still
 know which to highlight). When no `pending` step remains, zero `active` is
 correct: there is nothing left to point at. (`finish` converts every
 `pending`/`active` step to `skipped`, so the invariant stops applying the
-moment the run is no longer `running`.) `declare_plan` can *break* this by
-redeclaring a plan where every surviving key keeps a non-`active` status
-(e.g. preserved `done`) and every new key defaults to `pending` -- so it
-repairs the invariant after building the new list: if nothing ended up
-`active` and something is `pending`, the first `pending` step is promoted.
+moment the run is no longer `running`.)
+
+`declare_plan` can break this *in either direction* when a plan is
+redeclared, because it preserves each surviving key's own status and
+cannot know, key by key, what the rest of the new list will look like: a
+survivor can bring its own already-`active` status into a list where a
+new key also lands at `seq == 0`, giving two `active`; or every survivor
+can hold some non-`active` status (e.g. `done`) with no new key promoted
+either, giving zero. `declare_plan` handles this with a single
+normalisation pass (`_normalise_active`), run once after the full list is
+built, that corrects both directions the same way: more than one `active`
+keeps the first (by `seq`) and demotes the rest to `pending`; none at all
+promotes the first `pending`. This is why the build loop itself gives
+every new key a neutral `pending` default rather than special-casing
+`seq == 0` -- that special case is exactly what let the two-`active` case
+through in an earlier version of this function, because it could race a
+preserved `active` from a survivor elsewhere in the same list.
+
 `advance` can break it by being called twice for the same already-`done`
 key (a retried or duplicated tool call): naively re-running "promote the
 next `pending` step" a second time would promote *another* step on top of
@@ -266,6 +279,37 @@ def _sanitise_plan(steps: list[dict]) -> list[tuple[str, str]]:
     return cleaned
 
 
+def _normalise_active(steps: list[ResumeImportStep]) -> None:
+    """Enforce the one-active invariant (see the module docstring) on an
+    already-built, `seq`-ordered step list, in a single pass that handles
+    both directions:
+
+    - more than one `active` -- keep the first (by `seq`), demote the
+      rest to `pending`. Demoting is not a status regression: a demoted
+      step is not `done`, it is queued, which is exactly what `pending`
+      means.
+    - no `active` at all but at least one `pending` -- promote the first
+      `pending` step.
+
+    Either direction can arise from `declare_plan` preserving a survivor's
+    old status while giving every new key a neutral `pending` default:
+    a survivor can bring its own `active` into a list that also has a new
+    key sitting at `seq == 0`, or every survivor can be non-`active` (e.g.
+    `done`) with no new key ending up `active` either. One pass, run after
+    the list is built, covers both without a `seq == 0` special case in
+    the build loop that would only correctly handle a fresh plan.
+    """
+    actives = [step for step in steps if step.status == "active"]
+    if len(actives) > 1:
+        for step in actives[1:]:
+            step.status = "pending"
+    elif not actives:
+        for step in steps:
+            if step.status == "pending":
+                step.status = "active"
+                break
+
+
 def declare_plan(db: Session, run: ResumeImport, steps: list[dict]) -> list[ResumeImportStep]:
     """Replace `run`'s step list with a sanitised version of `steps`.
 
@@ -273,16 +317,18 @@ def declare_plan(db: Session, run: ResumeImport, steps: list[dict]) -> list[Resu
     redeclare its plan mid-import -- this replaces the row set while
     preserving the `status` of any key that survives into the new plan, so
     a step already marked `done` does not get reset to `pending` just
-    because the plan was redeclared. Of the keys that do not survive, the
-    first gets `active` and the rest `pending`, matching a fresh plan.
+    because the plan was redeclared. Every key that does not survive
+    starts `pending` -- no `seq == 0 -> active` special case here, because
+    a survivor elsewhere in the list can already hold `active`, and
+    forcing a new key at `seq == 0` to also be `active` would produce two.
 
-    Preserving status can leave the one-active invariant (see the module
-    docstring) violated: e.g. plan `[a, b]`, `a` advanced to `done` and
-    `b` promoted to `active`, then redeclared as `[a, c]` -- `a` keeps
-    `done` and `c` defaults to `pending` (it is new, and not first), so
-    nothing is `active` even though `c` is still waiting. The pass below
-    repairs exactly that: if the rebuilt list has no `active` step but has
-    a `pending` one, the first `pending` step is promoted.
+    `_normalise_active` is then run once over the rebuilt list to make
+    exactly one step `active` whenever any step is `pending` (and zero
+    when none is) -- see the module docstring for the invariant and why
+    preserving status can otherwise land on either zero or two. For a
+    fresh plan (no survivors at all), every key is new and thus `pending`,
+    so normalisation promotes `seq` 0, reproducing "first step active,
+    rest pending" from the single shared pass rather than a separate rule.
     """
     cleaned = _sanitise_plan(steps)
 
@@ -296,18 +342,12 @@ def declare_plan(db: Session, run: ResumeImport, steps: list[dict]) -> list[Resu
 
     new_steps: list[ResumeImportStep] = []
     for seq, (key, label) in enumerate(cleaned):
-        status = existing_status.get(key)
-        if status is None:
-            status = "active" if seq == 0 else "pending"
+        status = existing_status.get(key, "pending")
         step = ResumeImportStep(import_id=run.id, seq=seq, key=key, label=label, status=status)
         db.add(step)
         new_steps.append(step)
 
-    if not any(step.status == "active" for step in new_steps):
-        for step in new_steps:
-            if step.status == "pending":
-                step.status = "active"
-                break
+    _normalise_active(new_steps)
 
     _bump(run)
     db.commit()

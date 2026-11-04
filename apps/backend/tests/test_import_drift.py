@@ -216,3 +216,30 @@ def test_one_active_invariant_holds_through_a_normal_walk(db_session, run):
         assert active <= 1
         if pending:
             assert active == 1
+
+
+def test_redeclare_with_new_key_at_seq_zero_does_not_produce_two_active(db_session, run):
+    # Re-review finding: [a, b] -> advance(a) -> a=done, b=active. Redeclare
+    # [n, b, z]: n is new and lands at seq 0, b survives with its preserved
+    # "active" at seq 1. A seq==0-special-cased build loop would make n
+    # "active" too, leaving two active steps alongside pending z.
+    declare_plan(db_session, run, [{"key": "a", "label": "A"}, {"key": "b", "label": "B"}])
+    advance(db_session, run, "a")
+    declare_plan(
+        db_session,
+        run,
+        [{"key": "n", "label": "N"}, {"key": "b", "label": "B"}, {"key": "z", "label": "Z"}],
+    )
+    assert _active_count(db_session, run) == 1
+
+
+def test_fresh_plan_still_puts_first_step_active(db_session, run):
+    # Guard against the restructure (every new key defaults to "pending",
+    # with no seq==0 special case) regressing the simple, no-survivors case.
+    kept = declare_plan(
+        db_session,
+        run,
+        [{"key": "a", "label": "A"}, {"key": "b", "label": "B"}, {"key": "c", "label": "C"}],
+    )
+    assert _active_count(db_session, run) == 1
+    assert kept[0].status == "active"
