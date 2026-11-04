@@ -1,4 +1,5 @@
 import type { ModelRow, ModelTable, UsageTierRow, UsageTiers } from "@/lib/usage-tiers";
+import type { ImportSnapshot, ImportStepStatus } from "@/lib/import-progress";
 
 export class ApiError extends Error {
   status: number;
@@ -651,6 +652,39 @@ export type ChatSendOptions = {
   model?: string;
 };
 
+/**
+ * Transport-only half of an SSE body: reads `body` to completion, splits the
+ * decoded text on blank lines, and hands each raw block (untrimmed, as it sat
+ * between two `\n\n`s) to `onBlock` in order — including the tail left over
+ * after the stream closes, exactly as the final `decoder.decode()` call did
+ * before this was extracted.
+ *
+ * Deliberately knows nothing about what a block means: `sendChat` validates
+ * with `parseSseBlock` (which requires a `type` field), while the import
+ * stream validates against a snapshot shape instead. Neither caller's
+ * behaviour should change by sharing this loop.
+ */
+async function readSseBlocks(
+  body: ReadableStream<Uint8Array>,
+  onBlock: (block: string) => void | Promise<void>,
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() ?? "";
+    for (const block of parts) {
+      await onBlock(block);
+    }
+  }
+  buffer += decoder.decode();
+  await onBlock(buffer);
+}
+
 function parseSseBlock(block: string): ChatStreamEvent | null {
   const line = block.trim();
   if (!line.startsWith("data:")) return null;
@@ -704,23 +738,10 @@ export async function sendChat(
   if (!contentType.includes("event-stream") || !res.body) {
     throw new ApiError("Chat response was not a stream", res.status);
   }
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const parts = buffer.split("\n\n");
-    buffer = parts.pop() ?? "";
-    for (const block of parts) {
-      const event = parseSseBlock(block);
-      if (event) await onEvent(event);
-    }
-  }
-  buffer += decoder.decode();
-  const tail = parseSseBlock(buffer);
-  if (tail) await onEvent(tail);
+  await readSseBlocks(res.body, async (block) => {
+    const event = parseSseBlock(block);
+    if (event) await onEvent(event);
+  });
 }
 
 export async function getChatMessages(
@@ -753,6 +774,98 @@ export async function getChatMessages(
     }
     throw err;
   }
+}
+
+const IMPORT_STEP_STATUSES: ImportStepStatus[] = ["pending", "active", "done", "skipped"];
+
+function isImportSnapshot(value: unknown): value is ImportSnapshot {
+  if (!value || typeof value !== "object") return false;
+  const rec = value as Record<string, unknown>;
+  if (typeof rec.import_id !== "string") return false;
+  if (rec.status !== "running" && rec.status !== "done" && rec.status !== "failed") return false;
+  if (typeof rec.version !== "number") return false;
+  if (typeof rec.applied !== "number") return false;
+  if (!Array.isArray(rec.steps)) return false;
+  for (const step of rec.steps) {
+    if (!step || typeof step !== "object") return false;
+    const s = step as Record<string, unknown>;
+    if (typeof s.key !== "string" || typeof s.label !== "string") return false;
+    if (!IMPORT_STEP_STATUSES.includes(s.status as ImportStepStatus)) return false;
+    if (typeof s.detail !== "string" && s.detail !== null) return false;
+  }
+  if (typeof rec.error !== "string" && rec.error !== null) return false;
+  if (typeof rec.started_at !== "string") return false;
+  if (typeof rec.stale !== "boolean") return false;
+  return true;
+}
+
+/** Same `data:` convention as `parseSseBlock`, validated against a snapshot shape instead of a `ChatStreamEvent`. */
+function parseImportSseBlock(block: string): ImportSnapshot | null {
+  const line = block.trim();
+  if (!line.startsWith("data:")) return null;
+  try {
+    const parsed = JSON.parse(line.slice(5).trim()) as unknown;
+    if (isImportSnapshot(parsed)) return parsed;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/** POST /resumes/{id}/import. 409 if a run is already in progress, 400 if there is no upload to import. */
+export async function startImport(id: string): Promise<ImportSnapshot> {
+  return apiJson<ImportSnapshot>(`/api/v1/resumes/${id}/import`, { method: "POST" });
+}
+
+/** GET /resumes/{id}/import. `null` on 404 -- no import has ever been started for this resume. */
+export async function getImport(id: string): Promise<ImportSnapshot | null> {
+  try {
+    return await apiJson<ImportSnapshot>(`/api/v1/resumes/${id}/import`);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+/**
+ * The body-reading half of `streamImport`, pulled out because `fetch` is not
+ * mockable in this repo's test setup: tests drive this directly with a fake
+ * `ReadableStream`, while `streamImport` supplies the real `res.body`.
+ */
+export async function streamImportFromBody(
+  body: ReadableStream<Uint8Array>,
+  onSnapshot: (snapshot: ImportSnapshot) => void | Promise<void>,
+): Promise<void> {
+  await readSseBlocks(body, async (block) => {
+    const snapshot = parseImportSseBlock(block);
+    if (snapshot) await onSnapshot(snapshot);
+  });
+}
+
+/**
+ * GET /resumes/{id}/import/stream. Emits a full snapshot immediately, then
+ * one per version change, closing once status is "done" or "failed".
+ */
+export async function streamImport(
+  id: string,
+  onSnapshot: (snapshot: ImportSnapshot) => void | Promise<void>,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await apiFetch(`/api/v1/resumes/${id}/import/stream`, {
+    headers: { Accept: "text/event-stream" },
+    signal,
+  });
+  if (!res.ok) {
+    const body = await parseBody(res);
+    throw new ApiError(errorMessage(body, res.statusText || "Request failed"), res.status, body);
+  }
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("event-stream") || !res.body) {
+    throw new ApiError("Import stream was not a stream", res.status);
+  }
+  await streamImportFromBody(res.body, onSnapshot);
 }
 
 export async function getMe(): Promise<AuthUser | null> {
