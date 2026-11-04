@@ -310,6 +310,120 @@ async def test_failure_after_partial_progress_keeps_what_landed(
     assert resume.import_status == "failed"
 
 
+async def test_every_source_write_is_observable_through_the_snapshot(
+    db_session, resume, run, monkeypatch
+):
+    """What a polling client can actually see, event by event.
+
+    The editor repaints its preview when `snapshot()`'s `source_hash`
+    changes, and it only ever reads a snapshot a `version` change asked it
+    to read (`routers/resumes._stream_import_snapshots`). Two things have
+    to hold for that to track the resume, and both are about ordering
+    rather than about any single write:
+
+    - `version` must move *after* the source is committed. The bumps that
+      come with the edit's own tool event all happen while the resume still
+      holds the previous source.
+    - every changed edit must be observable, including one that reuses a
+      step key the agent already marked done -- `advance` is a no-op on
+      those, so `applied` cannot be the signal.
+
+    Two probes, both sampling what a poll landing there would have found.
+    One runs inside the fake turn, which works because a generator is only
+    resumed once the consumer has finished with the previous event. The
+    other wraps `set_draft_source` to sample the window *inside* the source
+    event -- after that event's own heartbeat bump, before the new source
+    is committed -- which is the window the post-write bump exists for: a
+    client that read the snapshot there has already spent this event's
+    version change on the old source.
+
+    The turn is faked at the name `import_runner` imports it under for the
+    same reason `test_failure_after_partial_progress_keeps_what_landed`
+    does it: the behaviour under test is `run_import`'s event loop, not the
+    provider.
+    """
+    import app.services.import_runner as import_runner_module
+
+    _stub_upload(monkeypatch)
+    seen: list[dict] = []
+    windows: list[dict] = []
+
+    def probe() -> None:
+        seen.append(import_run.snapshot(db_session, resume.id))
+
+    real_set_draft_source = import_runner_module.set_draft_source
+
+    def probing_set_draft_source(db, res, src, **kwargs):
+        windows.append(import_run.snapshot(db_session, resume.id))
+        return real_set_draft_source(db, res, src, **kwargs)
+
+    monkeypatch.setattr(
+        import_runner_module, "set_draft_source", probing_set_draft_source
+    )
+
+    def edit(step: str, source: str) -> dict:
+        return {
+            "kind": "tool",
+            "trace": {
+                "name": EDIT_TOOL,
+                "arguments": {"source": source, "step": step},
+                "result": {"ok": True, "changed": True, "source": source},
+            },
+        }
+
+    async def fake_turn(*args, **kwargs):
+        yield {
+            "kind": "tool",
+            "trace": {
+                "name": DECLARE_PLAN_TOOL,
+                "arguments": {"steps": [{"key": "experience", "label": "Experience"}]},
+                "result": {"accepted": 1},
+            },
+        }
+        probe()  # 0: the plan, nothing applied
+        yield edit("experience", "= R\nExperience")
+        probe()  # 1: counted, not yet written
+        yield {"kind": "source", "typst_source": "= R\nExperience"}
+        probe()  # 2: written
+        yield edit("experience", "= R\nExperience\n- Fixed a date")
+        probe()  # 3: the same step again -- the counter cannot see this one
+        yield {"kind": "source", "typst_source": "= R\nExperience\n- Fixed a date"}
+        probe()  # 4: written anyway
+        yield {"kind": "assistant", "content": "Imported."}
+
+    monkeypatch.setattr("app.services.import_runner.aiter_chat_edit", fake_turn)
+
+    await run_import(db_session, resume, run)
+
+    plan, counted, written, again, written_again = seen[:5]
+
+    # The counter leads the source by one commit. This is the window that
+    # used to strand the preview one edit behind for the rest of the run:
+    # `applied` never comes back to the same value, so nothing retried.
+    assert counted["applied"] == plan["applied"] + 1
+    assert counted["source_hash"] == plan["source_hash"]
+
+    # ...and the bump that follows the write is what lets the client find
+    # out. Sampled inside the event, the version has already moved while
+    # the hash has not; the bump *after* the write is what a client reading
+    # the snapshot there is waiting for, and without it the next one is a
+    # whole LLM round away.
+    first_window, second_window = windows[:2]
+    assert first_window["source_hash"] == counted["source_hash"]
+    assert written["source_hash"] != counted["source_hash"]
+    assert written["version"] > first_window["version"]
+
+    # An edit reusing a done step key: invisible to `applied`, visible in
+    # the hash, and still announced by a version bump of its own.
+    assert again["applied"] == counted["applied"]
+    assert second_window["source_hash"] == written["source_hash"]
+    assert written_again["source_hash"] != written["source_hash"]
+    assert written_again["version"] > second_window["version"]
+
+    db_session.refresh(resume)
+    assert resume.typst_source == "= R\nExperience\n- Fixed a date"
+
+
 async def test_import_without_a_declared_plan_still_completes(
     db_session, resume, run, monkeypatch, openai_enabled
 ):

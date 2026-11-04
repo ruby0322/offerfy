@@ -27,7 +27,11 @@ Event translation, one round at a time:
   `import_run.advance` owns what an unlabelled or off-plan edit means; this
   module does not special-case either.
 - `kind == "source"` is persisted with `set_draft_source`, exactly as
-  `app.routers.chat`'s `relay()` does for the live chat turn.
+  `app.routers.chat`'s `relay()` does for the live chat turn -- and then
+  `touch()` again, so the run's `version` moves *after* the new source is
+  committed. That second bump is what the editor's preview refresh hangs
+  on; see `import_run.snapshot`'s `source_hash` and this module's
+  `drain`.
 - `kind == "assistant"` is persisted (`persist_assistant_message`).
 - `kind == "usage"` is billed through the metering seam (see below) and
   never turned into a chat row. Both halves of it: the counter
@@ -311,6 +315,18 @@ async def run_import(
                     elif kind == "source":
                         set_draft_source(db, resume, event["typst_source"])
                         db.commit()
+                        # Bump `version` *after* the source is committed.
+                        # The editor repaints when `snapshot()`'s
+                        # `source_hash` changes, and it only ever sees a
+                        # snapshot that a version bump asked it to read:
+                        # the bumps this event already did (`touch` above,
+                        # `advance` on the tool event before it) all
+                        # happened while the resume still held the previous
+                        # source, and the next one of its own accord is a
+                        # whole LLM round away. Without this the preview
+                        # waits out that round -- or, if the agent's next
+                        # edit reuses a done step key, longer still.
+                        touch(db, run)
                     elif kind == "assistant":
                         assistant_text = event["content"] or assistant_text
                         persist_assistant_message(db, resume.id, assistant_text)

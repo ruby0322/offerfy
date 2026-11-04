@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.models import GuestSession, Resume, ResumeImport, ResumeImportStep, _utcnow
 from app.services import import_run
+from app.services.revisions import source_hash
 from app.services.import_run import (
     RENDER_CHECK_KEY,
     ImportAlreadyRunning,
@@ -227,12 +228,48 @@ def test_snapshot_shape_and_stale_flag(db_session, resume):
         "status",
         "version",
         "applied",
+        "source_hash",
         "steps",
         "error",
         "started_at",
         "stale",
     }
     assert snap["stale"] is False
+    assert snap["source_hash"] == source_hash(resume.typst_source)
+
+
+def test_snapshot_source_hash_follows_the_resume_not_the_counter(db_session, resume):
+    """The signal the editor's preview refresh follows.
+
+    `applied` cannot stand in for it: `advance` is a no-op on an
+    already-`done` key, so the agent's second edit to a section it already
+    marked done moves the resume without moving the counter. Keyed on
+    `applied`, that edit stayed invisible until a later one moved it -- the
+    preview running exactly one tool call behind. See this module's
+    docstring under `source_hash`.
+    """
+    run = start_run(db_session, resume)
+    declare_plan(db_session, run, [{"key": "experience", "label": "Experience"}])
+
+    first = snapshot(db_session, resume.id)
+
+    # One edit, applied and counted.
+    resume.typst_source = "= R\n== Experience\n"
+    advance(db_session, run, "experience")
+    db_session.commit()
+    second = snapshot(db_session, resume.id)
+    assert second["applied"] == first["applied"] + 1
+    assert second["source_hash"] != first["source_hash"]
+
+    # A second edit to the same section. The counter cannot see it...
+    resume.typst_source = "= R\n== Experience\n- Fixed a date\n"
+    advance(db_session, run, "experience")
+    db_session.commit()
+    third = snapshot(db_session, resume.id)
+    assert third["applied"] == second["applied"], "advance stays idempotent on a done key"
+    # ...and the hash can.
+    assert third["source_hash"] != second["source_hash"]
+    assert third["source_hash"] == source_hash(resume.typst_source)
 
 
 def test_snapshot_is_none_without_a_run(db_session, resume):

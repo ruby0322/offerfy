@@ -9,6 +9,7 @@ function snapshot(version: number): ImportSnapshot {
     status: version < 3 ? "running" : "done",
     version,
     applied: version,
+    source_hash: `h${version}`,
     steps: [
       { key: "summary", label: "Summary", status: "done", detail: null },
     ],
@@ -97,4 +98,37 @@ test("ignores non-data lines and blank keep-alive blocks", async () => {
   });
 
   assert.deepEqual(seen.map((s) => s.version), [1]);
+});
+
+test("carries the source hash through, and survives an api that omits it", async () => {
+  // The field the preview refresh follows (see `importSourceChanged`), and
+  // the deploy window where a new page is served frames by an older API:
+  // dropping the whole frame there would take the progress card with it.
+  const encoder = new TextEncoder();
+  const older: Record<string, unknown> = { ...snapshot(1) };
+  delete older.source_hash;
+  const text = sseFrame(snapshot(2)) + `data: ${JSON.stringify(older)}\n\n`;
+
+  const seen: ImportSnapshot[] = [];
+  await streamImportFromBody(bodyFromChunks([encoder.encode(text)]), (s) => {
+    seen.push(s);
+  });
+
+  assert.deepEqual(
+    seen.map((s) => s.source_hash),
+    ["h2", undefined],
+  );
+});
+
+test("a source hash of the wrong type rejects the frame", async () => {
+  const encoder = new TextEncoder();
+  const bad = { ...snapshot(1), source_hash: 7 };
+  const text = `data: ${JSON.stringify(bad)}\n\n` + sseFrame(snapshot(2));
+
+  const seen: ImportSnapshot[] = [];
+  await streamImportFromBody(bodyFromChunks([encoder.encode(text)]), (s) => {
+    seen.push(s);
+  });
+
+  assert.deepEqual(seen.map((s) => s.version), [2]);
 });

@@ -788,6 +788,15 @@ function isImportSnapshot(value: unknown): value is ImportSnapshot {
   if (rec.status !== "running" && rec.status !== "done" && rec.status !== "failed") return false;
   if (typeof rec.version !== "number") return false;
   if (typeof rec.applied !== "number") return false;
+  // Optional: a page can outlive the API deploy that added it (see
+  // `ImportSnapshot.source_hash`). Present-but-wrong-type is still a reject.
+  if (
+    rec.source_hash !== undefined &&
+    rec.source_hash !== null &&
+    typeof rec.source_hash !== "string"
+  ) {
+    return false;
+  }
   if (!Array.isArray(rec.steps)) return false;
   for (const step of rec.steps) {
     if (!step || typeof step !== "object") return false;
