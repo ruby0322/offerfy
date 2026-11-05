@@ -1,8 +1,7 @@
 # Switching templates without asking a model
 
 **Date:** 2026-11-05
-**Status:** design approved in conversation; spec awaiting review — not
-implemented
+**Status:** approved — not implemented
 **Touches:** backend `app/jobs/survey_templates.py` (new),
 `data/template_support.json` (new), `app/services/templates.py`,
 `app/services/resume_content.py` (new), `app/services/emitters/` (new, five
