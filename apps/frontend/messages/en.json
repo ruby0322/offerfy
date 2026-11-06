@@ -259,7 +259,7 @@
     "templateNext": "Next template",
     "templatePreview": "{name} preview",
     "templateCount": "{current} / {total}",
-    "templateSwitchError": "Could not switch to that template. Try again in a moment.",
+    "templateSwitchError": "Could not switch to that template.",
     "preview": "Preview",
     "download": "Download PDF",
     "downloading": "Downloading…",

@@ -176,6 +176,13 @@ export default function EditorShell({ resumeId }: Props) {
   const [draft, setDraft] = useState(() => loadComposerDraft(resumeId));
   const [attachment, setAttachment] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
+  // Covers the `switchTemplate` round trip itself, which runs before
+  // `sendUserChat` (or `onRestoreHistory`) ever flips `sending` -- without
+  // this the Apply button stays clickable for that whole await and a second
+  // click starts a second switch, whose own chat turn then silently no-ops
+  // against `sendUserChat`'s own `sendingRef` guard. Same shape as
+  // `importActionPending` guarding `onImportAction`.
+  const [templateApplyPending, setTemplateApplyPending] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [chatUnavailable, setChatUnavailable] = useState(false);
   // This week's AI allowance. Fetched once on mount, then kept current by the
@@ -1198,6 +1205,13 @@ export default function EditorShell({ resumeId }: Props) {
   }
 
   async function onApplyTemplate(template: { name: string; version: string }) {
+    // A second click during the `switchTemplate` await -- before `sending`
+    // ever flips true -- would start a second switch whose own chat turn
+    // then silently loses to `sendUserChat`'s `sendingRef` guard. Reusing
+    // `onImportAction`'s own-flag pattern rather than `sendingRef` itself
+    // because this flag must already be live before any chat turn exists.
+    if (templateApplyPending || sendingRef.current) return;
+    setTemplateApplyPending(true);
     try {
       const result = await switchTemplate(resumeId, template.name, template.version);
       if (result.mode === "llm") {
@@ -1217,6 +1231,8 @@ export default function EditorShell({ resumeId }: Props) {
       // swallow-and-toast as `onImportAction`: the backend's sentence isn't
       // for the person, but silence here reads as a dead button.
       toast(t("templateSwitchError"));
+    } finally {
+      setTemplateApplyPending(false);
     }
   }
 
@@ -1710,7 +1726,10 @@ export default function EditorShell({ resumeId }: Props) {
         value="template"
         className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
       >
-        <EditorTemplatePanel sending={sending} onApply={onApplyTemplate} />
+        <EditorTemplatePanel
+          sending={sending || templateApplyPending}
+          onApply={onApplyTemplate}
+        />
       </TabsContent>
       <TabsContent
         value="settings"
