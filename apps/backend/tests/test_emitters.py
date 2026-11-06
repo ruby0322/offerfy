@@ -34,3 +34,20 @@ def test_emitter_omits_a_section_with_no_entries():
     # Review Focus 4: the untouched starter has sections we must not emit empty
     src = emitter_for("basic-resume", "0.2.9").emit(MINIMAL).source
     assert "== Projects" not in src and "#project(" not in src
+
+
+def test_basic_resume_emitter_renders_the_summary():
+    # basic-resume has no dedicated summary component -- this is the one
+    # field the package only holds via a plain `== heading` + paragraph,
+    # and the only way `test_basic_resume_emitter_declares_no_losses` can
+    # be an honest claim about it is a fixture that actually sets it.
+    src = emitter_for("basic-resume", "0.2.9").emit(GOLDEN).source
+    assert "== Summary" in src
+    assert GOLDEN.summary in src
+
+
+def test_basic_resume_emitter_maps_website_to_personal_site():
+    # resume.with() has no `website` argument -- Contact.website has
+    # nowhere to go but the package's own `personal-site`.
+    src = emitter_for("basic-resume", "0.2.9").emit(GOLDEN).source
+    assert f'personal-site: "{GOLDEN.contact.website}"' in src

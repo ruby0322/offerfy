@@ -9,6 +9,14 @@ emitter that mishandles any one of these is exactly what
 `test_emitter_escapes_content_that_would_break_typst` and the compile-gated
 tests in `tests/test_emitters_compile.py` exist to catch.
 
+Every field `ResumeContent` has is set on `GOLDEN`, including `summary` and
+every `Contact` sub-field (`website` included) -- not just the sections a
+given package happens to have a dedicated component for. A package with
+nowhere to put one of these has to report it in `dropped` or `degraded`,
+and that claim can only be checked against a fixture that actually carries
+the field in question; a `GOLDEN` missing `summary` would let every future
+emitter's loss-reporting go unchecked for exactly that field.
+
 `MINIMAL` is the opposite case on purpose: a name and an email and nothing
 else, the shape of an untouched starter (see `app/services/starter.py`).
 It exists to prove an emitter never renders a heading or a component call
@@ -40,6 +48,8 @@ GOLDEN = ResumeContent(
         linkedin="linkedin.com/in/weiling",
         website="weiling.dev",
     ),
+    summary="Backend engineer who has spent six years hardening payment "
+    "infrastructure, most recently leading a ledger migration at Acme Pay.",
     education=[
         EducationEntry(
             institution="National Taiwan University",

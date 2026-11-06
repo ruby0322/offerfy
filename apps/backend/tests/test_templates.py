@@ -423,6 +423,31 @@ def test_survey_row_measures_font_warnings_on_the_emitter_output_when_one_exists
     assert row["font_warnings"] == ["comic sans"]
 
 
+def test_survey_row_falls_back_to_the_vendor_example_font_warnings_without_an_emitter(
+    monkeypatch, tmp_path
+):
+    # The other branch of the same decision, pinned by name: acorn-resume
+    # has no emitter yet (Task 11 is what gives it one and flips it back
+    # into the supported set), and ~92 of the 96 surveyed packages never
+    # will -- gate 2 must keep measuring the vendor example's own probe
+    # for them, and must never try to compile an emitter's output that
+    # does not exist.
+    from app.jobs import survey_templates
+
+    monkeypatch.setattr(
+        survey_templates, "probe_template", _canned_probe(ok=True, font_warnings=("calibri",))
+    )
+
+    def fail_if_called(source, fmt):
+        raise AssertionError("no emitter claims acorn-resume -- nothing to compile here")
+
+    monkeypatch.setattr(survey_templates, "compile_typst_with_stderr", fail_if_called)
+    row = survey_templates.survey_row("acorn-resume", "0.1.0", {}, root=tmp_path)
+    assert row["ok"] is False
+    assert "calibri" in row["reason"]
+    assert row["font_warnings"] == ["calibri"]
+
+
 def test_survey_row_records_the_installable_and_unavailable_font_split(monkeypatch, tmp_path):
     # Review finding 1: font_warnings alone can't be split back into "we
     # could ship this by installing it" vs "nobody can bundle this" after
