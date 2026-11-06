@@ -141,3 +141,32 @@ def test_ats_friendly_emitter_maps_website_to_portfolio():
     # argument, so Contact.website still needs a destination).
     src = emitter_for("ats-friendly-resume", "0.1.1").emit(GOLDEN).source
     assert f'portfolio: "{GOLDEN.contact.website}"' in src
+
+
+def test_ats_friendly_renders_a_projects_url_when_dates_are_missing():
+    # project()'s own layout (resume.typ) shows `url:` only inside
+    # `if url != "" and dates != "" [...]` -- a project with a URL and no
+    # dates (GOLDEN.projects[1], see golden_content.py) would otherwise
+    # pass `url:` as an argument that the package's own layout then never
+    # displays. This checks the fallback link line this emitter adds for
+    # exactly that case is present in the source;
+    # test_emitters_compile.py's
+    # test_registered_emitter_renders_a_dateless_projects_url is the
+    # end-to-end proof it survives the real render.
+    dateless = GOLDEN.projects[1]
+    assert dateless.url and not (dateless.start or dateless.end)
+    src = emitter_for("ats-friendly-resume", "0.1.1").emit(GOLDEN).source
+    assert f'link("https://" + "{dateless.url}")[#"{dateless.url}"]' in src
+
+
+def test_ats_friendly_declares_no_project_role_loss_when_none_is_set():
+    # emit() must derive `dropped` from the content it was actually
+    # handed, not return a constant -- a resume with no project `role`
+    # set has nothing to lose there, and GOLDEN alone (where
+    # projects[0].role is always set) could never catch a hardcoded
+    # tuple that claimed this loss unconditionally.
+    roleless = GOLDEN.model_copy(
+        update={"projects": [p.model_copy(update={"role": None}) for p in GOLDEN.projects]}
+    )
+    result = emitter_for("ats-friendly-resume", "0.1.1").emit(roleless)
+    assert result.dropped == ()

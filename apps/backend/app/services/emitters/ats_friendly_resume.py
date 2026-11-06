@@ -26,17 +26,33 @@ copied from the plan that named this package):** every field maps
 somewhere *except* `ProjectEntry.role` -- `project(name:, dates:,
 tech-used:, url:)` has no `role` parameter at all in this package (unlike
 basic-resume's own `project()`, which does), so there is nowhere for it to
-go. `Contact.website` is not dropped: `resume()` has no `website:`
-argument either, but it does have `portfolio:`, which the same contact
-line renders a link from. `summary`, `skills`, and `extras` are not
-dropped or degraded: this package has no dedicated component for any of
-them, but neither does basic-resume, and the same bare
-`== heading` + markup-paragraph/bullet technique that lets
-`basic_resume.emit` report zero losses for those three fields applies
-here unchanged -- `resume()`'s `body` is plain Typst content, so an
-arbitrary heading works the same way in both packages. `dropped` is
-exactly `("projects[].role",)`; `degraded` is empty -- there is no case
-here where content survives in a lesser form rather than not at all.
+go. `dropped` reports `"projects[].role"` only when some project in
+`content` actually has one set (`emit`'s own final `any(...)` check) --
+not unconditionally, since a resume with no project `role` has nothing to
+lose there. `degraded` is empty -- there is no case here where content
+survives in a lesser form rather than not at all.
+
+`ProjectEntry.url` is **not** dropped, but getting there took a second
+look (see the Task 9 fix report): `project()`'s own one-by-one-layout
+only displays `url:` inside `if url != "" and dates != "" [...]` --
+passing `url:` as an argument is not sufficient on its own when a project
+has no dates at all (`GOLDEN.projects[1]` is exactly this case), so the
+package's own rendering silently drops it even though the emitted source
+looks correct. `_project_lines` below renders that case itself, as a
+trailing link line, rather than declaring the loss -- the package *can*
+display the URL, it is only this one vendor macro's conditional that
+hides it, so avoiding the loss is the right answer per this module's own
+design brief, not declaring it.
+
+`Contact.website` is not dropped either: `resume()` has no `website:`
+argument, but it does have `portfolio:`, which the same contact line
+renders a link from. `summary`, `skills`, and `extras` are not dropped or
+degraded: this package has no dedicated component for any of them, but
+neither does basic-resume, and the same bare `== heading` +
+markup-paragraph/bullet technique that lets `basic_resume.emit` report
+zero losses for those three fields applies here unchanged -- `resume()`'s
+`body` is plain Typst content, so an arbitrary heading works the same way
+in both packages.
 
 **Section order:** the plan's own note says "skills, experience,
 education, projects", but this package's own vendor example
@@ -144,6 +160,19 @@ def _project_lines(entry: ProjectEntry) -> list[str]:
     if entry.url:
         lines.append(f"  url: {typst_value(entry.url)},")
     lines.append(")")
+    if entry.url and not dates:
+        # project()'s own one-by-one-layout (resume.typ) only shows the
+        # URL inside `if url != "" and dates != "" [...]` -- passing
+        # `url:` above is not enough on its own when there are no dates
+        # at all, the package's own layout simply never reaches that
+        # branch. Rendered here instead, as a trailing line under the
+        # project, using the same "insert the already-quoted string as
+        # content via `#expr`" idiom the package's own `contact-item`/
+        # `link(...)[#url]` calls use -- not `markup_value`, since this
+        # is not markup prose, it is the identical raw-string display
+        # the package's own `url` argument already is.
+        url_literal = typst_value(entry.url)
+        lines.append(f'#link("https://" + {url_literal})[#{url_literal}]')
     lines.extend(bullet_lines(entry.bullets))
     return lines
 
@@ -184,4 +213,10 @@ def emit(content: ResumeContent) -> EmitResult:
         lines.extend(heading_block(section.title, bullet_lines(section.entries)))
 
     source = "\n".join(lines).rstrip() + "\n"
-    return EmitResult(source=source, dropped=("projects[].role",), degraded=())
+    # Computed from `content`, not a constant: a loss is a property of
+    # what was actually handed in, not of the package in the abstract --
+    # a resume with no project `role` set has nothing to lose there, and
+    # a hardcoded tuple would go on claiming the loss anyway (see
+    # test_ats_friendly_declares_no_project_role_loss_when_none_is_set).
+    dropped = ("projects[].role",) if any(entry.role for entry in content.projects) else ()
+    return EmitResult(source=source, dropped=dropped, degraded=())

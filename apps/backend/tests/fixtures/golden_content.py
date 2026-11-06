@@ -3,12 +3,23 @@
 `GOLDEN` is deliberately hostile: CJK text, a `"`, a `\\`, a bare `$`, an
 `@`, a `#` (an ordinary skill like "C#", not an adversarial string -- see
 the `skills` list below), an unpaired `*`, and one over-long bullet, spread
-across two jobs with bullets, one degree with bullets, one dated project,
-two skill groups, and one `extras` section -- everything an emitter in this
-package is asked to hold (see `app/services/emitters/__init__.py`'s module
+across two jobs with bullets, one degree with bullets, two projects (one
+dated, one with a `url` and no `start`/`end` -- see below), two skill
+groups, and one `extras` section -- everything an emitter in this package
+is asked to hold (see `app/services/emitters/__init__.py`'s module
 docstring). An emitter that mishandles any one of these is exactly what
 `test_emitter_escapes_content_that_would_break_typst` and the compile-gated
 tests in `tests/test_emitters_compile.py` exist to catch.
+
+`projects[1]` carries a `url` but no `start`/`end`: a dated project alone
+cannot prove a template renders a project's URL independently of its
+dates, because a package's own component can (and `ats-friendly-resume`'s
+does -- Task 9's review caught this) conditionally hide the `url` *only*
+when there are no dates, which this fixture's first project never
+exercises. Both `start` and `end` must be absent, not just one of them --
+`_common.dates_expr` treats either end alone as "there are dates" -- so
+`dropped`/`degraded` claims about a project's URL can only be trusted
+against a fixture where the dates are genuinely, fully absent.
 
 The hostile characters are not only scattered across separate bullets --
 one work bullet puts a `@` and a `$` *inside* a quoted phrase
@@ -114,7 +125,14 @@ GOLDEN = ResumeContent(
             start="2021-03",
             end="Present",
             bullets=["Double-entry ledger library used by 3 startups"],
-        )
+        ),
+        # No start/end at all -- see the module docstring on why this is
+        # the one shape the first project can never exercise.
+        ProjectEntry(
+            name="QuietTools",
+            url="github.com/weiling/quiettools",
+            bullets=["A small CLI released without ever recording a date"],
+        ),
     ],
     skills=[
         # "C#" is not adversarial input -- it is an ordinary résumé skill,

@@ -48,6 +48,31 @@ def test_registered_emitter_output_keeps_the_content(pair):
 
 
 @pytest.mark.parametrize("pair", PAIRS)
+def test_registered_emitter_renders_a_dateless_projects_url(pair):
+    # Task 9's review found this: ats-friendly-resume's own project()
+    # component (resume.typ) shows a project's `url:` only inside
+    # `if url != "" and dates != "" [...]` -- a project with a URL and no
+    # dates (GOLDEN.projects[1], see golden_content.py's own docstring on
+    # why this is a separate fixture entry from the first, dated project)
+    # silently lost its URL from the rendered page even though the
+    # emitted source passed `url:` as an argument, and `verify_render`'s
+    # own content-survival check above cannot catch this class of bug by
+    # construction (import_qa.verify_render re-extracts a different
+    # thing than "did a specific field survive"; see that module). This
+    # reads the actual rendered PDF text back, not the emitted source, so
+    # a template-layout bug that hides something from the page -- while
+    # the source otherwise looks correct -- cannot hide from this test
+    # either.
+    name, version = pair
+    dateless = GOLDEN.projects[1]
+    assert dateless.url and not (dateless.start or dateless.end)
+    source = emitter_for(name, version).emit(GOLDEN).source
+    pdf_bytes = compile_typst(source, "pdf")
+    pdf_text = extract_pdf_text(pdf_bytes)
+    assert dateless.url in pdf_text
+
+
+@pytest.mark.parametrize("pair", PAIRS)
 def test_registered_emitter_output_preserves_a_literal_backslash(pair):
     # Critical 1's end-to-end proof: `verify_render` above normalises both
     # sides of its comparison, which strips every backslash on both sides
