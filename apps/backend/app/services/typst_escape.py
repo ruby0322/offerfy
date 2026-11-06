@@ -143,38 +143,54 @@ def escape_typst_markup(text: str) -> str:
     return "".join(out)
 
 
-# Every character Typst's markup grammar gives special meaning to
-# *anywhere* in a line, independent of position or pairing: `#` opens
+# Every character Typst's markup grammar gives special meaning to,
+# escaped unconditionally regardless of position or pairing: `#` opens
 # code mode; `$` opens math; `@` opens a reference; `*`/`_` toggle
 # strong/emphasis; `` ` `` opens raw/code; `<`/`>` can open a label;
 # `[`/`]` can open a content block; `~` is the non-breaking-space
-# shorthand. Verified against the real binary, character by character
-# and in combination (see tests/test_typst_escape.py and
-# tests/test_emitters_compile.py's round-trip test): every one of these,
-# escaped with a leading `\`, renders back as the literal character with
-# no other effect. `"` is deliberately absent -- it is just a character
-# in markup prose, not a string literal to protect (Typst renders it as
-# a smart quote, which is correct), unlike in `escape_typst_markup`'s
-# source-sanitizing job.
-_MARKUP_ALWAYS_ESCAPE = frozenset("#$@*_`<>[]~")
-
-# These four only matter as the very *first* character of a line: `-`,
-# `+`, and `/` open a bullet/numbered/term list item, and `=` opens a
-# heading -- but only when they begin the line. A bullet or heading built
-# by this package's emitters is always written with its own fixed prefix
-# (`"- "`, `"== "`), which already occupies that position, so the data
-# itself is never actually line-initial there. A bare paragraph (the
-# `summary` field, rendered with no prefix at all) is the one place data
-# can land at true line start, so escaping the data's own leading
-# character unconditionally -- harmless when a prefix already protects
-# it, since `\-` renders identically to an unescaped `-` mid-line -- is
-# what keeps every caller safe without each one having to know whether it
-# is "the prefixed kind" or "the bare kind". Verified against the real
-# binary: unescaped, `/` as the very first character of a line is a hard
-# compile error (`expected colon`, term-list syntax), and `-`/`+`/`=`
-# silently change what renders (a bullet marker, a numbered marker, a
-# heading) instead of the literal character.
-_LINE_INITIAL_HAZARD = frozenset("-+/=")
+# shorthand; `-`/`+`/`/` open a bullet/numbered/term list item and `=`
+# opens a heading when they are the first character *of a line*; `/`
+# followed by another `/` is also a line comment *anywhere* on the line
+# (not just at the start), which escaping every `/` on its own,
+# unconditionally, prevents from ever forming in the first place.
+#
+# "Unconditionally" is the point, not a simplification of something more
+# careful: an earlier version of this function escaped `-`/`+`/`/`/`=`
+# only as the first character of the whole *string*, reasoning that a
+# bullet/heading's own fixed prefix ("- ", "== ") already occupies that
+# position for every other caller. That reasoning had two holes a
+# position check can never close: leading whitespace in the data
+# (`"  - indented"` is still line-initial once rendered, `out[0]` is a
+# space) and an embedded newline (`"line one\n- line two"` makes the
+# text after the `\n` line-initial too, which no single `out[0]` check
+# can see) -- both verified against the real binary to fabricate
+# structure or hard-fail the compile. A position check is exactly the
+# kind of reasoning that also missed `#` entirely in an earlier round:
+# checking *where* a character is, instead of just escaping every
+# instance of it, leaves a gap for every position nobody enumerated.
+# Escaping every occurrence, full stop, has no such gap: there is no
+# position left to get wrong.
+#
+# All fifteen verified against the real binary to render back as the
+# literal character with no other effect when escaped with a leading
+# `\`, individually and in combination (see tests/test_typst_escape.py
+# and tests/test_emitters_compile.py's round-trip tests). `"` is
+# deliberately absent -- it is just a character in markup prose, not a
+# string literal to protect (Typst renders it as a smart quote, which is
+# correct), unlike in `escape_typst_markup`'s source-sanitizing job.
+#
+# Not escaped, deliberately: a *run* of two or more `-` (Typst's en/em
+# dash shorthand) and three `.` (ellipsis) are intact typography this
+# feature must not suppress -- see the module docstring's "Settled"
+# note. `.` was never in this set; a lone `-` still is, and always will
+# be escaped on its own (an isolated `-` has no shorthand to preserve),
+# but this module does not scan for a `--`/`---` run to carve out an
+# exception for it, so a résumé bullet that happens to contain one will,
+# after this function, render that run as literal hyphens rather than a
+# dash. That is a known, disclosed trade-off of escaping unconditionally
+# rather than conditionally (see this module's own docstring and the
+# task report for the reasoning), not an oversight.
+_MARKUP_ALWAYS_ESCAPE = frozenset("#$@*_`<>[]~-+/=")
 
 
 def markup_value(text: str) -> str:
@@ -194,25 +210,40 @@ def markup_value(text: str) -> str:
     pre-escaped, and a matched pair of `*`s in someone's raw résumé text
     (`C# and F#`, `Rated *5/5*`) is almost certainly not a request for
     bold -- it is two characters that happen to appear next to each
-    other. So this function does not try to guess intent at all: every
-    `\\` is doubled first (exactly like `typst_value`, for the same
-    reason -- an un-doubled backslash hands Typst an escape sequence that
-    silently consumes the next character), then every markup-significant
-    character is escaped *unconditionally*, regardless of pairing or
-    position, plus a line-initial list/heading marker (see
-    `_LINE_INITIAL_HAZARD`). Escaping unconditionally rather than only
-    "when it would otherwise break" is deliberate: a parity or position
-    heuristic is exactly the kind of reasoning that missed `#` the first
-    time around, and every character this function escapes round-trips
-    to the identical literal character either way (see
-    `tests/test_typst_escape.py`), so there is no correctness reason to
-    make the narrower call.
+    other. So this function does not try to guess intent, or position,
+    at all: every `\\` is doubled first (exactly like `typst_value`, for
+    the same reason -- an un-doubled backslash hands Typst an escape
+    sequence that silently consumes the next character), an embedded
+    newline is normalised to a single space (see the paragraph below),
+    and then every markup-significant character in `_MARKUP_ALWAYS_
+    ESCAPE` is escaped -- every occurrence, with no pairing rule and no
+    position check. See that set's own comment for why unconditional
+    beats "only when it would otherwise break" as a method, and for the
+    one disclosed trade-off this makes (a `--`/`---` run that would
+    otherwise become Typst's own en/em dash renders as literal hyphens
+    instead, since there is no run-length exception carved out for it).
+
+    An embedded `\\n`/`\\r` is normalised to a single space rather than
+    passed through as a literal line break. `ResumeContent`'s fields
+    (`summary`, every `bullets`/`items`/`title`/entry) are plain `str`
+    with nothing upstream stripping a newline out of an LLM extraction,
+    so a multi-line value is representable even though every emitter
+    treats each one as a single logical line of prose. Passing a raw
+    newline through would split that line in the *emitted Typst source*
+    itself -- harmless for a bullet or heading built with this package's
+    own fixed prefix (the continuation merely loses its bullet styling,
+    a formatting defect, not a correctness one, and already how
+    `escape_typst_markup` treats a newline in LLM-written source), but
+    `_skill_line` builds one whole skill group as a single source line
+    (`- *Category*: item, item, item`); a newline inside one item would
+    cut that line off mid-list, losing every item after it from that
+    group -- exactly the silent-loss class this module exists to close,
+    just caused by whitespace instead of a special character. Normalising
+    first means no caller has to know which shape it is building.
     """
+    text = text.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
     text = text.replace("\\", "\\\\")
-    out = [f"\\{ch}" if ch in _MARKUP_ALWAYS_ESCAPE else ch for ch in text]
-    if out and out[0] in _LINE_INITIAL_HAZARD:
-        out[0] = f"\\{out[0]}"
-    return "".join(out)
+    return "".join(f"\\{ch}" if ch in _MARKUP_ALWAYS_ESCAPE else ch for ch in text)
 
 
 def sanitize_typst_source(source: str) -> str:

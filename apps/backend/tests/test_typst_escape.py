@@ -187,25 +187,76 @@ def test_markup_value_escapes_hash_tilde_underscore_backtick_angles_and_brackets
     )
 
 
-def test_markup_value_escapes_a_line_initial_list_or_heading_marker():
-    # `-`, `+`, `/` open a bullet/numbered/term list item and `=` opens a
-    # heading, but only as the very first character of a line. Every
-    # bullet/heading this package's emitters build has its own fixed
-    # prefix ("- ", "== ") already occupying that position, but a bare
-    # paragraph (ResumeContent.summary, rendered with no prefix at all)
-    # does not -- that is the one place data can land at true line start.
-    # Escaping the data's own leading character unconditionally is safe
-    # either way: `\-` renders identically to a plain `-` once it is not
-    # actually at line start. Verified against the real binary: unescaped,
-    # a leading `/` is a hard compile error (term-list syntax), and
-    # `-`/`+`/`=` silently render as a bullet/numbered marker/heading
-    # instead of the literal character.
+def test_markup_value_escapes_dash_plus_slash_and_equals_everywhere_not_just_at_index_0():
+    # Critical (second round): a prior version of this function escaped
+    # `-`/`+`/`/`/`=` only as the first character of the whole *string*,
+    # reasoning that a bullet/heading's own fixed prefix already occupies
+    # line-start for every caller except a bare paragraph (summary).
+    # That reasoning broke on leading whitespace (still line-initial once
+    # rendered, but not index 0) and on an embedded newline (makes
+    # whatever follows line-initial too, invisible to a single `out[0]`
+    # check) -- verified against the real binary to fabricate a bullet/
+    # heading or hard-fail the compile (`/` at true line start: "expected
+    # colon", term-list syntax). Escaping every occurrence -- mid-string
+    # too, not only "when a check decides it matters" -- has no position
+    # left to get wrong.
+    assert markup_value("a - b + c / d = e") == "a \\- b \\+ c \\/ d \\= e"
     for marker in "-+/=":
         assert markup_value(f"{marker} leads a line") == f"\\{marker} leads a line"
+        assert markup_value(f"  {marker} indented") == f"  \\{marker} indented"
 
 
-def test_markup_value_only_escapes_a_truly_line_initial_marker():
-    # The same markers mid-string are not a line-start hazard at all --
-    # escaping them unconditionally everywhere, not just at position 0,
-    # would be a different (unnecessary) transformation.
-    assert markup_value("a - b + c / d = e") == "a - b + c / d = e"
+def test_markup_value_prevents_a_double_slash_comment_anywhere_on_the_line():
+    # Critical (second round): `//` opens a Typst line comment -- not
+    # only at the start of a line, anywhere a `/` is immediately followed
+    # by another `/`. Escaping only a line-initial `/` left this wide
+    # open: "Designer // Developer at Acme" rendered as just "Designer",
+    # and a `//` inside one `SkillGroup` item swallowed every item after
+    # it on that group's single source line. Escaping *every* `/`
+    # unconditionally means a raw `//` can never reach the document at
+    # all -- there are always two separate `\/` escapes, never one raw
+    # comment-opening token.
+    assert markup_value("Designer // Developer at Acme") == "Designer \\/\\/ Developer at Acme"
+    assert markup_value("Vue//Nuxt") == "Vue\\/\\/Nuxt"
+
+
+def test_markup_value_prevents_a_block_comment_from_opening_or_closing():
+    # `/*` opens a block comment that runs to end-of-file if never closed
+    # (the exact bug app.services.import_qa's module docstring documents
+    # for LLM-written source) and `*/` would close one if it were ever
+    # open. Both `/` and `*` are escaped unconditionally, so neither
+    # digraph can form.
+    assert markup_value("a /* b */ c") == "a \\/\\* b \\*\\/ c"
+
+
+def test_markup_value_normalises_an_embedded_newline_to_a_space():
+    # ResumeContent's fields are plain str with nothing upstream
+    # stripping a newline out of an LLM extraction -- a multi-line value
+    # is representable even though every emitter treats each one as a
+    # single logical line. A raw newline passed through would split that
+    # line in the emitted Typst source; for `_skill_line`, which builds
+    # one whole skill group as a single source line, that silently drops
+    # every item after the newline from the group.
+    assert markup_value("line one\nline two") == "line one line two"
+    assert markup_value("line one\r\nline two") == "line one line two"
+    # And critically, normalising first means the text after a former
+    # newline is no longer line-initial at all, so it needs no special
+    # handling of its own -- the unconditional escaping above already
+    # covers it.
+    assert markup_value("line one\n- line two") == "line one \\- line two"
+
+
+def test_markup_value_leaves_a_dash_run_or_ellipsis_alone():
+    # Settled, not a gap: a *run* of two or more `-` (Typst's en/em dash
+    # shorthand) and three `.` (ellipsis) are intact typography this
+    # feature must not suppress -- the same substitution the starter and
+    # LLM paths already produce, not content loss (no word, number or
+    # token disappears; the IR remains authoritative). `.` was never in
+    # the escaped set; a lone `-` still is -- escaping every `-`
+    # unconditionally does mean a `--`/`---` run renders as literal
+    # hyphens rather than a dash once it passes through this function,
+    # a disclosed trade-off (see the module docstring), not tested here
+    # as a requirement either way. What this test pins down is only that
+    # `.` is never touched, so "..." is untouched by this function and
+    # free to become an ellipsis downstream.
+    assert markup_value("Loading... done") == "Loading... done"

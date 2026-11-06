@@ -43,9 +43,11 @@ def test_emitter_escapes_a_dollar_and_at_sign_inside_a_quoted_markup_phrase():
     # Critical 1: a `"` in markup prose is not a Typst string literal --
     # `markup_value` must escape `$`/`@` that follow an odd-numbered quote
     # too, unlike `escape_typst_markup` (written for already-written
-    # source, where copying a quoted span verbatim is correct).
+    # source, where copying a quoted span verbatim is correct). `/` is
+    # also escaped unconditionally (see markup_value's docstring), so
+    # the `/` in "12M/yr" is escaped too.
     src = emitter_for("basic-resume", "0.2.9").emit(GOLDEN).source
-    assert r'"LegacyPay \@ \$12M/yr"' in src
+    assert r'"LegacyPay \@ \$12M\/yr"' in src
 
 
 def test_emitter_omits_a_section_with_no_entries():
