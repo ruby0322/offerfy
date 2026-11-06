@@ -145,10 +145,22 @@ class TemplateSwitchRequest(BaseModel):
 
 
 class TemplateSwitchOut(BaseModel):
-    # The only mode until Task 8 registers an emitter: the picker's request
-    # becomes the prompt that used to be typed into chat by hand.
+    # The model path: an emitter either does not exist for this pair, or
+    # could not be trusted to produce a compiling document from a fresh
+    # source -- the picker's request becomes the prompt that used to be
+    # typed into chat by hand.
     mode: Literal["llm"]
     prompt: str
+
+
+class TemplateSwitchApplied(BaseModel):
+    # The deterministic path: an emitter rewrote the document server-side
+    # and it is already saved, so the response carries the resume itself
+    # rather than anything for the model to act on.
+    mode: Literal["applied"]
+    dropped: list[str]
+    degraded: list[str]
+    resume: ResumeOut
 
 
 class ChatMessageOut(BaseModel):

@@ -25,7 +25,13 @@ APP = Path(__file__).resolve().parents[1] / "app"
 
 # Every function that spends money with the provider. Adding one here without
 # also wrapping its call sites is how this test earns its keep.
-BILLABLE = ("aiter_chat_edit", "build_profile", "vision_report", "read_layout_report")
+BILLABLE = (
+    "aiter_chat_edit",
+    "build_profile",
+    "vision_report",
+    "read_layout_report",
+    "extract_content",
+)
 
 # The (module, function) pairs that exist today, each inside a `metered()`
 # region or reached from one. Pairs, not individual lines: this is a set, so
@@ -44,6 +50,7 @@ EXPECTED_CALL_SITES = {
     ("jobs/refresh_profiles.py", "build_profile"),  # nightly, system_guard
     ("services/llm/turn.py", "read_layout_report"),  # inside aiter_chat_edit
     ("services/layout.py", "vision_report"),      # inside read_layout_report
+    ("routers/resumes.py", "extract_content"),    # deterministic template switch
 }
 
 

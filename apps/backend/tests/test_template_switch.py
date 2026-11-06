@@ -10,10 +10,17 @@ import json
 
 import pytest
 
-from app.models import GuestSession, Resume
+from fastapi import HTTPException
+
+from app.config import get_settings
+from app.deps import SESSION_COOKIE, _sign
+from app.models import ChatMessage, GuestSession, LlmCall, Resume, User
+from app.routers.chat import _history
 from app.services import templates
+from app.services.resume_content import ExtractResult, store_content
 from app.services.role_card import build_role_card
 from app.services.templates import mentioned_template, reset_template_index_cache
+from tests.fixtures.golden_content import GOLDEN
 
 
 @pytest.fixture(autouse=True)
@@ -51,6 +58,215 @@ def test_switch_404s_for_a_resume_this_caller_does_not_own(client):
         f"/v1/resumes/{rid}/template", json={"name": "gloat", "version": "0.1.0"}
     )
     assert resp.status_code == 404
+
+
+# --- applied mode: a switch that writes the document itself, no model -----
+
+
+def _signed_in(client, db_session, sub="sub-template-switch"):
+    user = User(google_sub=sub, email=f"{sub}@example.com", locale="en")
+    db_session.add(user)
+    db_session.commit()
+    client.cookies.set(SESSION_COOKIE, _sign(user.id, get_settings().auth_token_secret))
+    return user
+
+
+def _never_called(*args, **kwargs):
+    raise AssertionError("extract_content must not be called when the snapshot is fresh")
+
+
+def test_switch_applies_without_a_model_when_an_emitter_exists(client, db_session, monkeypatch):
+    rid = _create_resume(client)
+    resume = db_session.get(Resume, rid)
+    store_content(db_session, resume, GOLDEN, model="m")
+    db_session.commit()
+    monkeypatch.setattr("app.routers.resumes.extract_content", _never_called)
+
+    body = client.post(
+        f"/v1/resumes/{rid}/template", json={"name": "acorn-resume", "version": "0.1.0"}
+    ).json()
+
+    assert body["mode"] == "applied"
+    assert body["dropped"] == ["projects[].dates"]
+    assert "@preview/acorn-resume:0.1.0" in db_session.get(Resume, rid).typst_source
+
+
+def test_switch_writes_a_system_row_that_never_reaches_the_model(client, db_session, monkeypatch):
+    rid = _create_resume(client)
+    resume = db_session.get(Resume, rid)
+    store_content(db_session, resume, GOLDEN, model="m")
+    db_session.commit()
+    monkeypatch.setattr("app.routers.resumes.extract_content", _never_called)
+
+    client.post(f"/v1/resumes/{rid}/template", json={"name": "acorn-resume", "version": "0.1.0"})
+
+    rows = db_session.query(ChatMessage).filter(ChatMessage.resume_id == rid).all()
+    system_rows = [r for r in rows if r.role == "system"]
+    assert len(system_rows) == 1
+    payload = json.loads(system_rows[0].content)
+    assert payload == {
+        "type": "template_switch",
+        "name": "acorn-resume",
+        "version": "0.1.0",
+        "dropped": ["projects[].dates"],
+        "degraded": ["education[].bullets"],
+    }
+    # _history is what the model actually sees -- the system row must not
+    # reach it, the same way a `tool` row already does not. See chat.py.
+    assert system_rows[0].id not in {row.id for row in _history(db_session, rid)}
+
+
+def test_switch_extracts_once_and_reuses_the_snapshot(client, db_session, monkeypatch):
+    rid = _create_resume(client)
+    resume = db_session.get(Resume, rid)
+    original_source = resume.typst_source
+    calls = {"n": 0}
+
+    async def _fake_extract(source):
+        calls["n"] += 1
+        return ExtractResult(content=GOLDEN, model="m", usage={}, source_chars=len(source))
+
+    monkeypatch.setattr("app.routers.resumes.extract_content", _fake_extract)
+
+    first = client.post(
+        f"/v1/resumes/{rid}/template", json={"name": "acorn-resume", "version": "0.1.0"}
+    ).json()
+    assert first["mode"] == "applied"
+    assert calls["n"] == 1
+
+    # Simulate the person rolling back to the exact source the snapshot was
+    # derived from -- resume_content.stored_content's own docstring names
+    # this case ("a rolled-back edit that lands back on an old value") as
+    # one a direct assignment can produce, same as this. A raw UPDATE
+    # rather than `db_session.get(...).typst_source = ...`: that object is
+    # still identity-mapped from the read above and already holds
+    # `original_source`, so re-assigning the same value would not be
+    # considered dirty and no UPDATE would be issued.
+    db_session.query(Resume).filter(Resume.id == rid).update({"typst_source": original_source})
+    db_session.commit()
+
+    second = client.post(
+        f"/v1/resumes/{rid}/template", json={"name": "basic-resume", "version": "0.2.9"}
+    ).json()
+    assert second["mode"] == "applied"
+    assert calls["n"] == 1
+
+
+def test_switch_does_not_write_when_the_emitted_source_fails_to_compile(
+    client, db_session, monkeypatch
+):
+    rid = _create_resume(client)
+    resume = db_session.get(Resume, rid)
+    before = resume.typst_source
+    store_content(db_session, resume, GOLDEN, model="m")
+    db_session.commit()
+    monkeypatch.setattr("app.routers.resumes.extract_content", _never_called)
+
+    def _boom(*args, **kwargs):
+        raise HTTPException(status_code=400, detail="bad typst")
+
+    monkeypatch.setattr("app.routers.resumes.compile_typst", _boom)
+
+    body = client.post(
+        f"/v1/resumes/{rid}/template", json={"name": "acorn-resume", "version": "0.1.0"}
+    ).json()
+
+    assert body["mode"] == "llm"
+    assert db_session.get(Resume, rid).typst_source == before
+
+
+def test_switch_refuses_when_the_source_changed_after_extraction(client, db_session, monkeypatch):
+    rid = _create_resume(client)
+    edited = {"source": None}
+
+    async def _fake_extract(source):
+        # Simulate a chat edit landing in the gap between the extraction
+        # call starting and this request's own write -- Review Focus 2.
+        other = db_session.get(Resume, rid)
+        other.typst_source = source + "\n// edited mid-flight"
+        db_session.commit()
+        edited["source"] = other.typst_source
+        return ExtractResult(content=GOLDEN, model="m", usage={}, source_chars=len(source))
+
+    monkeypatch.setattr("app.routers.resumes.extract_content", _fake_extract)
+
+    body = client.post(
+        f"/v1/resumes/{rid}/template", json={"name": "acorn-resume", "version": "0.1.0"}
+    ).json()
+
+    assert body["mode"] == "llm"
+    assert edited["source"] is not None
+    assert db_session.get(Resume, rid).typst_source == edited["source"]
+
+
+def test_switch_falls_back_to_the_model_path_when_extraction_fails(client, db_session, monkeypatch):
+    rid = _create_resume(client)
+    resume = db_session.get(Resume, rid)
+    before = resume.typst_source
+
+    async def _fake_extract(source):
+        return ExtractResult(error="provider_error", model="m", usage={}, source_chars=len(source))
+
+    monkeypatch.setattr("app.routers.resumes.extract_content", _fake_extract)
+
+    body = client.post(
+        f"/v1/resumes/{rid}/template", json={"name": "acorn-resume", "version": "0.1.0"}
+    ).json()
+
+    assert body["mode"] == "llm"
+    assert "@preview/acorn-resume:0.1.0" in body["prompt"]
+    assert db_session.get(Resume, rid).typst_source == before
+    # Telemetry still fires on a failed extraction -- see
+    # resume_content.record_extract_spend and decision 2 on this task.
+    row = db_session.query(LlmCall).filter(LlmCall.purpose == "extract").one()
+    assert row.resume_id == rid
+
+
+# --- billing: exactly one of user/guest is set, matching llm_calls' own ---
+# --- CHECK constraint (llm_call_subject_not_both) --------------------------
+
+
+def test_switch_bills_a_guest_to_the_guest_column_on_extraction(client, db_session, monkeypatch):
+    rid = _create_resume(client)
+    resume = db_session.get(Resume, rid)
+    assert resume.guest_session_id is not None
+
+    async def _fake_extract(source):
+        return ExtractResult(content=GOLDEN, model="m", usage={}, source_chars=len(source))
+
+    monkeypatch.setattr("app.routers.resumes.extract_content", _fake_extract)
+
+    body = client.post(
+        f"/v1/resumes/{rid}/template", json={"name": "acorn-resume", "version": "0.1.0"}
+    ).json()
+    assert body["mode"] == "applied"
+
+    row = db_session.query(LlmCall).filter(LlmCall.purpose == "extract").one()
+    assert row.user_id is None
+    assert row.guest_session_id == resume.guest_session_id
+
+
+def test_switch_bills_a_signed_in_user_to_the_user_column_on_extraction(
+    client, db_session, monkeypatch
+):
+    user = _signed_in(client, db_session)
+    rid = _create_resume(client)
+    resume = db_session.get(Resume, rid)
+    assert resume.user_id == user.id
+
+    async def _fake_extract(source):
+        return ExtractResult(content=GOLDEN, model="m", usage={}, source_chars=len(source))
+
+    monkeypatch.setattr("app.routers.resumes.extract_content", _fake_extract)
+
+    body = client.post(
+        f"/v1/resumes/{rid}/template", json={"name": "acorn-resume", "version": "0.1.0"}
+    ).json()
+    assert body["mode"] == "applied"
+
+    row = db_session.query(LlmCall).filter(LlmCall.purpose == "extract").one()
+    assert row.guest_session_id is None
+    assert row.user_id == user.id
 
 
 def test_mentioned_template_matches_a_package_name_in_any_language(monkeypatch, tmp_path):

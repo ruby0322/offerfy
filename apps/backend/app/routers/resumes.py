@@ -26,10 +26,13 @@ from app.schemas import (
     RevisionListItem,
     ShareState,
     TailorCreate,
+    TemplateSwitchApplied,
     TemplateSwitchOut,
     TemplateSwitchRequest,
 )
 from app.services.ats import analyze_pdf
+from app.services.chat_messages import persist_template_switch
+from app.services.emitters import emitter_for
 from app.services.family import create_tailor, family_master, family_tailors
 from app.services.extract import (
     MAX_UPLOAD_BYTES,
@@ -37,10 +40,18 @@ from app.services.extract import (
 )
 from app.services.import_run import ImportAlreadyRunning, snapshot as import_snapshot, start_run
 from app.services.import_runner import run_import
+from app.services.metering import metered, preflight
 from app.services.rate_limit import enforce_guest_rate
+from app.services.resume_content import (
+    extract_content,
+    record_extract_spend,
+    store_content,
+    stored_content,
+)
 from app.services.revisions import (
     pin_current_draft,
     set_draft_source,
+    source_hash,
     unpublished_changes,
     build_share_state,
 )
@@ -471,8 +482,11 @@ def restore_revision(
     return out
 
 
-@router.post("/v1/resumes/{resume_id}/template", response_model=TemplateSwitchOut)
-def switch_template(
+@router.post(
+    "/v1/resumes/{resume_id}/template",
+    response_model=TemplateSwitchOut | TemplateSwitchApplied,
+)
+async def switch_template(
     resume_id: str,
     body: TemplateSwitchRequest,
     request: Request,
@@ -485,12 +499,90 @@ def switch_template(
     # list cosmetic -- see services.templates.is_supported.
     if not is_supported(body.name, body.version):
         raise HTTPException(status_code=400, detail="Template is not supported")
-    _owned_resume(resume_id, request, response, db, user, ensure=True)
-    # No emitter is registered for any template yet (Task 8 adds them), so
-    # every switch -- however the survey eventually marks it -- goes through
-    # the model path: this is the prompt that used to be typed into chat
-    # under the person's name instead of sent as its own request.
-    return TemplateSwitchOut(mode="llm", prompt=apply_prompt(body.name, body.version))
+    owner, guest = owner_context(request, response, db, user, ensure=True)
+    resume = load_resume_for_owner(resume_id, request, db, owner, guest)
+
+    def _model_path() -> TemplateSwitchOut:
+        return TemplateSwitchOut(mode="llm", prompt=apply_prompt(body.name, body.version))
+
+    emitter = emitter_for(body.name, body.version)
+    if emitter is None:
+        # No emitter registered for this pair -- the model path remains
+        # correct, if slower: this is the prompt that used to be typed into
+        # chat under the person's name instead of sent as its own request.
+        return _model_path()
+
+    guard = preflight(db, user=owner, guest=guest, purpose="extract")
+    async with metered(guard) as meter:
+        content = stored_content(db, resume)
+        if content is not None:
+            # The hash the snapshot was derived from, captured now while
+            # `resume.typst_source` still holds the text that produced it.
+            # Compared again below, right before the write, against
+            # whatever is actually in the database by then.
+            derived_from = source_hash(resume.typst_source)
+        else:
+            # Captured *before* the extraction call, into a plain string --
+            # not re-read off `resume` afterward. `record_extract_spend`
+            # below commits `db`, and a Session's default
+            # `expire_on_commit` means the next attribute access on
+            # `resume` re-reads from the database: if an edit landed while
+            # extraction was in flight (Review Focus 2), that re-read would
+            # silently adopt the edit as this snapshot's own basis instead
+            # of ever catching it.
+            source_for_extraction = resume.typst_source
+            result = await extract_content(source_for_extraction)
+            if result.content is not None:
+                content = store_content(db, resume, result.content, model=result.model)
+                derived_from = source_hash(source_for_extraction)
+            # Telemetry fires regardless of outcome, and after store_content
+            # so its own commit cannot be the thing that expires `resume`
+            # before this task's read of it above.
+            record_extract_spend(
+                db, user=owner, guest=guest, resume_id=resume.id, result=result, meter=meter
+            )
+            if result.content is None:
+                return _model_path()
+
+    emit_result = emitter.emit(content)
+    try:
+        compile_typst(emit_result.source, "pdf")
+    except HTTPException:
+        # A deterministic path that can commit a broken document is worse
+        # than the model path it replaces -- write nothing and fall back.
+        logger.warning(
+            "template switch emit failed to compile resume_id=%s name=%s version=%s",
+            resume_id,
+            body.name,
+            body.version,
+        )
+        return _model_path()
+
+    # Re-read rather than trust the in-session object: a chat edit can land
+    # between the freshness check above and this write. Silently clobbering
+    # what the person just typed is the worst outcome available here, so a
+    # mismatch aborts the write entirely and falls back to the model path.
+    db.refresh(resume)
+    if source_hash(resume.typst_source) != derived_from:
+        return _model_path()
+
+    set_draft_source(db, resume, emit_result.source)
+    persist_template_switch(
+        db,
+        resume.id,
+        name=body.name,
+        version=body.version,
+        dropped=list(emit_result.dropped),
+        degraded=list(emit_result.degraded),
+    )
+    out = _to_out(db, resume)
+    db.commit()
+    return TemplateSwitchApplied(
+        mode="applied",
+        dropped=list(emit_result.dropped),
+        degraded=list(emit_result.degraded),
+        resume=out,
+    )
 
 
 def _require_user_owned(resume: Resume, user: User) -> None:
