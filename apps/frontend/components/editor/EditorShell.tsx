@@ -1227,9 +1227,19 @@ export default function EditorShell({ resumeId }: Props) {
       // -- just pick up the resume it already saved, the same refresh
       // `onRestoreHistory` does for a restored revision. The caller (the
       // template panel) shows its own inline note from the return value
-      // here; the chat transcript gets the same note on its own, as a
-      // `role: "system"` row the server already wrote.
+      // here. The server also wrote a `role: "system"` row for this same
+      // switch, but nothing streams it -- `setMessages` is otherwise only
+      // called at mount and inside `sendUserChat` (see the import-runner
+      // comment above) -- so without an explicit re-read here the person
+      // would not see it in the transcript until a reload.
       await onRestoreHistory(result.resume);
+      try {
+        const history = await getChatMessages(resumeId);
+        setMessages(history.messages.map(withMessageId));
+        setContextCut(history.contextCut);
+      } catch {
+        /* a later frame re-reads it, and so does a reload */
+      }
       return {
         name: template.name,
         version: template.version,
