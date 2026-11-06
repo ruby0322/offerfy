@@ -1,5 +1,9 @@
+import json
+
 import pytest
 
+from app.services import templates
+from app.services.template_probe import SupportRow
 from app.services.templates import (
     apply_prompt,
     find_thumbnail,
@@ -94,6 +98,11 @@ def test_list_templates_endpoint(client, monkeypatch, tmp_path):
         ],
     )
     monkeypatch.setattr("app.services.templates.package_root", lambda: tmp_path)
+    support = tmp_path / "template_support.json"
+    support.write_text(
+        json.dumps({"rows": [{"name": "basic-resume", "version": "0.2.9", "ok": True}]})
+    )
+    monkeypatch.setattr(templates, "SUPPORT_PATH", support)
     response = client.get("/v1/templates")
     assert response.status_code == 200
     body = response.json()
@@ -107,6 +116,7 @@ def test_list_templates_endpoint(client, monkeypatch, tmp_path):
     assert "ATS resume" in row["description"]
     assert "read_typst" in row["apply_prompt"]
     assert "apply_typst_edit" in row["apply_prompt"]
+    assert row["deterministic"] is False
 
 
 def test_thumbnail_relpath_reads_template_section():
@@ -216,3 +226,178 @@ def test_package_cached_true_when_typst_toml_present(tmp_path):
     (dest / "typst.toml").write_text("[package]\nname = \"basic-resume\"\n")
     assert package_cached(tmp_path, "basic-resume", "0.2.9") is True
     assert package_cached(tmp_path, "missing", "1.0.0") is False
+
+
+def test_supported_templates_returns_empty_when_the_file_is_missing(monkeypatch, tmp_path):
+    # Review Focus 5: a missing list degrades to an empty picker, never a 500
+    monkeypatch.setattr(templates, "SUPPORT_PATH", tmp_path / "absent.json")
+    assert templates.supported_templates() == {}
+
+
+def test_supported_templates_returns_empty_on_malformed_json(monkeypatch, tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not valid json", encoding="utf-8")
+    monkeypatch.setattr(templates, "SUPPORT_PATH", bad)
+    assert templates.supported_templates() == {}
+
+
+def test_list_templates_drops_rows_that_are_not_supported(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "app.services.templates.fetch_index",
+        lambda: [
+            {
+                "name": "basic-resume",
+                "version": "0.2.9",
+                "categories": ["cv"],
+                "description": "a resume",
+            },
+            {
+                "name": "exp-cover-letter",
+                "version": "1.0.0",
+                "categories": ["cv"],
+                "description": "a cover letter",
+            },
+        ],
+    )
+    monkeypatch.setattr("app.services.templates.package_root", lambda: tmp_path)
+    support = tmp_path / "template_support.json"
+    support.write_text(
+        json.dumps(
+            {
+                "rows": [
+                    {"name": "basic-resume", "version": "0.2.9", "ok": True, "reason": "ok"},
+                    {
+                        "name": "exp-cover-letter",
+                        "version": "1.0.0",
+                        "ok": False,
+                        "reason": "cover letter, not a resume",
+                    },
+                ]
+            }
+        )
+    )
+    monkeypatch.setattr(templates, "SUPPORT_PATH", support)
+    rows = templates.list_templates()
+    assert [row["name"] for row in rows] == ["basic-resume"]
+
+
+def test_list_templates_offers_the_pinned_version_even_once_the_index_moves_on(
+    monkeypatch, tmp_path
+):
+    # Decision 1: the index's "latest" for basic-resume has moved to 0.2.10,
+    # but the starter/emitter are pinned to 0.2.9. Filtering the index's own
+    # rows by is_supported would drop basic-resume outright (0.2.10 never
+    # matches the support list's 0.2.9); list_templates() must instead offer
+    # the pinned version the support list actually carries.
+    monkeypatch.setattr(
+        "app.services.templates.fetch_index",
+        lambda: [
+            {
+                "name": "basic-resume",
+                "version": "0.2.10",
+                "categories": ["cv"],
+                "description": "ATS resume",
+            }
+        ],
+    )
+    monkeypatch.setattr("app.services.templates.package_root", lambda: tmp_path)
+    support = tmp_path / "template_support.json"
+    support.write_text(
+        json.dumps({"rows": [{"name": "basic-resume", "version": "0.2.9", "ok": True}]})
+    )
+    monkeypatch.setattr(templates, "SUPPORT_PATH", support)
+    rows = templates.list_templates()
+    assert len(rows) == 1
+    assert rows[0]["version"] == "0.2.9"
+    assert rows[0]["description"] == "ATS resume"
+    assert '@preview/basic-resume:0.2.9' in rows[0]["import_line"]
+
+
+def test_is_supported_matches_on_name_and_version(monkeypatch, tmp_path):
+    support = tmp_path / "template_support.json"
+    support.write_text(
+        json.dumps({"rows": [{"name": "basic-resume", "version": "0.2.9", "ok": True}]})
+    )
+    monkeypatch.setattr(templates, "SUPPORT_PATH", support)
+    assert templates.is_supported("basic-resume", "0.2.9") is True
+    # a floated version is not the supported one
+    assert templates.is_supported("basic-resume", "0.2.10") is False
+    assert templates.is_supported("not-a-package", "1.0.0") is False
+
+
+def test_denylist_entries_each_carry_a_reason():
+    from app.jobs.survey_templates import DENYLIST
+
+    assert set(DENYLIST) == {
+        "exp-cover-letter",
+        "modernpro-coverletter",
+        "hadronic-rirekisho",
+        "rirekisho-ofa",
+        "shokumu-keirekisho-ofa",
+        "scienceicons",
+    }
+    assert all(reason for reason in DENYLIST.values())
+
+
+def _canned_probe(*, ok, pages=1, font_warnings=(), needs_inline_data=False):
+    def probe(name, version, *, root):
+        return SupportRow(
+            name=name,
+            version=version,
+            ok=ok,
+            pages=pages,
+            needs_inline_data=needs_inline_data,
+            font_warnings=font_warnings,
+            installable_fonts=tuple(f for f in font_warnings if f == "pt serif"),
+            reason="ok" if ok else "compile failed",
+        )
+
+    return probe
+
+
+def test_survey_marks_a_denylisted_package_unsupported(monkeypatch, tmp_path):
+    from app.jobs import survey_templates
+
+    monkeypatch.setattr(survey_templates, "probe_template", _canned_probe(ok=True))
+    row = survey_templates.survey_row("exp-cover-letter", "1.0.0", {}, root=tmp_path)
+    assert row["ok"] is False
+    assert row["reason"] == survey_templates.DENYLIST["exp-cover-letter"]
+
+
+def test_survey_marks_a_template_with_any_font_warning_unsupported(monkeypatch, tmp_path):
+    from app.jobs import survey_templates
+
+    # pt serif is on the installable list, but the survey still gates on
+    # any warning at all -- probe_template's own docstring leaves deciding
+    # what to do about a warning to this job, not to itself.
+    monkeypatch.setattr(
+        survey_templates, "probe_template", _canned_probe(ok=True, font_warnings=("pt serif",))
+    )
+    row = survey_templates.survey_row("some-cv", "1.0.0", {}, root=tmp_path)
+    assert row["ok"] is False
+    assert "pt serif" in row["reason"]
+
+
+def test_survey_marks_a_template_over_two_pages_unsupported(monkeypatch, tmp_path):
+    from app.jobs import survey_templates
+
+    monkeypatch.setattr(survey_templates, "probe_template", _canned_probe(ok=True, pages=3))
+    row = survey_templates.survey_row("some-cv", "1.0.0", {}, root=tmp_path)
+    assert row["ok"] is False
+    assert "3" in row["reason"]
+
+
+def test_survey_pairs_prefer_the_emitter_pin_over_the_index_latest():
+    from app.jobs import survey_templates
+
+    index = [
+        {
+            "name": "basic-resume",
+            "version": "0.2.10",
+            "categories": ["cv"],
+            "template": {"thumbnail": "thumbnail.png"},
+        }
+    ]
+    pairs = survey_templates.survey_pairs(index)
+    versions = {name: version for name, version, _row in pairs}
+    assert versions["basic-resume"] == "0.2.9"
