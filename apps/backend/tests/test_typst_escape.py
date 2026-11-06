@@ -154,6 +154,58 @@ def test_markup_value_doubles_a_raw_backslash_so_it_survives_rendering():
     assert markup_value("C:\\configs\\prod") == "C:\\\\configs\\\\prod"
 
 
-def test_markup_value_escapes_bare_dollar_at_and_unpaired_star():
+def test_markup_value_escapes_bare_dollar_and_at():
     assert markup_value("Raised $100k with @ada") == r"Raised \$100k with \@ada"
+
+
+def test_markup_value_escapes_every_star_regardless_of_pairing():
+    # Unlike escape_typst_markup, which only escapes an *unpaired* `*`
+    # (assuming a matched pair is intentional bold formatting an editor
+    # wrote on purpose): a matched pair in raw data is not an intentional
+    # formatting request either, it is just two characters next to each
+    # other (`C# and F#`, `Rated *5/5*`), so every `*` is escaped the same
+    # way regardless of how many there are.
     assert markup_value("Used *bold* and leftover *") == r"Used \*bold\* and leftover \*"
+
+
+def test_markup_value_escapes_hash_tilde_underscore_backtick_angles_and_brackets():
+    # Review finding (Critical): `#` opens Typst code mode and was the
+    # one character the first version of this function missed entirely --
+    # `C# and F#` failed to compile, and `Ranked #1 of 40 reps` compiled
+    # but silently dropped the `#` (`dropped == ()` was a lie). `<...>`
+    # can open a label (`Owned the <draft> spec handoff` silently lost
+    # `<draft>`); `~` is the non-breaking-space shorthand; `_`/`` ` ``
+    # toggle emphasis/raw the same way `*` does; `[`/`]` can open a
+    # content block. All verified against the real binary to round-trip
+    # to the literal character once escaped (see
+    # tests/test_emitters_compile.py for the end-to-end proof through a
+    # registered emitter).
+    hostile = "C# #tag <lbl> [idx] `raw` a~b x_y s*b @ref $1k"
+    escaped = markup_value(hostile)
+    assert escaped == (
+        r"C\# \#tag \<lbl\> \[idx\] \`raw\` a\~b x\_y s\*b \@ref \$1k"
+    )
+
+
+def test_markup_value_escapes_a_line_initial_list_or_heading_marker():
+    # `-`, `+`, `/` open a bullet/numbered/term list item and `=` opens a
+    # heading, but only as the very first character of a line. Every
+    # bullet/heading this package's emitters build has its own fixed
+    # prefix ("- ", "== ") already occupying that position, but a bare
+    # paragraph (ResumeContent.summary, rendered with no prefix at all)
+    # does not -- that is the one place data can land at true line start.
+    # Escaping the data's own leading character unconditionally is safe
+    # either way: `\-` renders identically to a plain `-` once it is not
+    # actually at line start. Verified against the real binary: unescaped,
+    # a leading `/` is a hard compile error (term-list syntax), and
+    # `-`/`+`/`=` silently render as a bullet/numbered marker/heading
+    # instead of the literal character.
+    for marker in "-+/=":
+        assert markup_value(f"{marker} leads a line") == f"\\{marker} leads a line"
+
+
+def test_markup_value_only_escapes_a_truly_line_initial_marker():
+    # The same markers mid-string are not a line-start hazard at all --
+    # escaping them unconditionally everywhere, not just at position 0,
+    # would be a different (unnecessary) transformation.
+    assert markup_value("a - b + c / d = e") == "a - b + c / d = e"

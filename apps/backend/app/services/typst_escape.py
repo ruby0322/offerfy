@@ -143,6 +143,40 @@ def escape_typst_markup(text: str) -> str:
     return "".join(out)
 
 
+# Every character Typst's markup grammar gives special meaning to
+# *anywhere* in a line, independent of position or pairing: `#` opens
+# code mode; `$` opens math; `@` opens a reference; `*`/`_` toggle
+# strong/emphasis; `` ` `` opens raw/code; `<`/`>` can open a label;
+# `[`/`]` can open a content block; `~` is the non-breaking-space
+# shorthand. Verified against the real binary, character by character
+# and in combination (see tests/test_typst_escape.py and
+# tests/test_emitters_compile.py's round-trip test): every one of these,
+# escaped with a leading `\`, renders back as the literal character with
+# no other effect. `"` is deliberately absent -- it is just a character
+# in markup prose, not a string literal to protect (Typst renders it as
+# a smart quote, which is correct), unlike in `escape_typst_markup`'s
+# source-sanitizing job.
+_MARKUP_ALWAYS_ESCAPE = frozenset("#$@*_`<>[]~")
+
+# These four only matter as the very *first* character of a line: `-`,
+# `+`, and `/` open a bullet/numbered/term list item, and `=` opens a
+# heading -- but only when they begin the line. A bullet or heading built
+# by this package's emitters is always written with its own fixed prefix
+# (`"- "`, `"== "`), which already occupies that position, so the data
+# itself is never actually line-initial there. A bare paragraph (the
+# `summary` field, rendered with no prefix at all) is the one place data
+# can land at true line start, so escaping the data's own leading
+# character unconditionally -- harmless when a prefix already protects
+# it, since `\-` renders identically to an unescaped `-` mid-line -- is
+# what keeps every caller safe without each one having to know whether it
+# is "the prefixed kind" or "the bare kind". Verified against the real
+# binary: unescaped, `/` as the very first character of a line is a hard
+# compile error (`expected colon`, term-list syntax), and `-`/`+`/`=`
+# silently change what renders (a bullet marker, a numbered marker, a
+# heading) instead of the literal character.
+_LINE_INITIAL_HAZARD = frozenset("-+/=")
+
+
 def markup_value(text: str) -> str:
     """Escape raw, never-pre-escaped data for direct use as Typst markup
     (a bullet, a heading, a paragraph) -- the markup-mode counterpart to
@@ -152,37 +186,32 @@ def markup_value(text: str) -> str:
 
     `escape_typst_markup` above is not safe for this: it was written for
     *already-written Typst source* (an LLM's own bullet, edited in place),
-    where a `"` really does open a string literal worth copying verbatim
-    and a `\\` is already part of an intentional escape sequence. Neither
-    assumption holds for data straight out of a pydantic model. A `"` is
-    just a character in markup prose -- there is no string literal to
-    protect, so this function never treats one specially (Typst renders
-    it as a smart quote, which is correct). A `\\` is never pre-escaped,
-    so -- exactly like `typst_value` -- every one is doubled first: a
-    single raw backslash must survive as one literal backslash in the
-    rendered document, and passing it through unchanged (as
-    `escape_typst_markup` does, correctly, for *its* job) instead hands
-    Typst an escape sequence that consumes the next character and drops
-    the backslash silently. `$`, `@`, and an unpaired `*` are then
-    escaped exactly as `escape_typst_markup` does, since those rules do
-    not depend on the string-literal assumption that is wrong here.
+    where a `"` really does open a string literal worth copying verbatim,
+    a `\\` is already part of an intentional escape sequence, and a
+    *paired* `*`/`_`/`` ` `` is assumed to be formatting the editor
+    actually intended. None of those assumptions hold for data straight
+    out of a pydantic model: a `"` is just a character, a `\\` is never
+    pre-escaped, and a matched pair of `*`s in someone's raw résumé text
+    (`C# and F#`, `Rated *5/5*`) is almost certainly not a request for
+    bold -- it is two characters that happen to appear next to each
+    other. So this function does not try to guess intent at all: every
+    `\\` is doubled first (exactly like `typst_value`, for the same
+    reason -- an un-doubled backslash hands Typst an escape sequence that
+    silently consumes the next character), then every markup-significant
+    character is escaped *unconditionally*, regardless of pairing or
+    position, plus a line-initial list/heading marker (see
+    `_LINE_INITIAL_HAZARD`). Escaping unconditionally rather than only
+    "when it would otherwise break" is deliberate: a parity or position
+    heuristic is exactly the kind of reasoning that missed `#` the first
+    time around, and every character this function escapes round-trips
+    to the identical literal character either way (see
+    `tests/test_typst_escape.py`), so there is no correctness reason to
+    make the narrower call.
     """
     text = text.replace("\\", "\\\\")
-    out: list[str] = []
-    star_at: list[int] = []
-    for ch in text:
-        if ch == "$":
-            out.append(r"\$")
-        elif ch == "@":
-            out.append(r"\@")
-        elif ch == "*":
-            star_at.append(len(out))
-            out.append(ch)
-        else:
-            out.append(ch)
-    if len(star_at) % 2 == 1:
-        for idx in reversed(star_at):
-            out[idx] = r"\*"
+    out = [f"\\{ch}" if ch in _MARKUP_ALWAYS_ESCAPE else ch for ch in text]
+    if out and out[0] in _LINE_INITIAL_HAZARD:
+        out[0] = f"\\{out[0]}"
     return "".join(out)
 
 

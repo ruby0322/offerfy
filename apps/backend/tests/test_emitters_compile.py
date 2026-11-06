@@ -20,6 +20,7 @@ from pdfminer.high_level import extract_pages
 from app.services.ats import extract_pdf_text
 from app.services.emitters import deterministic_pairs, emitter_for
 from app.services.import_qa import verify_render
+from app.services.resume_content import Contact, ResumeContent, SkillGroup
 from app.services.typst_compile import compile_typst, typst_available
 from tests.fixtures.golden_content import GOLDEN
 
@@ -59,3 +60,53 @@ def test_registered_emitter_output_preserves_a_literal_backslash(pair):
     pdf_bytes = compile_typst(source, "pdf")
     pdf_text = extract_pdf_text(pdf_bytes)
     assert "C:\\configs\\prod" in pdf_text
+
+
+# Every character `typst_escape.markup_value` escapes unconditionally,
+# exercised together in one short string -- short enough to stay on one
+# rendered line, since a wrapped line can pick up its own blank-line
+# artifact from pdfminer's layout analysis that has nothing to do with
+# escaping (see import_qa's own normalisation, which exists for the same
+# reason). This is a demonstration, not an assertion built from the
+# characters a past failure happened to name: it compiles the real
+# registered emitter's output and reads the literal string back out of
+# the rendered PDF, so a character this module fails to escape shows up
+# here as a broken compile or a missing substring, not as something a
+# human has to reason out by inspection.
+HOSTILE_MARKUP_CHARS = "C# #tag <lbl> [idx] `raw` a~b x_y s*b @ref $1k c:\\path"
+
+
+@pytest.mark.parametrize("pair", PAIRS)
+def test_registered_emitter_round_trips_every_markup_significant_character(pair):
+    name, version = pair
+    content = ResumeContent(
+        name="Hostile Case",
+        contact=Contact(email="hostile@example.com"),
+        skills=[SkillGroup(category="Hostile", items=[HOSTILE_MARKUP_CHARS])],
+    )
+    source = emitter_for(name, version).emit(content).source
+    pdf_bytes = compile_typst(source, "pdf")
+    pdf_text = extract_pdf_text(pdf_bytes)
+    assert HOSTILE_MARKUP_CHARS in pdf_text
+
+
+@pytest.mark.parametrize("pair", PAIRS)
+def test_registered_emitter_round_trips_a_line_initial_list_or_heading_marker(pair):
+    # The one hazard that is positional, not character-based: `-`/`+`/`/`
+    # open a list item and `=` opens a heading only as literally the
+    # first character of a line. A bullet/heading has its own fixed
+    # prefix protecting that position, but `summary` renders as a bare
+    # paragraph with no prefix at all -- the one place data can land at
+    # true line start.
+    name, version = pair
+    for marker in "-+/=":
+        summary = f"{marker} leads this summary line"
+        content = ResumeContent(
+            name="Hostile Case",
+            contact=Contact(email="hostile@example.com"),
+            summary=summary,
+        )
+        source = emitter_for(name, version).emit(content).source
+        pdf_bytes = compile_typst(source, "pdf")
+        pdf_text = extract_pdf_text(pdf_bytes)
+        assert summary in pdf_text, (marker, pdf_text)

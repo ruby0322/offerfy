@@ -1,11 +1,12 @@
 """Two shared `ResumeContent` fixtures every emitter task (8-11) tests against.
 
 `GOLDEN` is deliberately hostile: CJK text, a `"`, a `\\`, a bare `$`, an
-`@`, an unpaired `*`, and one over-long bullet, spread across two jobs with
-bullets, one degree with bullets, one dated project, two skill groups, and
-one `extras` section -- everything an emitter in this package is asked to
-hold (see `app/services/emitters/__init__.py`'s module docstring). An
-emitter that mishandles any one of these is exactly what
+`@`, a `#` (an ordinary skill like "C#", not an adversarial string -- see
+the `skills` list below), an unpaired `*`, and one over-long bullet, spread
+across two jobs with bullets, one degree with bullets, one dated project,
+two skill groups, and one `extras` section -- everything an emitter in this
+package is asked to hold (see `app/services/emitters/__init__.py`'s module
+docstring). An emitter that mishandles any one of these is exactly what
 `test_emitter_escapes_content_that_would_break_typst` and the compile-gated
 tests in `tests/test_emitters_compile.py` exist to catch.
 
@@ -116,7 +117,13 @@ GOLDEN = ResumeContent(
         )
     ],
     skills=[
-        SkillGroup(category="Languages", items=["Python", "Go", "Rust"]),
+        # "C#" is not adversarial input -- it is an ordinary résumé skill,
+        # and `#` is the character the registry-parametrized compile
+        # tests in tests/test_emitters_compile.py exist to catch (see
+        # typst_escape.markup_value's docstring): unescaped, it either
+        # fails to compile outright or silently vanishes from the
+        # rendered page while `dropped` still claims nothing was lost.
+        SkillGroup(category="Languages", items=["Python", "Go", "Rust", "C#"]),
         SkillGroup(category="Infra", items=["Kubernetes", "Postgres", 'Kafka ($ real-time)']),
     ],
     extras=[
