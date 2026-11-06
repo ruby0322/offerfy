@@ -4,9 +4,10 @@ Switching a resume's template today means asking a model to rewrite the
 whole Typst source in the new template's shape -- slow, and free to drop or
 invent content on the way. Emitting the new document from a structured
 snapshot instead needs that snapshot to exist, so this module defines its
-shape (`ResumeContent`) and the two operations around it: `store_content`,
-called by the extraction step (a later task), and `stored_content`, called by
-whatever needs a fresh one.
+shape (`ResumeContent`), the one model call that fills it (`extract_content`),
+and the storage around it: `store_content`, called by that extraction, and
+`stored_content`, called by whatever needs a fresh one -- emitting a document
+from the snapshot is a later task.
 
 The snapshot is derived state, never the source of truth: `Resume.typst_source`
 stays authoritative. `stored_content` returns a payload only when
@@ -29,14 +30,26 @@ gives: a date we could not parse is better kept verbatim than dropped.
 
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 
-from pydantic import BaseModel, Field
+import httpx
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.orm import Session
 
 from app import models
-from app.models import Resume
+from app.config import get_settings
+from app.models import GuestSession, LlmCall, Resume, User
+from app.services.llm import _output_text, _responses_url
+from app.services.llm.prompts import EXTRACT_PROMPT
+from app.services.llm.providers import openai as openai_provider
+from app.services.model_catalog import DEFAULT_MODEL, spec_or_passthrough
 from app.services.revisions import source_hash
+from app.services.usage import event_cost_uusd
+
+logger = logging.getLogger(__name__)
 
 
 class Contact(BaseModel):
@@ -115,13 +128,23 @@ def stored_content(db: Session, resume: Resume) -> ResumeContent | None:
     marks (a direct `typst_source` assignment, a rolled-back edit that lands
     back on an old value), so comparing the live source's hash against the
     one the snapshot was built from is the only check that cannot be skipped.
+
+    A row whose `content_json` no longer validates -- the schema moved on
+    since it was written, or the blob was simply corrupted -- is treated the
+    same as a stale one: None already means "re-derive", which is exactly the
+    right answer here too, and the alternative is an unhandled ValidationError
+    turning into a 500 on an ordinary click.
     """
     row = _row_for(db, resume.id)
     if row is None:
         return None
     if row.derived_from_hash != source_hash(resume.typst_source):
         return None
-    return ResumeContent.model_validate_json(row.content_json)
+    try:
+        return ResumeContent.model_validate_json(row.content_json)
+    except ValidationError:
+        logger.warning("resume_contents row failed to validate resume_id=%s", resume.id)
+        return None
 
 
 def store_content(
@@ -138,3 +161,312 @@ def store_content(
     row.built_at = datetime.now(timezone.utc)
     db.flush()
     return content
+
+
+# --- extraction: the one model call that fills a snapshot -------------------
+#
+# Mirrors app.services.profile.build_profile closely: a direct httpx call to
+# the OpenAI Responses API (the only one of our two providers whose strict
+# structured output can guarantee every property answered), a hand-written
+# wire schema rather than one derived from pydantic, and a result dataclass
+# where a failure never writes.
+
+
+EXTRACT_TIMEOUT = httpx.Timeout(90.0, connect=10.0)
+
+
+def _schema() -> dict[str, Any]:
+    """The response schema, written out rather than derived from pydantic.
+
+    Strict structured output requires every property in `required` and
+    additionalProperties false throughout, which a pydantic schema with
+    defaults does not produce -- see profile._schema, which documents the
+    same constraint for the same reason. The payload is still validated
+    against ResumeContent afterwards, so this is the wire contract and that
+    is the truth.
+    """
+    text = {"type": ["string", "null"]}
+    bullets = {"type": "array", "items": {"type": "string"}}
+
+    def entry(*date_fields: str) -> dict[str, Any]:
+        properties = {name: text for name in date_fields}
+        properties["bullets"] = bullets
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "required": list(properties),
+            "properties": properties,
+        }
+
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "name",
+            "contact",
+            "summary",
+            "education",
+            "work",
+            "projects",
+            "skills",
+            "extras",
+        ],
+        "properties": {
+            "name": text,
+            "contact": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "email",
+                    "phone",
+                    "location",
+                    "github",
+                    "linkedin",
+                    "website",
+                ],
+                "properties": {
+                    "email": text,
+                    "phone": text,
+                    "location": text,
+                    "github": text,
+                    "linkedin": text,
+                    "website": text,
+                },
+            },
+            "summary": text,
+            "education": {
+                "type": "array",
+                "items": entry("institution", "degree", "location", "start", "end"),
+            },
+            "work": {
+                "type": "array",
+                "items": entry("title", "company", "location", "start", "end"),
+            },
+            "projects": {
+                "type": "array",
+                "items": entry("name", "role", "url", "start", "end"),
+            },
+            "skills": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["category", "items"],
+                    "properties": {
+                        "category": text,
+                        "items": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
+            "extras": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["title", "entries"],
+                    "properties": {
+                        "title": {"type": "string"},
+                        "entries": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
+        },
+    }
+
+
+def _request_body(model: str, source: str) -> dict[str, Any]:
+    parts = [EXTRACT_PROMPT, "", "RESUME (Typst source):", source]
+    return {
+        "model": model,
+        "input": [{"role": "user", "content": "\n".join(parts)}],
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "resume_content",
+                "strict": True,
+                "schema": _schema(),
+            }
+        },
+    }
+
+
+def _usage_of(data: dict[str, Any]) -> dict[str, Any]:
+    usage = data.get("usage")
+    if not isinstance(usage, dict):
+        return {}
+    cached = usage.get("input_tokens_details") or {}
+    return {
+        "input_tokens": usage.get("input_tokens"),
+        "output_tokens": usage.get("output_tokens"),
+        "cached_tokens": cached.get("cached_tokens")
+        if isinstance(cached, dict)
+        else None,
+    }
+
+
+def _is_empty(content: ResumeContent) -> bool:
+    """No name and no entries in any section is not a snapshot.
+
+    Emitting a document from this would produce a resume with a name and
+    nothing else, silently replacing the person's real one -- so it is
+    reported as a failure, the same call the caller's model path already
+    makes when there is nothing worth keeping.
+    """
+    return not (
+        content.name
+        or content.education
+        or content.work
+        or content.projects
+        or content.skills
+        or content.extras
+    )
+
+
+@dataclass
+class ExtractResult:
+    """What one extraction did. A failure never writes."""
+
+    content: ResumeContent | None = None
+    error: str | None = None
+    usage: dict[str, Any] = field(default_factory=dict)
+    model: str = ""
+    source_chars: int = 0
+
+
+async def extract_content(source: str) -> ExtractResult:
+    """Read one resume's Typst source and return its structured content.
+
+    Never raises -- every failure comes back as a populated `error` and a
+    `None` content, exactly like build_profile. Runs on the OpenAI Responses
+    API regardless of what anyone picked in the editor, and on the
+    configured default model rather than this person's choice, for the same
+    two reasons build_profile has: the output has to validate against
+    ResumeContent, and nobody is watching this call happen.
+    """
+    settings = get_settings()
+    if not openai_provider.OpenAIProvider().configured():
+        return ExtractResult(error="llm_not_configured", source_chars=len(source))
+    pinned = spec_or_passthrough(settings.pinned_chat_model() or DEFAULT_MODEL)
+    # An operator pin is honoured only when it names an OpenAI model, for the
+    # same reason build_profile restricts it: pinning an Anthropic model must
+    # not take this feature down with it.
+    spec = (
+        pinned
+        if pinned.provider == openai_provider.NAME
+        else spec_or_passthrough(DEFAULT_MODEL)
+    )
+    model = spec.id
+    url = _responses_url(settings.openai_base_url or "https://api.openai.com/v1")
+    headers = {
+        "Authorization": f"Bearer {settings.openai_api_key}",
+        "Content-Type": "application/json",
+    }
+    result = ExtractResult(model=model, source_chars=len(source))
+    try:
+        async with httpx.AsyncClient(timeout=EXTRACT_TIMEOUT) as client:
+            response = await client.post(
+                url, headers=headers, json=_request_body(model, source)
+            )
+            if response.status_code >= 400:
+                logger.warning(
+                    "content extraction failed status=%s", response.status_code
+                )
+                result.error = "provider_error"
+                return result
+            data = response.json()
+    except httpx.HTTPError as exc:
+        logger.warning(
+            "content extraction transport failed: %s", exc.__class__.__name__
+        )
+        result.error = "provider_error"
+        return result
+    except ValueError:
+        result.error = "unparseable"
+        return result
+
+    if not isinstance(data, dict):
+        result.error = "unparseable"
+        return result
+    result.usage = _usage_of(data)
+    output = data.get("output") if isinstance(data.get("output"), list) else []
+    text = _output_text(data, output)
+    if not text.strip():
+        logger.warning(
+            "content extraction returned no text status=%s", data.get("status")
+        )
+        result.error = "no_output"
+        return result
+    try:
+        content = ResumeContent.model_validate_json(text)
+    except ValidationError as exc:
+        # Log where it failed, never what it said: the content is personal
+        # data. Distinct from no_output so the two cannot be confused again.
+        logger.warning(
+            "extracted content rejected: %s",
+            "; ".join(".".join(str(part) for part in err["loc"]) for err in exc.errors()),
+        )
+        result.error = "invalid_payload"
+        return result
+    except ValueError:
+        logger.warning("content extraction output was not JSON")
+        result.error = "unparseable"
+        return result
+
+    if _is_empty(content):
+        logger.warning("content extraction produced an empty payload")
+        result.error = "empty"
+        return result
+
+    result.content = content
+    return result
+
+
+def record_extract_spend(
+    db: Session,
+    *,
+    user: User | None,
+    guest: GuestSession | None,
+    resume_id: str,
+    result: ExtractResult,
+    meter,
+) -> None:
+    """Record what one extraction billed.
+
+    Unlike profile.record_build_spend, which takes only a User because a
+    talent profile always belongs to a signed-in one, a résumé does not: a
+    guest can switch templates, so exactly one of user/guest is set on the
+    row -- never both, which llm_calls.llm_call_subject_not_both enforces.
+
+    Commits on its own, same reasoning as record_build_spend: telemetry may
+    be lost, the work it is describing may not.
+    """
+    if not result.model or resume_id is None:
+        return
+    cost, _ = event_cost_uusd({"model": result.model, **result.usage})
+    try:
+        db.add(
+            LlmCall(
+                resume_id=resume_id,
+                user_id=user.id if user is not None else None,
+                guest_session_id=guest.id if guest is not None else None,
+                purpose="extract",
+                model=result.model[:128],
+                round_index=0,
+                input_tokens=result.usage.get("input_tokens"),
+                cached_tokens=result.usage.get("cached_tokens"),
+                output_tokens=result.usage.get("output_tokens"),
+                source_chars=result.source_chars,
+                cost_uusd=cost,
+            )
+        )
+        db.commit()
+    except Exception:  # pragma: no cover - telemetry must never fail a caller
+        db.rollback()
+    meter.record(
+        {
+            "model": result.model,
+            "purpose": "extract",
+            "round_index": 0,
+            **result.usage,
+        }
+    )

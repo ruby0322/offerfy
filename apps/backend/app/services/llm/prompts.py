@@ -81,6 +81,20 @@ COMPILE_RETRY_NUDGE = (
     "\\$ \\@ \\* . Do not ask the user to retry."
 )
 
+EXTRACT_PROMPT = (
+    "You read one resume, written in Typst source, and return its content as "
+    "structured data -- not a rewrite, not a summary. Use only what the "
+    "source says; never infer, guess or invent a value it does not contain. "
+    "Keep every date exactly as written, including an ongoing role written "
+    "as Present or 至今/现在 -- do not normalise or reformat it. "
+    "The schema has a named field for education, work, projects and skills. "
+    "A section that does not fit one of those -- publications, military "
+    "service, certifications, volunteering, anything else the resume has -- "
+    "goes into extras with its own heading, rather than being dropped: a "
+    "resume's sections are not a fixed set, and a section with nowhere to go "
+    "is not a reason to lose it."
+)
+
 TEMPLATE_SWITCH_EXTRA = (
     " The user asked to rewrite the resume into a different Typst Universe "
     "template. You MUST change the #import and rewrite the full document to "

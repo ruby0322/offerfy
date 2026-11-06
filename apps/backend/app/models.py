@@ -406,7 +406,12 @@ class JobIngestRun(Base):
 # total, for the same reason the compile-repair loop bills as 'repair': an
 # import spends real provider tokens on work the person did not type, and the
 # admin overview's by-purpose breakdown is where that has to be visible.
-LLM_CALL_PURPOSES = ("chat", "repair", "vision", "profile", "import")
+#
+# 'extract' is the same story for app.services.resume_content.extract_content:
+# a resume_contents snapshot is derived state built by its own model call, and
+# it happens once per drift rather than once per switch, so its cost needs to
+# be visible as its own line rather than folded into another purpose.
+LLM_CALL_PURPOSES = ("chat", "repair", "vision", "profile", "import", "extract")
 
 
 class LlmCall(Base):
@@ -422,7 +427,7 @@ class LlmCall(Base):
     __tablename__ = "llm_calls"
     __table_args__ = (
         CheckConstraint(
-            "purpose IN ('chat', 'repair', 'vision', 'profile', 'import')",
+            "purpose IN ('chat', 'repair', 'vision', 'profile', 'import', 'extract')",
             name="llm_call_purpose_values",
         ),
         # Not an XOR: a row whose subject has been erased has neither, the same
