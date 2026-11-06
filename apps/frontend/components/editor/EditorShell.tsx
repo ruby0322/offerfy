@@ -986,25 +986,7 @@ export default function EditorShell({ resumeId }: Props) {
     } catch (err) {
       const limitHit = usageRefusalOf(err);
       if (limitHit) {
-        // A card, not a chat bubble: this is the sign-up moment for a guest and
-        // the matching moment for everyone else, and a bubble scrolls away.
-        setRefusal(limitHit);
-        // The refusal carries the balance that caused it, so the meter lands
-        // on empty without a second request.
-        setUsage((prev) =>
-          prev
-            ? {
-                ...prev,
-                tier: limitHit.tier,
-                reset_at: limitHit.reset_at,
-                used_credits: limitHit.used_credits,
-                limit_credits: limitHit.limit_credits,
-                turns_used: limitHit.turns_used,
-                turn_limit: limitHit.turn_limit,
-                exhausted: true,
-              }
-            : prev,
-        );
+        showUsageRefusal(limitHit);
       } else if (err instanceof ApiError && err.status === 503) {
         setChatUnavailable(true);
         setMessages((prev) => [
@@ -1206,6 +1188,37 @@ export default function EditorShell({ resumeId }: Props) {
     await sendUserChat(text, file);
   }
 
+  function showUsageRefusal(limitHit: UsageRefusal) {
+    // A card, not a chat bubble: this is the sign-up moment for a guest and
+    // the matching moment for everyone else, and a bubble scrolls away. The
+    // card itself names which limit was hit and what the next tier gives, and
+    // shows a sign-in button when `tier === "guest"` or the refusal carries
+    // `sign_in_required` (see UsageLimitCard).
+    //
+    // Shared with `onApplyTemplate`: a 429 is reachable from the template
+    // switch too, exactly when the snapshot is stale and the subject is out of
+    // credits -- the first switch a new person makes once their allowance is
+    // spent. That used to fall into a bare `catch` and be reported as "could
+    // not switch to that template", which is both wrong and unactionable.
+    setRefusal(limitHit);
+    // The refusal carries the balance that caused it, so the meter lands
+    // on empty without a second request.
+    setUsage((prev) =>
+      prev
+        ? {
+            ...prev,
+            tier: limitHit.tier,
+            reset_at: limitHit.reset_at,
+            used_credits: limitHit.used_credits,
+            limit_credits: limitHit.limit_credits,
+            turns_used: limitHit.turns_used,
+            turn_limit: limitHit.turn_limit,
+            exhausted: true,
+          }
+        : prev,
+    );
+  }
+
   async function onApplyTemplate(
     template: { name: string; version: string },
   ): Promise<AppliedTemplateNote | null> {
@@ -1238,7 +1251,8 @@ export default function EditorShell({ resumeId }: Props) {
         setMessages(history.messages.map(withMessageId));
         setContextCut(history.contextCut);
       } catch {
-        /* a later frame re-reads it, and so does a reload */
+        /* a reload re-reads it -- nothing re-polls the transcript after a
+           switch, so that is the only recovery */
       }
       return {
         name: template.name,
@@ -1246,12 +1260,30 @@ export default function EditorShell({ resumeId }: Props) {
         dropped: result.dropped,
         degraded: result.degraded,
       };
-    } catch {
-      // A 400 means the pair isn't on the committed support list -- the
-      // picker should already only offer those, so this is a mismatch
-      // between client and server state, not a routine failure. Same
-      // swallow-and-toast as `onImportAction`: the backend's sentence isn't
-      // for the person, but silence here reads as a dead button.
+    } catch (err) {
+      // A 429 is not a broken template: it is reachable here whenever the
+      // snapshot is stale (so the switch needs one extraction call) and the
+      // subject is out of credits -- the first switch a new person makes
+      // once their allowance is spent, and for a guest `preflight` raises
+      // `sign_in_required`. Routed to the same refusal card the chat path
+      // uses, which names the limit and offers sign-in, rather than told
+      // the template is broken.
+      const limitHit = usageRefusalOf(err);
+      if (limitHit) {
+        // The card lives in the chat panel (EditorChatPanel renders it from
+        // `usage.refusal`), and this ran from the template panel -- so switch
+        // tabs the same way the `mode: "llm"` branch above does, or the person
+        // would get no feedback at all.
+        setLeftTab("chat");
+        showUsageRefusal(limitHit);
+        return null;
+      }
+      // Everything else: a 400 means the pair isn't on the committed support
+      // list -- the picker should already only offer those, so this is a
+      // mismatch between client and server state, not a routine failure.
+      // Same swallow-and-toast as `onImportAction` for that and for a 404 or
+      // a network failure: the backend's sentence isn't for the person, but
+      // silence here reads as a dead button.
       toast(t("templateSwitchError"));
       return null;
     } finally {

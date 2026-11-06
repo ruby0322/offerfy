@@ -469,9 +469,10 @@ export type UniverseTemplate = {
   description: string;
   universe_url: string;
   import_line: string;
-  // Always false today. Task 8 turns this on for templates the server can
-  // rewrite without a chat turn at all; the picker doesn't need to know how,
-  // only whether `switchTemplate` might come back as `mode: "applied"`.
+  // True for the templates the server can rewrite without a chat turn at
+  // all -- four of them today, the ones with a hand-written emitter. The
+  // picker doesn't need to know how, only whether `switchTemplate` might
+  // come back as `mode: "applied"`.
   deterministic: boolean;
   cached: boolean;
 };
@@ -491,11 +492,11 @@ export async function listTemplates(): Promise<UniverseTemplate[]> {
 }
 
 /**
- * The server's two ways of carrying out a template switch. `llm` is the only
- * one it can return today: a sentence for the chat turn that rewrites the
- * document. `applied` is unreachable until Task 8/12 make a template
- * deterministic server-side, but the union is shaped now so that branch adds
- * a case rather than a reshape.
+ * The server's two ways of carrying out a template switch. `llm` carries a
+ * sentence for the chat turn that rewrites the document, and is what a
+ * template with no server-side emitter still comes back as. `applied` is the
+ * normal path for the four templates that have one: the server emitted and
+ * compiled the document itself, so there is no chat turn to run.
  */
 export type TemplateSwitchResult =
   | { mode: "llm"; prompt: string }
