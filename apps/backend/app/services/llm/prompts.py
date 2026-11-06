@@ -92,16 +92,30 @@ EXTRACT_PROMPT = (
     "service, certifications, volunteering, anything else the resume has -- "
     "goes into extras with its own heading, rather than being dropped: a "
     "resume's sections are not a fixed set, and a section with nowhere to go "
-    "is not a reason to lose it."
+    "is not a reason to lose it. "
+    # The emitters normalise this themselves too (see
+    # `app.services.emitters._common.bare_url`) -- a snapshot written
+    # before this sentence existed, or a value typed in by hand, still
+    # has to come out right -- but asking for the convention here is what
+    # keeps the IR itself consistent rather than only its renderings.
+    "Return every URL, github, linkedin and website value as a bare domain "
+    "and path with no scheme -- github.com/you, not https://github.com/you."
 )
 
+# Conditional on purpose, not an unconditional order: this extra is attached
+# whenever the turn merely *mentions* a supported package name (see
+# `app.services.templates.mentioned_template`), which a question like "is
+# acorn-resume better than basic-resume?" also does. An opening that asserted
+# the user asked for a switch was strong enough to override the model's own
+# reading of the turn, so a question rewrote the résumé and paid a
+# full-source turn to do it. Phrased as a condition, a name mention supplies
+# the API context while the model still judges intent.
 TEMPLATE_SWITCH_EXTRA = (
-    " The user asked to rewrite the resume into a different Typst Universe "
-    "template. You MUST change the #import and rewrite the full document to "
-    "that package's API. Do not keep @preview/basic-resume unless that is "
-    "the requested package. Call read_typst, then apply_typst_edit with only "
-    "the full `source` field (no search+replace). Keep the user's content "
-    "(name, contacts, education, experience, projects, skills). Prefer "
-    "paper a4 if the template allows it. Do not invent helpers like #section "
-    "or #entry."
+    " If the user is asking to switch templates, you MUST change the #import "
+    "and rewrite the full document to that package's API. Do not keep "
+    "@preview/basic-resume unless that is the requested package. Call "
+    "read_typst, then apply_typst_edit with only the full `source` field (no "
+    "search+replace). Keep the user's content (name, contacts, education, "
+    "experience, projects, skills). Prefer paper a4 if the template allows "
+    "it. Do not invent helpers like #section or #entry."
 )

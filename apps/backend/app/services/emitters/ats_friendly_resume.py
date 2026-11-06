@@ -73,6 +73,7 @@ from app.services.emitters._common import (
     font_literal,
     heading_block,
     skill_line,
+    url_value,
 )
 from app.services.emitters.base import EmitResult
 from app.services.resume_content import EducationEntry, ProjectEntry, ResumeContent, WorkEntry
@@ -80,6 +81,11 @@ from app.services.typst_escape import markup_value, typst_value
 
 name = "ats-friendly-resume"
 version = "0.1.1"
+
+# This package's own fork of basic-resume's `contact-item(..., link-type:
+# "https://")` slots (`src/resume.typ`) -- see basic_resume._URL_ARGS for
+# why these three take `url_value` rather than `typst_value`.
+_URL_ARGS = frozenset({"linkedin", "github", "portfolio"})
 
 
 def _header_lines(content: ResumeContent) -> list[str]:
@@ -98,7 +104,10 @@ def _header_lines(content: ResumeContent) -> list[str]:
         if value:
             args.append((key, value))
     lines = ["#show: resume.with("]
-    lines.extend(f"  {key}: {typst_value(value)}," for key, value in args)
+    lines.extend(
+        f"  {key}: {url_value(value) if key in _URL_ARGS else typst_value(value)},"
+        for key, value in args
+    )
     # color-enabled/text-color and paper are this emitter's own fixed
     # pins, not content -- never escaped, always this literal. Mirrors
     # basic_resume.py's accent-color/paper pins: same blue, same page
@@ -158,7 +167,7 @@ def _project_lines(entry: ProjectEntry) -> list[str]:
     if dates:
         lines.append(f"  dates: {dates},")
     if entry.url:
-        lines.append(f"  url: {typst_value(entry.url)},")
+        lines.append(f"  url: {url_value(entry.url)},")
     lines.append(")")
     if entry.url and not dates:
         # project()'s own one-by-one-layout (resume.typ) only shows the
@@ -171,7 +180,7 @@ def _project_lines(entry: ProjectEntry) -> list[str]:
         # `link(...)[#url]` calls use -- not `markup_value`, since this
         # is not markup prose, it is the identical raw-string display
         # the package's own `url` argument already is.
-        url_literal = typst_value(entry.url)
+        url_literal = url_value(entry.url)
         lines.append(f'#link("https://" + {url_literal})[#{url_literal}]')
     lines.extend(bullet_lines(entry.bullets))
     return lines

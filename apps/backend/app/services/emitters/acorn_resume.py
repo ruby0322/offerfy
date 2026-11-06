@@ -86,11 +86,13 @@ lets a later survey run offer this pair once this emitter exists.
 from __future__ import annotations
 
 from app.services.emitters._common import (
+    bare_url,
     bullet_lines,
     date_range_expr,
     font_literal,
     heading_block,
     skill_line,
+    url_value,
 )
 from app.services.emitters.base import EmitResult
 from app.services.resume_content import EducationEntry, ProjectEntry, ResumeContent, WorkEntry
@@ -119,12 +121,14 @@ def _header_lines(content: ResumeContent) -> list[str]:
     pairs: list[tuple[str, str]] = []
     if contact.email:
         pairs.append((f"mailto:{contact.email}", contact.email))
-    if contact.github:
-        pairs.append((f"https://{contact.github}", contact.github))
-    if contact.linkedin:
-        pairs.append((f"https://{contact.linkedin}", contact.linkedin))
-    if contact.website:
-        pairs.append((f"https://{contact.website}", contact.website))
+    # `bare_url` on both halves: this emitter builds the `https://` target
+    # itself, so a value that arrived carrying its own scheme would make
+    # the pair `("https://https://github.com/x", "https://github.com/x")`
+    # -- a dead hyperlink under a doubled label. See `_common.bare_url`.
+    for value in (contact.github, contact.linkedin, contact.website):
+        bare = bare_url(value)
+        if bare:
+            pairs.append((f"https://{bare}", bare))
     lines = [
         "#header(",
         f"  name: {typst_value(content.name or '')},",
@@ -213,7 +217,7 @@ def _project_lines(entry: ProjectEntry) -> list[str]:
         # the literal url for either -- only fixed "Live"/"GitHub" labels
         # (see lib.typ). Rendered here instead as a real link, the same
         # idiom ats_friendly_resume.py's own dateless-url fallback uses.
-        url_literal = typst_value(entry.url)
+        url_literal = url_value(entry.url)
         details.append(f'    #link("https://" + {url_literal})[#{url_literal}]')
     details.extend(f"    {bullet}" for bullet in bullet_lines(entry.bullets))
     if details:

@@ -32,6 +32,7 @@ from app.services.emitters._common import (
     font_literal,
     heading_block,
     skill_line,
+    url_value,
 )
 from app.services.emitters.base import EmitResult
 from app.services.resume_content import (
@@ -44,6 +45,15 @@ from app.services.typst_escape import markup_value, typst_value
 
 name = "basic-resume"
 version = "0.2.9"
+
+# The `resume.with(...)` arguments this package turns into a hyperlink by
+# prepending `"https://"` itself (`contact-item(github, link-type:
+# "https://")` and its two siblings in `src/resume.typ`). Those slots take
+# `url_value`, which strips a scheme the value may already carry -- passing
+# `typst_value` there is how `https://https://github.com/x` ends up as the
+# PDF's `/URI`. `email` is a link too, but `mailto:`-schemed, and
+# `location`/`phone` are not links at all.
+_URL_ARGS = frozenset({"github", "linkedin", "personal-site"})
 
 
 def _header_lines(content: ResumeContent) -> list[str]:
@@ -60,7 +70,10 @@ def _header_lines(content: ResumeContent) -> list[str]:
         if value:
             args.append((key, value))
     lines = ["#show: resume.with("]
-    lines.extend(f"  {key}: {typst_value(value)}," for key, value in args)
+    lines.extend(
+        f"  {key}: {url_value(value) if key in _URL_ARGS else typst_value(value)},"
+        for key, value in args
+    )
     # accent-color and paper are the starter's own pins (services.starter
     # ._render), not content -- never escaped, always this literal.
     lines.append('  accent-color: "#26428b",')
@@ -109,7 +122,9 @@ def _project_lines(entry: ProjectEntry) -> list[str]:
     if entry.role:
         lines.append(f"  role: {typst_value(entry.role)},")
     if entry.url:
-        lines.append(f"  url: {typst_value(entry.url)},")
+        # project() renders this as `link("https://" + url)[#url]`
+        # (resume.typ) -- `url_value`, never `typst_value`.
+        lines.append(f"  url: {url_value(entry.url)},")
     dates = dates_expr(entry.start, entry.end)
     if dates:
         lines.append(f"  dates: {dates},")

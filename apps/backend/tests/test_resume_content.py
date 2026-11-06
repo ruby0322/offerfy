@@ -242,6 +242,49 @@ async def test_extract_content_reports_an_empty_payload_as_an_error(
 
 
 @pytest.mark.anyio
+async def test_extract_content_rejects_a_payload_with_a_name_and_no_section(
+    openai_enabled, monkeypatch
+):
+    """Boundary 1 of `_is_empty`: a name (and even contacts) is not a snapshot.
+
+    This payload emits a document that compiles cleanly through every
+    emitter, so the switch endpoint's compile gate cannot catch it -- the
+    only thing standing between a name-only extraction and a résumé
+    silently replaced by a name and nothing else is this check.
+    """
+    stub = _StubLlm(
+        _said({"name": "Ruby Chen", "contact": {"email": "ruby@example.com"}})
+    )
+    monkeypatch.setattr("app.services.resume_content.httpx.AsyncClient", stub)
+
+    result = await extract_content(SOURCE)
+
+    assert result.content is None
+    assert result.error == "empty"
+
+
+@pytest.mark.anyio
+async def test_extract_content_keeps_a_payload_with_a_section_and_no_name(
+    openai_enabled, monkeypatch
+):
+    """Boundary 2: the check asks about sections only, never about `name`.
+
+    A résumé whose name the extraction could not find still has content
+    worth switching templates with, so one non-empty section is enough --
+    the guard must not have tightened into "a name is required".
+    """
+    stub = _StubLlm(_said({"skills": [{"category": "Infra", "items": ["Postgres"]}]}))
+    monkeypatch.setattr("app.services.resume_content.httpx.AsyncClient", stub)
+
+    result = await extract_content(SOURCE)
+
+    assert result.error is None
+    assert result.content is not None
+    assert not result.content.name
+    assert result.content.skills == [SkillGroup(category="Infra", items=["Postgres"])]
+
+
+@pytest.mark.anyio
 async def test_extract_content_reports_a_transport_failure_without_raising(
     openai_enabled, monkeypatch
 ):

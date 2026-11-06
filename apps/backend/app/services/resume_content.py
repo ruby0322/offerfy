@@ -344,16 +344,20 @@ def _usage_of(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _is_empty(content: ResumeContent) -> bool:
-    """No name and no entries in any section is not a snapshot.
+    """No entries in any section is not a snapshot, name or no name.
 
-    Emitting a document from this would produce a resume with a name and
-    nothing else, silently replacing the person's real one -- so it is
-    reported as a failure, the same call the caller's model path already
-    makes when there is nothing worth keeping.
+    Deliberately independent of `name` (and of `contact`/`summary`): a
+    payload carrying only a name emits a document that *compiles* cleanly
+    through every emitter, so the switch endpoint's compile gate passes
+    and `set_draft_source` writes a resume with a name and nothing else,
+    silently replacing the person's real one. Treating that as a failure
+    here is the only place that scenario is stopped -- an extraction that
+    found no section at all did not read the document, whatever else it
+    returned, so it is reported as a failure, the same call the caller's
+    model path already makes when there is nothing worth keeping.
     """
     return not (
-        content.name
-        or content.education
+        content.education
         or content.work
         or content.projects
         or content.skills

@@ -15,6 +15,7 @@ from app.services.templates import (
     template_example_source,
     thumbnail_relpath,
 )
+from app.services.typst_compile import typst_available
 
 PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
@@ -537,7 +538,16 @@ def test_survey_marks_a_template_unsupported_when_the_registry_has_no_thumbnail(
     assert row["reason"] == "no thumbnail"
 
 
+@pytest.mark.skipif(not typst_available(), reason="typst binary not available")
 def test_thumbnail_gate_falls_back_to_the_pinned_packages_own_typst_toml(monkeypatch, tmp_path):
+    # Needs the real binary even though `probe_template` is canned:
+    # `survey_row` also asks `_emitter_font_warnings` about this exact
+    # pair, acorn-resume has an emitter, and compiling its output with no
+    # typst installed comes back `_EMITTER_COMPILE_FAILED` -- which makes
+    # the row fail with "emitter output does not compile" before the
+    # thumbnail gate this test is about is ever reached. Per test rather
+    # than module-level: every other test in this module is
+    # binary-independent.
     # Review finding 3: a pinned package that drops out of
     # latest_cv_packages() (stale/changed category tag, a rename) arrives
     # here with index_row == {}. The thumbnail gate must still find the

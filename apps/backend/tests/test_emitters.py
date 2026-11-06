@@ -7,7 +7,7 @@ module that runs the emitted source through the real compiler.
 
 from app.services.emitters import emitter_for
 from app.services.emitters._common import bullet_lines
-from app.services.resume_content import Section
+from app.services.resume_content import Contact, ResumeContent, Section, SkillGroup
 from app.services.typst_escape import typst_value
 from tests.fixtures.golden_content import GOLDEN, MINIMAL
 
@@ -461,3 +461,102 @@ def test_clean_print_cv_omits_an_extras_section_with_no_entries():
     src = emitter_for("clean-print-cv", "0.1.0").emit(content).source
     assert "Empty Section" not in src
     assert "#section-heading(" not in src
+
+
+def test_clean_print_cv_packs_a_partial_contact_row_into_the_unguarded_slots():
+    # cv-header prints `email | phone | location` with *unconditional*
+    # separators (cv-template.typ:107-111); only linkedin/github/website
+    # are guarded by an `if != ""`, and `contact-sep` is a closed-over
+    # `#let` nothing here can reach. Mapping field-for-field therefore
+    # left a visible dangling `|` under the name of anyone without a
+    # phone number or without a location: email + github alone rendered
+    # `r@example.com  |    |    |  github.com/a`.
+    #
+    # Packing present values into the three unguarded slots first fixes
+    # that: three or more contact values render with no stray separator
+    # at all. Safe because cv-header renders all six slots identically --
+    # plain text, no `mailto:`, no `#link`, no per-field prefix -- so
+    # which slot a value occupies changes nothing but whether a separator
+    # has something to separate. See clean_print_cv._CONTACT_SLOTS.
+    content = ResumeContent(
+        name="Packed",
+        contact=Contact(email="r@example.com", github="github.com/a", website="a.dev"),
+    )
+    src = emitter_for("clean-print-cv", "0.1.0").emit(content).source
+    assert '"email": "r@example.com"' in src
+    assert '"phone": "github.com/a"' in src
+    assert '"location": "a.dev"' in src
+    # The three guarded slots are what is left empty -- they cost nothing
+    # when they are.
+    for slot in ("linkedin", "github", "website"):
+        assert f'"{slot}": ""' in src
+
+
+def test_clean_print_cv_keeps_every_contact_slot_present_even_when_empty():
+    # cv-header reads personal.email/phone/location/linkedin/github with
+    # no `.at(default:)` guard at all, so a *missing* key is a hard
+    # "dictionary does not contain key" compile error, not an empty
+    # render. Packing must never drop a key, only leave it empty.
+    src = emitter_for("clean-print-cv", "0.1.0").emit(MINIMAL).source
+    for slot in ("email", "phone", "location", "linkedin", "github", "website"):
+        assert f'"{slot}": ' in src
+
+
+def test_clean_print_cv_strips_a_scheme_from_a_contact_and_a_project_url():
+    # Not a dead link here (this package shows every URL as plain text,
+    # never a `#link`) -- a label inconsistent with what the other three
+    # emitters must emit to keep their hyperlinks alive. Normalised in
+    # the same place, `_common.bare_url`, for one answer rather than
+    # four. See tests/test_emitters_compile.py's /URI gate.
+    content = GOLDEN.model_copy(
+        update={
+            "contact": GOLDEN.contact.model_copy(
+                update={"github": "https://github.com/weiling"}
+            ),
+            "projects": [
+                GOLDEN.projects[0].model_copy(update={"url": "HTTPS://example.com/p"})
+            ],
+        }
+    )
+    src = emitter_for("clean-print-cv", "0.1.0").emit(content).source
+    assert "https://github.com/weiling" not in src
+    assert "github.com/weiling" in src
+    assert "HTTPS://example.com/p" not in src
+    assert "example.com/p" in src
+
+
+def test_clean_print_cv_filters_an_entirely_empty_skill_group():
+    # cv-skills prints `#group.category:` and `#group.items.join(...)`
+    # unconditionally, so a group with neither renders a bare `:` under
+    # the TECHNICAL SKILLS heading. The other three emitters already drop
+    # exactly this group (`_common.skill_line` returns None when both
+    # halves are empty, and renders the surviving half with no colon when
+    # only one is); this is the dict-shaped counterpart, with the same
+    # boundary: a group that still has one half is content, not junk, and
+    # is kept.
+    content = GOLDEN.model_copy(
+        update={
+            "skills": [
+                SkillGroup(category="Languages", items=["Python"]),
+                SkillGroup(category="", items=[]),
+                SkillGroup(category="", items=["Kept", ""]),
+            ]
+        }
+    )
+    src = emitter_for("clean-print-cv", "0.1.0").emit(content).source
+    assert "Languages" in src
+    assert "Kept" in src
+    # The empty group left nothing behind: exactly two groups survive.
+    assert src.count('"category"') == 2
+    # ...and a blank item inside a surviving group is filtered too, so
+    # `items.join("  |  ")` never renders a dangling separator either.
+    assert '"items": ("Kept", )' in src
+
+
+def test_clean_print_cv_omits_the_skills_call_when_every_group_is_empty():
+    # The guard has to be on the *filtered* list: `content.skills` is
+    # non-empty here, but nothing survives the filter, and cv-skills
+    # would still print its own heading over nothing.
+    content = GOLDEN.model_copy(update={"skills": [SkillGroup(category="", items=[])]})
+    src = emitter_for("clean-print-cv", "0.1.0").emit(content).source
+    assert "#cv-skills(" not in src

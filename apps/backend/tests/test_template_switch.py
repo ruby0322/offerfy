@@ -21,6 +21,7 @@ from app.services.metering import Meter, system_guard
 from app.services.resume_content import ExtractResult, store_content
 from app.services.role_card import build_role_card
 from app.services.templates import mentioned_template, reset_template_index_cache
+from app.services.typst_compile import typst_available
 from tests.fixtures.golden_content import GOLDEN
 
 
@@ -62,6 +63,19 @@ def test_switch_404s_for_a_resume_this_caller_does_not_own(client):
 
 
 # --- applied mode: a switch that writes the document itself, no model -----
+#
+# Every test below that asserts `mode == "applied"` needs the real typst
+# binary: the endpoint compiles the emitted source before it writes
+# anything, `compile_typst` raises `HTTPException(503)` with no binary,
+# and the handler's own `except HTTPException` turns that into the model
+# path -- so without the binary these fail rather than skip. Marked per
+# test, deliberately *not* module-level: the eleven other tests in this
+# module (the 400/404 gates, the model-path fallbacks, `mentioned_
+# template`, the role card) are binary-independent and worth keeping in
+# a fresh clone or a worktree that has no typst.
+_needs_typst = pytest.mark.skipif(
+    not typst_available(), reason="typst binary not available"
+)
 
 
 def _signed_in(client, db_session, sub="sub-template-switch"):
@@ -76,6 +90,7 @@ def _never_called(*args, **kwargs):
     raise AssertionError("extract_content must not be called when the snapshot is fresh")
 
 
+@_needs_typst
 def test_switch_applies_without_a_model_when_an_emitter_exists(client, db_session, monkeypatch):
     rid = _create_resume(client)
     resume = db_session.get(Resume, rid)
@@ -92,6 +107,7 @@ def test_switch_applies_without_a_model_when_an_emitter_exists(client, db_sessio
     assert "@preview/acorn-resume:0.1.0" in db_session.get(Resume, rid).typst_source
 
 
+@_needs_typst
 def test_switch_writes_a_system_row_that_never_reaches_the_model(client, db_session, monkeypatch):
     rid = _create_resume(client)
     resume = db_session.get(Resume, rid)
@@ -117,6 +133,7 @@ def test_switch_writes_a_system_row_that_never_reaches_the_model(client, db_sess
     assert system_rows[0].id not in {row.id for row in _history(db_session, rid)}
 
 
+@_needs_typst
 def test_switch_extracts_once_and_reuses_the_snapshot(client, db_session, monkeypatch):
     """Two consecutive switches, one extraction -- no rollback in between.
 
@@ -155,6 +172,7 @@ def test_switch_extracts_once_and_reuses_the_snapshot(client, db_session, monkey
     assert "2021-03" in db_session.get(Resume, rid).typst_source
 
 
+@_needs_typst
 def test_switch_applies_from_a_fresh_snapshot_even_when_quota_is_exhausted(
     client, db_session, monkeypatch
 ):
@@ -194,6 +212,17 @@ def test_switch_applies_from_a_fresh_snapshot_even_when_quota_is_exhausted(
 def test_switch_does_not_write_when_the_emitted_source_fails_to_compile(
     client, db_session, monkeypatch
 ):
+    """Unmarked on purpose -- but it proves less without the binary.
+
+    With no typst installed, `compile_typst` would raise
+    `HTTPException(503)` before `_boom` below is ever reached, so this
+    test's "no write, model path" assertions come out true for the wrong
+    reason: the monkeypatched failure is never what fails. It still
+    passes, which is why it carries no skip marker, but in a binary-less
+    checkout it is not evidence that the *emit* path's own compile gate
+    aborts the write -- only the marked tests above establish that the
+    applied path runs at all.
+    """
     rid = _create_resume(client)
     resume = db_session.get(Resume, rid)
     before = resume.typst_source
@@ -265,6 +294,7 @@ def test_switch_falls_back_to_the_model_path_when_extraction_fails(client, db_se
 # --- CHECK constraint (llm_call_subject_not_both) --------------------------
 
 
+@_needs_typst
 def test_switch_bills_a_guest_to_the_guest_column_on_extraction(client, db_session, monkeypatch):
     rid = _create_resume(client)
     resume = db_session.get(Resume, rid)
@@ -285,6 +315,7 @@ def test_switch_bills_a_guest_to_the_guest_column_on_extraction(client, db_sessi
     assert row.guest_session_id == resume.guest_session_id
 
 
+@_needs_typst
 def test_switch_bills_a_signed_in_user_to_the_user_column_on_extraction(
     client, db_session, monkeypatch
 ):

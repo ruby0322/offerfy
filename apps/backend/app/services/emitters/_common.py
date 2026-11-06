@@ -16,6 +16,8 @@ answer -- see `FALLBACK_FONTS` below.
 
 from __future__ import annotations
 
+import re
+
 from app.services.resume_content import SkillGroup
 from app.services.typst_escape import markup_value, typst_value
 
@@ -88,6 +90,38 @@ def date_range_expr(start: str | None, end: str | None, *, sep: str = " - ") -> 
     if start and end:
         return typst_value(f"{start}{sep}{end}")
     return typst_value(start or end or "")
+
+
+# A scheme at the front of a URL-ish value, matched case-insensitively --
+# `HTTPS://` and `Https://` are as valid in a résumé as `https://`.
+_SCHEME_RE = re.compile(r"^\s*https?://", re.IGNORECASE)
+
+
+def bare_url(value: str | None) -> str:
+    """`value` with a leading `http://`/`https://` removed -- the raw
+    string behind `url_value`, for a call site that needs the text rather
+    than a quoted literal (acorn-resume's `(url, label)` pairs, which
+    build their own `https://` target; clean-print-cv's `data` dict, which
+    `typst_value` quotes once for the whole dict).
+
+    The IR carries an implicit "bare domain, no scheme" convention that
+    nothing used to enforce -- not the schema, not `prompts.EXTRACT_PROMPT`,
+    not the emitters -- while every target package (and acorn's own
+    `#link`) prepends `"https://"` itself. A value that arrived carrying
+    its own scheme therefore produced `https://https://github.com/x` as
+    the PDF's `/URI`: a label that looks right above a hyperlink that is
+    dead, in the file a person sends to employers. Normalising here rather
+    than only at extraction is what makes that true for a snapshot written
+    before the prompt said so, or a value typed in by hand.
+    """
+    return _SCHEME_RE.sub("", value or "").strip()
+
+
+def url_value(value: str | None) -> str:
+    """`bare_url(value)` as a quoted Typst string literal -- what every
+    URL-ish argument slot (`url:`, `github:`, `linkedin:`,
+    `personal-site:`, `portfolio:`) in every emitter here passes."""
+    return typst_value(bare_url(value))
 
 
 def skill_line(group: SkillGroup) -> str | None:

@@ -117,6 +117,18 @@ def mentioned_template(message: str) -> tuple[str, str] | None:
     steer the model path's extras either way. Short of a spec, the longest
     supported package name found as a whole word decides, so
     `basic-resume-plus` is never read as a mention of `basic-resume`.
+
+    This is a *mention*, not a request: "is acorn-resume better than
+    basic-resume?" and "what does clean-print-cv look like?" both match,
+    and so does a message naming two packages (the longest match wins,
+    arbitrarily between equals). That is deliberate -- narrowing detection
+    to an explicit `template` parameter or an explicit `@preview/x:y` spec
+    would re-break 「幫我換成 acorn-resume」, the plain-language case this
+    fallback exists for. What a mention must therefore never do is *order*
+    a rewrite: `prompts.TEMPLATE_SWITCH_EXTRA` is phrased as a condition
+    ("if the user is asking to switch templates"), so a name supplies the
+    target's API context while the model still judges intent. Read that
+    constant's own comment before tightening either side.
     """
     text = message or ""
     spec = parse_preview_spec(text)

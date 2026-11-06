@@ -131,12 +131,15 @@ copied from the brief, which had the right two losses but the wrong
   real `highlights` list, with no join needed at all.
 - Every `EducationEntry` field maps directly except `bullets` (above):
   `degree`, `institution`, `location`, `start`/`end` -> `period`.
-- Every `Contact` field maps directly onto `personal`: `email`, `phone`,
+- Every `Contact` field reaches `personal`: `email`, `phone`,
   `location`, `github`, `linkedin`, `website` are all named keys `cv-
   header` already reads. Unlike `acorn-resume`, which has no slot for
   `phone`/`location` at all, this package's header has a dedicated key
   for both -- no loss, no need for the trailing-line fallback acorn
-  needed.
+  needed. Which value lands in which key is *not* field-for-field,
+  though: the first three keys are printed with unconditional
+  separators, so the values are packed into them in order -- see
+  `_CONTACT_SLOTS`.
 - `personal.title` -- this package's own schema has a professional
   headline/subtitle slot (`cv-data.yaml`'s `"Ogre | Swamp Owner | ..."`)
   that `ResumeContent` simply has no field for *at all*, not even on
@@ -182,7 +185,7 @@ nothing in `dropped`/`degraded`.
 
 from __future__ import annotations
 
-from app.services.emitters._common import bullet_lines, font_literal
+from app.services.emitters._common import bare_url, bullet_lines, font_literal
 from app.services.emitters.base import EmitResult
 from app.services.resume_content import ProjectEntry, ResumeContent
 from app.services.typst_escape import typst_value
@@ -230,28 +233,88 @@ def _project_name(entry: ProjectEntry) -> str:
     return role or name
 
 
+# `cv-header`'s contact row, in the package's own order. The first three
+# are printed with *unconditional* separators -- `#personal.email
+# #contact-sep #personal.phone #contact-sep #personal.location`
+# (cv-template.typ:107-111) -- and only the last three are guarded by an
+# `if != ""`. `contact-sep` is a closed-over `#let` inside
+# `cv-page-setup`'s scope, so there is no argument, key or show rule this
+# emitter can reach to suppress a separator next to an empty slot: a
+# person with no phone number used to get `r@example.com  |    |` under
+# their name, and `MINIMAL` (name + email, the shape of an untouched
+# starter) rendered the same.
+#
+# So the slots are *packed* rather than mapped field-for-field: every
+# present contact value, in this order, fills the three unguarded slots
+# first and spills into the guarded ones. That is safe because
+# `cv-header` renders all six identically -- plain text, no `mailto:`,
+# no `#link`, no per-field icon or prefix (confirmed against
+# cv-template.typ) -- so which slot a value occupies changes nothing
+# about how it looks, only whether a separator next to it has something
+# to separate. Three or more contact values (email + phone + location,
+# or email + two links) now render with no stray separator at all, and
+# two leave one trailing separator instead of two interleaved ones.
+#
+# One contact value still leaves two trailing separators: the unguarded
+# part of that row always emits exactly two, and no arrangement of a
+# single value can hide both. Removing them would mean not calling
+# `cv-header` at all -- reimplementing the name block, rule, subtitle and
+# contact row against this package's *internal* style `#let`s -- or
+# emitting negative `h()` spacing into a slot, which is font- and
+# size-dependent junk in a PDF a person sends to employers. Neither is
+# worth it; see `test_clean_print_cv_packs_a_partial_contact_row`.
+_CONTACT_SLOTS = ("email", "phone", "location", "linkedin", "github", "website")
+
+
 def _personal(content: ResumeContent) -> dict:
     contact = content.contact
-    return {
+    # linkedin/github/website go through `bare_url`, not `_text`: this
+    # package shows them as plain text rather than a hyperlink, so a
+    # value carrying its own `https://` is a label inconsistent with
+    # every other emitter's rather than a dead link -- normalised here
+    # for the same reason and in the same place. See `_common.bare_url`.
+    present = [
+        value
+        for value in (
+            _text(contact.email),
+            _text(contact.phone),
+            _text(contact.location),
+            bare_url(contact.linkedin),
+            bare_url(contact.github),
+            bare_url(contact.website),
+        )
+        if value
+    ]
+    personal = {
         "name": _text(content.name),
         # No ResumeContent field maps to this at all (not even on
         # Contact) -- "" is not a loss, there is nothing to drop. See
         # module docstring.
         "title": "",
-        "email": _text(contact.email),
-        "phone": _text(contact.phone),
-        "location": _text(contact.location),
-        "linkedin": _text(contact.linkedin),
-        "github": _text(contact.github),
-        "website": _text(contact.website),
+        # Every slot is always present, empty or not: `cv-header` reads
+        # each one with no `.at(default:)` guard (except `website`), so a
+        # missing key is a hard compile error.
+        **{slot: "" for slot in _CONTACT_SLOTS},
     }
+    personal.update(dict(zip(_CONTACT_SLOTS, present)))
+    return personal
 
 
 def _skills(content: ResumeContent) -> list[dict]:
-    return [
-        {"category": _text(group.category), "items": [_text(item) for item in group.items]}
+    # A group with nothing in it is filtered out, not emitted empty:
+    # `cv-skills` prints `#group.category:` and `#group.items.join(...)`
+    # unconditionally, so an empty group renders a bare `:` under the
+    # TECHNICAL SKILLS heading. This is the dict-shaped counterpart of
+    # `_common.skill_line` returning `None`, which is what already keeps
+    # the other three emitters from rendering the same junk -- and the
+    # reason `emit()` guards `#cv-skills` on *this* list rather than on
+    # `content.skills`: a skills list of nothing but empty groups must
+    # not print the heading either.
+    groups = [
+        {"category": _text(group.category), "items": [_text(item) for item in group.items if item]}
         for group in content.skills
     ]
+    return [group for group in groups if group["category"] or group["items"]]
 
 
 def _experience(content: ResumeContent) -> list[dict]:
@@ -273,7 +336,10 @@ def _projects(content: ResumeContent) -> list[dict]:
     return [
         {
             "name": _text(_project_name(entry)),
-            "url": _text(entry.url),
+            # Shown as plain text here, not a `#link` -- `bare_url` for
+            # label consistency with the other three emitters, which
+            # must strip the scheme to keep the hyperlink alive.
+            "url": bare_url(entry.url),
             # project() has only a single `description` string, not a
             # list -- this is the one place bullets are joined rather
             # than preserved as discrete items. degraded (see emit()).
@@ -338,7 +404,10 @@ def emit(content: ResumeContent) -> EmitResult:
         lines.append("#cv-summary(data.summary)")
     if content.work:
         lines.append("#cv-experience(data.experience)")
-    if content.skills:
+    # `data["skills"]`, not `content.skills`: `_skills` drops a group
+    # with no category and no items, so a skills list made only of empty
+    # groups must not print the heading. See `_skills`.
+    if data["skills"]:
         lines.append("#cv-skills(data.skills)")
     if content.projects:
         lines.append("#cv-projects(data.projects)")

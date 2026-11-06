@@ -31,10 +31,24 @@ worse than hand-written Typst. `markup_value` does not fight any of this:
 `"`/`'` are never escaped, and `.` is never in its escape set, so `...`
 is untouched. The one disclosed exception is `-`: it *is* escaped
 unconditionally like every other markup-significant character (see
-`_MARKUP_ALWAYS_ESCAPE`'s own comment for why), which means a `--`/`---`
-run arriving through `markup_value` renders as literal hyphens instead of
-an en/em dash -- a known trade-off of escaping every occurrence rather
-than carving out a run-length exception, not an oversight.
+`_MARKUP_ALWAYS_ESCAPE`'s own comment for why), which suppresses Typst's
+*markup-level* `--`/`---` substitution for a run that arrives through
+`markup_value`.
+
+That suppression is very nearly invisible in practice, which is worth
+stating precisely rather than overstating: in **New Computer Modern**,
+the face every emitter pins via `app.services.emitters._common.
+FALLBACK_FONTS`, the font's own `--` -> endash ligature then applies
+during shaping anyway, so the run still *renders* as a dash. Measured
+against the real binary: `X\-\-Y` and `X--Y` each produce one 5.50pt
+glyph in NCM, while Libertinus (Typst's default, and the reason a
+bare-document experiment suggested otherwise) renders the escaped form
+as two 3.72pt hyphens. What does differ in the pinned font is the PDF's
+ToUnicode mapping -- the escaped run extracts back as `--`, the
+unescaped one as `–` -- which is what text extraction, and therefore ATS
+parsing, sees. So this is a trade-off in the text layer, not a visibly
+worse page, and still a known consequence of escaping every occurrence
+rather than carving out a run-length exception, not an oversight.
 """
 
 from __future__ import annotations
@@ -230,11 +244,17 @@ def escape_typst_markup(text: str) -> str:
 # note. `.` was never in this set; a lone `-` still is, and always will
 # be escaped on its own (an isolated `-` has no shorthand to preserve),
 # but this module does not scan for a `--`/`---` run to carve out an
-# exception for it, so a résumé bullet that happens to contain one will,
-# after this function, render that run as literal hyphens rather than a
-# dash. That is a known, disclosed trade-off of escaping unconditionally
-# rather than conditionally (see this module's own docstring and the
-# task report for the reasoning), not an oversight.
+# exception for it, so a résumé bullet that happens to contain one has
+# Typst's *markup-level* substitution suppressed for it. That does not
+# mean it renders as literal hyphens: in New Computer Modern -- the face
+# every emitter pins (`emitters._common.FALLBACK_FONTS`) -- the font's
+# own `--` -> endash ligature applies during shaping regardless, so the
+# run still shapes to a dash, glyph for glyph (measured: one 5.50pt
+# glyph either way). The difference the escape does make in the pinned
+# font is the PDF's ToUnicode mapping, `--` rather than `–`, which is
+# what text extraction and ATS parsing read. A known, disclosed
+# trade-off of escaping unconditionally rather than conditionally (see
+# this module's own docstring for the measurements), not an oversight.
 _MARKUP_ALWAYS_ESCAPE = frozenset("#$@*_`<>[]~-+/=")
 
 # `_LINE_BREAK_RE` is defined once, near the top of this module,

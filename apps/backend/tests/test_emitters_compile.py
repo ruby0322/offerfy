@@ -17,22 +17,38 @@ from io import BytesIO
 
 import pytest
 from pdfminer.high_level import extract_pages
+from pdfminer.pdfdocument import PDFDocument
+from pdfminer.pdfpage import PDFPage
+from pdfminer.pdfparser import PDFParser
+from pdfminer.pdftypes import resolve1
 
 from app.services.ats import extract_pdf_text
 from app.services.emitters import deterministic_pairs, emitter_for
 from app.services.import_qa import verify_render
-from app.services.resume_content import Contact, ResumeContent, WorkEntry
+from app.services.resume_content import (
+    Contact,
+    ProjectEntry,
+    ResumeContent,
+    WorkEntry,
+)
 from app.services.template_probe import font_warnings
 from app.services.typst_compile import (
     compile_typst,
     compile_typst_with_stderr,
     typst_available,
 )
-from tests.fixtures.golden_content import GOLDEN
+from tests.fixtures.golden_content import GOLDEN, MINIMAL
 
 pytestmark = pytest.mark.skipif(not typst_available(), reason="typst binary not available")
 
 PAIRS = sorted(deterministic_pairs())
+
+# Every test below is parametrized over `PAIRS`, so an emptied registry
+# would collect nothing at all and turn this whole compile gate green by
+# vacuity rather than by passing. Asserted at import time, once, the same
+# way the rest of this suite refuses to let a shrinking fixture stand in
+# for a passing assertion.
+assert PAIRS, "deterministic_pairs() is empty -- every gate below would collect nothing"
 
 
 @pytest.mark.parametrize("pair", PAIRS)
@@ -157,9 +173,20 @@ _SMART_QUOTE_CHARS = frozenset("\"'")
 # module docstring's "Settled" note: intentional typography, not content
 # loss. `--`/`---` happen to round-trip exactly too, once every `-` is
 # escaped unconditionally (see `markup_value`'s docstring for why this is
-# a disclosed trade-off, not a design goal) -- asserted, so a regression
-# that stopped escaping `-` would be caught here, not hidden by the
-# single-character `X-Y`/`-Y` cases rendering identically escaped or not.
+# a disclosed trade-off, not a design goal) -- asserted, but it is worth
+# being exact about *what* that assertion pins, because an earlier
+# version of this comment claimed more than it delivers. In New Computer
+# Modern, the face every emitter pins, the escaped and unescaped forms
+# shape to the same glyph (the font's own `--` -> endash ligature applies
+# either way; measured, one 5.50pt glyph both times), so this assertion
+# is not evidence about how the page *looks*. What it reads back is the
+# PDF's ToUnicode mapping: `--` for the escaped run, `–` for the
+# unescaped one. A regression that stopped escaping `-` therefore does
+# fail here -- verified by removing `-` from `_MARKUP_ALWAYS_ESCAPE` --
+# but as a text-layer difference (the one ATS parsing sees), not a
+# visible one. The leading-position cases above (`f"{ch} lead"`) are what
+# guard the *visible* half: with `-` unescaped, `- lead` inside a bullet
+# renders as a nested list item instead of text.
 # `...` is excluded from the exact-match set on purpose: `.` was never in
 # `_MARKUP_ALWAYS_ESCAPE`, so `...` still becomes a single ellipsis
 # character, which is correct and not asserted against here -- it is
@@ -225,3 +252,143 @@ def test_registered_emitter_round_trips_a_hazard_character_in_a_bare_paragraph(p
         pdf_bytes = compile_typst(source, "pdf")
         pdf_text = extract_pdf_text(pdf_bytes)
         assert summary in pdf_text, (marker, pdf_text)
+
+
+def _pdf_uris(pdf_bytes: bytes) -> list[str]:
+    """Every `/URI` an annotation in this PDF actually points at.
+
+    The rendered *text* of a hyperlink is not what a doubled scheme
+    breaks -- the label reads correctly either way, which is exactly why
+    this had to be checked against the link target rather than the
+    emitted source or the extracted text.
+    """
+    found: list[str] = []
+    document = PDFDocument(PDFParser(BytesIO(pdf_bytes)))
+    for page in PDFPage.create_pages(document):
+        for annotation in resolve1(page.annots) or []:
+            action = resolve1(resolve1(annotation).get("A")) or {}
+            uri = action.get("URI")
+            if uri:
+                found.append(uri.decode() if isinstance(uri, bytes) else str(uri))
+    return found
+
+
+# A résumé whose contacts and project URL each arrived carrying their own
+# scheme -- the IR's "bare domain" convention is a convention, not a
+# constraint the schema enforces, so a snapshot written before
+# `EXTRACT_PROMPT` asked for it (or a value typed in by hand) looks like
+# this. Mixed case on purpose: `_common.bare_url` matches the scheme
+# case-insensitively.
+_SCHEMED_CONTACTS = ResumeContent(
+    name="Scheme Carrying Case",
+    contact=Contact(
+        email="scheme@example.com",
+        github="https://github.com/weiling",
+        linkedin="HTTP://linkedin.com/in/weiling",
+        website="Https://weiling.dev",
+    ),
+    projects=[ProjectEntry(name="Doubled", url="https://github.com/weiling/doubled")],
+)
+
+
+@pytest.mark.parametrize("pair", PAIRS)
+def test_registered_emitter_never_emits_a_doubled_scheme_in_a_link_target(pair):
+    # Every one of these packages (and acorn-resume's own `#link`)
+    # prepends `"https://"` to the value it is handed, so passing a value
+    # that already carries one produced `https://https://github.com/x` as
+    # the link target: the label looked right and the hyperlink was dead,
+    # in the PDF a person sends to employers. Read back off the compiled
+    # PDF's annotations rather than asserted on the emitted source,
+    # because the source is where it looked fine.
+    #
+    # `clean-print-cv` is the one pair that renders no link annotation at
+    # all (it prints every URL as plain text -- confirmed against
+    # `cv-template.typ`), so for that pair this is the weaker statement
+    # that nothing regressed into emitting a broken one. The companion
+    # test below is what keeps the assertion from going vacuous across
+    # the whole registry.
+    name, version = pair
+    source = emitter_for(name, version).emit(_SCHEMED_CONTACTS).source
+    uris = _pdf_uris(compile_typst(source, "pdf"))
+    for uri in uris:
+        assert "https://https://" not in uri, uri
+        assert "https://http://" not in uri, uri
+        # Belt and braces for any other ordering a future emitter could
+        # produce: a scheme may appear only at position 0.
+        assert uri.lower().count("http://") + uri.lower().count("https://") <= 1, uri
+
+
+def test_the_registry_renders_link_targets_at_all():
+    """The doubled-scheme gate above is per-pair, and a pair that renders
+    no annotations passes it for free. If every emitter stopped emitting
+    links -- or `_pdf_uris` stopped finding them -- that gate would go
+    green on nothing at all, which is the same vacuity class the
+    `assert PAIRS` at the top of this module exists for.
+    """
+    everything: list[str] = []
+    for name, version in PAIRS:
+        source = emitter_for(name, version).emit(_SCHEMED_CONTACTS).source
+        everything.extend(_pdf_uris(compile_typst(source, "pdf")))
+    assert "https://github.com/weiling" in everything
+    assert "https://github.com/weiling/doubled" in everything
+    assert "mailto:scheme@example.com" in everything
+
+
+# --- clean-print-cv's unguarded contact separators ------------------------
+
+
+def _clean_print_cv_contact_row(content: ResumeContent) -> str:
+    source = emitter_for("clean-print-cv", "0.1.0").emit(content).source
+    text = extract_pdf_text(compile_typst(source, "pdf"))
+    # The row directly under the name -- the second non-empty line of the
+    # rendered page, by cv-header's own layout.
+    lines = [line for line in text.splitlines() if line.strip()]
+    return lines[1]
+
+
+def test_clean_print_cv_renders_no_separator_junk_for_three_contact_values():
+    # The fix's real payoff, read off the page rather than the source:
+    # `email | phone | location` is printed with *unconditional*
+    # separators (cv-template.typ:107-111) and `contact-sep` is a
+    # closed-over `#let`, so the only lever is which values occupy those
+    # three slots. Packing present values into them in order means
+    # anyone with three or more contact values -- email + phone +
+    # location, or email + two links -- renders with no stray separator
+    # at all. Field-for-field mapping rendered this exact content as
+    # `r@example.com  |    |    |  github.com/a  |  a.dev`.
+    content = ResumeContent(
+        name="Packed",
+        contact=Contact(email="r@example.com", github="github.com/a", website="a.dev"),
+    )
+    assert _clean_print_cv_contact_row(content) == "r@example.com  |  github.com/a  |  a.dev"
+
+
+def test_clean_print_cv_renders_one_trailing_separator_for_two_contact_values():
+    # Two values fill two of the three unguarded slots, so one trailing
+    # separator is left. Field-for-field mapping rendered the same
+    # content with three separators and two of them dangling.
+    content = ResumeContent(
+        name="Two", contact=Contact(email="r@example.com", github="github.com/a")
+    )
+    assert _clean_print_cv_contact_row(content).rstrip() == "r@example.com  |  github.com/a  |"
+
+
+def test_clean_print_cv_still_renders_two_separators_for_minimal():
+    """What `MINIMAL` -- name + email, the shape of an untouched starter --
+    actually renders through this emitter, pinned rather than assumed.
+
+    This is the residual the packing cannot remove, recorded here so it
+    is a known number rather than a surprise: the unguarded part of
+    cv-header's contact row always emits exactly two `contact-sep`
+    glyphs, and no arrangement of a single value can hide both. Removing
+    them would mean not calling `cv-header` at all (reimplementing the
+    name block, rule, subtitle and contact row against this package's
+    *internal* style `#let`s) or emitting negative `h()` spacing into a
+    slot, which is font- and size-dependent junk in a PDF a person sends
+    to employers. If this assertion ever starts failing because the row
+    got *cleaner*, that is the fix, not a regression -- update it.
+    """
+    row = _clean_print_cv_contact_row(MINIMAL)
+    assert row.startswith("jordan@example.com")
+    assert row.count("|") == 2
+    assert row.rstrip() == "jordan@example.com  |    |"
