@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-06T03:59:05.324657+00:00",
+  "generated_at": "2026-11-06T08:02:46.079852+00:00",
   "typst_version": "typst 0.15.1 (9dfd3a08)",
   "rows": [
     {
@@ -38,17 +38,13 @@
     {
       "name": "acorn-resume",
       "version": "0.1.0",
-      "ok": false,
+      "ok": true,
       "pages": 2,
       "needs_inline_data": false,
-      "font_warnings": [
-        "calibri"
-      ],
+      "font_warnings": [],
       "installable_fonts": [],
-      "unavailable_fonts": [
-        "calibri"
-      ],
-      "reason": "font warning: calibri"
+      "unavailable_fonts": [],
+      "reason": "ok"
     },
     {
       "name": "altacv",
