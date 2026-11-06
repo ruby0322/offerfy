@@ -346,6 +346,19 @@ def emit(content: ResumeContent) -> EmitResult:
         lines.append("#cv-education(data.education)")
 
     for section in content.extras:
+        # section-heading() prints unconditionally -- it has no internal
+        # "skip if empty" guard of its own, unlike `_common.heading_
+        # block` (which this emitter no longer calls here, see below).
+        # A `Section` with no -- or entirely blank -- `entries` must
+        # still emit nothing at all, the same "heading only when there
+        # is a body" rule every other call in this function already
+        # follows (see the "Section calls are omitted" note above) and
+        # the one `heading_block` gave this section for free before the
+        # switch to `section-heading()`. Computing the body first and
+        # skipping the section when it is empty restores that.
+        body = bullet_lines(section.entries)
+        if not body:
+            continue
         lines.append("")
         # section-heading() is the package's own top-level `#let`
         # (confirmed against cv-template.typ: no underscore prefix),
@@ -354,7 +367,7 @@ def emit(content: ResumeContent) -> EmitResult:
         # section uses, not a markup `==` approximation of it. See
         # module docstring's "extras is rendered" note.
         lines.append(f"#section-heading({typst_value(section.title)})")
-        lines.extend(bullet_lines(section.entries))
+        lines.extend(body)
 
     source = "\n".join(lines).rstrip() + "\n"
 

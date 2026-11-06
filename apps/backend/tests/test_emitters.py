@@ -7,6 +7,7 @@ module that runs the emitted source through the real compiler.
 
 from app.services.emitters import emitter_for
 from app.services.emitters._common import bullet_lines
+from app.services.resume_content import Section
 from app.services.typst_escape import typst_value
 from tests.fixtures.golden_content import GOLDEN, MINIMAL
 
@@ -440,3 +441,23 @@ def test_clean_print_cv_renders_extras_through_the_packages_own_heading():
     assert f"#section-heading({typst_value(section.title)})" in src
     assert f"== {section.title}" not in src
     assert bullet_lines(section.entries)[0] in src
+
+
+def test_clean_print_cv_omits_an_extras_section_with_no_entries():
+    # section-heading() prints unconditionally -- it has no internal
+    # "skip if empty" guard the way _common.heading_block (used by the
+    # other three emitters, and by this emitter's own previous version)
+    # does. GOLDEN.extras[0] always has a non-empty entry and MINIMAL has
+    # no extras at all, so neither fixture alone exercises a Section with
+    # no entries -- this constructs one directly, the same model_copy
+    # pattern already used elsewhere in this module (e.g.
+    # test_clean_print_cv_declares_no_losses_when_the_content_has_none_
+    # to_lose), kept local to this emitter's own tests rather than added
+    # to the shared GOLDEN/MINIMAL fixtures: the other three emitters
+    # were independently confirmed to already guard this correctly (see
+    # the fix report), so this is a regression guard for this emitter's
+    # own code, not a new case the whole shared fixture needs to carry.
+    content = GOLDEN.model_copy(update={"extras": [Section(title="Empty Section", entries=[])]})
+    src = emitter_for("clean-print-cv", "0.1.0").emit(content).source
+    assert "Empty Section" not in src
+    assert "#section-heading(" not in src
