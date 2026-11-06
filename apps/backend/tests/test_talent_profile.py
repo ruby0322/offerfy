@@ -764,3 +764,82 @@ def test_clearing_the_source_reports_no_error(
     _, resume = _ready(client, db_session, monkeypatch, sub="sub-clear-error")
     _point_at(client, resume.id)
     assert _point_at(client, None).json()["build_error"] is None
+
+
+# --- regression: this call must never send an Anthropic model id to the ------
+# --- OpenAI endpoint it posts to ---------------------------------------------
+
+
+def test_build_sends_an_openai_model_with_no_pin(
+    client: TestClient, db_session, monkeypatch, openai_enabled
+):
+    """model_catalog.DEFAULT_MODEL is an Anthropic id ("claude-haiku-5-5"),
+    and this call always speaks to OpenAI's Responses endpoint -- CHAT_MODEL
+    is blank by default, so an unpinned build is the common path, not an edge
+    case. A fallback resolving to a non-OpenAI model would make every
+    unpinned build fail at the provider, and every profile would go unbuilt.
+    Asserted on the id actually sent in the request body, not on the result,
+    so a selection that merely *reports* an OpenAI id while sending something
+    else could not slip through.
+    """
+    from app.services import model_catalog
+
+    stub = _stub(monkeypatch, StubProfileLlm(_said(_profile())))
+    _, resume = _ready(client, db_session, monkeypatch, sub="sub-openai-no-pin")
+    _point_at(client, resume.id)
+
+    sent_model = stub.calls[0]["body"]["model"]
+    assert model_catalog.spec_or_passthrough(sent_model).provider == "openai"
+
+
+def test_build_sends_an_openai_model_when_the_pin_is_anthropic(
+    client: TestClient, db_session, monkeypatch, openai_enabled
+):
+    """An operator pin is honoured only when it names an OpenAI model:
+    pinning an Anthropic model must not take this feature down with it.
+    """
+    from app.services import model_catalog
+
+    monkeypatch.setenv("CHAT_MODEL", "claude-opus-5-5")
+    get_settings.cache_clear()
+
+    stub = _stub(monkeypatch, StubProfileLlm(_said(_profile())))
+    _, resume = _ready(client, db_session, monkeypatch, sub="sub-openai-ant-pin")
+    _point_at(client, resume.id)
+
+    sent_model = stub.calls[0]["body"]["model"]
+    assert model_catalog.spec_or_passthrough(sent_model).provider == "openai"
+
+
+def test_build_honours_an_openai_pin(
+    client: TestClient, db_session, monkeypatch, openai_enabled
+):
+    """The fallback must not override a pin that was already usable."""
+    monkeypatch.setenv("CHAT_MODEL", "gpt-6.1-terra")
+    get_settings.cache_clear()
+
+    stub = _stub(monkeypatch, StubProfileLlm(_said(_profile())))
+    _, resume = _ready(client, db_session, monkeypatch, sub="sub-openai-pin")
+    _point_at(client, resume.id)
+
+    assert stub.calls[0]["body"]["model"] == "gpt-6.1-terra"
+
+
+def test_build_refuses_rather_than_calling_if_the_fallback_is_not_openai(
+    client: TestClient, db_session, monkeypatch, openai_enabled
+):
+    """The guard behind the fallback: if PROFILE_FALLBACK_MODEL ever stops
+    resolving to an OpenAI model, this makes no request at all rather than
+    sending the wrong provider's id to an OpenAI endpoint.
+    """
+    monkeypatch.setattr(
+        "app.services.profile.PROFILE_FALLBACK_MODEL", "claude-haiku-5-5"
+    )
+
+    stub = _stub(monkeypatch, StubProfileLlm(_said(_profile())))
+    _, resume = _ready(client, db_session, monkeypatch, sub="sub-bad-fallback")
+    body = _point_at(client, resume.id).json()
+
+    assert stub.calls == []
+    assert body["build_error"] == "llm_not_configured"
+    assert db_session.query(TalentProfile).count() == 0
