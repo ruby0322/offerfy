@@ -22,7 +22,12 @@ from app.services.ats import extract_pdf_text
 from app.services.emitters import deterministic_pairs, emitter_for
 from app.services.import_qa import verify_render
 from app.services.resume_content import Contact, ResumeContent, WorkEntry
-from app.services.typst_compile import compile_typst, typst_available
+from app.services.template_probe import font_warnings
+from app.services.typst_compile import (
+    compile_typst,
+    compile_typst_with_stderr,
+    typst_available,
+)
 from tests.fixtures.golden_content import GOLDEN
 
 pytestmark = pytest.mark.skipif(not typst_available(), reason="typst binary not available")
@@ -37,6 +42,23 @@ def test_registered_emitter_output_compiles_in_one_page(pair):
     pdf_bytes = compile_typst(source, "pdf")
     pages = sum(1 for _ in extract_pages(BytesIO(pdf_bytes)))
     assert pages == 1
+
+
+@pytest.mark.parametrize("pair", PAIRS)
+def test_registered_emitter_output_has_no_missing_font_warning(pair):
+    # Every emitter in this registry sets its target's font explicitly
+    # (_common.font_literal) rather than trusting the package's own
+    # default -- acorn-resume's own `resume()` defaults to `font:
+    # "Calibri"`, which this host does not have, and its vendor example
+    # fails this exact gate in `data/template_support.json` for that
+    # reason (see acorn_resume.py's module docstring). Parametrized over
+    # every registered pair, not just acorn-resume: a clean font probe is
+    # the whole reason this emitter's output -- not the vendor example --
+    # is what a later survey run offers the pair on.
+    name, version = pair
+    source = emitter_for(name, version).emit(GOLDEN).source
+    _pdf_bytes, stderr = compile_typst_with_stderr(source, "pdf")
+    assert font_warnings(stderr) == ()
 
 
 @pytest.mark.parametrize("pair", PAIRS)

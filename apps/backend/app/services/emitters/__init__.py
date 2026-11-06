@@ -30,7 +30,7 @@ own `EMITTER_PINS` placeholder, so a pair only needs declaring once, here.
 
 from __future__ import annotations
 
-from app.services.emitters import ats_friendly_resume, basic_resume
+from app.services.emitters import acorn_resume, ats_friendly_resume, basic_resume
 from app.services.emitters.base import EmitResult, Emitter
 
 __all__ = ["EmitResult", "Emitter", "deterministic_pairs", "emitter_for"]
@@ -38,6 +38,7 @@ __all__ = ["EmitResult", "Emitter", "deterministic_pairs", "emitter_for"]
 _EMITTERS: dict[tuple[str, str], Emitter] = {
     (basic_resume.name, basic_resume.version): basic_resume,
     (ats_friendly_resume.name, ats_friendly_resume.version): ats_friendly_resume,
+    (acorn_resume.name, acorn_resume.version): acorn_resume,
 }
 
 

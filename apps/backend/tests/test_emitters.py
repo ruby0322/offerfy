@@ -6,6 +6,7 @@ module that runs the emitted source through the real compiler.
 """
 
 from app.services.emitters import emitter_for
+from app.services.emitters._common import bullet_lines
 from tests.fixtures.golden_content import GOLDEN, MINIMAL
 
 
@@ -170,3 +171,138 @@ def test_ats_friendly_declares_no_project_role_loss_when_none_is_set():
     )
     result = emitter_for("ats-friendly-resume", "0.1.1").emit(roleless)
     assert result.dropped == ()
+
+
+# --- acorn-resume: the lossy case -------------------------------------------
+#
+# acorn-resume's components have slots the IR's fields genuinely do not fit:
+# edu() has no `details` parameter at all (education bullets are only
+# degraded, rendered as plain markup after the call), and project() has no
+# date slot whatsoever (project dates are dropped) -- see
+# `app/services/emitters/acorn_resume.py`'s module docstring for the full
+# field-by-field derivation, including why `projects[].role` and
+# `projects[].url` are rendered rather than declared lost even though
+# project() has no dedicated slot for either.
+
+
+def test_acorn_emitter_registered_exactly():
+    assert emitter_for("acorn-resume", "0.1.0") is not None
+    assert emitter_for("acorn-resume", "0.2.0") is None
+
+
+def test_acorn_declares_its_losses_exactly():
+    # Only two losses in this package: project() has no date slot at all
+    # (dropped), and edu() has no `details` parameter so bullets survive
+    # only as plain markup after the call, not through a component slot
+    # (degraded). Every other field -- including projects[].role and
+    # projects[].url, which also have no dedicated slot -- is rendered
+    # rather than declared lost (see the module docstring).
+    result = emitter_for("acorn-resume", "0.1.0").emit(GOLDEN)
+    assert result.dropped == ("projects[].dates",)
+    assert result.degraded == ("education[].bullets",)
+
+
+def test_acorn_declares_no_losses_when_the_content_has_none_to_lose():
+    # emit() must derive dropped/degraded from the content it was handed,
+    # not return a constant -- a resume with no project dates and no
+    # education bullets has nothing to lose in either place.
+    content = GOLDEN.model_copy(
+        update={
+            "projects": [p.model_copy(update={"start": None, "end": None}) for p in GOLDEN.projects],
+            "education": [e.model_copy(update={"bullets": []}) for e in GOLDEN.education],
+        }
+    )
+    result = emitter_for("acorn-resume", "0.1.0").emit(content)
+    assert result.dropped == ()
+    assert result.degraded == ()
+
+
+def test_acorn_overrides_the_calibri_default():
+    # resume()'s own default is `font: "Calibri"`, which this host does
+    # not have -- see _common.FALLBACK_FONTS and this emitter's module
+    # docstring on why this matters more here than anywhere else.
+    src = emitter_for("acorn-resume", "0.1.0").emit(GOLDEN).source
+    assert "font: (" in src
+    assert "New Computer Modern" in src
+    assert "Noto Serif CJK TC" in src
+    assert "Calibri" not in src
+
+
+def test_acorn_always_passes_technologies_as_a_list():
+    # project()'s body calls `.map` on `technologies` unconditionally --
+    # omitting it (leaving the `none` default) raises "type none has no
+    # method map". ResumeContent has no technologies field at all, so
+    # this is always an empty list, never omitted.
+    src = emitter_for("acorn-resume", "0.1.0").emit(GOLDEN).source
+    assert "technologies: (" in src
+
+
+def test_acorn_takes_work_bullets_through_details():
+    # exp(role:, date:, organization:, location:, details:) -- bullets go
+    # through `details`, not as plain markup after the call (unlike
+    # basic-resume's/ats-friendly's `work()`, which has no such slot).
+    src = emitter_for("acorn-resume", "0.1.0").emit(GOLDEN).source
+    assert "details: [" in src
+    bullet = bullet_lines(GOLDEN.work[0].bullets)[0]
+    details_index = src.index("details: [")
+    work_close = src.index("\n)", details_index)
+    assert bullet in src[details_index:work_close]
+
+
+def test_acorn_renders_education_bullets_as_plain_markup_after_the_call():
+    # edu() has no `details` parameter at all (confirmed against
+    # acorn-resume/0.1.0/src/lib.typ) -- bullets are emitted as plain
+    # markup after the #edu(...) call closes, the degraded form, not
+    # inside a `details:` argument it does not have.
+    src = emitter_for("acorn-resume", "0.1.0").emit(GOLDEN).source
+    edu_entry = GOLDEN.education[0]
+    edu_index = src.index("#edu(")
+    edu_close = src.index("\n)", edu_index) + len("\n)")
+    bullet = bullet_lines(edu_entry.bullets)[0]
+    after_call = src[edu_close:]
+    assert "details:" not in src[edu_index:edu_close]
+    assert bullet in after_call
+
+
+def test_acorn_renders_a_projects_url_without_declaring_it_lost():
+    # project() has no `url` slot either, and its own `live-url`/
+    # `repo-url` chrome never displays the literal url text (only
+    # "Live"/"GitHub" labels do -- see lib.typ) -- so this emitter renders
+    # the literal url itself as a visible link inside `details:`, the
+    # same idiom ats_friendly_resume.py uses for its own dateless-url
+    # fallback, rather than declaring projects[].url lost.
+    dateless = GOLDEN.projects[1]
+    src = emitter_for("acorn-resume", "0.1.0").emit(GOLDEN).source
+    assert f'link("https://" + "{dateless.url}")[#"{dateless.url}"]' in src
+
+
+def test_acorn_folds_project_role_into_the_name_argument():
+    # project() has no `role` parameter at all -- rendered by folding it
+    # into `name:` as "<role>, <name>", the same "*role*, name" display
+    # basic-resume's OWN project() component already uses natively for
+    # this exact case (see basic-resume/0.2.9/src/resume.typ's project()).
+    entry = GOLDEN.projects[0]
+    assert entry.role
+    src = emitter_for("acorn-resume", "0.1.0").emit(GOLDEN).source
+    unescaped = src.replace('\\"', '"')
+    assert f"{entry.role}, {entry.name}" in unescaped
+
+
+def test_acorn_emitter_omits_a_section_with_no_entries():
+    src = emitter_for("acorn-resume", "0.1.0").emit(MINIMAL).source
+    assert "== Projects" not in src and "#project(" not in src
+    assert "== Experience" not in src and "#exp(" not in src
+    assert "== Education" not in src and "#edu(" not in src
+
+
+def test_acorn_emitter_renders_the_summary():
+    # No dedicated summary component in this package either -- same bare
+    # `== heading` + paragraph technique as basic-resume/ats-friendly.
+    src = emitter_for("acorn-resume", "0.1.0").emit(GOLDEN).source
+    assert "== Summary" in src
+    assert GOLDEN.summary in src
+
+
+def test_acorn_emitter_escapes_content_that_would_break_typst():
+    hostile = GOLDEN.model_copy(update={"name": 'A "B" \\ C'})
+    assert '\\"B\\"' in emitter_for("acorn-resume", "0.1.0").emit(hostile).source

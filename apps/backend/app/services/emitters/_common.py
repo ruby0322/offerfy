@@ -63,6 +63,33 @@ def dates_expr(
     )
 
 
+def date_range_expr(start: str | None, end: str | None, *, sep: str = " - ") -> str | None:
+    """A plain `"<start><sep><end>"` Typst string literal, or `None` when
+    there is nothing to date -- the plain-string counterpart to
+    `dates_expr`, for a package with no dates-helper function in its
+    namespace at all.
+
+    `dates_expr` assumes the target package exposes a two-keyword helper
+    call (`dates-helper(start-date:, end-date:)`, or a fork's rename of
+    it) -- true of every emitter before this one. `acorn-resume` has no
+    such function anywhere in `src/lib.typ`: its vendor template builds
+    the `date:` argument on `exp`/`edu` by hand, as a bare string
+    (`date: "Jun 2025 - Present"`). Calling `dates_expr` against this
+    package would silently emit a call to a function that does not
+    exist. This is the same shape question `dates_expr`'s own `helper`
+    keyword exists to answer, just one level further: not *which*
+    function to call, but *whether there is a function to call at all* --
+    so this is a sibling, not a variant of, `dates_expr`, kept here
+    rather than duplicated in `acorn_resume.py` on the chance a later
+    package needs the same plain-string shape.
+    """
+    if not start and not end:
+        return None
+    if start and end:
+        return typst_value(f"{start}{sep}{end}")
+    return typst_value(start or end or "")
+
+
 def skill_line(group: SkillGroup) -> str | None:
     """One `- *category*: item, item` (or just one half, whichever is
     present) markup bullet for a `SkillGroup`, or `None` for an empty one.

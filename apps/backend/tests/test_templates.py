@@ -448,12 +448,13 @@ def test_survey_row_fails_when_the_emitter_output_itself_does_not_compile(monkey
 def test_survey_row_falls_back_to_the_vendor_example_font_warnings_without_an_emitter(
     monkeypatch, tmp_path
 ):
-    # The other branch of the same decision, pinned by name: acorn-resume
-    # has no emitter yet (Task 11 is what gives it one and flips it back
-    # into the supported set), and ~92 of the 96 surveyed packages never
-    # will -- gate 2 must keep measuring the vendor example's own probe
-    # for them, and must never try to compile an emitter's output that
-    # does not exist.
+    # The other branch of the same decision, pinned by name: this package
+    # name is deliberately not in the emitter registry (acorn-resume
+    # itself got one in Task 10 -- see app/services/emitters/
+    # acorn_resume.py -- and is no longer a "no emitter" example), and
+    # ~92 of the 96 surveyed packages never will have one -- gate 2 must
+    # keep measuring the vendor example's own probe for them, and must
+    # never try to compile an emitter's output that does not exist.
     from app.jobs import survey_templates
 
     monkeypatch.setattr(
@@ -461,10 +462,10 @@ def test_survey_row_falls_back_to_the_vendor_example_font_warnings_without_an_em
     )
 
     def fail_if_called(source, fmt):
-        raise AssertionError("no emitter claims acorn-resume -- nothing to compile here")
+        raise AssertionError("no emitter claims this pair -- nothing to compile here")
 
     monkeypatch.setattr(survey_templates, "compile_typst_with_stderr", fail_if_called)
-    row = survey_templates.survey_row("acorn-resume", "0.1.0", {}, root=tmp_path)
+    row = survey_templates.survey_row("no-emitter-cv", "1.0.0", {}, root=tmp_path)
     assert row["ok"] is False
     assert "calibri" in row["reason"]
     assert row["font_warnings"] == ["calibri"]
