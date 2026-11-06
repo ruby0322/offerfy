@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-06T03:45:47.425025+00:00",
+  "generated_at": "2026-11-06T03:59:05.324657+00:00",
   "typst_version": "typst 0.15.1 (9dfd3a08)",
   "rows": [
     {
@@ -9,6 +9,8 @@
       "pages": 2,
       "needs_inline_data": true,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -19,6 +21,14 @@
       "needs_inline_data": false,
       "font_warnings": [
         "alegreya",
+        "courier new",
+        "arial",
+        "arial"
+      ],
+      "installable_fonts": [
+        "alegreya"
+      ],
+      "unavailable_fonts": [
         "courier new",
         "arial",
         "arial"
@@ -34,6 +44,10 @@
       "font_warnings": [
         "calibri"
       ],
+      "installable_fonts": [],
+      "unavailable_fonts": [
+        "calibri"
+      ],
       "reason": "font warning: calibri"
     },
     {
@@ -47,6 +61,12 @@
         "font awesome 7 brands",
         "font awesome 7 free"
       ],
+      "installable_fonts": [
+        "font awesome 7 free solid",
+        "font awesome 7 brands",
+        "font awesome 7 free"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: font awesome 7 free solid"
     },
     {
@@ -56,6 +76,8 @@
       "pages": 2,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -65,6 +87,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -74,6 +98,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -83,6 +109,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -92,6 +120,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -101,6 +131,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -116,6 +148,15 @@
         "hack nerd font",
         "lxgw wenkai gb"
       ],
+      "installable_fonts": [
+        "source han sans",
+        "lxgw wenkai gb",
+        "lxgw wenkai gb"
+      ],
+      "unavailable_fonts": [
+        "times new roman",
+        "hack nerd font"
+      ],
       "reason": "font warning: source han sans"
     },
     {
@@ -125,6 +166,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -141,6 +184,15 @@
         "source sans 3",
         "source serif 4"
       ],
+      "installable_fonts": [
+        "source sans 3",
+        "source sans 3",
+        "source sans 3",
+        "source serif 4",
+        "source sans 3",
+        "source serif 4"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: source sans 3"
     },
     {
@@ -162,6 +214,20 @@
         "inria sans",
         "inria sans"
       ],
+      "installable_fonts": [
+        "source sans pro",
+        "source sans 3",
+        "inria sans",
+        "inria sans",
+        "inria sans",
+        "inria sans",
+        "inria sans",
+        "font awesome 7 free",
+        "font awesome 7 brands",
+        "inria sans",
+        "inria sans"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: source sans pro"
     },
     {
@@ -173,6 +239,10 @@
       "font_warnings": [
         "linux biolinum"
       ],
+      "installable_fonts": [
+        "linux biolinum"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: linux biolinum"
     },
     {
@@ -188,6 +258,14 @@
         "font awesome 6 brands",
         "font awesome 6 free"
       ],
+      "installable_fonts": [
+        "montserrat",
+        "montserrat",
+        "font awesome 6 free solid",
+        "font awesome 6 brands",
+        "font awesome 6 free"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: montserrat"
     },
     {
@@ -197,6 +275,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -206,6 +286,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "no example"
     },
     {
@@ -215,6 +297,8 @@
       "pages": 2,
       "needs_inline_data": true,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -224,6 +308,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -238,6 +324,13 @@
         "font awesome 7 brands",
         "font awesome 7 brands"
       ],
+      "installable_fonts": [
+        "font awesome 7 free solid",
+        "font awesome 7 free solid",
+        "font awesome 7 brands",
+        "font awesome 7 brands"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: font awesome 7 free solid"
     },
     {
@@ -247,6 +340,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -258,6 +353,10 @@
       "font_warnings": [
         "source sans pro"
       ],
+      "installable_fonts": [
+        "source sans pro"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: source sans pro"
     },
     {
@@ -269,6 +368,10 @@
       "font_warnings": [
         "source sans pro"
       ],
+      "installable_fonts": [
+        "source sans pro"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: source sans pro"
     },
     {
@@ -278,6 +381,8 @@
       "pages": 2,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -287,6 +392,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -296,6 +403,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -305,6 +414,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "cover letter, not a resume"
     },
     {
@@ -314,6 +425,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -323,6 +436,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -332,6 +447,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -350,6 +467,18 @@
         "font awesome 7 brands",
         "font awesome 7 free solid"
       ],
+      "installable_fonts": [
+        "cabin",
+        "cabin",
+        "cabin",
+        "font awesome 7 free",
+        "font awesome 7 brands",
+        "font awesome 7 free solid"
+      ],
+      "unavailable_fonts": [
+        "consolas",
+        "calibri"
+      ],
       "reason": "font warning: cabin"
     },
     {
@@ -359,6 +488,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -372,6 +503,12 @@
         "symbols nerd font mono",
         "symbols nerd font"
       ],
+      "installable_fonts": [],
+      "unavailable_fonts": [
+        "symbols nerd font",
+        "symbols nerd font mono",
+        "symbols nerd font"
+      ],
       "reason": "font warning: symbols nerd font"
     },
     {
@@ -381,6 +518,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -390,6 +529,8 @@
       "pages": 0,
       "needs_inline_data": true,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -399,6 +540,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -408,6 +551,16 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [
+        "source han sans sc",
+        "source han sans sc",
+        "source han sans sc",
+        "source han serif sc",
+        "source han sans sc",
+        "source han sans sc",
+        "symbols nerd font mono"
+      ],
+      "installable_fonts": [],
+      "unavailable_fonts": [
         "source han sans sc",
         "source han sans sc",
         "source han sans sc",
@@ -428,6 +581,11 @@
         "harano aji mincho",
         "harano aji gothic"
       ],
+      "installable_fonts": [
+        "harano aji mincho",
+        "harano aji gothic"
+      ],
+      "unavailable_fonts": [],
       "reason": "Japanese rirekisho form, not a resume"
     },
     {
@@ -437,6 +595,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -448,6 +608,10 @@
       "font_warnings": [
         "cantarell"
       ],
+      "installable_fonts": [
+        "cantarell"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: cantarell"
     },
     {
@@ -463,6 +627,15 @@
         "linux libertine",
         "linux libertine"
       ],
+      "installable_fonts": [
+        "linux libertine",
+        "linux libertine",
+        "linux libertine",
+        "linux libertine"
+      ],
+      "unavailable_fonts": [
+        "consolas"
+      ],
       "reason": "font warning: linux libertine"
     },
     {
@@ -472,6 +645,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -483,6 +658,10 @@
       "font_warnings": [
         "symbols nerd font"
       ],
+      "installable_fonts": [],
+      "unavailable_fonts": [
+        "symbols nerd font"
+      ],
       "reason": "font warning: symbols nerd font"
     },
     {
@@ -492,6 +671,8 @@
       "pages": 1,
       "needs_inline_data": true,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -501,6 +682,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -510,6 +693,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -519,6 +704,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -532,6 +719,13 @@
         "font awesome 7 free solid",
         "font awesome 7 brands"
       ],
+      "installable_fonts": [
+        "font awesome 7 free solid",
+        "font awesome 7 brands"
+      ],
+      "unavailable_fonts": [
+        "calibri"
+      ],
       "reason": "font warning: calibri"
     },
     {
@@ -541,6 +735,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -559,6 +755,18 @@
         "cronos pro lt",
         "calluna"
       ],
+      "installable_fonts": [
+        "inter"
+      ],
+      "unavailable_fonts": [
+        "calluna",
+        "calluna",
+        "cronos pro",
+        "cronos lt",
+        "cronos",
+        "cronos pro lt",
+        "calluna"
+      ],
       "reason": "font warning: calluna"
     },
     {
@@ -568,6 +776,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -582,6 +792,13 @@
         "font awesome 6 brands",
         "font awesome 6 free"
       ],
+      "installable_fonts": [
+        "inter",
+        "font awesome 6 free solid",
+        "font awesome 6 brands",
+        "font awesome 6 free"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: inter"
     },
     {
@@ -591,6 +808,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -602,6 +821,10 @@
       "font_warnings": [
         "inria sans"
       ],
+      "installable_fonts": [
+        "inria sans"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: inria sans"
     },
     {
@@ -611,6 +834,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -626,6 +851,14 @@
         "font awesome 7 brands",
         "font awesome 7 free solid"
       ],
+      "installable_fonts": [
+        "fira sans",
+        "academicons",
+        "font awesome 7 free",
+        "font awesome 7 brands",
+        "font awesome 7 free solid"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: fira sans"
     },
     {
@@ -635,6 +868,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -644,6 +879,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -656,6 +893,11 @@
         "font awesome 7 free",
         "font awesome 7 brands"
       ],
+      "installable_fonts": [
+        "font awesome 7 free",
+        "font awesome 7 brands"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: font awesome 7 free"
     },
     {
@@ -667,6 +909,10 @@
       "font_warnings": [
         "pt serif"
       ],
+      "installable_fonts": [
+        "pt serif"
+      ],
+      "unavailable_fonts": [],
       "reason": "cover letter, not a resume"
     },
     {
@@ -678,6 +924,10 @@
       "font_warnings": [
         "pt serif"
       ],
+      "installable_fonts": [
+        "pt serif"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: pt serif"
     },
     {
@@ -687,6 +937,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -696,6 +948,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -705,6 +959,8 @@
       "pages": 0,
       "needs_inline_data": true,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -714,6 +970,8 @@
       "pages": 0,
       "needs_inline_data": true,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -723,6 +981,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -734,6 +994,10 @@
       "font_warnings": [
         "cantarell"
       ],
+      "installable_fonts": [
+        "cantarell"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: cantarell"
     },
     {
@@ -743,6 +1007,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -752,6 +1018,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -763,6 +1031,10 @@
       "font_warnings": [
         "palatino"
       ],
+      "installable_fonts": [],
+      "unavailable_fonts": [
+        "palatino"
+      ],
       "reason": "font warning: palatino"
     },
     {
@@ -772,6 +1044,8 @@
       "pages": 0,
       "needs_inline_data": true,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -783,6 +1057,10 @@
       "font_warnings": [
         "open sans"
       ],
+      "installable_fonts": [
+        "open sans"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: open sans"
     },
     {
@@ -792,6 +1070,10 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [
+        "georgia"
+      ],
+      "installable_fonts": [],
+      "unavailable_fonts": [
         "georgia"
       ],
       "reason": "font warning: georgia"
@@ -808,6 +1090,13 @@
         "xcharter",
         "xcharter"
       ],
+      "installable_fonts": [
+        "xcharter",
+        "xcharter",
+        "xcharter",
+        "xcharter"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: xcharter"
     },
     {
@@ -819,6 +1108,10 @@
       "font_warnings": [
         "open sans"
       ],
+      "installable_fonts": [
+        "open sans"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: open sans"
     },
     {
@@ -828,6 +1121,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -837,6 +1132,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -846,6 +1143,8 @@
       "pages": 2,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "Japanese rirekisho form, not a resume"
     },
     {
@@ -855,6 +1154,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "Japanese rirekisho form, not a resume"
     },
     {
@@ -864,6 +1165,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -875,6 +1178,10 @@
       "font_warnings": [
         "pt serif"
       ],
+      "installable_fonts": [
+        "pt serif"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: pt serif"
     },
     {
@@ -884,6 +1191,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -893,6 +1202,8 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -906,6 +1217,12 @@
         "font awesome 7 free",
         "font awesome 7 brands"
       ],
+      "installable_fonts": [
+        "source sans 3",
+        "font awesome 7 free",
+        "font awesome 7 brands"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: source sans 3"
     },
     {
@@ -915,6 +1232,8 @@
       "pages": 1,
       "needs_inline_data": true,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -924,6 +1243,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -933,6 +1254,8 @@
       "pages": 2,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "ok"
     },
     {
@@ -942,6 +1265,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -954,6 +1279,13 @@
         "courier new",
         "courier new",
         "eb garamond"
+      ],
+      "installable_fonts": [
+        "eb garamond"
+      ],
+      "unavailable_fonts": [
+        "courier new",
+        "courier new"
       ],
       "reason": "font warning: courier new"
     },
@@ -977,6 +1309,21 @@
         "montserrat",
         "roboto"
       ],
+      "installable_fonts": [
+        "roboto",
+        "roboto",
+        "roboto",
+        "roboto",
+        "roboto",
+        "roboto",
+        "montserrat",
+        "libre baskerville",
+        "libre baskerville",
+        "libre baskerville",
+        "montserrat",
+        "roboto"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: roboto"
     },
     {
@@ -986,6 +1333,8 @@
       "pages": 0,
       "needs_inline_data": true,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -997,6 +1346,10 @@
       "font_warnings": [
         "inria sans"
       ],
+      "installable_fonts": [
+        "inria sans"
+      ],
+      "unavailable_fonts": [],
       "reason": "font warning: inria sans"
     },
     {
@@ -1006,6 +1359,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -1015,6 +1370,8 @@
       "pages": 0,
       "needs_inline_data": false,
       "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
       "reason": "compile failed"
     },
     {
@@ -1024,6 +1381,13 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [
+        "sabon lt std",
+        "calluna",
+        "calluna",
+        "cronos pro"
+      ],
+      "installable_fonts": [],
+      "unavailable_fonts": [
         "sabon lt std",
         "calluna",
         "calluna",

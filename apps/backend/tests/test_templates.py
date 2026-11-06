@@ -401,3 +401,111 @@ def test_survey_pairs_prefer_the_emitter_pin_over_the_index_latest():
     pairs = survey_templates.survey_pairs(index)
     versions = {name: version for name, version, _row in pairs}
     assert versions["basic-resume"] == "0.2.9"
+
+
+def test_survey_row_records_the_installable_and_unavailable_font_split(monkeypatch, tmp_path):
+    # Review finding 1: font_warnings alone can't be split back into "we
+    # could ship this by installing it" vs "nobody can bundle this" after
+    # the fact -- both lists must be on the row, even though gate 2 still
+    # rejects on any warning at all regardless of the split.
+    from app.jobs import survey_templates
+    from app.services.template_probe import INSTALLABLE_FONTS
+
+    installable_font = next(iter(INSTALLABLE_FONTS))
+    warnings = (installable_font, "calibri")
+
+    def probe(name, version, *, root):
+        return SupportRow(
+            name=name,
+            version=version,
+            ok=True,
+            pages=1,
+            needs_inline_data=False,
+            font_warnings=warnings,
+            installable_fonts=(installable_font,),
+            reason="ok",
+        )
+
+    monkeypatch.setattr(survey_templates, "probe_template", probe)
+    row = survey_templates.survey_row("some-cv", "1.0.0", {}, root=tmp_path)
+    assert row["ok"] is False
+    assert row["installable_fonts"] == [installable_font]
+    assert row["unavailable_fonts"] == ["calibri"]
+
+
+def test_survey_row_passes_when_the_registry_serves_the_declared_thumbnail(monkeypatch, tmp_path):
+    # Review finding 2: gate 4 (thumbnail) had no coverage at all.
+    from app.jobs import survey_templates
+
+    monkeypatch.setattr(survey_templates, "probe_template", _canned_probe(ok=True))
+    monkeypatch.setattr(
+        survey_templates,
+        "fetch_registry_thumbnail",
+        lambda name, version, rel, *, root: tmp_path / "thumb.png",
+    )
+    row = survey_templates.survey_row(
+        "some-cv", "1.0.0", {"template": {"thumbnail": "thumbnail.png"}}, root=tmp_path
+    )
+    assert row["ok"] is True
+    assert row["reason"] == "ok"
+
+
+def test_survey_marks_a_template_unsupported_when_the_registry_has_no_thumbnail(
+    monkeypatch, tmp_path
+):
+    # Review finding 2: the fail path of gate 4 had no coverage either.
+    from app.jobs import survey_templates
+
+    monkeypatch.setattr(survey_templates, "probe_template", _canned_probe(ok=True))
+    monkeypatch.setattr(
+        survey_templates,
+        "fetch_registry_thumbnail",
+        lambda name, version, rel, *, root: None,
+    )
+    row = survey_templates.survey_row(
+        "some-cv", "1.0.0", {"template": {"thumbnail": "thumbnail.png"}}, root=tmp_path
+    )
+    assert row["ok"] is False
+    assert row["reason"] == "no thumbnail"
+
+
+def test_thumbnail_gate_falls_back_to_the_pinned_packages_own_typst_toml(monkeypatch, tmp_path):
+    # Review finding 3: a pinned package that drops out of
+    # latest_cv_packages() (stale/changed category tag, a rename) arrives
+    # here with index_row == {}. The thumbnail gate must still find the
+    # declared thumbnail from the package's own extracted typst.toml rather
+    # than failing "no thumbnail" regardless of whether one exists.
+    from app.jobs import survey_templates
+
+    dest = tmp_path / "preview" / "acorn-resume" / "0.1.0"
+    dest.mkdir(parents=True)
+    (dest / "typst.toml").write_text(
+        '[package]\nname = "acorn-resume"\nversion = "0.1.0"\n\n'
+        '[template]\npath = "template"\nentrypoint = "main.typ"\nthumbnail = "thumbnail.png"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(survey_templates, "probe_template", _canned_probe(ok=True))
+    seen_rel = {}
+
+    def fake_fetch(name, version, rel, *, root):
+        seen_rel["rel"] = rel
+        return dest / "thumbnail.png"
+
+    monkeypatch.setattr(survey_templates, "fetch_registry_thumbnail", fake_fetch)
+    row = survey_templates.survey_row("acorn-resume", "0.1.0", {}, root=tmp_path)
+    assert row["ok"] is True
+    assert seen_rel["rel"] == "thumbnail.png"
+
+
+def test_thumbnail_gate_fails_when_nothing_declares_a_thumbnail(monkeypatch, tmp_path):
+    # Neither the index row nor the package's own typst.toml declare a
+    # thumbnail -- the fallback from finding 3 has nothing to fall back to.
+    from app.jobs import survey_templates
+
+    dest = tmp_path / "preview" / "no-thumb-cv" / "1.0.0"
+    dest.mkdir(parents=True)
+    (dest / "typst.toml").write_text('[package]\nname = "no-thumb-cv"\n', encoding="utf-8")
+    monkeypatch.setattr(survey_templates, "probe_template", _canned_probe(ok=True))
+    row = survey_templates.survey_row("no-thumb-cv", "1.0.0", {}, root=tmp_path)
+    assert row["ok"] is False
+    assert row["reason"] == "no thumbnail"

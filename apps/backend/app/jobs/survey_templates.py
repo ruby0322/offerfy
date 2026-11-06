@@ -36,11 +36,12 @@ import argparse
 import json
 import subprocess
 import sys
+import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.services.template_probe import probe_template
+from app.services.template_probe import probe_template, unavailable_fonts
 from app.services.templates import (
     SUPPORT_PATH,
     fetch_index,
@@ -94,14 +95,49 @@ def survey_pairs(index: list[dict[str, Any]]) -> list[tuple[str, str, dict[str, 
     return pairs
 
 
-def _thumbnail_ok(name: str, version: str, row: dict[str, Any], *, root: Path) -> bool:
-    """Whether the registry actually serves the thumbnail this package
-    declares. A package with no `[template].thumbnail` in its typst.toml
-    has nothing to check here and fails this gate -- even if some file
-    elsewhere in its tarball happens to be named thumbnail.png, since that
-    is not what `declared` names.
+def _declared_thumbnail(name: str, version: str, row: dict[str, Any], *, root: Path) -> str | None:
+    """The thumbnail path this package declares, preferring the live
+    index row -- which also covers a pinned version a patch or two behind
+    the index's latest, since the declared path is normally unchanged
+    across patches -- and falling back to the pinned version's own
+    extracted typst.toml, already on disk after `prefetch_one`, when the
+    index has no row for this name at all.
+
+    That fallback is what keeps an emitter-pinned package's thumbnail gate
+    from failing merely because the package dropped out of
+    `latest_cv_packages()` -- a stale or changed `cv` category tag, a
+    rename -- which is exactly the kind of index drift the pin exists to
+    survive in the first place (see the module docstring and
+    `survey_pairs`). Without it, `row` would be `{}`, `thumbnail_relpath`
+    would return `None`, and the gate would fail with "no thumbnail" even
+    for a package whose own typst.toml declares a perfectly good one.
     """
     declared = thumbnail_relpath(row)
+    if declared:
+        return declared
+    toml_path = root / "preview" / name / version / "typst.toml"
+    if not toml_path.is_file():
+        return None
+    try:
+        data = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    template = data.get("template") if isinstance(data, dict) else None
+    if isinstance(template, dict):
+        thumb = template.get("thumbnail")
+        if isinstance(thumb, str) and thumb.strip():
+            return thumb.strip()
+    return None
+
+
+def _thumbnail_ok(name: str, version: str, row: dict[str, Any], *, root: Path) -> bool:
+    """Whether the registry actually serves the thumbnail this package
+    declares. A package with no declared thumbnail at all -- neither in
+    the index row nor its own typst.toml -- has nothing to check here and
+    fails this gate, even if some file elsewhere in its tarball happens to
+    be named thumbnail.png, since that is not what `declared` names.
+    """
+    declared = _declared_thumbnail(name, version, row, root=root)
     if not declared:
         return False
     return fetch_registry_thumbnail(name, version, declared, root=root) is not None
@@ -131,6 +167,15 @@ def survey_row(name: str, version: str, row: dict[str, Any], *, root: Path) -> d
         "pages": probe.pages,
         "needs_inline_data": probe.needs_inline_data,
         "font_warnings": list(probe.font_warnings),
+        # The classification `font_warnings` alone can't recover: which of
+        # those warnings names a font the pool could ship by installing it
+        # (`installable_fonts`) versus one nobody can legally or practically
+        # bundle (`unavailable_fonts`). Gate 2 above still rejects a
+        # template on *any* warning, but recording the split here is what
+        # makes the to-install set recoverable from the committed file
+        # instead of only by re-running the survey.
+        "installable_fonts": list(probe.installable_fonts),
+        "unavailable_fonts": list(unavailable_fonts(probe.font_warnings)),
         "reason": reason,
     }
 
