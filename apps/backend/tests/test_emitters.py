@@ -306,3 +306,123 @@ def test_acorn_emitter_renders_the_summary():
 def test_acorn_emitter_escapes_content_that_would_break_typst():
     hostile = GOLDEN.model_copy(update={"name": 'A "B" \\ C'})
     assert '\\"B\\"' in emitter_for("acorn-resume", "0.1.0").emit(hostile).source
+
+
+# --- clean-print-cv: the dict-shaped case -----------------------------------
+#
+# basic-resume/ats-friendly-resume/acorn-resume are all "call-shaped": the
+# emitter writes `#work(title: "...", ...)` and the package's own component
+# unpacks keyword arguments. clean-print-cv's own entrypoint instead builds
+# one `data` dict and hands whole sub-dicts to its section functions
+# (`cv-header(data.personal)`, ...), so this emitter does too -- the check
+# that the emitter interface is not over-fitted to the call-shaped packages.
+# See `app/services/emitters/clean_print_cv.py`'s module docstring for the
+# full field-by-field derivation this guards.
+
+
+def test_clean_print_cv_registered_exactly():
+    assert emitter_for("clean-print-cv", "0.1.0") is not None
+    assert emitter_for("clean-print-cv", "0.2.0") is None
+
+
+def test_clean_print_cv_emits_a_data_value_and_calls_section_functions():
+    src = emitter_for("clean-print-cv", "0.1.0").emit(GOLDEN).source
+    assert "#let data = (" in src
+    assert "#cv-header(data.personal)" in src and "#cv-experience(data.experience)" in src
+
+
+def test_clean_print_cv_declares_its_losses_exactly():
+    # The brief's own `degraded` value was free-form English
+    # ("projects[].bullets -> joined into description", ...), which
+    # base.py's own convention forbids -- EmitResult's dropped/degraded
+    # are stable dot-path identifiers, never prose a UI notice would
+    # show verbatim. Dot-paths only, corrected here.
+    result = emitter_for("clean-print-cv", "0.1.0").emit(GOLDEN)
+    assert result.dropped == ("projects[].dates",)
+    assert result.degraded == ("projects[].bullets", "education[].bullets")
+
+
+def test_clean_print_cv_declares_no_losses_when_the_content_has_none_to_lose():
+    # emit() must derive dropped/degraded from the content it was
+    # actually handed, not return a constant -- a resume with no project
+    # dates and no project/education bullets has nothing to lose in any
+    # of the three places.
+    content = GOLDEN.model_copy(
+        update={
+            "projects": [
+                p.model_copy(update={"start": None, "end": None, "bullets": []})
+                for p in GOLDEN.projects
+            ],
+            "education": [e.model_copy(update={"bullets": []}) for e in GOLDEN.education],
+        }
+    )
+    result = emitter_for("clean-print-cv", "0.1.0").emit(content)
+    assert result.dropped == ()
+    assert result.degraded == ()
+
+
+def test_clean_print_cv_omits_section_calls_with_no_data():
+    src = emitter_for("clean-print-cv", "0.1.0").emit(MINIMAL).source
+    assert "#cv-certifications(" not in src
+    assert "#cv-experience(" not in src and "#cv-summary(" not in src
+    assert "#cv-skills(" not in src and "#cv-projects(" not in src
+    assert "#cv-education(" not in src
+
+
+def test_clean_print_cv_never_emits_certifications_or_languages():
+    # No ResumeContent field maps to either -- not a loss (there is
+    # nothing to drop), but also never a placeholder call or key.
+    src = emitter_for("clean-print-cv", "0.1.0").emit(GOLDEN).source
+    assert "#cv-certifications(" not in src and "#cv-languages(" not in src
+    assert "certifications:" not in src and "languages:" not in src
+
+
+def test_clean_print_cv_sets_the_font_explicitly():
+    # cv-page-setup has no font: argument at all -- unlike every other
+    # package here, overriding it takes a `#set text(font: ...)` line of
+    # its own rather than a keyword passed into a show/call.
+    src = emitter_for("clean-print-cv", "0.1.0").emit(GOLDEN).source
+    assert "#show: cv-page-setup" in src
+    assert "#set text(font: (" in src
+    assert "New Computer Modern" in src and "Noto Serif CJK TC" in src
+
+
+def test_clean_print_cv_folds_project_role_into_the_name_field():
+    entry = GOLDEN.projects[0]
+    assert entry.role
+    src = emitter_for("clean-print-cv", "0.1.0").emit(GOLDEN).source
+    unescaped = src.replace('\\"', '"')
+    assert f"{entry.role}, {entry.name}" in unescaped
+
+
+def test_clean_print_cv_keeps_work_highlights_as_a_list_not_joined():
+    # experience[].highlights is a real list cv-experience iterates --
+    # unlike projects[].description/education[].details, work bullets
+    # are not degraded.
+    src = emitter_for("clean-print-cv", "0.1.0").emit(GOLDEN).source
+    # Plain-ASCII bullet, deliberately -- escaping of the hostile ones is
+    # covered elsewhere; this test only checks the list shape survives.
+    bullet = GOLDEN.work[1].bullets[1]
+    # typst_value renders every dict key as a quoted string literal
+    # (`"highlights": (...)`, not a bare identifier) -- still a valid
+    # Typst dict, and `.highlights` field access on it works the same
+    # either way (confirmed against the real compiler).
+    assert '"highlights": (' in src
+    assert bullet in src
+
+
+def test_clean_print_cv_renders_the_summary():
+    src = emitter_for("clean-print-cv", "0.1.0").emit(GOLDEN).source
+    assert "#cv-summary(data.summary)" in src
+    assert GOLDEN.summary in src
+
+
+def test_clean_print_cv_normalises_an_embedded_newline_before_quoting():
+    # typst_value (unlike markup_value) never collapses an embedded line
+    # break on its own -- this emitter must do it itself before handing
+    # prose to typst_value, or a raw "\n" survives into the quoted Typst
+    # string literal. See the module docstring's own hazard note.
+    hostile = GOLDEN.model_copy(update={"summary": "line one\nline two"})
+    src = emitter_for("clean-print-cv", "0.1.0").emit(hostile).source
+    assert "line one line two" in src
+    assert "line one\nline two" not in src
