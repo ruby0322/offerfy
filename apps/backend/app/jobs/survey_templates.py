@@ -13,15 +13,26 @@ forms, an icon library).
 Which (name, version) gets probed is not simply "whatever `latest_cv_
 packages()` says is newest". The starter and system prompt pin a handful of
 packages to a specific version (`app/services/starter._render`,
-`app/services/llm.SYSTEM_PROMPT`), and Task 8's emitter registry will pin
-more. A survey built only from the index's latest would mark the pinned
-version unsupported the moment the index moves on, and Task 4's switch
-endpoint would then reject the very template Offerfy ships by default. So
-this job surveys the index's latest per package, unioned with every pinned
-pair, and offers the pinned version when a package has both -- one row per
-package either way. `EMITTER_PINS` below stands in for Task 8's
-`emitters.deterministic_pairs()`, which does not exist yet; Task 8 replaces
-this constant with that call.
+`app/services/llm.SYSTEM_PROMPT`), and the emitter registry
+(`app.services.emitters.deterministic_pairs()`) pins whichever versions it
+has an emitter for. A survey built only from the index's latest would mark
+the pinned version unsupported the moment the index moves on, and Task 4's
+switch endpoint would then reject the very template Offerfy ships by
+default. So this job surveys the index's latest per package, unioned with
+every pinned pair, and offers the pinned version when a package has both --
+one row per package either way.
+
+Font gate 2 below is measured differently once a pair has an emitter: an
+emitter sets its target's font explicitly (see
+`app/services/emitters/__init__.py`'s module docstring), so the question
+worth asking is whether *that* output warns, not whether the vendor
+example's un-set default does. `_emitter_font_warnings` compiles the
+emitter's own output against a sample built right here -- never against
+`tests/fixtures/golden_content.GOLDEN`, since an app module must not import
+a `tests/` fixture -- and only the content's *shape* matters for a font
+warning (it comes from the explicit `font:` argument and the package's own
+icon usage, never from the text), so this sample does not need to be
+hostile the way that fixture is.
 
 Usage (compose):
   docker compose run --rm backend python -m app.jobs.survey_templates --out data/template_support.json
@@ -41,7 +52,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.services.template_probe import probe_template, unavailable_fonts
+from fastapi import HTTPException
+
+from app.services.emitters import deterministic_pairs, emitter_for
+from app.services.resume_content import (
+    Contact,
+    EducationEntry,
+    ProjectEntry,
+    ResumeContent,
+    SkillGroup,
+    WorkEntry,
+)
+from app.services.template_probe import (
+    INSTALLABLE_FONTS,
+    font_warnings as compiled_font_warnings,
+    probe_template,
+    unavailable_fonts,
+)
 from app.services.templates import (
     SUPPORT_PATH,
     fetch_index,
@@ -51,18 +78,7 @@ from app.services.templates import (
     prefetch_one,
     thumbnail_relpath,
 )
-from app.services.typst_compile import typst_binary
-
-# Stands in for Task 8's emitters.deterministic_pairs(): the (package,
-# version) pairs the starter and system prompt are pinned to today. See the
-# module docstring for why the survey must offer these versions rather than
-# the index's latest.
-EMITTER_PINS: dict[str, str] = {
-    "basic-resume": "0.2.9",
-    "ats-friendly-resume": "0.1.1",
-    "acorn-resume": "0.1.0",
-    "clean-print-cv": "0.1.0",
-}
+from app.services.typst_compile import compile_typst_with_stderr, typst_binary
 
 # `cv`-category packages that are not résumés at all -- two cover letters,
 # three Japanese rirekisho forms, one icon library -- so no amount of
@@ -79,20 +95,97 @@ DENYLIST: dict[str, str] = {
 
 def survey_pairs(index: list[dict[str, Any]]) -> list[tuple[str, str, dict[str, Any]]]:
     """One (name, version, index_row) per package to survey: the latest
-    `cv` row per package, with any name in `EMITTER_PINS` pointed at its
-    pinned version instead. The index row still carries the declared
+    `cv` row per package, with any name the emitter registry pins pointed
+    at its pinned version instead. The index row still carries the declared
     thumbnail path used by `_thumbnail_ok` -- which is normally valid for a
     pinned version a patch or two behind the index's latest too.
     """
     latest = {str(row.get("name") or ""): row for row in latest_cv_packages(index)}
-    names = sorted(set(latest) | set(EMITTER_PINS))
+    pins = dict(deterministic_pairs())
+    names = sorted(set(latest) | set(pins))
     pairs: list[tuple[str, str, dict[str, Any]]] = []
     for name in names:
         row = latest.get(name, {})
-        version = EMITTER_PINS.get(name) or str(row.get("version") or "")
+        version = pins.get(name) or str(row.get("version") or "")
         if version:
             pairs.append((name, version, row))
     return pairs
+
+
+def _emitter_sample_content() -> ResumeContent:
+    """A representative snapshot for probing an emitter's own output below
+    -- not a stand-in for `tests/fixtures/golden_content.GOLDEN`, which
+    this app module must not import. It only needs to exercise every
+    section an emitter can produce (contact fields, one of each entry
+    type, a skill group); see the module docstring for why the words in it
+    don't matter for a font warning.
+    """
+    return ResumeContent(
+        name="Sample Name",
+        contact=Contact(
+            email="sample@example.com",
+            phone="+1 555 0100",
+            location="City, Country",
+            github="github.com/sample",
+            linkedin="linkedin.com/in/sample",
+            website="sample.dev",
+        ),
+        summary="A short summary line.",
+        education=[
+            EducationEntry(
+                institution="Sample University",
+                degree="B.S., Sample Field",
+                location="City, Country",
+                start="2018-09",
+                end="2022-06",
+                bullets=["Sample coursework bullet"],
+            )
+        ],
+        work=[
+            WorkEntry(
+                title="Sample Title",
+                company="Sample Company",
+                location="City, Country",
+                start="2022-07",
+                end="Present",
+                bullets=["Sample achievement bullet"],
+            )
+        ],
+        projects=[
+            ProjectEntry(
+                name="Sample Project",
+                role="Contributor",
+                url="github.com/sample/project",
+                start="2021-01",
+                end="2021-12",
+                bullets=["Sample project bullet"],
+            )
+        ],
+        skills=[SkillGroup(category="Sample Skills", items=["Alpha", "Beta"])],
+    )
+
+
+def _emitter_font_warnings(name: str, version: str) -> tuple[str, ...] | None:
+    """Font warnings from compiling the emitter's own output for this pair,
+    or `None` when there is no emitter -- telling `survey_row` to keep
+    using the vendor example's own warnings instead. See the module
+    docstring for why gate 2 must ask this question once an emitter
+    exists, rather than the vendor example's.
+
+    A compile failure here counts as a clean pass on fonts specifically
+    (no warning text to report) -- gate 1 (`probe.ok`) is what already
+    catches a template that cannot compile at all; this function answers
+    only the font question.
+    """
+    emitter = emitter_for(name, version)
+    if emitter is None:
+        return None
+    source = emitter.emit(_emitter_sample_content()).source
+    try:
+        _pdf_bytes, stderr = compile_typst_with_stderr(source, "pdf")
+    except HTTPException:
+        return ()
+    return compiled_font_warnings(stderr)
 
 
 def _declared_thumbnail(name: str, version: str, row: dict[str, Any], *, root: Path) -> str | None:
@@ -152,10 +245,17 @@ def survey_row(name: str, version: str, row: dict[str, Any], *, root: Path) -> d
     """
     probe = probe_template(name, version, root=root)
     ok, reason = probe.ok, probe.reason
+    # Once a pair has an emitter, gate 2 asks about *its* output instead of
+    # the vendor example's -- see the module docstring and
+    # `_emitter_font_warnings`. `None` means no emitter claims this pair,
+    # so the vendor example's own warnings (and split) still govern.
+    emitter_warnings = _emitter_font_warnings(name, version)
+    warnings = probe.font_warnings if emitter_warnings is None else emitter_warnings
+    installable = tuple(font for font in warnings if font in INSTALLABLE_FONTS)
     if ok and name in DENYLIST:
         ok, reason = False, DENYLIST[name]
-    if ok and probe.font_warnings:
-        ok, reason = False, f"font warning: {probe.font_warnings[0]}"
+    if ok and warnings:
+        ok, reason = False, f"font warning: {warnings[0]}"
     if ok and probe.pages > 2:
         ok, reason = False, f"{probe.pages} pages"
     if ok and not _thumbnail_ok(name, version, row, root=root):
@@ -166,7 +266,7 @@ def survey_row(name: str, version: str, row: dict[str, Any], *, root: Path) -> d
         "ok": ok,
         "pages": probe.pages,
         "needs_inline_data": probe.needs_inline_data,
-        "font_warnings": list(probe.font_warnings),
+        "font_warnings": list(warnings),
         # The classification `font_warnings` alone can't recover: which of
         # those warnings names a font the pool could ship by installing it
         # (`installable_fonts`) versus one nobody can legally or practically
@@ -174,8 +274,8 @@ def survey_row(name: str, version: str, row: dict[str, Any], *, root: Path) -> d
         # template on *any* warning, but recording the split here is what
         # makes the to-install set recoverable from the committed file
         # instead of only by re-running the survey.
-        "installable_fonts": list(probe.installable_fonts),
-        "unavailable_fonts": list(unavailable_fonts(probe.font_warnings)),
+        "installable_fonts": list(installable),
+        "unavailable_fonts": list(unavailable_fonts(warnings)),
         "reason": reason,
     }
 

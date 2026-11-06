@@ -112,7 +112,9 @@ def test_list_templates_endpoint(client, monkeypatch, tmp_path):
     assert '@preview/basic-resume:0.2.9' in row["import_line"]
     assert "ATS resume" in row["description"]
     assert "apply_prompt" not in row
-    assert row["deterministic"] is False
+    # basic-resume:0.2.9 now has a real emitter (Task 8) -- the field is no
+    # longer the hard-coded placeholder this test used to pin.
+    assert row["deterministic"] is True
 
 
 def test_thumbnail_relpath_reads_template_section():
@@ -397,6 +399,28 @@ def test_survey_pairs_prefer_the_emitter_pin_over_the_index_latest():
     pairs = survey_templates.survey_pairs(index)
     versions = {name: version for name, version, _row in pairs}
     assert versions["basic-resume"] == "0.2.9"
+
+
+def test_survey_row_measures_font_warnings_on_the_emitter_output_when_one_exists(
+    monkeypatch, tmp_path
+):
+    # Task 8's decision 2: once a pair has an emitter, gate 2 must measure
+    # *its* output, not the vendor example's -- an emitter sets its font
+    # explicitly, so a clean vendor-example probe (font_warnings=()) must
+    # not hide a warning the emitter's own output actually produces.
+    from app.jobs import survey_templates
+
+    monkeypatch.setattr(survey_templates, "probe_template", _canned_probe(ok=True))
+
+    def fake_compile(source, fmt):
+        assert 'font: "' in source  # the emitter's own explicit font argument
+        return b"%PDF-fake", "warning: unknown font family: comic sans\n"
+
+    monkeypatch.setattr(survey_templates, "compile_typst_with_stderr", fake_compile)
+    row = survey_templates.survey_row("basic-resume", "0.2.9", {}, root=tmp_path)
+    assert row["ok"] is False
+    assert "comic sans" in row["reason"]
+    assert row["font_warnings"] == ["comic sans"]
 
 
 def test_survey_row_records_the_installable_and_unavailable_font_split(monkeypatch, tmp_path):

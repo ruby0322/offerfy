@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from app.services.emitters import deterministic_pairs
 from app.services.starter import resolve_package_path
 
 logger = logging.getLogger(__name__)
@@ -454,6 +455,7 @@ def list_templates() -> list[dict[str, str | bool]]:
     """
     index_by_name = {str(row.get("name") or ""): row for row in cached_latest_cv_packages()}
     root = package_root()
+    deterministic = deterministic_pairs()
     out: list[dict[str, str | bool]] = []
     for name, version in sorted(supported_templates()):
         description = str(index_by_name.get(name, {}).get("description") or "")
@@ -465,10 +467,7 @@ def list_templates() -> list[dict[str, str | bool]]:
                 "universe_url": UNIVERSE_URL.format(name=name),
                 "import_line": f'#import "@preview/{name}:{version}": *',
                 "cached": package_cached(root, name, version),
-                # Task 8's emitter registry supplies the real per-template
-                # value; until it exists, nothing offered here is wired
-                # into a deterministic emitter.
-                "deterministic": False,
+                "deterministic": (name, version) in deterministic,
             }
         )
     return out
