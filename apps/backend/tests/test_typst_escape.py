@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 from app.services.typst_compile import compile_status, typst_available
-from app.services.typst_escape import sanitize_typst_source
+from app.services.typst_escape import sanitize_typst_source, typst_value
 
 TYPST = Path(__file__).resolve().parents[1] / "typst"
 STARTER = TYPST / "starter.typ"
@@ -112,3 +112,17 @@ def test_sanitize_makes_common_fill_artifacts_compile():
     fixed = sanitize_typst_source(messy)
     status = compile_status(fixed)
     assert status.get("ok") is True, status
+
+
+def test_typst_value_renders_nested_dicts_and_lists():
+    out = typst_value({"a": [1, "x"], "b": {"c": True}, "d": None})
+    assert out.replace("\n", "").replace(" ", "") == '("a":(1,"x",),"b":("c":true,),"d":none,)'
+
+
+def test_typst_value_escapes_quotes_and_backslashes():
+    assert typst_value('he said "hi"\\n') == '"he said \\"hi\\"\\\\n"'
+
+
+def test_typst_value_renders_empty_dict_and_list():
+    assert typst_value({}) == "(:)"
+    assert typst_value([]) == "()"

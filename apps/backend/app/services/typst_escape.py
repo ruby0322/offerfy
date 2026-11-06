@@ -11,6 +11,7 @@ on every edit.
 from __future__ import annotations
 
 import re
+from typing import Any
 
 _STRING_FIELD = re.compile(
     r"""(?x)
@@ -50,6 +51,39 @@ def escape_typst_string(value: str) -> str:
         out.append(ch)
         i += 1
     return "".join(out)
+
+
+def typst_value(value: Any) -> str:
+    """Render a Python value as a Typst literal: dict/list data inlined straight
+    into source, rather than loaded from a sidecar file at compile time.
+
+    Unlike `escape_typst_string`, which assumes a backslash in LLM-written Typst
+    source is already part of an intentional escape sequence, a backslash here
+    comes from raw data (YAML/TOML/JSON) and is never pre-escaped -- so every
+    backslash is doubled before the quote escaping is applied.
+    """
+    if value is None:
+        return "none"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        return f'"{escape_typst_string(value.replace("\\", "\\\\"))}"'
+    if isinstance(value, dict):
+        if not value:
+            return "(:)"
+        pairs = "".join(
+            f"{typst_value(str(key))}: {typst_value(item)}, "
+            for key, item in value.items()
+        )
+        return f"({pairs})"
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return "()"
+        items = "".join(f"{typst_value(item)}, " for item in value)
+        return f"({items})"
+    return f'"{escape_typst_string(str(value))}"'
 
 
 def escape_typst_markup(text: str) -> str:
