@@ -12,6 +12,9 @@ from tests.fixtures.golden_content import GOLDEN, MINIMAL
 def test_emitter_for_matches_name_and_version_exactly():
     assert emitter_for("basic-resume", "0.2.9") is not None
     assert emitter_for("basic-resume", "0.3.0") is None  # a floated version falls back
+    # 0.2.10 actually exists in the live index -- the real regression the
+    # exact-match rule exists to prevent, not just a hypothetical version.
+    assert emitter_for("basic-resume", "0.2.10") is None
 
 
 def test_basic_resume_emitter_declares_no_losses():
@@ -22,12 +25,27 @@ def test_basic_resume_emitter_declares_no_losses():
 def test_basic_resume_emitter_pins_the_import_and_the_font():
     src = emitter_for("basic-resume", "0.2.9").emit(GOLDEN).source
     assert src.startswith('#import "@preview/basic-resume:0.2.9"')
-    assert 'font: "' in src
+    # The font argument is a (latin, cjk) fallback array, not a single
+    # conditional string -- see emitters._common.FALLBACK_FONTS -- so this
+    # checks for the array literal and both faces by name rather than for
+    # a bare quoted string.
+    assert "font: (" in src
+    assert "New Computer Modern" in src
+    assert "Noto Serif CJK TC" in src
 
 
 def test_emitter_escapes_content_that_would_break_typst():
     hostile = GOLDEN.model_copy(update={"name": 'A "B" \\ C'})
     assert '\\"B\\"' in emitter_for("basic-resume", "0.2.9").emit(hostile).source
+
+
+def test_emitter_escapes_a_dollar_and_at_sign_inside_a_quoted_markup_phrase():
+    # Critical 1: a `"` in markup prose is not a Typst string literal --
+    # `markup_value` must escape `$`/`@` that follow an odd-numbered quote
+    # too, unlike `escape_typst_markup` (written for already-written
+    # source, where copying a quoted span verbatim is correct).
+    src = emitter_for("basic-resume", "0.2.9").emit(GOLDEN).source
+    assert r'"LegacyPay \@ \$12M/yr"' in src
 
 
 def test_emitter_omits_a_section_with_no_entries():

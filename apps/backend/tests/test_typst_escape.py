@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 from app.services.typst_compile import compile_status, typst_available
-from app.services.typst_escape import sanitize_typst_source, typst_value
+from app.services.typst_escape import markup_value, sanitize_typst_source, typst_value
 
 TYPST = Path(__file__).resolve().parents[1] / "typst"
 STARTER = TYPST / "starter.typ"
@@ -126,3 +126,34 @@ def test_typst_value_escapes_quotes_and_backslashes():
 def test_typst_value_renders_empty_dict_and_list():
     assert typst_value({}) == "(:)"
     assert typst_value([]) == "()"
+
+
+# markup_value: the data-mode counterpart to escape_typst_markup, for raw
+# text that was never pre-escaped (see its own docstring for why the two
+# cannot share one implementation -- a `"` is not a string literal to
+# protect in data, and a backslash is never already an intentional escape).
+
+
+def test_markup_value_escapes_a_dollar_and_at_sign_inside_a_quoted_phrase():
+    # escape_typst_markup copies a quoted span verbatim, assuming it is a
+    # real Typst string literal -- correct for source, wrong here: a `"`
+    # in raw data is just a character, so `$`/`@` right after it must
+    # still be escaped. Verified against the real binary (see
+    # tests/test_emitters_compile.py): without this, Typst raises
+    # "unclosed delimiter" or treats the text after `@` as a label.
+    assert markup_value('Set "$HOME @ 50%" in prod') == 'Set "\\$HOME \\@ 50%" in prod'
+
+
+def test_markup_value_doubles_a_raw_backslash_so_it_survives_rendering():
+    # escape_typst_markup passes a backslash plus the next character
+    # through unchanged, assuming it is already an intentional escape --
+    # correct for already-written source, wrong for raw data: Typst then
+    # reads e.g. `\c` as an escape that renders a bare `c`, silently
+    # dropping the backslash. Doubling first makes Typst see an escaped
+    # backslash instead, which renders back to exactly one backslash.
+    assert markup_value("C:\\configs\\prod") == "C:\\\\configs\\\\prod"
+
+
+def test_markup_value_escapes_bare_dollar_at_and_unpaired_star():
+    assert markup_value("Raised $100k with @ada") == r"Raised \$100k with \@ada"
+    assert markup_value("Used *bold* and leftover *") == r"Used \*bold\* and leftover \*"

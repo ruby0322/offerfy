@@ -413,7 +413,7 @@ def test_survey_row_measures_font_warnings_on_the_emitter_output_when_one_exists
     monkeypatch.setattr(survey_templates, "probe_template", _canned_probe(ok=True))
 
     def fake_compile(source, fmt):
-        assert 'font: "' in source  # the emitter's own explicit font argument
+        assert "font: (" in source  # the emitter's own explicit font argument
         return b"%PDF-fake", "warning: unknown font family: comic sans\n"
 
     monkeypatch.setattr(survey_templates, "compile_typst_with_stderr", fake_compile)
@@ -421,6 +421,28 @@ def test_survey_row_measures_font_warnings_on_the_emitter_output_when_one_exists
     assert row["ok"] is False
     assert "comic sans" in row["reason"]
     assert row["font_warnings"] == ["comic sans"]
+
+
+def test_survey_row_fails_when_the_emitter_output_itself_does_not_compile(monkeypatch, tmp_path):
+    # Important 2: an emitter claiming a pair is not itself a pass.
+    # probe_template's `ok` only ever compiled the *vendor example* -- if
+    # the emitter's own output fails to compile, that must be its own
+    # distinct, terminal failure, never read back as a clean
+    # font_warnings=() the way a bare `except: return ()` would.
+    from fastapi import HTTPException
+
+    from app.jobs import survey_templates
+
+    monkeypatch.setattr(survey_templates, "probe_template", _canned_probe(ok=True))
+
+    def fake_compile(source, fmt):
+        raise HTTPException(status_code=400, detail="Typst compile failed: unknown variable")
+
+    monkeypatch.setattr(survey_templates, "compile_typst_with_stderr", fake_compile)
+    row = survey_templates.survey_row("basic-resume", "0.2.9", {}, root=tmp_path)
+    assert row["ok"] is False
+    assert row["reason"] == "emitter output does not compile"
+    assert row["font_warnings"] == []
 
 
 def test_survey_row_falls_back_to_the_vendor_example_font_warnings_without_an_emitter(

@@ -9,6 +9,18 @@ emitter that mishandles any one of these is exactly what
 `test_emitter_escapes_content_that_would_break_typst` and the compile-gated
 tests in `tests/test_emitters_compile.py` exist to catch.
 
+The hostile characters are not only scattered across separate bullets --
+one work bullet puts a `@` and a `$` *inside* a quoted phrase
+(`"LegacyPay @ $12M/yr"`), which is the specific adversarial shape a
+source-oriented escaper gets wrong (it copies a quoted span verbatim,
+assuming it is a real Typst string literal, so anything special inside it
+reaches the document raw) but a data-mode escaper must not. They also
+reach a `SkillGroup` item, a `Section` title, a company name, a project
+name, and a `Contact` field (`location`) -- not just bullets -- because
+those are exactly the places a dict-shaped emitter (a later task) routes
+through a different code path than a markup bullet does, and this fixture
+is what decides whether that path gets proven too.
+
 Every field `ResumeContent` has is set on `GOLDEN`, including `summary` and
 every `Contact` sub-field (`website` included) -- not just the sections a
 given package happens to have a dedicated component for. A package with
@@ -43,7 +55,7 @@ GOLDEN = ResumeContent(
     contact=Contact(
         email="wei.ling@example.com",
         phone="+1 (555) 010-0100",
-        location="Taipei, Taiwan",
+        location='Taipei, Taiwan ("near NTU" @ $0 commute)',
         github="github.com/weiling",
         linkedin="linkedin.com/in/weiling",
         website="weiling.dev",
@@ -75,14 +87,15 @@ GOLDEN = ResumeContent(
             start="2022-01",
             end="Present",
             bullets=[
-                'Led the migration off a vendor named "LegacyPay" to an in-house ledger',
+                'Led the migration off a vendor named "LegacyPay @ $12M/yr" '
+                "to an in-house ledger",
                 "Cut p99 latency 40% with a * flagged cache layer @edge, "
                 "config path C:\\configs\\prod",
             ],
         ),
         WorkEntry(
             title="Software Engineer",
-            company="Beta Systems",
+            company='Beta Systems ("BS" @ Hsinchu)',
             location="Hsinchu, Taiwan",
             start="2020-07",
             end="2021-12",
@@ -94,7 +107,7 @@ GOLDEN = ResumeContent(
     ],
     projects=[
         ProjectEntry(
-            name="OpenLedger",
+            name='OpenLedger ("v2" @ $0 cost)',
             role="Maintainer",
             url="github.com/weiling/openledger",
             start="2021-03",
@@ -104,11 +117,11 @@ GOLDEN = ResumeContent(
     ],
     skills=[
         SkillGroup(category="Languages", items=["Python", "Go", "Rust"]),
-        SkillGroup(category="Infra", items=["Kubernetes", "Postgres", "Kafka"]),
+        SkillGroup(category="Infra", items=["Kubernetes", "Postgres", 'Kafka ($ real-time)']),
     ],
     extras=[
         Section(
-            title="Certifications",
+            title='Certifications @ "Audited" Co.',
             entries=["AWS Certified Solutions Architect -- Professional (2023)"],
         )
     ],

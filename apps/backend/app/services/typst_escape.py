@@ -1,7 +1,19 @@
-"""Make LLM-written Typst more likely to compile.
+"""Make LLM-written Typst more likely to compile, and raw data safe to
+place inside it.
 
 Fill/edit turns often paste resume text with raw `"`, `$`, `@`, or `*` into
 string fields and list items. Typst then treats them as syntax.
+`escape_typst_string`/`escape_typst_markup`/`sanitize_typst_source` handle
+that case: already-written Typst *source*, where a `"` really does open a
+string literal and a `\\` is already part of an intentional escape.
+
+`typst_value`/`markup_value` are the other case: raw *data* (e.g. an
+emitter rendering `ResumeContent` straight into a document -- see
+`app.services.emitters`) that was never pre-escaped at all, where a `"` is
+just a character and every `\\` must be doubled before anything else runs.
+Mixing the two up is exactly how a data-mode caller silently drops a
+backslash or breaks on a quote followed by `$`/`@` -- pick the function
+for what the text actually is, not for where it ends up.
 
 Comments are left alone: escaping is meaningless inside `//` and `/* ... */`,
 and template comments full of `name: ""` placeholders otherwise get rewritten
@@ -125,6 +137,49 @@ def escape_typst_markup(text: str) -> str:
             continue
         out.append(ch)
         i += 1
+    if len(star_at) % 2 == 1:
+        for idx in reversed(star_at):
+            out[idx] = r"\*"
+    return "".join(out)
+
+
+def markup_value(text: str) -> str:
+    """Escape raw, never-pre-escaped data for direct use as Typst markup
+    (a bullet, a heading, a paragraph) -- the markup-mode counterpart to
+    `typst_value`'s string-literal escaping, for an emitter rendering
+    `ResumeContent` text straight into a document body rather than into a
+    quoted argument.
+
+    `escape_typst_markup` above is not safe for this: it was written for
+    *already-written Typst source* (an LLM's own bullet, edited in place),
+    where a `"` really does open a string literal worth copying verbatim
+    and a `\\` is already part of an intentional escape sequence. Neither
+    assumption holds for data straight out of a pydantic model. A `"` is
+    just a character in markup prose -- there is no string literal to
+    protect, so this function never treats one specially (Typst renders
+    it as a smart quote, which is correct). A `\\` is never pre-escaped,
+    so -- exactly like `typst_value` -- every one is doubled first: a
+    single raw backslash must survive as one literal backslash in the
+    rendered document, and passing it through unchanged (as
+    `escape_typst_markup` does, correctly, for *its* job) instead hands
+    Typst an escape sequence that consumes the next character and drops
+    the backslash silently. `$`, `@`, and an unpaired `*` are then
+    escaped exactly as `escape_typst_markup` does, since those rules do
+    not depend on the string-literal assumption that is wrong here.
+    """
+    text = text.replace("\\", "\\\\")
+    out: list[str] = []
+    star_at: list[int] = []
+    for ch in text:
+        if ch == "$":
+            out.append(r"\$")
+        elif ch == "@":
+            out.append(r"\@")
+        elif ch == "*":
+            star_at.append(len(out))
+            out.append(ch)
+        else:
+            out.append(ch)
     if len(star_at) % 2 == 1:
         for idx in reversed(star_at):
             out[idx] = r"\*"

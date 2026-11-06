@@ -29,10 +29,17 @@ worth asking is whether *that* output warns, not whether the vendor
 example's un-set default does. `_emitter_font_warnings` compiles the
 emitter's own output against a sample built right here -- never against
 `tests/fixtures/golden_content.GOLDEN`, since an app module must not import
-a `tests/` fixture -- and only the content's *shape* matters for a font
-warning (it comes from the explicit `font:` argument and the package's own
-icon usage, never from the text), so this sample does not need to be
-hostile the way that fixture is.
+a `tests/` fixture -- and the sample carries CJK text deliberately: every
+emitter's font argument is a `(latin, cjk)` fallback pair
+(`emitters._common.FALLBACK_FONTS`), and a sample with no CJK text at all
+would only ever exercise the first of the two, never actually probing
+whether the second face is installed.
+
+An emitter existing for a pair is not itself a pass: if the emitter's own
+output does not compile at all, that is a distinct failure
+("emitter output does not compile") from a clean font probe, and must not
+be read back as `font_warnings: []` -- an emitter whose output breaks is
+not a template this survey should offer just because nothing warned.
 
 Usage (compose):
   docker compose run --rm backend python -m app.jobs.survey_templates --out data/template_support.json
@@ -117,11 +124,12 @@ def _emitter_sample_content() -> ResumeContent:
     -- not a stand-in for `tests/fixtures/golden_content.GOLDEN`, which
     this app module must not import. It only needs to exercise every
     section an emitter can produce (contact fields, one of each entry
-    type, a skill group); see the module docstring for why the words in it
-    don't matter for a font warning.
+    type, a skill group) and, deliberately, some CJK text -- see the
+    module docstring for why a sample with no CJK at all would leave the
+    fallback font half of gate 2 unprobed.
     """
     return ResumeContent(
-        name="Sample Name",
+        name="Sample Name 範例姓名",
         contact=Contact(
             email="sample@example.com",
             phone="+1 555 0100",
@@ -165,17 +173,29 @@ def _emitter_sample_content() -> ResumeContent:
     )
 
 
-def _emitter_font_warnings(name: str, version: str) -> tuple[str, ...] | None:
-    """Font warnings from compiling the emitter's own output for this pair,
-    or `None` when there is no emitter -- telling `survey_row` to keep
-    using the vendor example's own warnings instead. See the module
-    docstring for why gate 2 must ask this question once an emitter
-    exists, rather than the vendor example's.
+class _EmitterCompileFailed:
+    """Sentinel: an emitter claims this pair, but its own output did not
+    compile -- distinct from `None` ("no emitter at all") and from `()`
+    ("compiled clean, no font warnings"). `probe_template`'s own `ok`
+    cannot catch this: it compiles the *vendor example*, never the
+    emitter's output, so without this sentinel a broken emitter would
+    read back as a clean font probe and the pair would still be offered.
+    """
 
-    A compile failure here counts as a clean pass on fonts specifically
-    (no warning text to report) -- gate 1 (`probe.ok`) is what already
-    catches a template that cannot compile at all; this function answers
-    only the font question.
+
+_EMITTER_COMPILE_FAILED = _EmitterCompileFailed()
+
+
+def _emitter_font_warnings(
+    name: str, version: str
+) -> tuple[str, ...] | _EmitterCompileFailed | None:
+    """Font warnings from compiling the emitter's own output for this pair;
+    `None` when there is no emitter at all, telling `survey_row` to keep
+    using the vendor example's own warnings instead; or
+    `_EMITTER_COMPILE_FAILED` when an emitter claims the pair but its own
+    output does not compile. See the module docstring and this module's
+    docstring for why that third case must be distinguished rather than
+    folded into a clean `()`.
     """
     emitter = emitter_for(name, version)
     if emitter is None:
@@ -184,7 +204,7 @@ def _emitter_font_warnings(name: str, version: str) -> tuple[str, ...] | None:
     try:
         _pdf_bytes, stderr = compile_typst_with_stderr(source, "pdf")
     except HTTPException:
-        return ()
+        return _EMITTER_COMPILE_FAILED
     return compiled_font_warnings(stderr)
 
 
@@ -249,8 +269,15 @@ def survey_row(name: str, version: str, row: dict[str, Any], *, root: Path) -> d
     # the vendor example's -- see the module docstring and
     # `_emitter_font_warnings`. `None` means no emitter claims this pair,
     # so the vendor example's own warnings (and split) still govern.
+    # `_EMITTER_COMPILE_FAILED` means one claims it but its own output does
+    # not even compile -- a distinct, terminal failure, never a clean `()`.
     emitter_warnings = _emitter_font_warnings(name, version)
-    warnings = probe.font_warnings if emitter_warnings is None else emitter_warnings
+    if emitter_warnings is _EMITTER_COMPILE_FAILED:
+        warnings: tuple[str, ...] = ()
+        if ok:
+            ok, reason = False, "emitter output does not compile"
+    else:
+        warnings = probe.font_warnings if emitter_warnings is None else emitter_warnings
     installable = tuple(font for font in warnings if font in INSTALLABLE_FONTS)
     if ok and name in DENYLIST:
         ok, reason = False, DENYLIST[name]
