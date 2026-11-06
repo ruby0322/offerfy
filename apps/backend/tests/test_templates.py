@@ -7,7 +7,6 @@ from app.services.template_probe import SupportRow
 from app.services.templates import (
     apply_prompt,
     find_thumbnail,
-    is_template_switch_message,
     latest_cv_packages,
     package_cached,
     parse_preview_spec,
@@ -63,8 +62,6 @@ def test_apply_prompt_asks_for_full_source_rewrite():
     assert "read_typst" in text
     assert "apply_typst_edit" in text
     assert "search+replace" in text
-    assert is_template_switch_message(text) is True
-    assert is_template_switch_message("Rename me to Ada Lovelace") is False
     assert parse_preview_spec(text) == ("brilliant-cv", "2.0.0")
     assert parse_preview_spec("hello") is None
 
@@ -114,8 +111,7 @@ def test_list_templates_endpoint(client, monkeypatch, tmp_path):
     assert row["universe_url"] == "https://typst.app/universe/package/basic-resume/"
     assert '@preview/basic-resume:0.2.9' in row["import_line"]
     assert "ATS resume" in row["description"]
-    assert "read_typst" in row["apply_prompt"]
-    assert "apply_typst_edit" in row["apply_prompt"]
+    assert "apply_prompt" not in row
     assert row["deterministic"] is False
 
 

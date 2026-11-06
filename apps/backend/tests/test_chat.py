@@ -940,6 +940,28 @@ def test_chat_template_switch_includes_package_example(
     assert "Do not invent helpers like #section or #entry" in systems
 
 
+def test_chat_applies_the_template_extra_when_the_request_names_one(
+    client: TestClient, openai_enabled, monkeypatch
+):
+    # The picker's model path sets `template` on the request; the message
+    # itself names no package and matches no English sentence.
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    scripted = ScriptedOpenAI([llm_message(content="ok")])
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+    result = post_chat(
+        client,
+        created["id"],
+        json={
+            "message": "Make it nicer",
+            "template": {"name": "gloat", "version": "0.1.0"},
+        },
+    )
+    assert result["status"] == 200
+    systems = _system_blobs(scripted.requests)
+    assert "MUST change the #import" in systems
+    assert "@preview/gloat:0.1.0" in systems
+
+
 @pytest.mark.skipif(not typst_available(), reason="Typst CLI is required")
 def test_chat_template_switch_repairs_compile_error(
     client: TestClient, openai_enabled, monkeypatch

@@ -26,6 +26,8 @@ from app.schemas import (
     RevisionListItem,
     ShareState,
     TailorCreate,
+    TemplateSwitchOut,
+    TemplateSwitchRequest,
 )
 from app.services.ats import analyze_pdf
 from app.services.family import create_tailor, family_master, family_tailors
@@ -45,6 +47,7 @@ from app.services.revisions import (
 from app.services.s3 import delete_object, put_object
 from app.services.sse import SSE_HEADERS, sse_frame
 from app.services.starter import default_title, generate_starter, title_from_filename
+from app.services.templates import apply_prompt, is_supported
 from app.services.typst_compile import (
     compile_preview_pages,
     compile_typst,
@@ -466,6 +469,28 @@ def restore_revision(
     out = _to_out(db, resume)
     db.commit()
     return out
+
+
+@router.post("/v1/resumes/{resume_id}/template", response_model=TemplateSwitchOut)
+def switch_template(
+    resume_id: str,
+    body: TemplateSwitchRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+):
+    # Checked before anything else, including ownership: a template a list
+    # merely hides but this endpoint still accepted would make the support
+    # list cosmetic -- see services.templates.is_supported.
+    if not is_supported(body.name, body.version):
+        raise HTTPException(status_code=400, detail="Template is not supported")
+    _owned_resume(resume_id, request, response, db, user, ensure=True)
+    # No emitter is registered for any template yet (Task 8 adds them), so
+    # every switch -- however the survey eventually marks it -- goes through
+    # the model path: this is the prompt that used to be typed into chat
+    # under the person's name instead of sent as its own request.
+    return TemplateSwitchOut(mode="llm", prompt=apply_prompt(body.name, body.version))
 
 
 def _require_user_owned(resume: Resume, user: User) -> None:

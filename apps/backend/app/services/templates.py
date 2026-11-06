@@ -98,20 +98,37 @@ def apply_prompt(name: str, version: str) -> str:
     )
 
 
-def is_template_switch_message(message: str) -> bool:
-    text = message or ""
-    return (
-        "rewrite my current Typst resume to use the" in text
-        and "apply_typst_edit" in text
-        and "@preview/" in text
-    )
-
-
 def parse_preview_spec(text: str) -> tuple[str, str] | None:
     match = PREVIEW_SPEC_RE.search(text or "")
     if not match:
         return None
     return match.group(1), match.group(2)
+
+
+def mentioned_template(message: str) -> tuple[str, str] | None:
+    """Which template a chat message is about, independent of the language
+    it is written in -- the fallback for a message typed by hand rather than
+    sent by the picker's own request (see `ChatRequest.template`).
+
+    A `@preview/name:version` spec wins outright, regardless of the support
+    list: a message that pins a package explicitly says what it means even
+    if that package is not (yet) approved, and `chat.py` needs that pin to
+    steer the model path's extras either way. Short of a spec, the longest
+    supported package name found as a whole word decides, so
+    `basic-resume-plus` is never read as a mention of `basic-resume`.
+    """
+    text = message or ""
+    spec = parse_preview_spec(text)
+    if spec:
+        return spec
+    by_name: dict[str, str] = {}
+    for name, version in supported_templates():
+        by_name.setdefault(name, version)
+    for name in sorted(by_name, key=len, reverse=True):
+        pattern = re.compile(rf"(?<![\w-]){re.escape(name)}(?![\w-])")
+        if pattern.search(text):
+            return name, by_name[name]
+    return None
 
 
 def template_example_source(
@@ -447,7 +464,6 @@ def list_templates() -> list[dict[str, str | bool]]:
                 "description": description,
                 "universe_url": UNIVERSE_URL.format(name=name),
                 "import_line": f'#import "@preview/{name}:{version}": *',
-                "apply_prompt": apply_prompt(name, version),
                 "cached": package_cached(root, name, version),
                 # Task 8's emitter registry supplies the real per-template
                 # value; until it exists, nothing offered here is wired
