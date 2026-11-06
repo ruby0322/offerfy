@@ -71,3 +71,73 @@ def test_basic_resume_emitter_maps_website_to_personal_site():
     # nowhere to go but the package's own `personal-site`.
     src = emitter_for("basic-resume", "0.2.9").emit(GOLDEN).source
     assert f'personal-site: "{GOLDEN.contact.website}"' in src
+
+
+# --- ats-friendly-resume: the false-friend fork -----------------------------
+#
+# ats-friendly-resume forked basic-resume and renamed two of its parameters
+# (work's `title:` -> `role:`, and the date helper `dates-helper` ->
+# `dates-util`) while keeping everything else -- see
+# `app/services/emitters/ats_friendly_resume.py`'s module docstring for the
+# full field-by-field derivation this guards.
+
+
+def test_ats_friendly_emitter_registered_exactly():
+    assert emitter_for("ats-friendly-resume", "0.1.1") is not None
+    assert emitter_for("ats-friendly-resume", "0.2.0") is None
+
+
+def test_ats_friendly_uses_dates_util_not_dates_helper():
+    src = emitter_for("ats-friendly-resume", "0.1.1").emit(GOLDEN).source
+    assert "dates-util(" in src and "dates-helper(" not in src
+
+
+def test_ats_friendly_passes_role_not_title():
+    src = emitter_for("ats-friendly-resume", "0.1.1").emit(GOLDEN).source
+    assert "role:" in src and "title:" not in src
+
+
+def test_ats_friendly_declares_what_its_project_slot_cannot_hold():
+    result = emitter_for("ats-friendly-resume", "0.1.1").emit(GOLDEN)
+    # project() has no `role` parameter at all in this package (unlike
+    # basic-resume's own project() component) -- see resume.typ. Every
+    # other ResumeContent field (summary, extras, skills included) has
+    # somewhere to go, so this is the only loss.
+    assert result.dropped == ("projects[].role",)
+    assert result.degraded == ()
+
+
+def test_ats_friendly_emitter_pins_the_import_and_the_font():
+    src = emitter_for("ats-friendly-resume", "0.1.1").emit(GOLDEN).source
+    assert src.startswith('#import "@preview/ats-friendly-resume:0.1.1"')
+    assert "font: (" in src
+    assert "New Computer Modern" in src
+    assert "Noto Serif CJK TC" in src
+
+
+def test_ats_friendly_emitter_escapes_content_that_would_break_typst():
+    hostile = GOLDEN.model_copy(update={"name": 'A "B" \\ C'})
+    assert '\\"B\\"' in emitter_for("ats-friendly-resume", "0.1.1").emit(hostile).source
+
+
+def test_ats_friendly_emitter_omits_a_section_with_no_entries():
+    src = emitter_for("ats-friendly-resume", "0.1.1").emit(MINIMAL).source
+    assert "== Projects" not in src and "#project(" not in src
+    assert "== Experience" not in src and "#work(" not in src
+
+
+def test_ats_friendly_emitter_renders_the_summary():
+    # No dedicated summary component in this package either -- same
+    # bare-paragraph-under-a-heading technique as basic-resume.
+    src = emitter_for("ats-friendly-resume", "0.1.1").emit(GOLDEN).source
+    assert "== Summary" in src
+    assert GOLDEN.summary in src
+
+
+def test_ats_friendly_emitter_maps_website_to_portfolio():
+    # resume() has no `website` argument -- it has `portfolio` instead
+    # (ats-friendly-resume's own renamed slot for the same idea; not one
+    # of the two renames the trap is about, but still not a `website:`
+    # argument, so Contact.website still needs a destination).
+    src = emitter_for("ats-friendly-resume", "0.1.1").emit(GOLDEN).source
+    assert f'portfolio: "{GOLDEN.contact.website}"' in src

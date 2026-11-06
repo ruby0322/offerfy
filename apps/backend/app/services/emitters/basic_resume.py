@@ -26,13 +26,18 @@ protect) needs a different rule than already-written Typst source does.
 
 from __future__ import annotations
 
-from app.services.emitters._common import bullet_lines, dates_expr, font_literal, heading_block
+from app.services.emitters._common import (
+    bullet_lines,
+    dates_expr,
+    font_literal,
+    heading_block,
+    skill_line,
+)
 from app.services.emitters.base import EmitResult
 from app.services.resume_content import (
     EducationEntry,
     ProjectEntry,
     ResumeContent,
-    SkillGroup,
     WorkEntry,
 )
 from app.services.typst_escape import markup_value, typst_value
@@ -113,16 +118,6 @@ def _project_lines(entry: ProjectEntry) -> list[str]:
     return lines
 
 
-def _skill_line(group: SkillGroup) -> str | None:
-    category = markup_value(group.category) if group.category else ""
-    items = ", ".join(markup_value(item) for item in group.items if item)
-    if not category and not items:
-        return None
-    if category and items:
-        return f"- *{category}*: {items}"
-    return f"- {category or items}"
-
-
 def emit(content: ResumeContent) -> EmitResult:
     lines: list[str] = [f'#import "@preview/{name}:{version}": *', ""]
     lines.extend(_header_lines(content))
@@ -150,7 +145,7 @@ def emit(content: ResumeContent) -> EmitResult:
         project_body.append("")
     lines.extend(heading_block("Projects", project_body))
 
-    skill_body = [line for line in (_skill_line(group) for group in content.skills) if line]
+    skill_body = [line for line in (skill_line(group) for group in content.skills) if line]
     lines.extend(heading_block("Skills", skill_body))
 
     for section in content.extras:

@@ -3,17 +3,20 @@
 Each emitter still owns its own package's component calls (`#edu(...)`,
 `#work(...)`, whatever `ats-friendly-resume` renames them to) -- that part
 is genuinely package-specific and belongs in each emitter's own module.
-What is not package-specific is the font policy, the `dates-helper(...)`
-idiom `basic-resume` and its forks share, the bullet-list rendering of a
-list of strings, and the "heading, then body, or nothing at all when the
-body is empty" shape every section in every emitter so far has used. A
-second emitter re-deciding any of these independently is exactly how the
-font policy would end up with four different CJK regexes instead of one
+What is not package-specific is the font policy, the dates-helper idiom
+`basic-resume` and its forks share (even where a fork renames the helper
+function itself -- see `dates_expr`'s `helper` argument), the rendering of
+a `SkillGroup` as a markup bullet, the bullet-list rendering of a list of
+strings, and the "heading, then body, or nothing at all when the body is
+empty" shape every section in every emitter so far has used. A second
+emitter re-deciding any of these independently is exactly how the font
+policy would end up with four different CJK regexes instead of one
 answer -- see `FALLBACK_FONTS` below.
 """
 
 from __future__ import annotations
 
+from app.services.resume_content import SkillGroup
 from app.services.typst_escape import markup_value, typst_value
 
 # Per-glyph fallback, not an all-or-nothing switch: Typst's `font` accepts
@@ -34,20 +37,50 @@ def font_literal() -> str:
     return typst_value(list(FALLBACK_FONTS))
 
 
-def dates_expr(start: str | None, end: str | None) -> str | None:
-    """A `dates-helper(...)` call, or `None` when there is nothing to date
-    -- omitting the argument entirely keeps a dates-consuming component
-    from rendering a bare em dash when neither end of the range is known.
-    Shared because `dates-helper` is the basic-resume idiom its forks
-    (`ats-friendly-resume` among them) keep even where they rename other
-    parameters.
+def dates_expr(
+    start: str | None, end: str | None, *, helper: str = "dates-helper"
+) -> str | None:
+    """A `<helper>(start-date: ..., end-date: ...)` call, or `None` when
+    there is nothing to date -- omitting the argument entirely keeps a
+    dates-consuming component from rendering a bare em dash when neither
+    end of the range is known.
+
+    `helper` defaults to `"dates-helper"`, basic-resume's own name for
+    this idiom. Shared because the *shape* of the call (two named
+    `start-date`/`end-date` keywords, each a plain string) is what every
+    fork so far keeps -- but the name is not: `ats-friendly-resume`
+    renamed the function itself to `dates-util` (confirmed against its
+    own `src/resume.typ`) while keeping this exact shape. Hard-coding
+    `"dates-helper"` here would silently call a function that does not
+    exist in that package's namespace, so the name is a parameter, not
+    an assumption.
     """
     if not start and not end:
         return None
     return (
-        f"dates-helper(start-date: {typst_value(start or '')}, "
+        f"{helper}(start-date: {typst_value(start or '')}, "
         f"end-date: {typst_value(end or '')})"
     )
+
+
+def skill_line(group: SkillGroup) -> str | None:
+    """One `- *category*: item, item` (or just one half, whichever is
+    present) markup bullet for a `SkillGroup`, or `None` for an empty one.
+
+    Shared because no package in this directory has a dedicated skills
+    component -- `basic-resume` and `ats-friendly-resume` alike render
+    skills as plain markup bullets under a `== Skills` heading (see
+    `ats-friendly-resume`'s own `template/main.typ` example), so the
+    rendering is a property of `ResumeContent.skills`, not of either
+    package.
+    """
+    category = markup_value(group.category) if group.category else ""
+    items = ", ".join(markup_value(item) for item in group.items if item)
+    if not category and not items:
+        return None
+    if category and items:
+        return f"- *{category}*: {items}"
+    return f"- {category or items}"
 
 
 def bullet_lines(items: list[str]) -> list[str]:
