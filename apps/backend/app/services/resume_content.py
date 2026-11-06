@@ -45,7 +45,7 @@ from app.models import GuestSession, LlmCall, Resume, User
 from app.services.llm import _output_text, _responses_url
 from app.services.llm.prompts import EXTRACT_PROMPT
 from app.services.llm.providers import openai as openai_provider
-from app.services.model_catalog import DEFAULT_MODEL, spec_or_passthrough
+from app.services.model_catalog import spec_or_passthrough
 from app.services.revisions import source_hash
 from app.services.usage import event_cost_uusd
 
@@ -322,6 +322,18 @@ def _is_empty(content: ResumeContent) -> bool:
     )
 
 
+# The model this call sends to OpenAI's Responses API when no pin names an
+# OpenAI model. Deliberately not model_catalog.DEFAULT_MODEL: that constant is
+# "claude-haiku-5-5", an Anthropic id, and sending an Anthropic id to this
+# endpoint is not a fallback at all -- it is every unpinned call failing with
+# a provider 400, silently, because CHAT_MODEL is blank by default (so this is
+# the *common* path, not an edge case). gpt-6-luna is the cheapest OpenAI
+# model in the catalogue and is already the fixed model behind
+# layout.DEFAULT_DECISIONS_MODEL, so this reuses rather than invents "the
+# cheap OpenAI model we trust for a structured call nobody is choosing."
+EXTRACT_FALLBACK_MODEL = "gpt-6-luna"
+
+
 @dataclass
 class ExtractResult:
     """What one extraction did. A failure never writes."""
@@ -338,23 +350,32 @@ async def extract_content(source: str) -> ExtractResult:
 
     Never raises -- every failure comes back as a populated `error` and a
     `None` content, exactly like build_profile. Runs on the OpenAI Responses
-    API regardless of what anyone picked in the editor, and on the
-    configured default model rather than this person's choice, for the same
-    two reasons build_profile has: the output has to validate against
-    ResumeContent, and nobody is watching this call happen.
+    API regardless of what anyone picked in the editor, and on a fixed
+    default model rather than this person's choice, for the same two reasons
+    build_profile has: the output has to validate against ResumeContent, and
+    nobody is watching this call happen. Unlike build_profile, the fallback
+    model is pinned to EXTRACT_FALLBACK_MODEL rather than to the catalogue
+    default -- see that constant for why.
     """
     settings = get_settings()
     if not openai_provider.OpenAIProvider().configured():
         return ExtractResult(error="llm_not_configured", source_chars=len(source))
-    pinned = spec_or_passthrough(settings.pinned_chat_model() or DEFAULT_MODEL)
+    pin = settings.pinned_chat_model()
+    pinned = spec_or_passthrough(pin) if pin else None
     # An operator pin is honoured only when it names an OpenAI model, for the
     # same reason build_profile restricts it: pinning an Anthropic model must
-    # not take this feature down with it.
+    # not take this feature down with it. Anything else -- no pin, or a pin
+    # naming a non-OpenAI model -- falls back to EXTRACT_FALLBACK_MODEL.
     spec = (
         pinned
-        if pinned.provider == openai_provider.NAME
-        else spec_or_passthrough(DEFAULT_MODEL)
+        if pinned is not None and pinned.provider == openai_provider.NAME
+        else spec_or_passthrough(EXTRACT_FALLBACK_MODEL)
     )
+    if spec.provider != openai_provider.NAME:
+        # The fallback itself did not resolve to an OpenAI model -- nothing
+        # usable to call, so this makes no request at all rather than sending
+        # the wrong provider's id to this endpoint.
+        return ExtractResult(error="llm_not_configured", source_chars=len(source))
     model = spec.id
     url = _responses_url(settings.openai_base_url or "https://api.openai.com/v1")
     headers = {

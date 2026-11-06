@@ -253,6 +253,57 @@ async def test_extract_content_reports_a_transport_failure_without_raising(
     assert result.error == "provider_error"
 
 
+# --- regression: this call must never send an Anthropic model id to the ----
+# --- OpenAI endpoint it posts to ---------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_extract_content_sends_an_openai_model_with_no_pin(
+    openai_enabled, monkeypatch
+):
+    """model_catalog.DEFAULT_MODEL is an Anthropic id ("claude-haiku-5-5"),
+    and this call always speaks to OpenAI's Responses endpoint -- CHAT_MODEL
+    is blank by default, so an unpinned call is the common path, not an edge
+    case. A fallback that resolves to a non-OpenAI model would make every
+    unpinned extraction fail at the provider, silently, and the feature
+    would never engage. Asserted on the id actually sent in the request
+    body, not on the result, so a fallback that merely *returns* an OpenAI id
+    while sending something else could not slip through.
+    """
+    from app.services import model_catalog
+
+    stub = _StubLlm(_said({"name": "Ruby"}))
+    monkeypatch.setattr("app.services.resume_content.httpx.AsyncClient", stub)
+
+    await extract_content(SOURCE)
+
+    sent_model = stub.calls[0]["body"]["model"]
+    assert model_catalog.spec_or_passthrough(sent_model).provider == "openai"
+
+
+@pytest.mark.anyio
+async def test_extract_content_sends_an_openai_model_when_the_pin_is_anthropic(
+    openai_enabled, monkeypatch
+):
+    """An operator pin is honoured only when it names an OpenAI model -- the
+    same rule build_profile applies, for the same reason: pinning an
+    Anthropic model must not take this feature down with it.
+    """
+    from app.config import get_settings
+    from app.services import model_catalog
+
+    monkeypatch.setenv("CHAT_MODEL", "claude-opus-5-5")
+    get_settings.cache_clear()
+
+    stub = _StubLlm(_said({"name": "Ruby"}))
+    monkeypatch.setattr("app.services.resume_content.httpx.AsyncClient", stub)
+
+    await extract_content(SOURCE)
+
+    sent_model = stub.calls[0]["body"]["model"]
+    assert model_catalog.spec_or_passthrough(sent_model).provider == "openai"
+
+
 # --- record_extract_spend: the guest/user billing split ---------------------
 
 
