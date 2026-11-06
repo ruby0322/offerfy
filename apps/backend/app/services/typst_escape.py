@@ -18,6 +18,23 @@ for what the text actually is, not for where it ends up.
 Comments are left alone: escaping is meaningless inside `//` and `/* ... */`,
 and template comments full of `name: ""` placeholders otherwise get rewritten
 on every edit.
+
+**Settled.** Typst applies glyph-level typography to all markup prose on
+its own, with no escaping involved: a straight `"`/`'` becomes a curly
+smart quote, a run of two or three `-` becomes an en/em dash, and `...`
+becomes a single ellipsis character. None of that is content loss for
+this product -- no word, number or token disappears, the IR a résumé is
+built from stays authoritative, and it is the same substitution the
+starter (`app.services.starter._render`) and the LLM edit path already
+produce, so suppressing it would make an emitter's output typographically
+worse than hand-written Typst. `markup_value` does not fight any of this:
+`"`/`'` are never escaped, and `.` is never in its escape set, so `...`
+is untouched. The one disclosed exception is `-`: it *is* escaped
+unconditionally like every other markup-significant character (see
+`_MARKUP_ALWAYS_ESCAPE`'s own comment for why), which means a `--`/`---`
+run arriving through `markup_value` renders as literal hyphens instead of
+an en/em dash -- a known trade-off of escaping every occurrence rather
+than carving out a run-length exception, not an oversight.
 """
 
 from __future__ import annotations
@@ -192,6 +209,13 @@ def escape_typst_markup(text: str) -> str:
 # task report for the reasoning), not an oversight.
 _MARKUP_ALWAYS_ESCAPE = frozenset("#$@*_`<>[]~-+/=")
 
+# Every character Typst's own lexer treats as a line break -- ASCII
+# `\n`/`\r` plus vertical tab, form feed, NEL, and the Unicode line/
+# paragraph separators -- collapsed to one space per run. See
+# `markup_value`'s own docstring for why a raw one must never reach the
+# emitted Typst source.
+_LINE_BREAK_RE = re.compile("[\r\n\x0b\x0c\x85  ]+")
+
 
 def markup_value(text: str) -> str:
     """Escape raw, never-pre-escaped data for direct use as Typst markup
@@ -223,25 +247,30 @@ def markup_value(text: str) -> str:
     otherwise become Typst's own en/em dash renders as literal hyphens
     instead, since there is no run-length exception carved out for it).
 
-    An embedded `\\n`/`\\r` is normalised to a single space rather than
-    passed through as a literal line break. `ResumeContent`'s fields
-    (`summary`, every `bullets`/`items`/`title`/entry) are plain `str`
-    with nothing upstream stripping a newline out of an LLM extraction,
-    so a multi-line value is representable even though every emitter
-    treats each one as a single logical line of prose. Passing a raw
-    newline through would split that line in the *emitted Typst source*
-    itself -- harmless for a bullet or heading built with this package's
-    own fixed prefix (the continuation merely loses its bullet styling,
-    a formatting defect, not a correctness one, and already how
+    Every character Typst's own lexer treats as a line break -- not just
+    `\\n`/`\\r`, but also vertical tab (`\\x0b`), form feed (`\\x0c`), NEL
+    (`\\x85`), and the Unicode line/paragraph separators (`\\u2028`,
+    `\\u2029`) -- is normalised to a single space rather than passed
+    through as a literal line break. `ResumeContent`'s fields (`summary`,
+    every `bullets`/`items`/`title`/entry) are plain `str` with nothing
+    upstream stripping any of these out of an LLM extraction, so a
+    multi-line value is representable even though every emitter treats
+    each one as a single logical line of prose. Passing one through
+    would split that line in the *emitted Typst source* itself --
+    harmless for a bullet or heading built with this package's own fixed
+    prefix (the continuation merely loses its bullet styling, a
+    formatting defect, not a correctness one, and already how
     `escape_typst_markup` treats a newline in LLM-written source), but
     `_skill_line` builds one whole skill group as a single source line
-    (`- *Category*: item, item, item`); a newline inside one item would
-    cut that line off mid-list, losing every item after it from that
-    group -- exactly the silent-loss class this module exists to close,
-    just caused by whitespace instead of a special character. Normalising
-    first means no caller has to know which shape it is building.
+    (`- *Category*: item, item, item`); one inside an item would cut that
+    line off mid-list, rendering every item after it as an un-bulleted
+    continuation line instead of dropping them, but still not what the
+    IR describes -- the same silent-reshaping class this module exists
+    to close, just caused by whitespace instead of a special character.
+    Normalising first means no caller has to know which shape it is
+    building.
     """
-    text = text.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    text = _LINE_BREAK_RE.sub(" ", text)
     text = text.replace("\\", "\\\\")
     return "".join(f"\\{ch}" if ch in _MARKUP_ALWAYS_ESCAPE else ch for ch in text)
 

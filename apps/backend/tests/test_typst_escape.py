@@ -246,6 +246,16 @@ def test_markup_value_normalises_an_embedded_newline_to_a_space():
     assert markup_value("line one\n- line two") == "line one \\- line two"
 
 
+def test_markup_value_normalises_every_typst_line_break_character():
+    # Typst's own lexer treats more than ASCII \n/\r as a line break --
+    # vertical tab, form feed, NEL, and the Unicode line/paragraph
+    # separators all split a line the same way. None of these are
+    # stripped out of an LLM extraction either, so each gets the same
+    # normalisation as \n for the same reason.
+    for ch in ("\x0b", "\x0c", "\x85", " ", " "):
+        assert markup_value(f"line one{ch}line two") == "line one line two"
+
+
 def test_markup_value_leaves_a_dash_run_or_ellipsis_alone():
     # Settled, not a gap: a *run* of two or more `-` (Typst's en/em dash
     # shorthand) and three `.` (ellipsis) are intact typography this

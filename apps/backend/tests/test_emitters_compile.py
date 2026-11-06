@@ -68,14 +68,31 @@ def test_registered_emitter_output_preserves_a_literal_backslash(pair):
 # `#` slipped past a hostile string that covered the eleven characters a
 # previous version of `markup_value` did handle. This exhaustive version
 # does not curate: it runs through *every* printable ASCII punctuation
-# character (`string.punctuation`, all 32 of them), in both an embedded
-# ("X{ch}Y") and a leading ("{ch}Y") context, in one document, through
+# character (`string.punctuation`, all 32 of them -- exhaustive over
+# that specific, closed set, which is what matters: nothing in Typst's
+# markup grammar is non-ASCII, so ASCII punctuation is the complete
+# hazard class, even though it is not every character in the alphabet),
+# in both an embedded and a leading context, in one document, through
 # the real registered emitter and the real binary.
+#
+# The two contexts are deliberately non-overlapping and each shaped so
+# it can actually fail if the escaping regresses:
+# - `embedded = f"mid{ch}mid"` has no shared substring with `leading`.
+# - `leading = f"{ch} lead"` has a trailing space, which the leading
+#   case needs to even be *capable* of exhibiting a list/heading marker
+#   -- `{ch}Y` with no space after it renders as a literal character
+#   whether `ch` is escaped or not (verified against the real binary),
+#   so it could never have failed regardless of what this module did,
+#   and `{ch}Y` is also a substring of `X{ch}Y` for every one of these
+#   32 characters, so that assertion was already satisfied by the
+#   embedded case alone. Both holes made the previous version of this
+#   test unable to fail even with the positional bug from the last
+#   review round reintroduced.
 #
 # Two characters are deliberately excluded from the exact-match
 # assertions, not missed: `"` and `'` are Typst's smart-quote
-# substitution (`"hi"` -> `“hi”`), the same "settled, not content loss"
-# typography the module docstring excludes dash/ellipsis runs from --
+# substitution (`"hi"` -> `“hi”`), the same settled typography the
+# module docstring's "Settled" note excludes dash/ellipsis runs from --
 # verified above (`_SMART_QUOTE_CHARS`) to be the *only* two of the 32
 # that do not round-trip exactly; every other one of the 32, including
 # ones no prior round named (`%`, `&`, `(`, `)`, `,`, `:`, `;`, `?`,
@@ -87,16 +104,23 @@ _SMART_QUOTE_CHARS = frozenset("\"'")
 # unterminated block comment -- the exact bug `app.services.import_qa`'s
 # module docstring documents for LLM-written source) that must round-trip
 # exactly now that every `/` and `*` is escaped unconditionally, with no
-# digraph able to form. `--`, `---`, and `...` are Typst's own en/em
-# dash and ellipsis shorthand -- settled typography, not asserted exactly
-# (see `markup_value`'s own docstring for the disclosed trade-off: a
-# `--`/`---` run renders as literal hyphens once it passes through this
-# function, since there is no run-length exception carved out for it);
-# they are still included in the document, to prove the whole thing
-# still compiles cleanly with them present, just not pinned to one exact
-# rendering.
+# digraph able to form -- asserted exactly, same as the single characters.
+#
+# `--`/`---` (Typst's en/em dash shorthand) and `...` (ellipsis) are the
+# module docstring's "Settled" note: intentional typography, not content
+# loss. `--`/`---` happen to round-trip exactly too, once every `-` is
+# escaped unconditionally (see `markup_value`'s docstring for why this is
+# a disclosed trade-off, not a design goal) -- asserted, so a regression
+# that stopped escaping `-` would be caught here, not hidden by the
+# single-character `X-Y`/`-Y` cases rendering identically escaped or not.
+# `...` is excluded from the exact-match set on purpose: `.` was never in
+# `_MARKUP_ALWAYS_ESCAPE`, so `...` still becomes a single ellipsis
+# character, which is correct and not asserted against here -- it is
+# still in the document, to prove the whole thing compiles cleanly with
+# it present, just not pinned to one exact rendering.
 _HAZARD_DIGRAPHS = ("//", "/*", "*/")
-_SETTLED_DIGRAPHS = ("--", "---", "...")
+_SETTLED_DASH_RUNS = ("--", "---")
+_SETTLED_ELLIPSIS = "..."
 
 # A newline embedded in one field: see `markup_value`'s own docstring for
 # why this is normalised to a single space rather than passed through.
@@ -110,13 +134,15 @@ def test_registered_emitter_round_trips_every_printable_ascii_punctuation_charac
     bullets: list[str] = []
     exact_cases: list[str] = []
     for ch in string.punctuation:
-        embedded, leading = f"X{ch}Y", f"{ch}Y"
+        embedded, leading = f"mid{ch}mid", f"{ch} lead"
         bullets.extend([embedded, leading])
         if ch not in _SMART_QUOTE_CHARS:
             exact_cases.extend([embedded, leading])
     bullets.extend(_HAZARD_DIGRAPHS)
     exact_cases.extend(_HAZARD_DIGRAPHS)
-    bullets.extend(_SETTLED_DIGRAPHS)
+    bullets.extend(_SETTLED_DASH_RUNS)
+    exact_cases.extend(_SETTLED_DASH_RUNS)
+    bullets.append(_SETTLED_ELLIPSIS)
     bullets.append(_EMBEDDED_NEWLINE_CASE)
 
     content = ResumeContent(
