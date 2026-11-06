@@ -128,6 +128,28 @@ def test_typst_value_renders_empty_dict_and_list():
     assert typst_value([]) == "()"
 
 
+def test_typst_value_normalises_an_embedded_newline_to_a_space():
+    # A raw newline is legal *syntax* inside a Typst string literal (it
+    # simply spans source lines) -- so this was never a compile failure,
+    # it was a silent one: the literal line break survived into whatever
+    # displayed the string. Surfaced by the first dict-shaped emitter
+    # (clean_print_cv.py), which routes free-form prose through this
+    # function instead of markup_value -- every earlier caller only ever
+    # passed short, structured values (dates, names) with no embedded
+    # newline to begin with. Same normalisation, same reason, as
+    # markup_value's own (see test_markup_value_normalises_an_embedded_
+    # newline_to_a_space above).
+    assert typst_value("line one\nline two") == '"line one line two"'
+    assert typst_value("line one\r\nline two") == '"line one line two"'
+
+
+def test_typst_value_normalises_every_typst_line_break_character():
+    # Same character class as markup_value's own
+    # test_markup_value_normalises_every_typst_line_break_character.
+    for ch in ("\x0b", "\x0c", "\x85", " ", " "):
+        assert typst_value(f"line one{ch}line two") == '"line one line two"'
+
+
 # markup_value: the data-mode counterpart to escape_typst_markup, for raw
 # text that was never pre-escaped (see its own docstring for why the two
 # cannot share one implementation -- a `"` is not a string literal to

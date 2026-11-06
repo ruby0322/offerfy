@@ -85,29 +85,21 @@ string-literal escaping (backslash-doubling, quote-escaping); running it
 through `markup_value` as well would double-escape markup characters
 (`#`, `$`, `@`, ...) that this package's functions never interpret as
 markup in the first place. `markup_value` is still used, via
-`_common.heading_block`/`bullet_lines`, for the one thing this emitter
-*does* write as real markup source: the `extras` section (see below).
+`_common.bullet_lines`, for the one thing this emitter *does* write as
+real markup source: the `extras` bullets (see below).
 
-**One hazard `typst_value` does not cover, that `markup_value` does.**
-`typst_value` only doubles backslashes and escapes quotes -- unlike
-`markup_value`, it never touches an embedded line-break character.
-Confirmed against the real compiler: a raw `\\n` inside a quoted Typst
-string literal is legal syntax (the string itself spans multiple source
-lines), but it reaches the rendered PDF as a literal newline between the
-two halves, not the single space `markup_value`'s own `_LINE_BREAK_RE`
-normalization already guarantees for every call-shaped emitter's
-bullets. Every other emitter in this registry never hits this because
-every string it hands to `typst_value` is a short, structured argument
-(a date, a name) rather than free-form prose -- this is the first
-emitter to route prose (`summary`, bullets folded into `description`/
-`details`) through `typst_value` instead of `markup_value`, because this
-package displays prose via code-mode interpolation rather than markup.
-`_text()` below closes that gap locally, by the same normalization
-`markup_value` applies, duplicated rather than imported: `typst_escape.
-_LINE_BREAK_RE` is a private module symbol, and the two functions
-disagree on purpose (one must also escape markup characters, the other
-must not), so sharing the pattern as a public export would be a bigger
-change than this one emitter needs.
+**An embedded line break.** `typst_value` normalises one to a single
+space before quoting, the same way `markup_value` does, and for the same
+reason (see `typst_escape.typst_value`'s own docstring) -- this emitter
+is what surfaced the gap: it is the first one to route free-form prose
+(`summary`, bullets folded into `description`/`details`) through
+`typst_value` rather than `markup_value`, since this package displays
+prose via code-mode interpolation rather than markup. Fixed once, in
+`typst_escape.py` itself, rather than patched around here, once review
+flagged the first version of this module for duplicating `markup_value`'s
+`_LINE_BREAK_RE` locally -- the gap was a property of `typst_value`, not
+of this package, and a per-emitter patch is exactly how it would have
+reached a fifth emitter untouched.
 
 **Losses, derived field by field over every `ResumeContent` field** (not
 copied from the brief, which had the right two losses but the wrong
@@ -167,28 +159,30 @@ copied from the brief, which had the right two losses but the wrong
 **`extras` is rendered, not declared dropped.** This package has no
 generic user-named-section function (no `cv-section(title, body)`
 analogue), the same gap the original plan assumed would make `extras`
-a loss here too. But Tasks 9 and 10 both found the same gap closeable:
-a bare `== <title>` heading plus markup bullets -- `_common.
-heading_block`/`bullet_lines`, unchanged -- renders as an ordinary Typst
-heading and bullet list, with no dependency on `cv-page-setup`'s own
-styling at all (`cv-page-setup` only sets `text`/`par`/`page`, no `show
-heading` rule that would make a bare heading look out of place against
-this package's own `section-heading()` accent-bar treatment). Verified
-against the real compiler: it compiles cleanly and the heading/bullets
-render legibly, just without the accent bar and hairline rule
-`section-heading()` gives every *built-in* section -- a visual
-inconsistency, not a broken or hidden one, and avoiding a loss beats
-declaring one wherever the template can actually display the content
-(this module's own design brief, Tasks 9-10's precedent). So `extras` is
-appended after every other section, exactly like the other three
-emitters, and reports nothing in `dropped`/`degraded`.
+a loss here too. But Tasks 9 and 10 both found the same gap closeable,
+and this package closes it even more directly than either: `section-
+heading(title)` is a top-level `#let` in `cv-template.typ`, with no
+underscore prefix, so `#import "@preview/clean-print-cv:0.1.0": *`
+already exports it -- the exact function every built-in section calls
+for its own accent-bar/upper-case/hairline-rule heading. Calling it
+directly for `extras` too (then `_common.bullet_lines` for the body)
+costs nothing and matches every other heading on the page exactly,
+rather than falling back to a bare `== <title>` markup heading that
+would only *approximate* this package's own look. (An earlier version of
+this module used the bare-heading fallback, reasoning that it kept
+`extras` handling identical across all four emitters -- review correctly
+rejected that: this task exists *because* this package is shaped
+differently from the other three, so cross-emitter uniformity was the
+wrong axis to optimise, and the package's own heading was free for the
+taking.) So `extras` is appended after every other section, exactly like
+the other three emitters in *position*, but through the package's own
+heading function rather than a markup approximation of one, and reports
+nothing in `dropped`/`degraded`.
 """
 
 from __future__ import annotations
 
-import re
-
-from app.services.emitters._common import bullet_lines, font_literal, heading_block
+from app.services.emitters._common import bullet_lines, font_literal
 from app.services.emitters.base import EmitResult
 from app.services.resume_content import ProjectEntry, ResumeContent
 from app.services.typst_escape import typst_value
@@ -196,21 +190,15 @@ from app.services.typst_escape import typst_value
 name = "clean-print-cv"
 version = "0.1.0"
 
-# Mirrors `typst_escape._LINE_BREAK_RE` (private to that module -- a
-# small, deliberate duplication rather than an import across the
-# boundary; see the module docstring's "one hazard `typst_value` does
-# not cover" section for why `typst_value` itself cannot absorb this).
-_LINE_BREAK_RE = re.compile("[\r\n\x0b\x0c\x85  ]+")
-
 
 def _text(value: str | None) -> str:
-    """A prose string ready for `typst_value`: `""` for `None`/empty,
-    any embedded line break collapsed to one space exactly like
-    `markup_value` already does for every call-shaped emitter's
-    bullets."""
-    if not value:
-        return ""
-    return _LINE_BREAK_RE.sub(" ", value)
+    """A prose string ready for `typst_value`: `""` for `None`/empty.
+    `typst_value` itself now normalises an embedded line break to a
+    single space (see that function's own docstring) -- this helper only
+    supplies the empty-string default `cv-header`/etc. require in place
+    of `none`, since every key `_personal`/`_experience`/etc. build is
+    read with no `.at(default:)` guard."""
+    return value or ""
 
 
 def _period(start: str | None, end: str | None) -> str:
@@ -359,7 +347,14 @@ def emit(content: ResumeContent) -> EmitResult:
 
     for section in content.extras:
         lines.append("")
-        lines.extend(heading_block(section.title, bullet_lines(section.entries)))
+        # section-heading() is the package's own top-level `#let`
+        # (confirmed against cv-template.typ: no underscore prefix),
+        # already in scope via the `*` import above -- the same
+        # accent-bar/upper-case/hairline-rule heading every built-in
+        # section uses, not a markup `==` approximation of it. See
+        # module docstring's "extras is rendered" note.
+        lines.append(f"#section-heading({typst_value(section.title)})")
+        lines.extend(bullet_lines(section.entries))
 
     source = "\n".join(lines).rstrip() + "\n"
 

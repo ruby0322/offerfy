@@ -62,6 +62,22 @@ _STRING_FIELD = re.compile(
 _BULLET = re.compile(r"^(\s*-\s+)(.*)$")
 _IMPORT = re.compile(r"^\s*#import\s")
 
+# Every character Typst's own lexer treats as a line break -- ASCII
+# `\n`/`\r` plus vertical tab, form feed, NEL, and the Unicode line/
+# paragraph separators -- collapsed to one space per run. Shared by
+# `typst_value` and `markup_value`: both hand raw, never-pre-escaped data
+# straight into Typst source, and in neither case may a literal line
+# break survive into it (see each function's own docstring for why,
+# they differ in *how* a line break would otherwise cause harm, not in
+# whether it would). Defined once, ahead of both, rather than per-caller
+# -- a prior version of `typst_value` left this out, which worked for
+# every call-shaped emitter (dates, names: never multi-line) until the
+# first dict-shaped one (`clean_print_cv.py`) routed actual résumé prose
+# through it instead of `markup_value`, and the gap surfaced as a raw
+# newline reaching the rendered page as a literal line break instead of
+# a space.
+_LINE_BREAK_RE = re.compile("[\r\n\x0b\x0c\x85  ]+")
+
 
 def escape_typst_string(value: str) -> str:
     """Escape text for a Typst `"..."` literal without double-escaping."""
@@ -90,6 +106,17 @@ def typst_value(value: Any) -> str:
     source is already part of an intentional escape sequence, a backslash here
     comes from raw data (YAML/TOML/JSON) and is never pre-escaped -- so every
     backslash is doubled before the quote escaping is applied.
+
+    A string value also has any embedded line break collapsed to a single
+    space first (`_LINE_BREAK_RE`, the same normalisation `markup_value`
+    applies, and for the same underlying reason -- see that function's own
+    docstring). An unescaped raw newline is legal *syntax* inside a Typst
+    string literal (the literal simply spans source lines), so this was not
+    a compile failure waiting to happen; it was a silent one. Confirmed
+    against the real compiler: without this, the newline survives into
+    whatever displays the string as a literal line break in the rendered
+    output, not the single space every caller of this function implicitly
+    assumes free-form prose collapses to.
     """
     if value is None:
         return "none"
@@ -98,7 +125,8 @@ def typst_value(value: Any) -> str:
     if isinstance(value, (int, float)):
         return str(value)
     if isinstance(value, str):
-        return f'"{escape_typst_string(value.replace("\\", "\\\\"))}"'
+        normalised = _LINE_BREAK_RE.sub(" ", value)
+        return f'"{escape_typst_string(normalised.replace("\\", "\\\\"))}"'
     if isinstance(value, dict):
         if not value:
             return "(:)"
@@ -209,12 +237,10 @@ def escape_typst_markup(text: str) -> str:
 # task report for the reasoning), not an oversight.
 _MARKUP_ALWAYS_ESCAPE = frozenset("#$@*_`<>[]~-+/=")
 
-# Every character Typst's own lexer treats as a line break -- ASCII
-# `\n`/`\r` plus vertical tab, form feed, NEL, and the Unicode line/
-# paragraph separators -- collapsed to one space per run. See
-# `markup_value`'s own docstring for why a raw one must never reach the
-# emitted Typst source.
-_LINE_BREAK_RE = re.compile("[\r\n\x0b\x0c\x85  ]+")
+# `_LINE_BREAK_RE` is defined once, near the top of this module,
+# shared with `typst_value` -- see its own comment there and
+# `markup_value`'s own docstring (below) for why a raw line break must
+# never reach the emitted Typst source from this side either.
 
 
 def markup_value(text: str) -> str:

@@ -7,6 +7,7 @@ module that runs the emitted source through the real compiler.
 
 from app.services.emitters import emitter_for
 from app.services.emitters._common import bullet_lines
+from app.services.typst_escape import typst_value
 from tests.fixtures.golden_content import GOLDEN, MINIMAL
 
 
@@ -418,11 +419,24 @@ def test_clean_print_cv_renders_the_summary():
 
 
 def test_clean_print_cv_normalises_an_embedded_newline_before_quoting():
-    # typst_value (unlike markup_value) never collapses an embedded line
-    # break on its own -- this emitter must do it itself before handing
-    # prose to typst_value, or a raw "\n" survives into the quoted Typst
-    # string literal. See the module docstring's own hazard note.
+    # typst_value itself now normalises an embedded line break to a
+    # single space before quoting (see that function's own docstring,
+    # and tests/test_typst_escape.py's own unit tests for the fix at its
+    # source) -- this is the end-to-end proof that this emitter's prose
+    # (summary, here) benefits from it without doing anything extra.
     hostile = GOLDEN.model_copy(update={"summary": "line one\nline two"})
     src = emitter_for("clean-print-cv", "0.1.0").emit(hostile).source
     assert "line one line two" in src
     assert "line one\nline two" not in src
+
+
+def test_clean_print_cv_renders_extras_through_the_packages_own_heading():
+    # section-heading(title) is a top-level `#let` in cv-template.typ
+    # (no underscore prefix), already in scope via this emitter's own
+    # `#import "...": *` -- the same accent-bar/upper-case heading every
+    # built-in section uses, not a bare `==` markup approximation of one.
+    src = emitter_for("clean-print-cv", "0.1.0").emit(GOLDEN).source
+    section = GOLDEN.extras[0]
+    assert f"#section-heading({typst_value(section.title)})" in src
+    assert f"== {section.title}" not in src
+    assert bullet_lines(section.entries)[0] in src
