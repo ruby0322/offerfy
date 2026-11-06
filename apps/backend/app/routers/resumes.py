@@ -45,6 +45,7 @@ from app.services.rate_limit import enforce_guest_rate
 from app.services.resume_content import (
     extract_content,
     record_extract_spend,
+    restamp_content,
     store_content,
     stored_content,
 )
@@ -512,46 +513,67 @@ async def switch_template(
         # chat under the person's name instead of sent as its own request.
         return _model_path()
 
-    guard = preflight(db, user=owner, guest=guest, purpose="extract")
-    async with metered(guard) as meter:
-        content = stored_content(db, resume)
-        if content is not None:
-            # The hash the snapshot was derived from, captured now while
-            # `resume.typst_source` still holds the text that produced it.
-            # Compared again below, right before the write, against
-            # whatever is actually in the database by then.
-            derived_from = source_hash(resume.typst_source)
-        else:
-            # Captured *before* the extraction call, into a plain string --
-            # not re-read off `resume` afterward. `record_extract_spend`
-            # below commits `db`, and a Session's default
-            # `expire_on_commit` means the next attribute access on
-            # `resume` re-reads from the database: if an edit landed while
-            # extraction was in flight (Review Focus 2), that re-read would
-            # silently adopt the edit as this snapshot's own basis instead
-            # of ever catching it.
-            source_for_extraction = resume.typst_source
+    content = stored_content(db, resume)
+    if content is not None:
+        # The hash the snapshot was derived from, captured now while
+        # `resume.typst_source` still holds the text that produced it.
+        # Compared again below, right before the write, against whatever
+        # is actually in the database by then. No `preflight`/`metered`
+        # here: this is the zero-cost, no-model-call case -- the feature's
+        # entire premise -- so it must never be gated behind quota a
+        # provider call was never going to touch.
+        derived_from = source_hash(resume.typst_source)
+    else:
+        # Captured *before* the extraction call, into a plain string --
+        # not re-read off `resume` afterward. `record_extract_spend` below
+        # commits `db`, and a Session's default `expire_on_commit` means
+        # the next attribute access on `resume` re-reads from the
+        # database: if an edit landed while extraction was in flight
+        # (Review Focus 2), that re-read would silently adopt the edit as
+        # this snapshot's own basis instead of ever catching it.
+        source_for_extraction = resume.typst_source
+        guard = preflight(db, user=owner, guest=guest, purpose="extract")
+        async with metered(guard) as meter:
             result = await extract_content(source_for_extraction)
             if result.content is not None:
-                content = store_content(db, resume, result.content, model=result.model)
+                content = store_content(
+                    db, resume, result.content, model=result.model, source=source_for_extraction
+                )
                 derived_from = source_hash(source_for_extraction)
-            # Telemetry fires regardless of outcome, and after store_content
-            # so its own commit cannot be the thing that expires `resume`
-            # before this task's read of it above.
+            # Telemetry fires regardless of outcome, and after
+            # store_content so its own commit cannot be the thing that
+            # expires `resume` before this task's read of it above.
             record_extract_spend(
                 db, user=owner, guest=guest, resume_id=resume.id, result=result, meter=meter
             )
-            if result.content is None:
-                return _model_path()
+        if result.content is None:
+            return _model_path()
 
-    emit_result = emitter.emit(content)
     try:
-        compile_typst(emit_result.source, "pdf")
+        emit_result = emitter.emit(content)
+        # Off the event loop: this handler is `async def`, so a sync call
+        # here would otherwise block every concurrent request -- including
+        # an in-flight chat SSE stream -- for the length of a subprocess
+        # compile. Matches the convention at chat.py's and llm/turn.py's
+        # own `asyncio.to_thread` call sites.
+        await asyncio.to_thread(compile_typst, emit_result.source, "pdf")
     except HTTPException:
         # A deterministic path that can commit a broken document is worse
         # than the model path it replaces -- write nothing and fall back.
         logger.warning(
             "template switch emit failed to compile resume_id=%s name=%s version=%s",
+            resume_id,
+            body.name,
+            body.version,
+        )
+        return _model_path()
+    except Exception:
+        # An emitter raising on an unusual-but-valid ResumeContent must
+        # fall back the same way a failed compile does, not 500 -- the
+        # brief's own rule ("any error returns the model path") does not
+        # carve out an exception for the emitter itself.
+        logger.exception(
+            "template switch emit raised resume_id=%s name=%s version=%s",
             resume_id,
             body.name,
             body.version,
@@ -566,7 +588,18 @@ async def switch_template(
     if source_hash(resume.typst_source) != derived_from:
         return _model_path()
 
-    set_draft_source(db, resume, emit_result.source)
+    # coalesce=False, like restore_revision's own whole-document
+    # replacement: the default would merge this write into a revision
+    # still inside the 120s coalescing window, overwriting the pre-switch
+    # Typst in place and leaving nothing in history to undo back to.
+    set_draft_source(db, resume, emit_result.source, coalesce=False)
+    # The snapshot's content did not change -- it is exactly what `emit()`
+    # was built from -- only the resume's own source did. Re-keying it to
+    # the document just written (rather than leaving it pointed at the
+    # pre-switch text) is what lets a *second* switch, right after this
+    # one, reuse the same snapshot instead of paying for another
+    # extraction; see resume_content.restamp_content.
+    restamp_content(db, resume, source=emit_result.source)
     persist_template_switch(
         db,
         resume.id,

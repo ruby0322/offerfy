@@ -16,7 +16,8 @@ from app.config import get_settings
 from app.deps import SESSION_COOKIE, _sign
 from app.models import ChatMessage, GuestSession, LlmCall, Resume, User
 from app.routers.chat import _history
-from app.services import templates
+from app.services import templates, usage
+from app.services.metering import Meter, system_guard
 from app.services.resume_content import ExtractResult, store_content
 from app.services.role_card import build_role_card
 from app.services.templates import mentioned_template, reset_template_index_cache
@@ -117,9 +118,16 @@ def test_switch_writes_a_system_row_that_never_reaches_the_model(client, db_sess
 
 
 def test_switch_extracts_once_and_reuses_the_snapshot(client, db_session, monkeypatch):
+    """Two consecutive switches, one extraction -- no rollback in between.
+
+    `store_content`/`restamp_content` re-key the snapshot to each
+    successfully-emitted document's own hash, so a *second* switch right
+    after the first still finds a fresh snapshot without re-extracting --
+    not because the source happens to match what it originally was, but
+    because the snapshot was deliberately re-stamped to describe the
+    document the first switch actually wrote.
+    """
     rid = _create_resume(client)
-    resume = db_session.get(Resume, rid)
-    original_source = resume.typst_source
     calls = {"n": 0}
 
     async def _fake_extract(source):
@@ -133,23 +141,54 @@ def test_switch_extracts_once_and_reuses_the_snapshot(client, db_session, monkey
     ).json()
     assert first["mode"] == "applied"
     assert calls["n"] == 1
-
-    # Simulate the person rolling back to the exact source the snapshot was
-    # derived from -- resume_content.stored_content's own docstring names
-    # this case ("a rolled-back edit that lands back on an old value") as
-    # one a direct assignment can produce, same as this. A raw UPDATE
-    # rather than `db_session.get(...).typst_source = ...`: that object is
-    # still identity-mapped from the read above and already holds
-    # `original_source`, so re-assigning the same value would not be
-    # considered dirty and no UPDATE would be issued.
-    db_session.query(Resume).filter(Resume.id == rid).update({"typst_source": original_source})
-    db_session.commit()
+    # acorn-resume drops a project's dates -- confirmed gone from the
+    # document this switch actually wrote.
+    assert "2021-03" not in db_session.get(Resume, rid).typst_source
 
     second = client.post(
         f"/v1/resumes/{rid}/template", json={"name": "basic-resume", "version": "0.2.9"}
     ).json()
     assert second["mode"] == "applied"
     assert calls["n"] == 1
+    # The snapshot never lost the dates -- only acorn-resume's own document
+    # had nowhere to put them -- so switching again restores them.
+    assert "2021-03" in db_session.get(Resume, rid).typst_source
+
+
+def test_switch_applies_from_a_fresh_snapshot_even_when_quota_is_exhausted(
+    client, db_session, monkeypatch
+):
+    """Critical 1: `preflight` must not gate the zero-cost, no-model-call
+    path. A subject already over their weekly ceiling still gets a free,
+    deterministic switch when the snapshot is fresh -- that is the
+    feature's entire premise, and it must not become reachable only with
+    quota to spare.
+    """
+    monkeypatch.setenv("USAGE_LIMITS_ENABLED", "true")
+    get_settings.cache_clear()
+    user = _signed_in(client, db_session, sub="sub-quota-exhausted")
+    rid = _create_resume(client)
+    resume = db_session.get(Resume, rid)
+    store_content(db_session, resume, GOLDEN, model="m")
+    db_session.commit()
+    monkeypatch.setattr("app.routers.resumes.extract_content", _never_called)
+
+    tier = usage.TIERS[usage.REGISTERED]
+    Meter(system_guard(user=user, purpose="chat", reason="test")).record(
+        {
+            "model": "gpt-5.6-terra",
+            "purpose": "chat",
+            "round_index": 0,
+            "input_tokens": tier.credits * usage.CREDIT_UUSD,
+        }
+    )
+    assert usage.balance(db_session, user, None).exhausted
+
+    body = client.post(
+        f"/v1/resumes/{rid}/template", json={"name": "acorn-resume", "version": "0.1.0"}
+    ).json()
+
+    assert body["mode"] == "applied"
 
 
 def test_switch_does_not_write_when_the_emitted_source_fails_to_compile(

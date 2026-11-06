@@ -148,19 +148,58 @@ def stored_content(db: Session, resume: Resume) -> ResumeContent | None:
 
 
 def store_content(
-    db: Session, resume: Resume, content: ResumeContent, *, model: str
+    db: Session,
+    resume: Resume,
+    content: ResumeContent,
+    *,
+    model: str,
+    source: str | None = None,
 ) -> ResumeContent:
-    """Upsert this resume's snapshot, stamped with the source it came from."""
+    """Upsert this resume's snapshot, stamped with the source it came from.
+
+    `source` lets a caller pass the exact text `content` was actually
+    derived from, rather than relying on `resume.typst_source` to still
+    hold it by the time this runs. Defaults to `resume.typst_source` for
+    every existing caller, but `app.routers.resumes.switch_template`
+    passes it explicitly: it captures that text into a plain string before
+    calling the model, and a commit in between (its own
+    `record_extract_spend`) can otherwise silently refresh `resume` off an
+    edit that landed while extraction was in flight (the same
+    `expire_on_commit` hazard `stored_content`'s docstring warns about) --
+    passing the string makes that invariant structural rather than
+    ordering-dependent.
+    """
     row = _row_for(db, resume.id)
     if row is None:
         row = models.ResumeContent(resume_id=resume.id)
         db.add(row)
     row.content_json = content.model_dump_json()
-    row.derived_from_hash = source_hash(resume.typst_source)
+    row.derived_from_hash = source_hash(source if source is not None else resume.typst_source)
     row.model = model[:128]
     row.built_at = datetime.now(timezone.utc)
     db.flush()
     return content
+
+
+def restamp_content(db: Session, resume: Resume, *, source: str) -> None:
+    """Re-key an existing snapshot to a different source hash, leaving its
+    content, model, and built_at untouched. A no-op if there is no row.
+
+    Called after a deterministic template switch writes a new document:
+    the snapshot's structured content did not change -- it is exactly what
+    `emit()` was built from -- but `resume.typst_source` is no longer the
+    text `derived_from_hash` names. It is the document *produced from*
+    that content, which the snapshot equally well describes now. Leaving
+    `derived_from_hash` pointed at the pre-switch text would make the very
+    next switch pay for a needless re-extraction even though nothing about
+    the person's underlying content changed; see `routers.resumes.
+    switch_template`'s own call of this right after `set_draft_source`.
+    """
+    row = _row_for(db, resume.id)
+    if row is None:
+        return
+    row.derived_from_hash = source_hash(source)
+    db.flush()
 
 
 # --- extraction: the one model call that fills a snapshot -------------------
