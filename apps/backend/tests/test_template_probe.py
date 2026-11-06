@@ -1,4 +1,11 @@
-from app.services.template_probe import inline_data_files
+from pathlib import Path
+
+from app.services.template_probe import (
+    font_warnings,
+    inline_data_files,
+    probe_template,
+    unavailable_fonts,
+)
 
 
 def test_inline_data_files_replaces_the_loader_call(tmp_path):
@@ -38,3 +45,31 @@ def test_inline_data_files_ignores_a_computed_path(tmp_path):
     # sys.inputs-driven loaders (polycv, porygon) are out of reach by design
     src = '#let p = sys.inputs.at("CV", default: "cv.json")\n#let d = json(p)'
     assert inline_data_files(src, tmp_path) == (src, ())
+
+
+def test_font_warnings_reads_every_unknown_family():
+    err = (
+        "warning: unknown font family: calibri\n"
+        "warning: unknown font family: font awesome 7 free\n"
+    )
+    assert font_warnings(err) == ("calibri", "font awesome 7 free")
+
+
+def test_unavailable_fonts_separates_what_we_could_ship():
+    seen = ("calibri", "font awesome 7 free", "pt serif")
+    assert unavailable_fonts(seen) == ("calibri",)
+
+
+def test_probe_rejects_a_name_that_is_not_a_package_name():
+    row = probe_template("../etc", "1.0.0", root=Path("/nonexistent"))
+    assert row.ok is False and row.reason == "invalid name"
+
+
+def test_probe_reports_no_example_when_the_package_ships_none(tmp_path):
+    dest = tmp_path / "preview" / "no-example-pkg" / "1.0.0"
+    dest.mkdir(parents=True)
+    (dest / "typst.toml").write_text(
+        '[package]\nname = "no-example-pkg"\nversion = "1.0.0"\n', encoding="utf-8"
+    )
+    row = probe_template("no-example-pkg", "1.0.0", root=tmp_path)
+    assert row.ok is False and row.reason == "no example"

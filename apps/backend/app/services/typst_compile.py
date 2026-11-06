@@ -56,11 +56,28 @@ def _svg_bytes(path: Path) -> bytes:
 def compile_typst_pages(
     source: str, fmt: str, pages: str | None = None, ppi: int | None = None
 ) -> list[bytes]:
-    """Compile the document.
+    """Compile the document, discarding stderr.
 
     Typst 0.15 writes one SVG/PNG file per page and requires `{p}` in the
     output path. PDF remains a single file. Never pass `--pages 1` as a
     substitute for a page template — that drops every page after the first.
+    """
+    blobs, _stderr = compile_typst_pages_with_stderr(source, fmt, pages=pages, ppi=ppi)
+    return blobs
+
+
+def compile_typst_pages_with_stderr(
+    source: str, fmt: str, pages: str | None = None, ppi: int | None = None
+) -> tuple[list[bytes], str]:
+    """Same compile as `compile_typst_pages`, plus the compiler's stderr on a
+    *successful* run.
+
+    A failed compile raises `HTTPException` and never returns here -- the
+    caller already has the error text in the exception. The only reason to
+    keep stderr around is the opposite case: a compile that succeeds but
+    still printed `warning: unknown font family: ...`, which the template
+    probe (`services/template_probe.py`) needs to see and which a bare
+    `compile_typst_pages` throws away.
     """
     if fmt not in {"svg", "pdf", "png"}:
         raise HTTPException(status_code=400, detail="format must be svg, pdf, or png")
@@ -112,25 +129,26 @@ def compile_typst_pages(
             ]
             snippet = "\n".join(error_lines)[:2000] if error_lines else err[-2000:]
             raise HTTPException(status_code=400, detail=f"Typst compile failed: {snippet}")
+        stderr_text = (completed.stderr or b"").decode("utf-8", errors="replace")
         if fmt == "pdf":
             pdf_path = tmp_path / "resume.pdf"
             if pdf_path.is_file():
-                return [pdf_path.read_bytes()]
+                return [pdf_path.read_bytes()], stderr_text
             raise HTTPException(status_code=500, detail="Typst produced no output")
         if fmt == "png":
             numbered = sorted(tmp_path.glob("resume-*.png"), key=_svg_page_index)
             if numbered:
-                return [path.read_bytes() for path in numbered]
+                return [path.read_bytes() for path in numbered], stderr_text
             fallback = tmp_path / "resume.png"
             if fallback.is_file():
-                return [fallback.read_bytes()]
+                return [fallback.read_bytes()], stderr_text
             raise HTTPException(status_code=500, detail="Typst produced no output")
         numbered = sorted(tmp_path.glob("resume-*.svg"), key=_svg_page_index)
         if numbered:
-            return [_svg_bytes(path) for path in numbered]
+            return [_svg_bytes(path) for path in numbered], stderr_text
         fallback = tmp_path / "resume.svg"
         if fallback.is_file():
-            return [_svg_bytes(fallback)]
+            return [_svg_bytes(fallback)], stderr_text
         raise HTTPException(status_code=500, detail="Typst produced no output")
 
 
@@ -169,3 +187,9 @@ def compile_typst(source: str, fmt: str, pages: str | None = None) -> bytes:
     every page must use compile_typst_pages."""
     blobs = compile_typst_pages(source, fmt, pages=pages)
     return blobs[0]
+
+
+def compile_typst_with_stderr(source: str, fmt: str, pages: str | None = None) -> tuple[bytes, str]:
+    """Single compile artifact plus stderr -- see `compile_typst_pages_with_stderr`."""
+    blobs, stderr_text = compile_typst_pages_with_stderr(source, fmt, pages=pages)
+    return blobs[0], stderr_text
