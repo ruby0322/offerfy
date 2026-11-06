@@ -57,7 +57,7 @@ from app.services.consent import has_consent, has_consent_many
 from app.services.family import family_master
 from app.services.llm import _output_text, _responses_url
 from app.services.llm.providers import openai as openai_provider
-from app.services.model_catalog import DEFAULT_MODEL, spec_or_passthrough
+from app.services.model_catalog import spec_or_passthrough
 from app.services.memory import accepted_memory_texts
 from app.services.usage import event_cost_uusd
 from app.services.revisions import published_source
@@ -70,6 +70,21 @@ def _utcnow() -> datetime:
 
 
 PROFILE_TIMEOUT = httpx.Timeout(90.0, connect=10.0)
+
+# The model this call sends to OpenAI's Responses API when no pin names an
+# OpenAI model. Deliberately not model_catalog.DEFAULT_MODEL: that constant is
+# "claude-haiku-5-5", an Anthropic id, and sending an Anthropic id to this
+# endpoint is not a fallback at all -- it is every unpinned build failing with
+# a provider 400, because CHAT_MODEL is blank by default (so this is the
+# *common* path, not an edge case). gpt-6-luna is the cheapest OpenAI model in
+# the catalogue and is already the fixed model behind
+# layout.DEFAULT_DECISIONS_MODEL, so this reuses rather than invents "the
+# cheap OpenAI model we trust for a structured call nobody is choosing."
+#
+# Kept as its own constant rather than read from the catalogue's default so
+# that DEFAULT_MODEL stays free to be a chat model -- other callers depend on
+# that -- without this endpoint's requirement riding along with it.
+PROFILE_FALLBACK_MODEL = "gpt-6-luna"
 
 PROMPT = (
     "You read one resume and return a structured talent profile for it. "
@@ -503,27 +518,37 @@ async def build_profile(db: Session, user: User) -> ProfileBuildResult:
         return ProfileBuildResult(error="no_source")
     resume, revision_id, source, facts = bundle
     # Runs on the OpenAI Responses API regardless of what anyone picked in
-    # the editor, and the model is the configured default rather than this
-    # person's choice. Two reasons, and both are about the output rather than
-    # the cost: this call has to return JSON that validates against
-    # TalentProfilePayload, and `_request_body` shapes a Responses-API
-    # structured-output request to get it. A profile build is also not an
-    # interaction anyone is watching, so there is nothing for a preference to
-    # be a preference about.
+    # the editor, and on a fixed model rather than this person's choice. Two
+    # reasons, and both are about the output rather than the cost: this call
+    # has to return JSON that validates against TalentProfilePayload, and
+    # `_request_body` shapes a Responses-API structured-output request to get
+    # it. A profile build is also not an interaction anyone is watching, so
+    # there is nothing for a preference to be a preference about.
+    #
+    # That fixed model is PROFILE_FALLBACK_MODEL, *not* the catalogue default
+    # -- see that constant for why the catalogue default cannot serve here.
     #
     # It is still metered like any other call, which is why the model id below
     # is recorded: see jobs/refresh_profiles.py and the system_guard it holds.
     settings = get_settings()
     if not openai_provider.OpenAIProvider().configured():
         return ProfileBuildResult(error="llm_not_configured", resume_id=resume.id)
-    pinned = spec_or_passthrough(settings.pinned_chat_model() or DEFAULT_MODEL)
-    # An operator pin is honoured only when it names an OpenAI model. Pinning
-    # an Anthropic one must not take the matching feature down with it, and
-    # falling back to the catalogue default is better than refusing: this call
-    # has one job, and the default model does it.
-    spec = pinned if pinned.provider == openai_provider.NAME else spec_or_passthrough(
-        DEFAULT_MODEL
+    pin = settings.pinned_chat_model()
+    pinned = spec_or_passthrough(pin) if pin else None
+    # An operator pin is honoured only when it names an OpenAI model: pinning
+    # an Anthropic one must not take this feature down with it. Anything else
+    # -- no pin, or a pin naming a non-OpenAI model -- falls back to
+    # PROFILE_FALLBACK_MODEL.
+    spec = (
+        pinned
+        if pinned is not None and pinned.provider == openai_provider.NAME
+        else spec_or_passthrough(PROFILE_FALLBACK_MODEL)
     )
+    if spec.provider != openai_provider.NAME:
+        # The fallback itself did not resolve to an OpenAI model -- nothing
+        # usable to call, so this makes no request at all rather than sending
+        # the wrong provider's id to this endpoint.
+        return ProfileBuildResult(error="llm_not_configured", resume_id=resume.id)
     model = spec.id
     url = _responses_url(settings.openai_base_url or "https://api.openai.com/v1")
     headers = {
