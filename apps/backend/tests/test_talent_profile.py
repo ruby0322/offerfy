@@ -322,7 +322,11 @@ def test_contact_details_are_scrubbed_from_every_field(
     _point_at(client, resume.id)
 
     body = client.post("/v1/me/talent-profile/refresh").json()
-    blob = json.dumps(body)
+    # Only the payload, not the envelope: `updated_at` and `profile_id` are not
+    # scrubbed and never carry a contact detail, but their digits collide with
+    # the phone fragment below -- a timestamp whose microseconds happen to read
+    # ...912... used to fail this test for no reason.
+    blob = json.dumps(body["profile"])
     assert "@chenwei" not in blob
     assert "chenwei.dev" not in blob
     assert "chen@example.com" not in blob
