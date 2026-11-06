@@ -22,6 +22,68 @@ export function parseToolPayload(content: string): ToolPayload | null {
   }
 }
 
+export type TemplateSwitchPayload = {
+  name: string;
+  version: string;
+  dropped: string[];
+  degraded: string[];
+};
+
+function asStringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
+/** The `role: "system"` chat row a deterministic template switch writes --
+ * see `app.services.chat_messages.persist_template_switch`. An unparseable
+ * payload (a future row shape this build does not know yet, or plain
+ * corruption) returns null, which callers must render as nothing rather
+ * than raw JSON. */
+export function parseTemplateSwitchPayload(content: string): TemplateSwitchPayload | null {
+  try {
+    const parsed = JSON.parse(content) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const rec = parsed as Record<string, unknown>;
+    if (rec.type !== "template_switch") return null;
+    if (typeof rec.name !== "string" || typeof rec.version !== "string") return null;
+    return {
+      name: rec.name,
+      version: rec.version,
+      dropped: asStringList(rec.dropped),
+      degraded: asStringList(rec.degraded),
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Every dot-path identifier the registered emitters produce today (see
+// app/services/emitters/base.py's EmitResult docstring) maps to its own
+// i18n key. `templateFieldKey`'s fallback is the load-bearing part: a
+// future emitter introducing a new path must still render a real sentence,
+// never the bare identifier, to a person reading their own language.
+//
+// The return type is a literal union, not `string`, the same trick
+// `PricingPage.tsx`'s own `nameKey` uses -- next-intl's generated message
+// types only accept a key it actually knows about, and a bare `string`
+// return would not type-check at either call site.
+type TemplateFieldKey =
+  | "templateFieldProjectsDates"
+  | "templateFieldProjectsRole"
+  | "templateFieldProjectsBullets"
+  | "templateFieldEducationBullets"
+  | "templateFieldUnknown";
+
+const TEMPLATE_FIELD_KEYS: Record<string, TemplateFieldKey> = {
+  "projects[].dates": "templateFieldProjectsDates",
+  "projects[].role": "templateFieldProjectsRole",
+  "projects[].bullets": "templateFieldProjectsBullets",
+  "education[].bullets": "templateFieldEducationBullets",
+};
+
+export function templateFieldKey(path: string): TemplateFieldKey {
+  return TEMPLATE_FIELD_KEYS[path] ?? "templateFieldUnknown";
+}
+
 function resultError(result: unknown): string | null {
   if (result && typeof result === "object" && "error" in result) {
     const error = (result as { error: unknown }).error;

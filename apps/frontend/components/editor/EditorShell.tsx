@@ -18,7 +18,9 @@ import EditorHistoryPanel from "@/components/editor/EditorHistoryPanel";
 import EditorMobileLayout from "@/components/editor/EditorMobileLayout";
 import EditorPreview from "@/components/editor/EditorPreview";
 import EditorSettingsPanel from "@/components/editor/EditorSettingsPanel";
-import EditorTemplatePanel from "@/components/editor/EditorTemplatePanel";
+import EditorTemplatePanel, {
+  type AppliedTemplateNote,
+} from "@/components/editor/EditorTemplatePanel";
 import MemoryPanel from "@/components/editor/MemoryPanel";
 import ResumeFamilyMenu from "@/components/editor/ResumeFamilyMenu";
 import type { FamilyCardActions } from "@/components/editor/ChatMessageCard";
@@ -1204,26 +1206,36 @@ export default function EditorShell({ resumeId }: Props) {
     await sendUserChat(text, file);
   }
 
-  async function onApplyTemplate(template: { name: string; version: string }) {
+  async function onApplyTemplate(
+    template: { name: string; version: string },
+  ): Promise<AppliedTemplateNote | null> {
     // A second click during the `switchTemplate` await -- before `sending`
     // ever flips true -- would start a second switch whose own chat turn
     // then silently loses to `sendUserChat`'s `sendingRef` guard. Reusing
     // `onImportAction`'s own-flag pattern rather than `sendingRef` itself
     // because this flag must already be live before any chat turn exists.
-    if (templateApplyPending || sendingRef.current) return;
+    if (templateApplyPending || sendingRef.current) return null;
     setTemplateApplyPending(true);
     try {
       const result = await switchTemplate(resumeId, template.name, template.version);
       if (result.mode === "llm") {
         setLeftTab("chat");
         void sendUserChat(result.prompt, null, { preferFullSource: true, template });
-      } else {
-        // Unreachable until Task 8/12 make a template deterministic, but
-        // already wired: the server did the rewrite itself, so there is no
-        // chat turn to run -- just pick up the resume it already saved, the
-        // same refresh `onRestoreHistory` does for a restored revision.
-        await onRestoreHistory(result.resume);
+        return null;
       }
+      // The server did the rewrite itself, so there is no chat turn to run
+      // -- just pick up the resume it already saved, the same refresh
+      // `onRestoreHistory` does for a restored revision. The caller (the
+      // template panel) shows its own inline note from the return value
+      // here; the chat transcript gets the same note on its own, as a
+      // `role: "system"` row the server already wrote.
+      await onRestoreHistory(result.resume);
+      return {
+        name: template.name,
+        version: template.version,
+        dropped: result.dropped,
+        degraded: result.degraded,
+      };
     } catch {
       // A 400 means the pair isn't on the committed support list -- the
       // picker should already only offer those, so this is a mismatch
@@ -1231,6 +1243,7 @@ export default function EditorShell({ resumeId }: Props) {
       // swallow-and-toast as `onImportAction`: the backend's sentence isn't
       // for the person, but silence here reads as a dead button.
       toast(t("templateSwitchError"));
+      return null;
     } finally {
       setTemplateApplyPending(false);
     }
