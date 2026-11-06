@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 
 type Props = {
   sending: boolean;
-  onApply: (prompt: string) => void;
+  onApply: (template: { name: string; version: string }) => void;
 };
 
 export default function EditorTemplatePanel({ sending, onApply }: Props) {
@@ -127,7 +127,7 @@ export default function EditorTemplatePanel({ sending, onApply }: Props) {
           size="sm"
           disabled={sending}
           className="shrink-0"
-          onClick={() => onApply(current.apply_prompt)}
+          onClick={() => onApply({ name: current.name, version: current.version })}
         >
           {t("templateApply")}
         </Button>

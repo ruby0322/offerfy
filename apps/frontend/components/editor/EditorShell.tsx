@@ -54,6 +54,7 @@ import {
   sendChat,
   startImport,
   streamImport,
+  switchTemplate,
   type AtsReport,
   type ChatMessage,
   type ImportStatus,
@@ -802,7 +803,7 @@ export default function EditorShell({ resumeId }: Props) {
     async (
       text: string,
       file: File | null = null,
-      options?: { preferFullSource?: boolean },
+      options?: { preferFullSource?: boolean; template?: { name: string; version: string } },
     ) => {
     const trimmed = text.trim();
     if ((!trimmed && !file) || sendingRef.current) return;
@@ -1196,9 +1197,27 @@ export default function EditorShell({ resumeId }: Props) {
     await sendUserChat(text, file);
   }
 
-  function onApplyTemplate(prompt: string) {
-    setLeftTab("chat");
-    void sendUserChat(prompt, null, { preferFullSource: true });
+  async function onApplyTemplate(template: { name: string; version: string }) {
+    try {
+      const result = await switchTemplate(resumeId, template.name, template.version);
+      if (result.mode === "llm") {
+        setLeftTab("chat");
+        void sendUserChat(result.prompt, null, { preferFullSource: true, template });
+      } else {
+        // Unreachable until Task 8/12 make a template deterministic, but
+        // already wired: the server did the rewrite itself, so there is no
+        // chat turn to run -- just pick up the resume it already saved, the
+        // same refresh `onRestoreHistory` does for a restored revision.
+        await onRestoreHistory(result.resume);
+      }
+    } catch {
+      // A 400 means the pair isn't on the committed support list -- the
+      // picker should already only offer those, so this is a mismatch
+      // between client and server state, not a routine failure. Same
+      // swallow-and-toast as `onImportAction`: the backend's sentence isn't
+      // for the person, but silence here reads as a dead button.
+      toast(t("templateSwitchError"));
+    }
   }
 
   async function onRestoreHistory(saved: Resume) {

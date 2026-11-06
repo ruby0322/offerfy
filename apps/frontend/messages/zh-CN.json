@@ -262,6 +262,7 @@
     "templateNext": "下一个模板",
     "templatePreview": "{name} 预览",
     "templateCount": "{current} / {total}",
+    "templateSwitchError": "无法切换到该模板，请稍后再试一次。",
     "preview": "预览",
     "download": "下载 PDF",
     "downloading": "下载中…",
