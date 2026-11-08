@@ -406,7 +406,12 @@ class JobIngestRun(Base):
 # total, for the same reason the compile-repair loop bills as 'repair': an
 # import spends real provider tokens on work the person did not type, and the
 # admin overview's by-purpose breakdown is where that has to be visible.
-LLM_CALL_PURPOSES = ("chat", "repair", "vision", "profile", "import")
+#
+# 'extract' is the same story for app.services.resume_content.extract_content:
+# a resume_contents snapshot is derived state built by its own model call, and
+# it happens once per drift rather than once per switch, so its cost needs to
+# be visible as its own line rather than folded into another purpose.
+LLM_CALL_PURPOSES = ("chat", "repair", "vision", "profile", "import", "extract")
 
 
 class LlmCall(Base):
@@ -422,7 +427,7 @@ class LlmCall(Base):
     __tablename__ = "llm_calls"
     __table_args__ = (
         CheckConstraint(
-            "purpose IN ('chat', 'repair', 'vision', 'profile', 'import')",
+            "purpose IN ('chat', 'repair', 'vision', 'profile', 'import', 'extract')",
             name="llm_call_purpose_values",
         ),
         # Not an XOR: a row whose subject has been erased has neither, the same
@@ -931,6 +936,51 @@ class TalentProfile(Base):
     model: Mapped[str] = mapped_column(String(128), nullable=False, default="")
 
     user: Mapped[User] = relationship(foreign_keys=[user_id])
+
+
+class ResumeContent(Base):
+    """A structured snapshot of one resume's content, for switching templates.
+
+    Derived state, like TalentProfile above and for the same reason: a
+    separate table rather than a widening of Resume keeps "derived,
+    disposable, rebuildable" legible, and content_json is Text rather than
+    JSONB because nothing queries inside the blob and Postgres JSONB would
+    normalise key order and numeric form -- see profile_json above.
+
+    Resume.typst_source stays authoritative. derived_from_hash is
+    revisions.source_hash() of the source this snapshot was extracted from
+    (the same function that produces ResumeRevision.content_hash -- not a
+    second hash), and the row is fresh exactly when that still equals
+    source_hash(resume.typst_source). A stale row is not deleted; it is
+    simply ignored by stored_content and overwritten by the next
+    store_content.
+    """
+
+    __tablename__ = "resume_contents"
+    __table_args__ = (
+        # Named, not unique=True on the column, so this and alembic produce
+        # the same two objects -- same reasoning as
+        # talent_profiles_user_id_key above.
+        UniqueConstraint("resume_id", name="resume_contents_resume_id_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # CASCADE: a snapshot with no source resume is unsourced, same as
+    # TalentProfile.source_resume_id.
+    resume_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("resumes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Text, not JSON: same idiom as TalentProfile.profile_json and
+    # ResumeRevision.typst_source -- nothing queries inside the blob.
+    content_json: Mapped[str] = mapped_column(Text, nullable=False)
+    derived_from_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    model: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    built_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
 
 
 class TalentApiKey(Base):

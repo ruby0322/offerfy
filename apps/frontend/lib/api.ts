@@ -469,7 +469,11 @@ export type UniverseTemplate = {
   description: string;
   universe_url: string;
   import_line: string;
-  apply_prompt: string;
+  // True for the templates the server can rewrite without a chat turn at
+  // all -- four of them today, the ones with a hand-written emitter. The
+  // picker doesn't need to know how, only whether `switchTemplate` might
+  // come back as `mode: "applied"`.
+  deterministic: boolean;
   cached: boolean;
 };
 
@@ -481,10 +485,51 @@ export async function listTemplates(): Promise<UniverseTemplate[]> {
   const data = await apiJson<unknown>("/api/v1/templates");
   if (data && typeof data === "object" && Array.isArray((data as { templates?: unknown }).templates)) {
     return (data as { templates: UniverseTemplate[] }).templates.filter(
-      (row) => row && typeof row.name === "string" && typeof row.apply_prompt === "string",
+      (row) => row && typeof row.name === "string" && typeof row.version === "string",
     );
   }
   return [];
+}
+
+/**
+ * The server's two ways of carrying out a template switch. `llm` carries a
+ * sentence for the chat turn that rewrites the document, and is what a
+ * template with no server-side emitter still comes back as. `applied` is the
+ * normal path for the four templates that have one: the server emitted and
+ * compiled the document itself, so there is no chat turn to run.
+ */
+export type TemplateSwitchResult =
+  | { mode: "llm"; prompt: string }
+  | { mode: "applied"; dropped: string[]; degraded: string[]; resume: Resume };
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
+export async function switchTemplate(
+  resumeId: string,
+  name: string,
+  version: string,
+): Promise<TemplateSwitchResult> {
+  const data = await apiJson<unknown>(`/api/v1/resumes/${resumeId}/template`, {
+    method: "POST",
+    body: JSON.stringify({ name, version }),
+  });
+  if (data && typeof data === "object") {
+    const rec = data as Record<string, unknown>;
+    if (rec.mode === "llm" && typeof rec.prompt === "string") {
+      return { mode: "llm", prompt: rec.prompt };
+    }
+    if (rec.mode === "applied" && rec.resume && typeof rec.resume === "object") {
+      return {
+        mode: "applied",
+        dropped: asStringArray(rec.dropped),
+        degraded: asStringArray(rec.degraded),
+        resume: rec.resume as Resume,
+      };
+    }
+  }
+  throw new ApiError("Unexpected template switch response", 0, data);
 }
 
 /** Where the model's view of a long conversation starts. */
@@ -653,6 +698,12 @@ export type ChatSendOptions = {
    * disagreeing about which model ran.
    */
   model?: string;
+  /**
+   * Set when this turn's prompt came from the template picker, so the server
+   * applies the switch the caller already chose instead of re-deriving it by
+   * matching the sentence's words.
+   */
+  template?: { name: string; version: string };
 };
 
 /**
@@ -724,12 +775,16 @@ export async function sendChat(
     if (options?.model) {
       form.append("model", options.model);
     }
+    if (options?.template) {
+      form.append("template", JSON.stringify(options.template));
+    }
     init.body = form;
   } else {
     init.body = JSON.stringify({
       message,
       ...(options?.preferFullSource ? { prefer_full_source: true } : {}),
       ...(options?.model ? { model: options.model } : {}),
+      ...(options?.template ? { template: options.template } : {}),
     });
   }
   const res = await apiFetch(`/api/v1/resumes/${id}/chat`, init);

@@ -47,6 +47,51 @@ def persist_assistant_message(db: Session, resume_id: str, content: str) -> Chat
     return row
 
 
+def persist_template_switch(
+    db: Session,
+    resume_id: str,
+    *,
+    name: str,
+    version: str,
+    dropped: list[str],
+    degraded: list[str],
+) -> ChatMessage:
+    """Record one deterministic template switch in the transcript.
+
+    `role="system"` on purpose, not "tool": this did not happen inside a
+    chat turn (no assistant message frames it, no round_index), and it
+    must stay out of what any provider sees. `_history`'s
+    `role.in_(("user", "assistant"))` filter already excludes it from that,
+    the same way it already excludes `tool` rows -- see that function's
+    docstring. `list_messages` does not filter by role, so the transcript
+    still shows it; `ChatMessageOut.role` is a plain `str`, so no schema
+    change was needed for "system" to round-trip.
+
+    `content` is structured JSON, like a tool row's, not a sentence: the
+    reader's language is decided by the frontend at render time, following
+    `ChatMessageCard`'s existing `role === "tool"` pattern of storing a
+    payload rather than prose. `dropped`/`degraded` are the emitter's own
+    dot-path identifiers (see `services.emitters.base.EmitResult`) -- the
+    frontend maps those to copy, this module just carries them.
+    """
+    payload = {
+        "type": "template_switch",
+        "name": name,
+        "version": version,
+        "dropped": list(dropped),
+        "degraded": list(degraded),
+    }
+    row = ChatMessage(
+        resume_id=resume_id,
+        role="system",
+        content=json.dumps(payload, ensure_ascii=False),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
 def persist_usage(
     db: Session,
     resume_id: str,

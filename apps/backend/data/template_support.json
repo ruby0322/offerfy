@@ -1,0 +1,1395 @@
+{
+  "generated_at": "2026-11-06T08:02:46.079852+00:00",
+  "typst_version": "typst 0.15.1 (9dfd3a08)",
+  "rows": [
+    {
+      "name": "academicv",
+      "version": "1.1.0",
+      "ok": true,
+      "pages": 2,
+      "needs_inline_data": true,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "acadennial-cv",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 3,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "alegreya",
+        "courier new",
+        "arial",
+        "arial"
+      ],
+      "installable_fonts": [
+        "alegreya"
+      ],
+      "unavailable_fonts": [
+        "courier new",
+        "arial",
+        "arial"
+      ],
+      "reason": "font warning: alegreya"
+    },
+    {
+      "name": "acorn-resume",
+      "version": "0.1.0",
+      "ok": true,
+      "pages": 2,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "altacv",
+      "version": "1.7.0",
+      "ok": false,
+      "pages": 2,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "font awesome 7 free solid",
+        "font awesome 7 brands",
+        "font awesome 7 free"
+      ],
+      "installable_fonts": [
+        "font awesome 7 free solid",
+        "font awesome 7 brands",
+        "font awesome 7 free"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: font awesome 7 free solid"
+    },
+    {
+      "name": "aspirationally",
+      "version": "0.1.1",
+      "ok": true,
+      "pages": 2,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "ats-friendly-resume",
+      "version": "0.1.1",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "atsthetic-cv",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "basic-cv-with-photo",
+      "version": "0.2.11",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "basic-resume",
+      "version": "0.2.9",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "basic-resume-plus",
+      "version": "0.3.0",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "bone-resume",
+      "version": "0.3.1",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "source han sans",
+        "times new roman",
+        "lxgw wenkai gb",
+        "hack nerd font",
+        "lxgw wenkai gb"
+      ],
+      "installable_fonts": [
+        "source han sans",
+        "lxgw wenkai gb",
+        "lxgw wenkai gb"
+      ],
+      "unavailable_fonts": [
+        "times new roman",
+        "hack nerd font"
+      ],
+      "reason": "font warning: source han sans"
+    },
+    {
+      "name": "brilliant-cv",
+      "version": "4.1.1",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "butterick-resume",
+      "version": "0.1.1",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "source sans 3",
+        "source sans 3",
+        "source sans 3",
+        "source serif 4",
+        "source sans 3",
+        "source serif 4"
+      ],
+      "installable_fonts": [
+        "source sans 3",
+        "source sans 3",
+        "source sans 3",
+        "source serif 4",
+        "source sans 3",
+        "source serif 4"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: source sans 3"
+    },
+    {
+      "name": "calligraphics",
+      "version": "1.0.0",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "source sans pro",
+        "source sans 3",
+        "inria sans",
+        "inria sans",
+        "inria sans",
+        "inria sans",
+        "inria sans",
+        "font awesome 7 free",
+        "font awesome 7 brands",
+        "inria sans",
+        "inria sans"
+      ],
+      "installable_fonts": [
+        "source sans pro",
+        "source sans 3",
+        "inria sans",
+        "inria sans",
+        "inria sans",
+        "inria sans",
+        "inria sans",
+        "font awesome 7 free",
+        "font awesome 7 brands",
+        "inria sans",
+        "inria sans"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: source sans pro"
+    },
+    {
+      "name": "chicv",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "linux biolinum"
+      ],
+      "installable_fonts": [
+        "linux biolinum"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: linux biolinum"
+    },
+    {
+      "name": "chicv-ripoff",
+      "version": "1.1.4",
+      "ok": false,
+      "pages": 2,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "montserrat",
+        "montserrat",
+        "font awesome 6 free solid",
+        "font awesome 6 brands",
+        "font awesome 6 free"
+      ],
+      "installable_fonts": [
+        "montserrat",
+        "montserrat",
+        "font awesome 6 free solid",
+        "font awesome 6 brands",
+        "font awesome 6 free"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: montserrat"
+    },
+    {
+      "name": "chuli-cv",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "clean-ats-cv",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "no example"
+    },
+    {
+      "name": "clean-print-cv",
+      "version": "0.1.0",
+      "ok": true,
+      "pages": 2,
+      "needs_inline_data": true,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "clickworthy-resume",
+      "version": "1.1.0",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "cobalt-cv",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "font awesome 7 free solid",
+        "font awesome 7 free solid",
+        "font awesome 7 brands",
+        "font awesome 7 brands"
+      ],
+      "installable_fonts": [
+        "font awesome 7 free solid",
+        "font awesome 7 free solid",
+        "font awesome 7 brands",
+        "font awesome 7 brands"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: font awesome 7 free solid"
+    },
+    {
+      "name": "coral-cv",
+      "version": "0.1.0",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "crisp-cv",
+      "version": "1.0.0",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "source sans pro"
+      ],
+      "installable_fonts": [
+        "source sans pro"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: source sans pro"
+    },
+    {
+      "name": "curriculo-acad",
+      "version": "0.1.2",
+      "ok": false,
+      "pages": 6,
+      "needs_inline_data": true,
+      "font_warnings": [
+        "source sans pro"
+      ],
+      "installable_fonts": [
+        "source sans pro"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: source sans pro"
+    },
+    {
+      "name": "cv-nikudanngo",
+      "version": "0.1.0",
+      "ok": true,
+      "pages": 2,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "cv-soft-and-hard",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "cyber-cv-letter",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "exp-cover-letter",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "cover letter, not a resume"
+    },
+    {
+      "name": "exp-resume",
+      "version": "0.2.0",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "fantastic-cv",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "finely-crafted-cv",
+      "version": "0.3.0",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "free-cv",
+      "version": "1.0.0",
+      "ok": false,
+      "pages": 2,
+      "needs_inline_data": true,
+      "font_warnings": [
+        "cabin",
+        "consolas",
+        "calibri",
+        "cabin",
+        "cabin",
+        "font awesome 7 free",
+        "font awesome 7 brands",
+        "font awesome 7 free solid"
+      ],
+      "installable_fonts": [
+        "cabin",
+        "cabin",
+        "cabin",
+        "font awesome 7 free",
+        "font awesome 7 brands",
+        "font awesome 7 free solid"
+      ],
+      "unavailable_fonts": [
+        "consolas",
+        "calibri"
+      ],
+      "reason": "font warning: cabin"
+    },
+    {
+      "name": "gloat",
+      "version": "0.1.0",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "golixp-resume-zh-cn",
+      "version": "0.1.2",
+      "ok": false,
+      "pages": 2,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "symbols nerd font",
+        "symbols nerd font mono",
+        "symbols nerd font"
+      ],
+      "installable_fonts": [],
+      "unavailable_fonts": [
+        "symbols nerd font",
+        "symbols nerd font mono",
+        "symbols nerd font"
+      ],
+      "reason": "font warning: symbols nerd font"
+    },
+    {
+      "name": "grid-cv",
+      "version": "0.1.0",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "grotesk-cv",
+      "version": "1.0.5",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": true,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "guided-resume-starter-cgc",
+      "version": "2.0.0",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "habaneraa-one-page-resume-zh",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "source han sans sc",
+        "source han sans sc",
+        "source han sans sc",
+        "source han serif sc",
+        "source han sans sc",
+        "source han sans sc",
+        "symbols nerd font mono"
+      ],
+      "installable_fonts": [],
+      "unavailable_fonts": [
+        "source han sans sc",
+        "source han sans sc",
+        "source han sans sc",
+        "source han serif sc",
+        "source han sans sc",
+        "source han sans sc",
+        "symbols nerd font mono"
+      ],
+      "reason": "font warning: source han sans sc"
+    },
+    {
+      "name": "hadronic-rirekisho",
+      "version": "0.1.1",
+      "ok": false,
+      "pages": 2,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "harano aji mincho",
+        "harano aji gothic"
+      ],
+      "installable_fonts": [
+        "harano aji mincho",
+        "harano aji gothic"
+      ],
+      "unavailable_fonts": [],
+      "reason": "Japanese rirekisho form, not a resume"
+    },
+    {
+      "name": "heading-resume",
+      "version": "0.1.0",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "humanistically",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 3,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "cantarell"
+      ],
+      "installable_fonts": [
+        "cantarell"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: cantarell"
+    },
+    {
+      "name": "imprecv",
+      "version": "1.0.1",
+      "ok": false,
+      "pages": 2,
+      "needs_inline_data": true,
+      "font_warnings": [
+        "linux libertine",
+        "consolas",
+        "linux libertine",
+        "linux libertine",
+        "linux libertine"
+      ],
+      "installable_fonts": [
+        "linux libertine",
+        "linux libertine",
+        "linux libertine",
+        "linux libertine"
+      ],
+      "unavailable_fonts": [
+        "consolas"
+      ],
+      "reason": "font warning: linux libertine"
+    },
+    {
+      "name": "impressive-impression",
+      "version": "0.2.1",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "jsume",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": true,
+      "font_warnings": [
+        "symbols nerd font"
+      ],
+      "installable_fonts": [],
+      "unavailable_fonts": [
+        "symbols nerd font"
+      ],
+      "reason": "font warning: symbols nerd font"
+    },
+    {
+      "name": "kiresume",
+      "version": "0.1.17",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": true,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "lavandula",
+      "version": "0.1.1",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "light-cv",
+      "version": "0.2.1",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "linked-cv",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "luminar-cv",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 2,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "calibri",
+        "font awesome 7 free solid",
+        "font awesome 7 brands"
+      ],
+      "installable_fonts": [
+        "font awesome 7 free solid",
+        "font awesome 7 brands"
+      ],
+      "unavailable_fonts": [
+        "calibri"
+      ],
+      "reason": "font warning: calibri"
+    },
+    {
+      "name": "mahou-cv",
+      "version": "0.1.0",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "medieval-resume",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "calluna",
+        "inter",
+        "calluna",
+        "cronos pro",
+        "cronos lt",
+        "cronos",
+        "cronos pro lt",
+        "calluna"
+      ],
+      "installable_fonts": [
+        "inter"
+      ],
+      "unavailable_fonts": [
+        "calluna",
+        "calluna",
+        "cronos pro",
+        "cronos lt",
+        "cronos",
+        "cronos pro lt",
+        "calluna"
+      ],
+      "reason": "font warning: calluna"
+    },
+    {
+      "name": "meridian-cv",
+      "version": "0.1.0",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "metronic",
+      "version": "1.1.0",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "inter",
+        "font awesome 6 free solid",
+        "font awesome 6 brands",
+        "font awesome 6 free"
+      ],
+      "installable_fonts": [
+        "inter",
+        "font awesome 6 free solid",
+        "font awesome 6 brands",
+        "font awesome 6 free"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: inter"
+    },
+    {
+      "name": "min-resume",
+      "version": "0.2.0",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "minimal-cv",
+      "version": "0.2.0",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "inria sans"
+      ],
+      "installable_fonts": [
+        "inria sans"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: inria sans"
+    },
+    {
+      "name": "minimalistic-latex-cv",
+      "version": "0.1.1",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "modern-acad-cv",
+      "version": "0.1.5",
+      "ok": false,
+      "pages": 3,
+      "needs_inline_data": true,
+      "font_warnings": [
+        "fira sans",
+        "academicons",
+        "font awesome 7 free",
+        "font awesome 7 brands",
+        "font awesome 7 free solid"
+      ],
+      "installable_fonts": [
+        "fira sans",
+        "academicons",
+        "font awesome 7 free",
+        "font awesome 7 brands",
+        "font awesome 7 free solid"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: fira sans"
+    },
+    {
+      "name": "modern-cv",
+      "version": "0.10.0",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "modern-resume",
+      "version": "1.0.0",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "moderner-cv",
+      "version": "0.2.1",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "font awesome 7 free",
+        "font awesome 7 brands"
+      ],
+      "installable_fonts": [
+        "font awesome 7 free",
+        "font awesome 7 brands"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: font awesome 7 free"
+    },
+    {
+      "name": "modernpro-coverletter",
+      "version": "1.0.3",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "pt serif"
+      ],
+      "installable_fonts": [
+        "pt serif"
+      ],
+      "unavailable_fonts": [],
+      "reason": "cover letter, not a resume"
+    },
+    {
+      "name": "modernpro-cv",
+      "version": "2.1.2",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "pt serif"
+      ],
+      "installable_fonts": [
+        "pt serif"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: pt serif"
+    },
+    {
+      "name": "monofolio",
+      "version": "0.1.1",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "mrbogo-cv",
+      "version": "1.0.5",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "nabcv",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": true,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "neat-cv",
+      "version": "1.2.0",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": true,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "nutshell",
+      "version": "0.1.1",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "pesha",
+      "version": "0.4.0",
+      "ok": false,
+      "pages": 2,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "cantarell"
+      ],
+      "installable_fonts": [
+        "cantarell"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: cantarell"
+    },
+    {
+      "name": "polycv",
+      "version": "0.2.1",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "porygon",
+      "version": "0.1.1",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "pro-academic-cv",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 3,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "palatino"
+      ],
+      "installable_fonts": [],
+      "unavailable_fonts": [
+        "palatino"
+      ],
+      "reason": "font warning: palatino"
+    },
+    {
+      "name": "quati-curriculum",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": true,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "rasko-europass",
+      "version": "1.0.0",
+      "ok": false,
+      "pages": 2,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "open sans"
+      ],
+      "installable_fonts": [
+        "open sans"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: open sans"
+    },
+    {
+      "name": "readable-classic",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "georgia"
+      ],
+      "installable_fonts": [],
+      "unavailable_fonts": [
+        "georgia"
+      ],
+      "reason": "font warning: georgia"
+    },
+    {
+      "name": "rendercv",
+      "version": "0.3.0",
+      "ok": false,
+      "pages": 3,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "xcharter",
+        "xcharter",
+        "xcharter",
+        "xcharter"
+      ],
+      "installable_fonts": [
+        "xcharter",
+        "xcharter",
+        "xcharter",
+        "xcharter"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: xcharter"
+    },
+    {
+      "name": "resumania",
+      "version": "1.0.0",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "open sans"
+      ],
+      "installable_fonts": [
+        "open sans"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: open sans"
+    },
+    {
+      "name": "resume-ng",
+      "version": "1.0.0",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "resume-ofa",
+      "version": "0.1.0",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "rirekisho-ofa",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 2,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "Japanese rirekisho form, not a resume"
+    },
+    {
+      "name": "shokumu-keirekisho-ofa",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "Japanese rirekisho form, not a resume"
+    },
+    {
+      "name": "signal-resume",
+      "version": "0.1.1",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "silver-dev-cv",
+      "version": "1.0.2",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "pt serif"
+      ],
+      "installable_fonts": [
+        "pt serif"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: pt serif"
+    },
+    {
+      "name": "simple-cv",
+      "version": "0.1.0",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "simple-technical-resume",
+      "version": "0.1.1",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "simple-xd-resume",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "source sans 3",
+        "font awesome 7 free",
+        "font awesome 7 brands"
+      ],
+      "installable_fonts": [
+        "source sans 3",
+        "font awesome 7 free",
+        "font awesome 7 brands"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: source sans 3"
+    },
+    {
+      "name": "swe-cv",
+      "version": "1.0.0",
+      "ok": true,
+      "pages": 1,
+      "needs_inline_data": true,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "sweet-graduate-resume",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "tech-focused-resume",
+      "version": "0.1.2",
+      "ok": true,
+      "pages": 2,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "ok"
+    },
+    {
+      "name": "toy-cv",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "ttq-classic-resume",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 3,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "courier new",
+        "courier new",
+        "eb garamond"
+      ],
+      "installable_fonts": [
+        "eb garamond"
+      ],
+      "unavailable_fonts": [
+        "courier new",
+        "courier new"
+      ],
+      "reason": "font warning: courier new"
+    },
+    {
+      "name": "typographic-resume",
+      "version": "0.2.0",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "roboto",
+        "roboto",
+        "roboto",
+        "roboto",
+        "roboto",
+        "roboto",
+        "montserrat",
+        "libre baskerville",
+        "libre baskerville",
+        "libre baskerville",
+        "montserrat",
+        "roboto"
+      ],
+      "installable_fonts": [
+        "roboto",
+        "roboto",
+        "roboto",
+        "roboto",
+        "roboto",
+        "roboto",
+        "montserrat",
+        "libre baskerville",
+        "libre baskerville",
+        "libre baskerville",
+        "montserrat",
+        "roboto"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: roboto"
+    },
+    {
+      "name": "vantage-cv",
+      "version": "1.0.0",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": true,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "vercanard",
+      "version": "1.0.3",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "inria sans"
+      ],
+      "installable_fonts": [
+        "inria sans"
+      ],
+      "unavailable_fonts": [],
+      "reason": "font warning: inria sans"
+    },
+    {
+      "name": "vivid-cv",
+      "version": "0.2.0",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "yaaacv",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 0,
+      "needs_inline_data": false,
+      "font_warnings": [],
+      "installable_fonts": [],
+      "unavailable_fonts": [],
+      "reason": "compile failed"
+    },
+    {
+      "name": "yuan-resume",
+      "version": "0.1.0",
+      "ok": false,
+      "pages": 1,
+      "needs_inline_data": false,
+      "font_warnings": [
+        "sabon lt std",
+        "calluna",
+        "calluna",
+        "cronos pro"
+      ],
+      "installable_fonts": [],
+      "unavailable_fonts": [
+        "sabon lt std",
+        "calluna",
+        "calluna",
+        "cronos pro"
+      ],
+      "reason": "font warning: sabon lt std"
+    }
+  ]
+}

@@ -1,0 +1,562 @@
+"""Pure-Python checks for the emitter registry and the basic-resume emitter.
+
+No typst binary needed here -- these only check what the emitter *wrote*,
+not whether it compiles. `tests/test_emitters_compile.py` is the gated
+module that runs the emitted source through the real compiler.
+"""
+
+from app.services.emitters import emitter_for
+from app.services.emitters._common import bullet_lines
+from app.services.resume_content import Contact, ResumeContent, Section, SkillGroup
+from app.services.typst_escape import typst_value
+from tests.fixtures.golden_content import GOLDEN, MINIMAL
+
+
+def test_emitter_for_matches_name_and_version_exactly():
+    assert emitter_for("basic-resume", "0.2.9") is not None
+    assert emitter_for("basic-resume", "0.3.0") is None  # a floated version falls back
+    # 0.2.10 actually exists in the live index -- the real regression the
+    # exact-match rule exists to prevent, not just a hypothetical version.
+    assert emitter_for("basic-resume", "0.2.10") is None
+
+
+def test_basic_resume_emitter_declares_no_losses():
+    result = emitter_for("basic-resume", "0.2.9").emit(GOLDEN)
+    assert result.dropped == () and result.degraded == ()
+
+
+def test_basic_resume_emitter_pins_the_import_and_the_font():
+    src = emitter_for("basic-resume", "0.2.9").emit(GOLDEN).source
+    assert src.startswith('#import "@preview/basic-resume:0.2.9"')
+    # The font argument is a (latin, cjk) fallback array, not a single
+    # conditional string -- see emitters._common.FALLBACK_FONTS -- so this
+    # checks for the array literal and both faces by name rather than for
+    # a bare quoted string.
+    assert "font: (" in src
+    assert "New Computer Modern" in src
+    assert "Noto Serif CJK TC" in src
+
+
+def test_emitter_escapes_content_that_would_break_typst():
+    hostile = GOLDEN.model_copy(update={"name": 'A "B" \\ C'})
+    assert '\\"B\\"' in emitter_for("basic-resume", "0.2.9").emit(hostile).source
+
+
+def test_emitter_escapes_a_dollar_and_at_sign_inside_a_quoted_markup_phrase():
+    # Critical 1: a `"` in markup prose is not a Typst string literal --
+    # `markup_value` must escape `$`/`@` that follow an odd-numbered quote
+    # too, unlike `escape_typst_markup` (written for already-written
+    # source, where copying a quoted span verbatim is correct). `/` is
+    # also escaped unconditionally (see markup_value's docstring), so
+    # the `/` in "12M/yr" is escaped too.
+    src = emitter_for("basic-resume", "0.2.9").emit(GOLDEN).source
+    assert r'"LegacyPay \@ \$12M\/yr"' in src
+
+
+def test_emitter_omits_a_section_with_no_entries():
+    # Review Focus 4: the untouched starter has sections we must not emit empty
+    src = emitter_for("basic-resume", "0.2.9").emit(MINIMAL).source
+    assert "== Projects" not in src and "#project(" not in src
+
+
+def test_basic_resume_emitter_renders_the_summary():
+    # basic-resume has no dedicated summary component -- this is the one
+    # field the package only holds via a plain `== heading` + paragraph,
+    # and the only way `test_basic_resume_emitter_declares_no_losses` can
+    # be an honest claim about it is a fixture that actually sets it.
+    src = emitter_for("basic-resume", "0.2.9").emit(GOLDEN).source
+    assert "== Summary" in src
+    assert GOLDEN.summary in src
+
+
+def test_basic_resume_emitter_maps_website_to_personal_site():
+    # resume.with() has no `website` argument -- Contact.website has
+    # nowhere to go but the package's own `personal-site`.
+    src = emitter_for("basic-resume", "0.2.9").emit(GOLDEN).source
+    assert f'personal-site: "{GOLDEN.contact.website}"' in src
+
+
+# --- ats-friendly-resume: the false-friend fork -----------------------------
+#
+# ats-friendly-resume forked basic-resume and renamed two of its parameters
+# (work's `title:` -> `role:`, and the date helper `dates-helper` ->
+# `dates-util`) while keeping everything else -- see
+# `app/services/emitters/ats_friendly_resume.py`'s module docstring for the
+# full field-by-field derivation this guards.
+
+
+def test_ats_friendly_emitter_registered_exactly():
+    assert emitter_for("ats-friendly-resume", "0.1.1") is not None
+    assert emitter_for("ats-friendly-resume", "0.2.0") is None
+
+
+def test_ats_friendly_uses_dates_util_not_dates_helper():
+    src = emitter_for("ats-friendly-resume", "0.1.1").emit(GOLDEN).source
+    assert "dates-util(" in src and "dates-helper(" not in src
+
+
+def test_ats_friendly_passes_role_not_title():
+    src = emitter_for("ats-friendly-resume", "0.1.1").emit(GOLDEN).source
+    assert "role:" in src and "title:" not in src
+
+
+def test_ats_friendly_declares_what_its_project_slot_cannot_hold():
+    result = emitter_for("ats-friendly-resume", "0.1.1").emit(GOLDEN)
+    # project() has no `role` parameter at all in this package (unlike
+    # basic-resume's own project() component) -- see resume.typ. Every
+    # other ResumeContent field (summary, extras, skills included) has
+    # somewhere to go, so this is the only loss.
+    assert result.dropped == ("projects[].role",)
+    assert result.degraded == ()
+
+
+def test_ats_friendly_emitter_pins_the_import_and_the_font():
+    src = emitter_for("ats-friendly-resume", "0.1.1").emit(GOLDEN).source
+    assert src.startswith('#import "@preview/ats-friendly-resume:0.1.1"')
+    assert "font: (" in src
+    assert "New Computer Modern" in src
+    assert "Noto Serif CJK TC" in src
+
+
+def test_ats_friendly_emitter_escapes_content_that_would_break_typst():
+    hostile = GOLDEN.model_copy(update={"name": 'A "B" \\ C'})
+    assert '\\"B\\"' in emitter_for("ats-friendly-resume", "0.1.1").emit(hostile).source
+
+
+def test_ats_friendly_emitter_omits_a_section_with_no_entries():
+    src = emitter_for("ats-friendly-resume", "0.1.1").emit(MINIMAL).source
+    assert "== Projects" not in src and "#project(" not in src
+    assert "== Experience" not in src and "#work(" not in src
+
+
+def test_ats_friendly_emitter_renders_the_summary():
+    # No dedicated summary component in this package either -- same
+    # bare-paragraph-under-a-heading technique as basic-resume.
+    src = emitter_for("ats-friendly-resume", "0.1.1").emit(GOLDEN).source
+    assert "== Summary" in src
+    assert GOLDEN.summary in src
+
+
+def test_ats_friendly_emitter_maps_website_to_portfolio():
+    # resume() has no `website` argument -- it has `portfolio` instead
+    # (ats-friendly-resume's own renamed slot for the same idea; not one
+    # of the two renames the trap is about, but still not a `website:`
+    # argument, so Contact.website still needs a destination).
+    src = emitter_for("ats-friendly-resume", "0.1.1").emit(GOLDEN).source
+    assert f'portfolio: "{GOLDEN.contact.website}"' in src
+
+
+def test_ats_friendly_renders_a_projects_url_when_dates_are_missing():
+    # project()'s own layout (resume.typ) shows `url:` only inside
+    # `if url != "" and dates != "" [...]` -- a project with a URL and no
+    # dates (GOLDEN.projects[1], see golden_content.py) would otherwise
+    # pass `url:` as an argument that the package's own layout then never
+    # displays. This checks the fallback link line this emitter adds for
+    # exactly that case is present in the source;
+    # test_emitters_compile.py's
+    # test_registered_emitter_renders_a_dateless_projects_url is the
+    # end-to-end proof it survives the real render.
+    dateless = GOLDEN.projects[1]
+    assert dateless.url and not (dateless.start or dateless.end)
+    src = emitter_for("ats-friendly-resume", "0.1.1").emit(GOLDEN).source
+    assert f'link("https://" + "{dateless.url}")[#"{dateless.url}"]' in src
+
+
+def test_ats_friendly_declares_no_project_role_loss_when_none_is_set():
+    # emit() must derive `dropped` from the content it was actually
+    # handed, not return a constant -- a resume with no project `role`
+    # set has nothing to lose there, and GOLDEN alone (where
+    # projects[0].role is always set) could never catch a hardcoded
+    # tuple that claimed this loss unconditionally.
+    roleless = GOLDEN.model_copy(
+        update={"projects": [p.model_copy(update={"role": None}) for p in GOLDEN.projects]}
+    )
+    result = emitter_for("ats-friendly-resume", "0.1.1").emit(roleless)
+    assert result.dropped == ()
+
+
+# --- acorn-resume: the lossy case -------------------------------------------
+#
+# acorn-resume's components have slots the IR's fields genuinely do not fit:
+# edu() has no `details` parameter at all (education bullets are only
+# degraded, rendered as plain markup after the call), and project() has no
+# date slot whatsoever (project dates are dropped) -- see
+# `app/services/emitters/acorn_resume.py`'s module docstring for the full
+# field-by-field derivation, including why `projects[].role` and
+# `projects[].url` are rendered rather than declared lost even though
+# project() has no dedicated slot for either.
+
+
+def test_acorn_emitter_registered_exactly():
+    assert emitter_for("acorn-resume", "0.1.0") is not None
+    assert emitter_for("acorn-resume", "0.2.0") is None
+
+
+def test_acorn_declares_its_losses_exactly():
+    # Only two losses in this package: project() has no date slot at all
+    # (dropped), and edu() has no `details` parameter so bullets survive
+    # only as plain markup after the call, not through a component slot
+    # (degraded). Every other field -- including projects[].role and
+    # projects[].url, which also have no dedicated slot -- is rendered
+    # rather than declared lost (see the module docstring).
+    result = emitter_for("acorn-resume", "0.1.0").emit(GOLDEN)
+    assert result.dropped == ("projects[].dates",)
+    assert result.degraded == ("education[].bullets",)
+
+
+def test_acorn_declares_no_losses_when_the_content_has_none_to_lose():
+    # emit() must derive dropped/degraded from the content it was handed,
+    # not return a constant -- a resume with no project dates and no
+    # education bullets has nothing to lose in either place.
+    content = GOLDEN.model_copy(
+        update={
+            "projects": [p.model_copy(update={"start": None, "end": None}) for p in GOLDEN.projects],
+            "education": [e.model_copy(update={"bullets": []}) for e in GOLDEN.education],
+        }
+    )
+    result = emitter_for("acorn-resume", "0.1.0").emit(content)
+    assert result.dropped == ()
+    assert result.degraded == ()
+
+
+def test_acorn_overrides_the_calibri_default():
+    # resume()'s own default is `font: "Calibri"`, which this host does
+    # not have -- see _common.FALLBACK_FONTS and this emitter's module
+    # docstring on why this matters more here than anywhere else.
+    src = emitter_for("acorn-resume", "0.1.0").emit(GOLDEN).source
+    assert "font: (" in src
+    assert "New Computer Modern" in src
+    assert "Noto Serif CJK TC" in src
+    assert "Calibri" not in src
+
+
+def test_acorn_always_passes_technologies_as_a_list():
+    # project()'s body calls `.map` on `technologies` unconditionally --
+    # omitting it (leaving the `none` default) raises "type none has no
+    # method map". ResumeContent has no technologies field at all, so
+    # this is always an empty list, never omitted.
+    src = emitter_for("acorn-resume", "0.1.0").emit(GOLDEN).source
+    assert "technologies: (" in src
+
+
+def test_acorn_takes_work_bullets_through_details():
+    # exp(role:, date:, organization:, location:, details:) -- bullets go
+    # through `details`, not as plain markup after the call (unlike
+    # basic-resume's/ats-friendly's `work()`, which has no such slot).
+    src = emitter_for("acorn-resume", "0.1.0").emit(GOLDEN).source
+    assert "details: [" in src
+    bullet = bullet_lines(GOLDEN.work[0].bullets)[0]
+    details_index = src.index("details: [")
+    work_close = src.index("\n)", details_index)
+    assert bullet in src[details_index:work_close]
+
+
+def test_acorn_renders_education_bullets_as_plain_markup_after_the_call():
+    # edu() has no `details` parameter at all (confirmed against
+    # acorn-resume/0.1.0/src/lib.typ) -- bullets are emitted as plain
+    # markup after the #edu(...) call closes, the degraded form, not
+    # inside a `details:` argument it does not have.
+    src = emitter_for("acorn-resume", "0.1.0").emit(GOLDEN).source
+    edu_entry = GOLDEN.education[0]
+    edu_index = src.index("#edu(")
+    edu_close = src.index("\n)", edu_index) + len("\n)")
+    bullet = bullet_lines(edu_entry.bullets)[0]
+    after_call = src[edu_close:]
+    assert "details:" not in src[edu_index:edu_close]
+    assert bullet in after_call
+
+
+def test_acorn_renders_a_projects_url_without_declaring_it_lost():
+    # project() has no `url` slot either, and its own `live-url`/
+    # `repo-url` chrome never displays the literal url text (only
+    # "Live"/"GitHub" labels do -- see lib.typ) -- so this emitter renders
+    # the literal url itself as a visible link inside `details:`, the
+    # same idiom ats_friendly_resume.py uses for its own dateless-url
+    # fallback, rather than declaring projects[].url lost.
+    dateless = GOLDEN.projects[1]
+    src = emitter_for("acorn-resume", "0.1.0").emit(GOLDEN).source
+    assert f'link("https://" + "{dateless.url}")[#"{dateless.url}"]' in src
+
+
+def test_acorn_folds_project_role_into_the_name_argument():
+    # project() has no `role` parameter at all -- rendered by folding it
+    # into `name:` as "<role>, <name>", the same "*role*, name" display
+    # basic-resume's OWN project() component already uses natively for
+    # this exact case (see basic-resume/0.2.9/src/resume.typ's project()).
+    entry = GOLDEN.projects[0]
+    assert entry.role
+    src = emitter_for("acorn-resume", "0.1.0").emit(GOLDEN).source
+    unescaped = src.replace('\\"', '"')
+    assert f"{entry.role}, {entry.name}" in unescaped
+
+
+def test_acorn_emitter_omits_a_section_with_no_entries():
+    src = emitter_for("acorn-resume", "0.1.0").emit(MINIMAL).source
+    assert "== Projects" not in src and "#project(" not in src
+    assert "== Experience" not in src and "#exp(" not in src
+    assert "== Education" not in src and "#edu(" not in src
+
+
+def test_acorn_emitter_renders_the_summary():
+    # No dedicated summary component in this package either -- same bare
+    # `== heading` + paragraph technique as basic-resume/ats-friendly.
+    src = emitter_for("acorn-resume", "0.1.0").emit(GOLDEN).source
+    assert "== Summary" in src
+    assert GOLDEN.summary in src
+
+
+def test_acorn_emitter_escapes_content_that_would_break_typst():
+    hostile = GOLDEN.model_copy(update={"name": 'A "B" \\ C'})
+    assert '\\"B\\"' in emitter_for("acorn-resume", "0.1.0").emit(hostile).source
+
+
+# --- clean-print-cv: the dict-shaped case -----------------------------------
+#
+# basic-resume/ats-friendly-resume/acorn-resume are all "call-shaped": the
+# emitter writes `#work(title: "...", ...)` and the package's own component
+# unpacks keyword arguments. clean-print-cv's own entrypoint instead builds
+# one `data` dict and hands whole sub-dicts to its section functions
+# (`cv-header(data.personal)`, ...), so this emitter does too -- the check
+# that the emitter interface is not over-fitted to the call-shaped packages.
+# See `app/services/emitters/clean_print_cv.py`'s module docstring for the
+# full field-by-field derivation this guards.
+
+
+def test_clean_print_cv_registered_exactly():
+    assert emitter_for("clean-print-cv", "0.1.0") is not None
+    assert emitter_for("clean-print-cv", "0.2.0") is None
+
+
+def test_clean_print_cv_emits_a_data_value_and_calls_section_functions():
+    src = emitter_for("clean-print-cv", "0.1.0").emit(GOLDEN).source
+    assert "#let data = (" in src
+    assert "#cv-header(data.personal)" in src and "#cv-experience(data.experience)" in src
+
+
+def test_clean_print_cv_declares_its_losses_exactly():
+    # The brief's own `degraded` value was free-form English
+    # ("projects[].bullets -> joined into description", ...), which
+    # base.py's own convention forbids -- EmitResult's dropped/degraded
+    # are stable dot-path identifiers, never prose a UI notice would
+    # show verbatim. Dot-paths only, corrected here.
+    result = emitter_for("clean-print-cv", "0.1.0").emit(GOLDEN)
+    assert result.dropped == ("projects[].dates",)
+    assert result.degraded == ("projects[].bullets", "education[].bullets")
+
+
+def test_clean_print_cv_declares_no_losses_when_the_content_has_none_to_lose():
+    # emit() must derive dropped/degraded from the content it was
+    # actually handed, not return a constant -- a resume with no project
+    # dates and no project/education bullets has nothing to lose in any
+    # of the three places.
+    content = GOLDEN.model_copy(
+        update={
+            "projects": [
+                p.model_copy(update={"start": None, "end": None, "bullets": []})
+                for p in GOLDEN.projects
+            ],
+            "education": [e.model_copy(update={"bullets": []}) for e in GOLDEN.education],
+        }
+    )
+    result = emitter_for("clean-print-cv", "0.1.0").emit(content)
+    assert result.dropped == ()
+    assert result.degraded == ()
+
+
+def test_clean_print_cv_omits_section_calls_with_no_data():
+    src = emitter_for("clean-print-cv", "0.1.0").emit(MINIMAL).source
+    assert "#cv-certifications(" not in src
+    assert "#cv-experience(" not in src and "#cv-summary(" not in src
+    assert "#cv-skills(" not in src and "#cv-projects(" not in src
+    assert "#cv-education(" not in src
+
+
+def test_clean_print_cv_never_emits_certifications_or_languages():
+    # No ResumeContent field maps to either -- not a loss (there is
+    # nothing to drop), but also never a placeholder call or key.
+    src = emitter_for("clean-print-cv", "0.1.0").emit(GOLDEN).source
+    assert "#cv-certifications(" not in src and "#cv-languages(" not in src
+    assert "certifications:" not in src and "languages:" not in src
+
+
+def test_clean_print_cv_sets_the_font_explicitly():
+    # cv-page-setup has no font: argument at all -- unlike every other
+    # package here, overriding it takes a `#set text(font: ...)` line of
+    # its own rather than a keyword passed into a show/call.
+    src = emitter_for("clean-print-cv", "0.1.0").emit(GOLDEN).source
+    assert "#show: cv-page-setup" in src
+    assert "#set text(font: (" in src
+    assert "New Computer Modern" in src and "Noto Serif CJK TC" in src
+
+
+def test_clean_print_cv_folds_project_role_into_the_name_field():
+    entry = GOLDEN.projects[0]
+    assert entry.role
+    src = emitter_for("clean-print-cv", "0.1.0").emit(GOLDEN).source
+    unescaped = src.replace('\\"', '"')
+    assert f"{entry.role}, {entry.name}" in unescaped
+
+
+def test_clean_print_cv_keeps_work_highlights_as_a_list_not_joined():
+    # experience[].highlights is a real list cv-experience iterates --
+    # unlike projects[].description/education[].details, work bullets
+    # are not degraded.
+    src = emitter_for("clean-print-cv", "0.1.0").emit(GOLDEN).source
+    # Plain-ASCII bullet, deliberately -- escaping of the hostile ones is
+    # covered elsewhere; this test only checks the list shape survives.
+    bullet = GOLDEN.work[1].bullets[1]
+    # typst_value renders every dict key as a quoted string literal
+    # (`"highlights": (...)`, not a bare identifier) -- still a valid
+    # Typst dict, and `.highlights` field access on it works the same
+    # either way (confirmed against the real compiler).
+    assert '"highlights": (' in src
+    assert bullet in src
+
+
+def test_clean_print_cv_renders_the_summary():
+    src = emitter_for("clean-print-cv", "0.1.0").emit(GOLDEN).source
+    assert "#cv-summary(data.summary)" in src
+    assert GOLDEN.summary in src
+
+
+def test_clean_print_cv_normalises_an_embedded_newline_before_quoting():
+    # typst_value itself now normalises an embedded line break to a
+    # single space before quoting (see that function's own docstring,
+    # and tests/test_typst_escape.py's own unit tests for the fix at its
+    # source) -- this is the end-to-end proof that this emitter's prose
+    # (summary, here) benefits from it without doing anything extra.
+    hostile = GOLDEN.model_copy(update={"summary": "line one\nline two"})
+    src = emitter_for("clean-print-cv", "0.1.0").emit(hostile).source
+    assert "line one line two" in src
+    assert "line one\nline two" not in src
+
+
+def test_clean_print_cv_renders_extras_through_the_packages_own_heading():
+    # section-heading(title) is a top-level `#let` in cv-template.typ
+    # (no underscore prefix), already in scope via this emitter's own
+    # `#import "...": *` -- the same accent-bar/upper-case heading every
+    # built-in section uses, not a bare `==` markup approximation of one.
+    src = emitter_for("clean-print-cv", "0.1.0").emit(GOLDEN).source
+    section = GOLDEN.extras[0]
+    assert f"#section-heading({typst_value(section.title)})" in src
+    assert f"== {section.title}" not in src
+    assert bullet_lines(section.entries)[0] in src
+
+
+def test_clean_print_cv_omits_an_extras_section_with_no_entries():
+    # section-heading() prints unconditionally -- it has no internal
+    # "skip if empty" guard the way _common.heading_block (used by the
+    # other three emitters, and by this emitter's own previous version)
+    # does. GOLDEN.extras[0] always has a non-empty entry and MINIMAL has
+    # no extras at all, so neither fixture alone exercises a Section with
+    # no entries -- this constructs one directly, the same model_copy
+    # pattern already used elsewhere in this module (e.g.
+    # test_clean_print_cv_declares_no_losses_when_the_content_has_none_
+    # to_lose), kept local to this emitter's own tests rather than added
+    # to the shared GOLDEN/MINIMAL fixtures: the other three emitters
+    # were independently confirmed to already guard this correctly (see
+    # the fix report), so this is a regression guard for this emitter's
+    # own code, not a new case the whole shared fixture needs to carry.
+    content = GOLDEN.model_copy(update={"extras": [Section(title="Empty Section", entries=[])]})
+    src = emitter_for("clean-print-cv", "0.1.0").emit(content).source
+    assert "Empty Section" not in src
+    assert "#section-heading(" not in src
+
+
+def test_clean_print_cv_packs_a_partial_contact_row_into_the_unguarded_slots():
+    # cv-header prints `email | phone | location` with *unconditional*
+    # separators (cv-template.typ:107-111); only linkedin/github/website
+    # are guarded by an `if != ""`, and `contact-sep` is a closed-over
+    # `#let` nothing here can reach. Mapping field-for-field therefore
+    # left a visible dangling `|` under the name of anyone without a
+    # phone number or without a location: email + github alone rendered
+    # `r@example.com  |    |    |  github.com/a`.
+    #
+    # Packing present values into the three unguarded slots first fixes
+    # that: three or more contact values render with no stray separator
+    # at all. Safe because cv-header renders all six slots identically --
+    # plain text, no `mailto:`, no `#link`, no per-field prefix -- so
+    # which slot a value occupies changes nothing but whether a separator
+    # has something to separate. See clean_print_cv._CONTACT_SLOTS.
+    content = ResumeContent(
+        name="Packed",
+        contact=Contact(email="r@example.com", github="github.com/a", website="a.dev"),
+    )
+    src = emitter_for("clean-print-cv", "0.1.0").emit(content).source
+    assert '"email": "r@example.com"' in src
+    assert '"phone": "github.com/a"' in src
+    assert '"location": "a.dev"' in src
+    # The three guarded slots are what is left empty -- they cost nothing
+    # when they are.
+    for slot in ("linkedin", "github", "website"):
+        assert f'"{slot}": ""' in src
+
+
+def test_clean_print_cv_keeps_every_contact_slot_present_even_when_empty():
+    # cv-header reads personal.email/phone/location/linkedin/github with
+    # no `.at(default:)` guard at all, so a *missing* key is a hard
+    # "dictionary does not contain key" compile error, not an empty
+    # render. Packing must never drop a key, only leave it empty.
+    src = emitter_for("clean-print-cv", "0.1.0").emit(MINIMAL).source
+    for slot in ("email", "phone", "location", "linkedin", "github", "website"):
+        assert f'"{slot}": ' in src
+
+
+def test_clean_print_cv_strips_a_scheme_from_a_contact_and_a_project_url():
+    # Not a dead link here (this package shows every URL as plain text,
+    # never a `#link`) -- a label inconsistent with what the other three
+    # emitters must emit to keep their hyperlinks alive. Normalised in
+    # the same place, `_common.bare_url`, for one answer rather than
+    # four. See tests/test_emitters_compile.py's /URI gate.
+    content = GOLDEN.model_copy(
+        update={
+            "contact": GOLDEN.contact.model_copy(
+                update={"github": "https://github.com/weiling"}
+            ),
+            "projects": [
+                GOLDEN.projects[0].model_copy(update={"url": "HTTPS://example.com/p"})
+            ],
+        }
+    )
+    src = emitter_for("clean-print-cv", "0.1.0").emit(content).source
+    assert "https://github.com/weiling" not in src
+    assert "github.com/weiling" in src
+    assert "HTTPS://example.com/p" not in src
+    assert "example.com/p" in src
+
+
+def test_clean_print_cv_filters_an_entirely_empty_skill_group():
+    # cv-skills prints `#group.category:` and `#group.items.join(...)`
+    # unconditionally, so a group with neither renders a bare `:` under
+    # the TECHNICAL SKILLS heading. The other three emitters already drop
+    # exactly this group (`_common.skill_line` returns None when both
+    # halves are empty, and renders the surviving half with no colon when
+    # only one is); this is the dict-shaped counterpart, with the same
+    # boundary: a group that still has one half is content, not junk, and
+    # is kept.
+    content = GOLDEN.model_copy(
+        update={
+            "skills": [
+                SkillGroup(category="Languages", items=["Python"]),
+                SkillGroup(category="", items=[]),
+                SkillGroup(category="", items=["Kept", ""]),
+            ]
+        }
+    )
+    src = emitter_for("clean-print-cv", "0.1.0").emit(content).source
+    assert "Languages" in src
+    assert "Kept" in src
+    # The empty group left nothing behind: exactly two groups survive.
+    assert src.count('"category"') == 2
+    # ...and a blank item inside a surviving group is filtered too, so
+    # `items.join("  |  ")` never renders a dangling separator either.
+    assert '"items": ("Kept", )' in src
+
+
+def test_clean_print_cv_omits_the_skills_call_when_every_group_is_empty():
+    # The guard has to be on the *filtered* list: `content.skills` is
+    # non-empty here, but nothing survives the filter, and cv-skills
+    # would still print its own heading over nothing.
+    content = GOLDEN.model_copy(update={"skills": [SkillGroup(category="", items=[])]})
+    src = emitter_for("clean-print-cv", "0.1.0").emit(content).source
+    assert "#cv-skills(" not in src

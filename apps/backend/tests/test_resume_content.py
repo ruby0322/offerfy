@@ -1,0 +1,409 @@
+"""resume_contents: the snapshot is derived state, not the source of truth.
+
+`stored_content` must say so itself the moment the source it was built from
+changes -- these tests pin that behaviour down, plus the schema's round trip
+and its "every section defaults to empty" shape (the thing that makes
+`extras` safe to leave unset when a resume genuinely has no extra section).
+
+The second half covers `extract_content`, the one model call that fills a
+snapshot (a direct httpx call, mirroring services.profile.build_profile), and
+`record_extract_spend`, its telemetry.
+"""
+
+import json
+
+import httpx
+import pytest
+
+from app.models import GuestSession, LLM_CALL_PURPOSES, LlmCall, Resume, User
+from app.services.metering import Meter, system_guard
+from app.services.resume_content import (
+    EducationEntry,
+    ExtractResult,
+    ProjectEntry,
+    ResumeContent,
+    Section,
+    SkillGroup,
+    WorkEntry,
+    extract_content,
+    record_extract_spend,
+    store_content,
+    stored_content,
+)
+
+
+@pytest.fixture
+def db(db_session):
+    return db_session
+
+
+@pytest.fixture
+def resume(client, db_session) -> Resume:
+    created = client.post("/v1/resumes", json={"locale": "en"}).json()
+    row = db_session.get(Resume, created["id"])
+    assert row is not None
+    return row
+
+
+def test_resume_content_round_trips_through_json():
+    content = ResumeContent(
+        name="Ruby",
+        summary="Builds things.",
+        education=[
+            EducationEntry(
+                institution="NTU",
+                degree="BS",
+                start="2018-09",
+                end="2022-06",
+                bullets=["Dean's list"],
+            )
+        ],
+        work=[
+            WorkEntry(
+                title="Engineer",
+                company="Offerfy",
+                start="2022-07",
+                end="Present",
+                bullets=["Shipped things"],
+            )
+        ],
+        projects=[ProjectEntry(name="Offerfy", role="Founder", url="https://offerfy.com")],
+        skills=[SkillGroup(category="Languages", items=["Python", "TypeScript"])],
+        extras=[Section(title="Publications", entries=["A paper"])],
+    )
+    content.contact.email = "ruby@example.com"
+
+    assert ResumeContent.model_validate_json(content.model_dump_json()) == content
+
+
+def test_resume_content_defaults_every_section_to_empty():
+    content = ResumeContent()
+    assert content.work == []
+    assert content.extras == []
+    assert content.education == []
+    assert content.projects == []
+    assert content.skills == []
+
+
+def test_stored_content_returns_none_when_the_source_has_changed(db, resume):
+    store_content(db, resume, ResumeContent(name="Ruby"), model="m")
+    resume.typst_source = resume.typst_source + "\n// edited"
+    assert stored_content(db, resume) is None
+
+
+def test_stored_content_returns_the_snapshot_when_the_hash_still_matches(db, resume):
+    content = ResumeContent(name="Ruby")
+    store_content(db, resume, content, model="m")
+    assert stored_content(db, resume) == content
+
+
+def test_store_content_overwrites_the_existing_row_for_a_resume(db, resume):
+    from app.models import ResumeContent as ResumeContentRow
+
+    store_content(db, resume, ResumeContent(name="Ruby"), model="m")
+    store_content(db, resume, ResumeContent(name="Ada"), model="m2")
+
+    rows = (
+        db.query(ResumeContentRow)
+        .filter(ResumeContentRow.resume_id == resume.id)
+        .all()
+    )
+    assert len(rows) == 1
+    assert stored_content(db, resume) == ResumeContent(name="Ada")
+
+
+def test_stored_content_returns_none_when_the_stored_blob_no_longer_validates(
+    db, resume
+):
+    """A row that no longer validates is treated the same as a stale one.
+
+    None already means "re-derive"; an unhandled ValidationError here would
+    become a 500 on an ordinary click once a later task wires this up behind
+    an endpoint.
+    """
+    from app.models import ResumeContent as ResumeContentRow
+    from app.services.revisions import source_hash
+
+    store_content(db, resume, ResumeContent(name="Ruby"), model="m")
+    row = (
+        db.query(ResumeContentRow)
+        .filter(ResumeContentRow.resume_id == resume.id)
+        .one()
+    )
+    row.content_json = "{not json"
+    row.derived_from_hash = source_hash(resume.typst_source)
+    db.flush()
+
+    assert stored_content(db, resume) is None
+
+
+# --- extract_content: the one model call that fills a snapshot --------------
+
+
+SOURCE = "= Ruby Chen\n== Education\nNTU, BS\n== Work\nOfferfy, Engineer"
+
+
+class _StubLlm:
+    """Stands in for httpx.AsyncClient inside services.resume_content."""
+
+    def __init__(self, payload: dict | None = None, status_code: int = 200):
+        self.payload = payload
+        self.status_code = status_code
+        self.calls: list[dict] = []
+
+    def __call__(self, *args, **kwargs):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def post(self, url, headers=None, json=None):
+        self.calls.append({"url": url, "body": json or {}})
+        return self
+
+    def json(self):
+        if self.payload is None:
+            raise ValueError("no json")
+        return self.payload
+
+
+class _BoomLlm:
+    """A transport that never reaches the provider at all."""
+
+    def __call__(self, *args, **kwargs):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def post(self, *args, **kwargs):
+        raise httpx.ConnectError("boom")
+
+
+def _said(content: dict) -> dict:
+    """A Responses-API envelope carrying one content payload. See the
+    identical helper in tests/test_talent_profile.py for why this shape (a
+    message item's output_text block, no top-level output_text key) is the
+    one verified against a live call.
+    """
+    return {
+        "status": "completed",
+        "output": [
+            {
+                "type": "message",
+                "content": [{"type": "output_text", "text": json.dumps(content)}],
+            }
+        ],
+    }
+
+
+@pytest.mark.anyio
+async def test_extract_content_parses_a_strict_json_response(
+    openai_enabled, monkeypatch
+):
+    stub = _StubLlm(
+        _said(
+            {
+                "name": "Ruby Chen",
+                "work": [{"title": "Engineer", "company": "Offerfy"}],
+            }
+        )
+    )
+    monkeypatch.setattr("app.services.resume_content.httpx.AsyncClient", stub)
+
+    result = await extract_content(SOURCE)
+
+    assert result.error is None
+    assert result.content == ResumeContent(
+        name="Ruby Chen",
+        work=[WorkEntry(title="Engineer", company="Offerfy")],
+    )
+    assert result.model
+    assert result.source_chars == len(SOURCE)
+
+
+@pytest.mark.anyio
+async def test_extract_content_reports_an_empty_payload_as_an_error(
+    openai_enabled, monkeypatch
+):
+    stub = _StubLlm(_said({}))
+    monkeypatch.setattr("app.services.resume_content.httpx.AsyncClient", stub)
+
+    result = await extract_content(SOURCE)
+
+    assert result.content is None
+    assert result.error == "empty"
+
+
+@pytest.mark.anyio
+async def test_extract_content_rejects_a_payload_with_a_name_and_no_section(
+    openai_enabled, monkeypatch
+):
+    """Boundary 1 of `_is_empty`: a name (and even contacts) is not a snapshot.
+
+    This payload emits a document that compiles cleanly through every
+    emitter, so the switch endpoint's compile gate cannot catch it -- the
+    only thing standing between a name-only extraction and a résumé
+    silently replaced by a name and nothing else is this check.
+    """
+    stub = _StubLlm(
+        _said({"name": "Ruby Chen", "contact": {"email": "ruby@example.com"}})
+    )
+    monkeypatch.setattr("app.services.resume_content.httpx.AsyncClient", stub)
+
+    result = await extract_content(SOURCE)
+
+    assert result.content is None
+    assert result.error == "empty"
+
+
+@pytest.mark.anyio
+async def test_extract_content_keeps_a_payload_with_a_section_and_no_name(
+    openai_enabled, monkeypatch
+):
+    """Boundary 2: the check asks about sections only, never about `name`.
+
+    A résumé whose name the extraction could not find still has content
+    worth switching templates with, so one non-empty section is enough --
+    the guard must not have tightened into "a name is required".
+    """
+    stub = _StubLlm(_said({"skills": [{"category": "Infra", "items": ["Postgres"]}]}))
+    monkeypatch.setattr("app.services.resume_content.httpx.AsyncClient", stub)
+
+    result = await extract_content(SOURCE)
+
+    assert result.error is None
+    assert result.content is not None
+    assert not result.content.name
+    assert result.content.skills == [SkillGroup(category="Infra", items=["Postgres"])]
+
+
+@pytest.mark.anyio
+async def test_extract_content_reports_a_transport_failure_without_raising(
+    openai_enabled, monkeypatch
+):
+    monkeypatch.setattr("app.services.resume_content.httpx.AsyncClient", _BoomLlm())
+
+    result = await extract_content(SOURCE)
+
+    assert result.content is None
+    assert result.error == "provider_error"
+
+
+# --- regression: this call must never send an Anthropic model id to the ----
+# --- OpenAI endpoint it posts to ---------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_extract_content_sends_an_openai_model_with_no_pin(
+    openai_enabled, monkeypatch
+):
+    """model_catalog.DEFAULT_MODEL is an Anthropic id ("claude-haiku-5-5"),
+    and this call always speaks to OpenAI's Responses endpoint -- CHAT_MODEL
+    is blank by default, so an unpinned call is the common path, not an edge
+    case. A fallback that resolves to a non-OpenAI model would make every
+    unpinned extraction fail at the provider, silently, and the feature
+    would never engage. Asserted on the id actually sent in the request
+    body, not on the result, so a fallback that merely *returns* an OpenAI id
+    while sending something else could not slip through.
+    """
+    from app.services import model_catalog
+
+    stub = _StubLlm(_said({"name": "Ruby"}))
+    monkeypatch.setattr("app.services.resume_content.httpx.AsyncClient", stub)
+
+    await extract_content(SOURCE)
+
+    sent_model = stub.calls[0]["body"]["model"]
+    assert model_catalog.spec_or_passthrough(sent_model).provider == "openai"
+
+
+@pytest.mark.anyio
+async def test_extract_content_sends_an_openai_model_when_the_pin_is_anthropic(
+    openai_enabled, monkeypatch
+):
+    """An operator pin is honoured only when it names an OpenAI model -- the
+    same rule build_profile applies, for the same reason: pinning an
+    Anthropic model must not take this feature down with it.
+    """
+    from app.config import get_settings
+    from app.services import model_catalog
+
+    monkeypatch.setenv("CHAT_MODEL", "claude-opus-5-5")
+    get_settings.cache_clear()
+
+    stub = _StubLlm(_said({"name": "Ruby"}))
+    monkeypatch.setattr("app.services.resume_content.httpx.AsyncClient", stub)
+
+    await extract_content(SOURCE)
+
+    sent_model = stub.calls[0]["body"]["model"]
+    assert model_catalog.spec_or_passthrough(sent_model).provider == "openai"
+
+
+# --- record_extract_spend: the guest/user billing split ---------------------
+
+
+def _resume_for(db, *, user: User | None = None, guest: GuestSession | None = None) -> Resume:
+    resume = Resume(
+        title="R",
+        typst_source="= R",
+        source="create",
+        locale="en",
+        kind="master",
+        user_id=user.id if user else None,
+        guest_session_id=guest.id if guest else None,
+    )
+    db.add(resume)
+    db.flush()
+    return resume
+
+
+def test_record_extract_spend_bills_a_guest_to_the_guest_column(db):
+    guest = GuestSession(key_hash="h-extract-guest")
+    db.add(guest)
+    db.flush()
+    r = _resume_for(db, guest=guest)
+    result = ExtractResult(
+        content=ResumeContent(name="Ruby"), model="m", usage={}, source_chars=3
+    )
+    meter = Meter(system_guard(guest=guest, purpose="extract", reason="test"))
+
+    record_extract_spend(
+        db, user=None, guest=guest, resume_id=r.id, result=result, meter=meter
+    )
+
+    row = db.query(LlmCall).one()
+    assert row.purpose == "extract"
+    assert row.user_id is None
+    assert row.guest_session_id == guest.id
+
+
+def test_record_extract_spend_bills_a_signed_in_user_to_the_user_column(db):
+    user = User(google_sub="s-extract-user", email="ruby@example.com", locale="en")
+    db.add(user)
+    db.flush()
+    r = _resume_for(db, user=user)
+    result = ExtractResult(
+        content=ResumeContent(name="Ruby"), model="m", usage={}, source_chars=3
+    )
+    meter = Meter(system_guard(user=user, purpose="extract", reason="test"))
+
+    record_extract_spend(
+        db, user=user, guest=None, resume_id=r.id, result=result, meter=meter
+    )
+
+    row = db.query(LlmCall).one()
+    assert row.purpose == "extract"
+    assert row.guest_session_id is None
+    assert row.user_id == user.id
+
+
+def test_extract_purpose_is_allowed():
+    assert "extract" in LLM_CALL_PURPOSES

@@ -5,11 +5,17 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { listTemplates, templatePreviewUrl, type UniverseTemplate } from "@/lib/api";
+import { templateFieldKey } from "@/lib/chat-tools";
 import { cn } from "@/lib/utils";
+
+/** What an applied switch left behind, for the inline note below --
+ * `null` when the switch went through the model path instead, or failed,
+ * so there is nothing of this shape to show. */
+export type AppliedTemplateNote = { name: string; version: string; dropped: string[]; degraded: string[] };
 
 type Props = {
   sending: boolean;
-  onApply: (prompt: string) => void;
+  onApply: (template: { name: string; version: string }) => Promise<AppliedTemplateNote | null>;
 };
 
 export default function EditorTemplatePanel({ sending, onApply }: Props) {
@@ -19,6 +25,7 @@ export default function EditorTemplatePanel({ sending, onApply }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [broken, setBroken] = useState<Record<string, boolean>>({});
+  const [appliedNote, setAppliedNote] = useState<AppliedTemplateNote | null>(null);
   const stripRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -127,11 +134,39 @@ export default function EditorTemplatePanel({ sending, onApply }: Props) {
           size="sm"
           disabled={sending}
           className="shrink-0"
-          onClick={() => onApply(current.apply_prompt)}
+          onClick={() => {
+            setAppliedNote(null);
+            void onApply({ name: current.name, version: current.version }).then(setAppliedNote);
+          }}
         >
           {t("templateApply")}
         </Button>
       </header>
+
+      {appliedNote ? (
+        <div
+          data-testid="template-applied-note"
+          className="shrink-0 rounded-lg border border-border bg-sheet px-3 py-2 text-xs text-muted-foreground"
+        >
+          <p className="font-medium text-foreground">
+            {t("templateSwitchApplied", { name: appliedNote.name, version: appliedNote.version })}
+          </p>
+          {appliedNote.dropped.length > 0 || appliedNote.degraded.length > 0 ? (
+            <ul className="mt-1 space-y-0.5">
+              {appliedNote.dropped.map((path) => (
+                <li key={`dropped-${path}`}>
+                  {t("templateSwitchDropped", { field: t(templateFieldKey(path)) })}
+                </li>
+              ))}
+              {appliedNote.degraded.map((path) => (
+                <li key={`degraded-${path}`}>
+                  {t("templateSwitchDegraded", { field: t(templateFieldKey(path)) })}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-paper">
         {showImage ? (

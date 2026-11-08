@@ -5,11 +5,15 @@ from sqlalchemy.orm import Session
 from app.models import Resume
 from app.services.family import family_master
 from app.services.memory import accepted_memory_texts
+from app.services.templates import parse_preview_spec
 
 
 def build_role_card(db: Session, resume: Resume) -> str:
     master = family_master(db, resume)
     lines = ["", "", "Document context (rebuilt every turn, not part of the chat):"]
+    spec = parse_preview_spec(resume.typst_source)
+    if spec:
+        lines.append(f"- This document currently uses @preview/{spec[0]}:{spec[1]}.")
     if resume.kind == "tailor":
         lines.append(
             f"- You are editing a TAILOR resume titled {resume.title!r}, "

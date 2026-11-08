@@ -1,16 +1,60 @@
-"""Make LLM-written Typst more likely to compile.
+"""Make LLM-written Typst more likely to compile, and raw data safe to
+place inside it.
 
 Fill/edit turns often paste resume text with raw `"`, `$`, `@`, or `*` into
 string fields and list items. Typst then treats them as syntax.
+`escape_typst_string`/`escape_typst_markup`/`sanitize_typst_source` handle
+that case: already-written Typst *source*, where a `"` really does open a
+string literal and a `\\` is already part of an intentional escape.
+
+`typst_value`/`markup_value` are the other case: raw *data* (e.g. an
+emitter rendering `ResumeContent` straight into a document -- see
+`app.services.emitters`) that was never pre-escaped at all, where a `"` is
+just a character and every `\\` must be doubled before anything else runs.
+Mixing the two up is exactly how a data-mode caller silently drops a
+backslash or breaks on a quote followed by `$`/`@` -- pick the function
+for what the text actually is, not for where it ends up.
 
 Comments are left alone: escaping is meaningless inside `//` and `/* ... */`,
 and template comments full of `name: ""` placeholders otherwise get rewritten
 on every edit.
+
+**Settled.** Typst applies glyph-level typography to all markup prose on
+its own, with no escaping involved: a straight `"`/`'` becomes a curly
+smart quote, a run of two or three `-` becomes an en/em dash, and `...`
+becomes a single ellipsis character. None of that is content loss for
+this product -- no word, number or token disappears, the IR a résumé is
+built from stays authoritative, and it is the same substitution the
+starter (`app.services.starter._render`) and the LLM edit path already
+produce, so suppressing it would make an emitter's output typographically
+worse than hand-written Typst. `markup_value` does not fight any of this:
+`"`/`'` are never escaped, and `.` is never in its escape set, so `...`
+is untouched. The one disclosed exception is `-`: it *is* escaped
+unconditionally like every other markup-significant character (see
+`_MARKUP_ALWAYS_ESCAPE`'s own comment for why), which suppresses Typst's
+*markup-level* `--`/`---` substitution for a run that arrives through
+`markup_value`.
+
+That suppression is very nearly invisible in practice, which is worth
+stating precisely rather than overstating: in **New Computer Modern**,
+the face every emitter pins via `app.services.emitters._common.
+FALLBACK_FONTS`, the font's own `--` -> endash ligature then applies
+during shaping anyway, so the run still *renders* as a dash. Measured
+against the real binary: `X\-\-Y` and `X--Y` each produce one 5.50pt
+glyph in NCM, while Libertinus (Typst's default, and the reason a
+bare-document experiment suggested otherwise) renders the escaped form
+as two 3.72pt hyphens. What does differ in the pinned font is the PDF's
+ToUnicode mapping -- the escaped run extracts back as `--`, the
+unescaped one as `–` -- which is what text extraction, and therefore ATS
+parsing, sees. So this is a trade-off in the text layer, not a visibly
+worse page, and still a known consequence of escaping every occurrence
+rather than carving out a run-length exception, not an oversight.
 """
 
 from __future__ import annotations
 
 import re
+from typing import Any
 
 _STRING_FIELD = re.compile(
     r"""(?x)
@@ -32,6 +76,22 @@ _STRING_FIELD = re.compile(
 _BULLET = re.compile(r"^(\s*-\s+)(.*)$")
 _IMPORT = re.compile(r"^\s*#import\s")
 
+# Every character Typst's own lexer treats as a line break -- ASCII
+# `\n`/`\r` plus vertical tab, form feed, NEL, and the Unicode line/
+# paragraph separators -- collapsed to one space per run. Shared by
+# `typst_value` and `markup_value`: both hand raw, never-pre-escaped data
+# straight into Typst source, and in neither case may a literal line
+# break survive into it (see each function's own docstring for why,
+# they differ in *how* a line break would otherwise cause harm, not in
+# whether it would). Defined once, ahead of both, rather than per-caller
+# -- a prior version of `typst_value` left this out, which worked for
+# every call-shaped emitter (dates, names: never multi-line) until the
+# first dict-shaped one (`clean_print_cv.py`) routed actual résumé prose
+# through it instead of `markup_value`, and the gap surfaced as a raw
+# newline reaching the rendered page as a literal line break instead of
+# a space.
+_LINE_BREAK_RE = re.compile("[\r\n\x0b\x0c\x85  ]+")
+
 
 def escape_typst_string(value: str) -> str:
     """Escape text for a Typst `"..."` literal without double-escaping."""
@@ -50,6 +110,51 @@ def escape_typst_string(value: str) -> str:
         out.append(ch)
         i += 1
     return "".join(out)
+
+
+def typst_value(value: Any) -> str:
+    """Render a Python value as a Typst literal: dict/list data inlined straight
+    into source, rather than loaded from a sidecar file at compile time.
+
+    Unlike `escape_typst_string`, which assumes a backslash in LLM-written Typst
+    source is already part of an intentional escape sequence, a backslash here
+    comes from raw data (YAML/TOML/JSON) and is never pre-escaped -- so every
+    backslash is doubled before the quote escaping is applied.
+
+    A string value also has any embedded line break collapsed to a single
+    space first (`_LINE_BREAK_RE`, the same normalisation `markup_value`
+    applies, and for the same underlying reason -- see that function's own
+    docstring). An unescaped raw newline is legal *syntax* inside a Typst
+    string literal (the literal simply spans source lines), so this was not
+    a compile failure waiting to happen; it was a silent one. Confirmed
+    against the real compiler: without this, the newline survives into
+    whatever displays the string as a literal line break in the rendered
+    output, not the single space every caller of this function implicitly
+    assumes free-form prose collapses to.
+    """
+    if value is None:
+        return "none"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        normalised = _LINE_BREAK_RE.sub(" ", value)
+        return f'"{escape_typst_string(normalised.replace("\\", "\\\\"))}"'
+    if isinstance(value, dict):
+        if not value:
+            return "(:)"
+        pairs = "".join(
+            f"{typst_value(str(key))}: {typst_value(item)}, "
+            for key, item in value.items()
+        )
+        return f"({pairs})"
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return "()"
+        items = "".join(f"{typst_value(item)}, " for item in value)
+        return f"({items})"
+    return f'"{escape_typst_string(str(value))}"'
 
 
 def escape_typst_markup(text: str) -> str:
@@ -95,6 +200,125 @@ def escape_typst_markup(text: str) -> str:
         for idx in reversed(star_at):
             out[idx] = r"\*"
     return "".join(out)
+
+
+# Every character Typst's markup grammar gives special meaning to,
+# escaped unconditionally regardless of position or pairing: `#` opens
+# code mode; `$` opens math; `@` opens a reference; `*`/`_` toggle
+# strong/emphasis; `` ` `` opens raw/code; `<`/`>` can open a label;
+# `[`/`]` can open a content block; `~` is the non-breaking-space
+# shorthand; `-`/`+`/`/` open a bullet/numbered/term list item and `=`
+# opens a heading when they are the first character *of a line*; `/`
+# followed by another `/` is also a line comment *anywhere* on the line
+# (not just at the start), which escaping every `/` on its own,
+# unconditionally, prevents from ever forming in the first place.
+#
+# "Unconditionally" is the point, not a simplification of something more
+# careful: an earlier version of this function escaped `-`/`+`/`/`/`=`
+# only as the first character of the whole *string*, reasoning that a
+# bullet/heading's own fixed prefix ("- ", "== ") already occupies that
+# position for every other caller. That reasoning had two holes a
+# position check can never close: leading whitespace in the data
+# (`"  - indented"` is still line-initial once rendered, `out[0]` is a
+# space) and an embedded newline (`"line one\n- line two"` makes the
+# text after the `\n` line-initial too, which no single `out[0]` check
+# can see) -- both verified against the real binary to fabricate
+# structure or hard-fail the compile. A position check is exactly the
+# kind of reasoning that also missed `#` entirely in an earlier round:
+# checking *where* a character is, instead of just escaping every
+# instance of it, leaves a gap for every position nobody enumerated.
+# Escaping every occurrence, full stop, has no such gap: there is no
+# position left to get wrong.
+#
+# All fifteen verified against the real binary to render back as the
+# literal character with no other effect when escaped with a leading
+# `\`, individually and in combination (see tests/test_typst_escape.py
+# and tests/test_emitters_compile.py's round-trip tests). `"` is
+# deliberately absent -- it is just a character in markup prose, not a
+# string literal to protect (Typst renders it as a smart quote, which is
+# correct), unlike in `escape_typst_markup`'s source-sanitizing job.
+#
+# Not escaped, deliberately: a *run* of two or more `-` (Typst's en/em
+# dash shorthand) and three `.` (ellipsis) are intact typography this
+# feature must not suppress -- see the module docstring's "Settled"
+# note. `.` was never in this set; a lone `-` still is, and always will
+# be escaped on its own (an isolated `-` has no shorthand to preserve),
+# but this module does not scan for a `--`/`---` run to carve out an
+# exception for it, so a résumé bullet that happens to contain one has
+# Typst's *markup-level* substitution suppressed for it. That does not
+# mean it renders as literal hyphens: in New Computer Modern -- the face
+# every emitter pins (`emitters._common.FALLBACK_FONTS`) -- the font's
+# own `--` -> endash ligature applies during shaping regardless, so the
+# run still shapes to a dash, glyph for glyph (measured: one 5.50pt
+# glyph either way). The difference the escape does make in the pinned
+# font is the PDF's ToUnicode mapping, `--` rather than `–`, which is
+# what text extraction and ATS parsing read. A known, disclosed
+# trade-off of escaping unconditionally rather than conditionally (see
+# this module's own docstring for the measurements), not an oversight.
+_MARKUP_ALWAYS_ESCAPE = frozenset("#$@*_`<>[]~-+/=")
+
+# `_LINE_BREAK_RE` is defined once, near the top of this module,
+# shared with `typst_value` -- see its own comment there and
+# `markup_value`'s own docstring (below) for why a raw line break must
+# never reach the emitted Typst source from this side either.
+
+
+def markup_value(text: str) -> str:
+    """Escape raw, never-pre-escaped data for direct use as Typst markup
+    (a bullet, a heading, a paragraph) -- the markup-mode counterpart to
+    `typst_value`'s string-literal escaping, for an emitter rendering
+    `ResumeContent` text straight into a document body rather than into a
+    quoted argument.
+
+    `escape_typst_markup` above is not safe for this: it was written for
+    *already-written Typst source* (an LLM's own bullet, edited in place),
+    where a `"` really does open a string literal worth copying verbatim,
+    a `\\` is already part of an intentional escape sequence, and a
+    *paired* `*`/`_`/`` ` `` is assumed to be formatting the editor
+    actually intended. None of those assumptions hold for data straight
+    out of a pydantic model: a `"` is just a character, a `\\` is never
+    pre-escaped, and a matched pair of `*`s in someone's raw résumé text
+    (`C# and F#`, `Rated *5/5*`) is almost certainly not a request for
+    bold -- it is two characters that happen to appear next to each
+    other. So this function does not try to guess intent, or position,
+    at all: every `\\` is doubled first (exactly like `typst_value`, for
+    the same reason -- an un-doubled backslash hands Typst an escape
+    sequence that silently consumes the next character), an embedded
+    newline is normalised to a single space (see the paragraph below),
+    and then every markup-significant character in `_MARKUP_ALWAYS_
+    ESCAPE` is escaped -- every occurrence, with no pairing rule and no
+    position check. See that set's own comment for why unconditional
+    beats "only when it would otherwise break" as a method, and for the
+    one disclosed trade-off this makes (a `--`/`---` run that would
+    otherwise become Typst's own en/em dash renders as literal hyphens
+    instead, since there is no run-length exception carved out for it).
+
+    Every character Typst's own lexer treats as a line break -- not just
+    `\\n`/`\\r`, but also vertical tab (`\\x0b`), form feed (`\\x0c`), NEL
+    (`\\x85`), and the Unicode line/paragraph separators (`\\u2028`,
+    `\\u2029`) -- is normalised to a single space rather than passed
+    through as a literal line break. `ResumeContent`'s fields (`summary`,
+    every `bullets`/`items`/`title`/entry) are plain `str` with nothing
+    upstream stripping any of these out of an LLM extraction, so a
+    multi-line value is representable even though every emitter treats
+    each one as a single logical line of prose. Passing one through
+    would split that line in the *emitted Typst source* itself --
+    harmless for a bullet or heading built with this package's own fixed
+    prefix (the continuation merely loses its bullet styling, a
+    formatting defect, not a correctness one, and already how
+    `escape_typst_markup` treats a newline in LLM-written source), but
+    `_skill_line` builds one whole skill group as a single source line
+    (`- *Category*: item, item, item`); one inside an item would cut that
+    line off mid-list, rendering every item after it as an un-bulleted
+    continuation line instead of dropping them, but still not what the
+    IR describes -- the same silent-reshaping class this module exists
+    to close, just caused by whitespace instead of a special character.
+    Normalising first means no caller has to know which shape it is
+    building.
+    """
+    text = _LINE_BREAK_RE.sub(" ", text)
+    text = text.replace("\\", "\\\\")
+    return "".join(f"\\{ch}" if ch in _MARKUP_ALWAYS_ESCAPE else ch for ch in text)
 
 
 def sanitize_typst_source(source: str) -> str:

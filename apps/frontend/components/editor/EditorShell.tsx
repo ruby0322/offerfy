@@ -18,7 +18,9 @@ import EditorHistoryPanel from "@/components/editor/EditorHistoryPanel";
 import EditorMobileLayout from "@/components/editor/EditorMobileLayout";
 import EditorPreview from "@/components/editor/EditorPreview";
 import EditorSettingsPanel from "@/components/editor/EditorSettingsPanel";
-import EditorTemplatePanel from "@/components/editor/EditorTemplatePanel";
+import EditorTemplatePanel, {
+  type AppliedTemplateNote,
+} from "@/components/editor/EditorTemplatePanel";
 import MemoryPanel from "@/components/editor/MemoryPanel";
 import ResumeFamilyMenu from "@/components/editor/ResumeFamilyMenu";
 import type { FamilyCardActions } from "@/components/editor/ChatMessageCard";
@@ -54,6 +56,7 @@ import {
   sendChat,
   startImport,
   streamImport,
+  switchTemplate,
   type AtsReport,
   type ChatMessage,
   type ImportStatus,
@@ -175,6 +178,13 @@ export default function EditorShell({ resumeId }: Props) {
   const [draft, setDraft] = useState(() => loadComposerDraft(resumeId));
   const [attachment, setAttachment] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
+  // Covers the `switchTemplate` round trip itself, which runs before
+  // `sendUserChat` (or `onRestoreHistory`) ever flips `sending` -- without
+  // this the Apply button stays clickable for that whole await and a second
+  // click starts a second switch, whose own chat turn then silently no-ops
+  // against `sendUserChat`'s own `sendingRef` guard. Same shape as
+  // `importActionPending` guarding `onImportAction`.
+  const [templateApplyPending, setTemplateApplyPending] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [chatUnavailable, setChatUnavailable] = useState(false);
   // This week's AI allowance. Fetched once on mount, then kept current by the
@@ -802,7 +812,7 @@ export default function EditorShell({ resumeId }: Props) {
     async (
       text: string,
       file: File | null = null,
-      options?: { preferFullSource?: boolean },
+      options?: { preferFullSource?: boolean; template?: { name: string; version: string } },
     ) => {
     const trimmed = text.trim();
     if ((!trimmed && !file) || sendingRef.current) return;
@@ -976,25 +986,7 @@ export default function EditorShell({ resumeId }: Props) {
     } catch (err) {
       const limitHit = usageRefusalOf(err);
       if (limitHit) {
-        // A card, not a chat bubble: this is the sign-up moment for a guest and
-        // the matching moment for everyone else, and a bubble scrolls away.
-        setRefusal(limitHit);
-        // The refusal carries the balance that caused it, so the meter lands
-        // on empty without a second request.
-        setUsage((prev) =>
-          prev
-            ? {
-                ...prev,
-                tier: limitHit.tier,
-                reset_at: limitHit.reset_at,
-                used_credits: limitHit.used_credits,
-                limit_credits: limitHit.limit_credits,
-                turns_used: limitHit.turns_used,
-                turn_limit: limitHit.turn_limit,
-                exhausted: true,
-              }
-            : prev,
-        );
+        showUsageRefusal(limitHit);
       } else if (err instanceof ApiError && err.status === 503) {
         setChatUnavailable(true);
         setMessages((prev) => [
@@ -1196,9 +1188,107 @@ export default function EditorShell({ resumeId }: Props) {
     await sendUserChat(text, file);
   }
 
-  function onApplyTemplate(prompt: string) {
-    setLeftTab("chat");
-    void sendUserChat(prompt, null, { preferFullSource: true });
+  function showUsageRefusal(limitHit: UsageRefusal) {
+    // A card, not a chat bubble: this is the sign-up moment for a guest and
+    // the matching moment for everyone else, and a bubble scrolls away. The
+    // card itself names which limit was hit and what the next tier gives, and
+    // shows a sign-in button when `tier === "guest"` or the refusal carries
+    // `sign_in_required` (see UsageLimitCard).
+    //
+    // Shared with `onApplyTemplate`: a 429 is reachable from the template
+    // switch too, exactly when the snapshot is stale and the subject is out of
+    // credits -- the first switch a new person makes once their allowance is
+    // spent. That used to fall into a bare `catch` and be reported as "could
+    // not switch to that template", which is both wrong and unactionable.
+    setRefusal(limitHit);
+    // The refusal carries the balance that caused it, so the meter lands
+    // on empty without a second request.
+    setUsage((prev) =>
+      prev
+        ? {
+            ...prev,
+            tier: limitHit.tier,
+            reset_at: limitHit.reset_at,
+            used_credits: limitHit.used_credits,
+            limit_credits: limitHit.limit_credits,
+            turns_used: limitHit.turns_used,
+            turn_limit: limitHit.turn_limit,
+            exhausted: true,
+          }
+        : prev,
+    );
+  }
+
+  async function onApplyTemplate(
+    template: { name: string; version: string },
+  ): Promise<AppliedTemplateNote | null> {
+    // A second click during the `switchTemplate` await -- before `sending`
+    // ever flips true -- would start a second switch whose own chat turn
+    // then silently loses to `sendUserChat`'s `sendingRef` guard. Reusing
+    // `onImportAction`'s own-flag pattern rather than `sendingRef` itself
+    // because this flag must already be live before any chat turn exists.
+    if (templateApplyPending || sendingRef.current) return null;
+    setTemplateApplyPending(true);
+    try {
+      const result = await switchTemplate(resumeId, template.name, template.version);
+      if (result.mode === "llm") {
+        setLeftTab("chat");
+        void sendUserChat(result.prompt, null, { preferFullSource: true, template });
+        return null;
+      }
+      // The server did the rewrite itself, so there is no chat turn to run
+      // -- just pick up the resume it already saved, the same refresh
+      // `onRestoreHistory` does for a restored revision. The caller (the
+      // template panel) shows its own inline note from the return value
+      // here. The server also wrote a `role: "system"` row for this same
+      // switch, but nothing streams it -- `setMessages` is otherwise only
+      // called at mount and inside `sendUserChat` (see the import-runner
+      // comment above) -- so without an explicit re-read here the person
+      // would not see it in the transcript until a reload.
+      await onRestoreHistory(result.resume);
+      try {
+        const history = await getChatMessages(resumeId);
+        setMessages(history.messages.map(withMessageId));
+        setContextCut(history.contextCut);
+      } catch {
+        /* a reload re-reads it -- nothing re-polls the transcript after a
+           switch, so that is the only recovery */
+      }
+      return {
+        name: template.name,
+        version: template.version,
+        dropped: result.dropped,
+        degraded: result.degraded,
+      };
+    } catch (err) {
+      // A 429 is not a broken template: it is reachable here whenever the
+      // snapshot is stale (so the switch needs one extraction call) and the
+      // subject is out of credits -- the first switch a new person makes
+      // once their allowance is spent, and for a guest `preflight` raises
+      // `sign_in_required`. Routed to the same refusal card the chat path
+      // uses, which names the limit and offers sign-in, rather than told
+      // the template is broken.
+      const limitHit = usageRefusalOf(err);
+      if (limitHit) {
+        // The card lives in the chat panel (EditorChatPanel renders it from
+        // `usage.refusal`), and this ran from the template panel -- so switch
+        // tabs the same way the `mode: "llm"` branch above does, or the person
+        // would get no feedback at all.
+        setLeftTab("chat");
+        showUsageRefusal(limitHit);
+        return null;
+      }
+      // Everything else: a 400 means the pair isn't on the committed support
+      // list -- the picker should already only offer those, so this is a
+      // mismatch between client and server state, not a routine failure.
+      // Same swallow-and-toast as `onImportAction` for that and for a 404 or
+      // a network failure: the backend's sentence isn't for the person, but
+      // silence here reads as a dead button.
+      toast(t("templateSwitchError"));
+      return null;
+    } finally {
+      setTemplateApplyPending(false);
+    }
   }
 
   async function onRestoreHistory(saved: Resume) {
@@ -1691,7 +1781,10 @@ export default function EditorShell({ resumeId }: Props) {
         value="template"
         className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
       >
-        <EditorTemplatePanel sending={sending} onApply={onApplyTemplate} />
+        <EditorTemplatePanel
+          sending={sending || templateApplyPending}
+          onApply={onApplyTemplate}
+        />
       </TabsContent>
       <TabsContent
         value="settings"

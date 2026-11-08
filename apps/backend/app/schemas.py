@@ -114,6 +114,13 @@ class AtsReport(BaseModel):
     checks: list[AtsCheck]
 
 
+class TemplateRef(BaseModel):
+    """A (name, version) pin naming a Typst Universe package."""
+
+    name: str
+    version: str
+
+
 class ChatRequest(BaseModel):
     message: str
     prefer_full_source: bool = False
@@ -124,6 +131,36 @@ class ChatRequest(BaseModel):
     # not have is a 400, never a silent substitution: see
     # services.model_choice.require_offered.
     model: str | None = None
+    # The picker's switch target, set when this turn was started from the
+    # template picker rather than typed by hand. Its presence is what used to
+    # be guessed by matching an English sentence against itself -- see
+    # services.templates.mentioned_template for the fallback a typed message
+    # still needs.
+    template: TemplateRef | None = None
+
+
+class TemplateSwitchRequest(BaseModel):
+    name: str
+    version: str
+
+
+class TemplateSwitchOut(BaseModel):
+    # The model path: an emitter either does not exist for this pair, or
+    # could not be trusted to produce a compiling document from a fresh
+    # source -- the picker's request becomes the prompt that used to be
+    # typed into chat by hand.
+    mode: Literal["llm"]
+    prompt: str
+
+
+class TemplateSwitchApplied(BaseModel):
+    # The deterministic path: an emitter rewrote the document server-side
+    # and it is already saved, so the response carries the resume itself
+    # rather than anything for the model to act on.
+    mode: Literal["applied"]
+    dropped: list[str]
+    degraded: list[str]
+    resume: ResumeOut
 
 
 class ChatMessageOut(BaseModel):

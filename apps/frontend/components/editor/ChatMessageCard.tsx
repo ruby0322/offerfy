@@ -31,7 +31,9 @@ import {
   editCheckpointAction,
   memoryProposal,
   parseAttachedUserMessage,
+  parseTemplateSwitchPayload,
   parseToolPayload,
+  templateFieldKey,
   toolErrorMessage,
   type ToolPayload,
 } from "@/lib/chat-tools";
@@ -431,6 +433,47 @@ function RestoreButton({
   );
 }
 
+function TemplateSwitchCard({ message }: { message: ChatMessage }) {
+  const t = useTranslations("editor");
+  const payload = parseTemplateSwitchPayload(message.content);
+  // An unparseable payload -- a row shape this build does not know yet, or
+  // plain corruption -- renders nothing rather than the raw JSON a plain
+  // assistant bubble would otherwise show for this role.
+  if (!payload) return null;
+  const notes = [
+    ...payload.dropped.map((path) => ({
+      key: `dropped-${path}`,
+      text: t("templateSwitchDropped", { field: t(templateFieldKey(path)) }),
+    })),
+    ...payload.degraded.map((path) => ({
+      key: `degraded-${path}`,
+      text: t("templateSwitchDegraded", { field: t(templateFieldKey(path)) }),
+    })),
+  ];
+
+  return (
+    <div className="flex w-full justify-start">
+      <div className="w-full max-w-[90vw] rounded-lg border border-border bg-sheet px-3 py-2 text-sm text-foreground">
+        <p className="flex items-center gap-2 font-medium tracking-tight">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-paper text-muted-foreground">
+            <LayoutTemplate className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          </span>
+          <span className="min-w-0 flex-1">
+            {t("templateSwitchApplied", { name: payload.name, version: payload.version })}
+          </span>
+        </p>
+        {notes.length > 0 ? (
+          <ul className="mt-1 space-y-0.5 pl-8 text-xs text-muted-foreground">
+            {notes.map((note) => (
+              <li key={note.key}>{note.text}</li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function ToolCallCard({
   message,
   sending = false,
@@ -535,6 +578,10 @@ export default function ChatMessageCard({
   const locale = useLocale();
   const isUser = message.role === "user";
   const time = message.timestamp ? new Date(message.timestamp) : null;
+
+  if (message.role === "system") {
+    return <TemplateSwitchCard message={message} />;
+  }
 
   if (message.role === "tool") {
     return (

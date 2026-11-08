@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from app.db import get_db
 from app.deps import get_current_user, load_resume_for_owner, owner_context
 from app.models import ChatMessage, User
-from app.schemas import ChatMessageOut, ChatRequest
+from app.schemas import ChatMessageOut, ChatRequest, TemplateRef
 from app.services.attachment import llm_content_for_upload, stored_user_message
 from app.services.chat_messages import (
     persist_assistant_message,
@@ -29,7 +29,7 @@ from app.services.revisions import set_draft_source
 from app.services.role_card import build_role_card
 from app.services.s3 import put_object
 from app.services.sse import SSE_HEADERS, sse_frame
-from app.services.templates import is_template_switch_message, parse_preview_spec, template_api_block
+from app.services.templates import mentioned_template, template_api_block
 from app.services.typst_compile import compile_status
 from app.services.metering import metered, preflight
 from app.services import model_choice
@@ -110,12 +110,16 @@ def _context_notice(rows: list[ChatMessage]) -> dict | None:
 
 async def _parse_chat_input(
     request: Request,
-) -> tuple[str, str | None, bytes | None, bool, str | None]:
-    """The message, the attachment, and the two per-turn options.
+) -> tuple[str, str | None, bytes | None, bool, str | None, TemplateRef | None]:
+    """The message, the attachment, and the per-turn options.
 
     `model` is returned as whatever arrived, unvalidated: this function reads a
     request and nothing more. services.model_choice decides whether the caller
     may have it, and raises 400 if not.
+
+    `template` is always None for a multipart (file-upload) turn -- there is
+    no structured field for it on that path, only the message text, which
+    `mentioned_template` still covers.
     """
     content_type = (request.headers.get("content-type") or "").lower()
     if "multipart/form-data" in content_type:
@@ -136,13 +140,13 @@ async def _parse_chat_input(
             filename = Path(raw_name).name
             payload = await read()
             data = payload if isinstance(payload, (bytes, bytearray)) else None
-        return message, filename, data, prefer_full, chosen
+        return message, filename, data, prefer_full, chosen, None
     try:
         payload = await request.json()
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid chat request") from exc
     body = ChatRequest.model_validate(payload)
-    return body.message, None, None, body.prefer_full_source, body.model
+    return body.message, None, None, body.prefer_full_source, body.model, body.template
 
 
 def _tailor_created(trace: dict) -> dict | None:
@@ -175,8 +179,8 @@ async def chat(
     # the check passed, and the only thing `metered` accepts.
     guard = preflight(db, user=user, guest=guest, purpose="chat")
 
-    message, filename, data, prefer_full_source, requested_model = await _parse_chat_input(
-        request
+    message, filename, data, prefer_full_source, requested_model, template = (
+        await _parse_chat_input(request)
     )
     message = (message or "").strip()
     if data is not None and filename:
@@ -237,11 +241,15 @@ async def chat(
     if messages:
         messages[-1]["content"] = llm_content
     original_source = resume.typst_source
-    template_switch = is_template_switch_message(message)
+    # The picker's own request names the target directly; a message typed
+    # by hand still falls back to `mentioned_template`'s language-independent
+    # guess. Either way the intent is a (name, version) pair, never an
+    # English sentence matched against itself.
+    spec = (template.name, template.version) if template else mentioned_template(message)
+    template_switch = spec is not None
     if template_switch or filename:
         prefer_full_source = True
     extra = TEMPLATE_SWITCH_EXTRA if template_switch else ""
-    spec = parse_preview_spec(message)
     if spec:
         extra += template_api_block(*spec)
     extra += build_role_card(db, resume)
