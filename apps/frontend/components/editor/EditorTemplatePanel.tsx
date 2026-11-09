@@ -4,9 +4,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { listTemplates, templatePreviewUrl, type UniverseTemplate } from "@/lib/api";
 import { templateFieldKey } from "@/lib/chat-tools";
 import { cn } from "@/lib/utils";
+
+/** Which half of the list the carousel shows.
+ *
+ * The two differ in what pressing Apply costs, and in nothing else a
+ * thumbnail can convey: an `instant` template has an emitter server-side, so
+ * the document is rendered from the stored content snapshot with no model
+ * call at all, while a `rewrite` template goes through a chat turn that
+ * rewrites the whole file. Both used to sit in one undifferentiated strip,
+ * which left pressing the button as the only way to find out which kind you
+ * had picked. */
+type TemplateGroup = "instant" | "rewrite";
 
 /** What an applied switch left behind, for the inline note below --
  * `null` when the switch went through the model path instead, or failed,
@@ -26,6 +38,7 @@ export default function EditorTemplatePanel({ sending, onApply }: Props) {
   const [loaded, setLoaded] = useState(false);
   const [broken, setBroken] = useState<Record<string, boolean>>({});
   const [appliedNote, setAppliedNote] = useState<AppliedTemplateNote | null>(null);
+  const [group, setGroup] = useState<TemplateGroup>("instant");
   const stripRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -50,8 +63,23 @@ export default function EditorTemplatePanel({ sending, onApply }: Props) {
     };
   }, [t]);
 
-  const current = templates[index] ?? null;
-  const count = templates.length;
+  const instant = templates.filter((row) => row.deterministic);
+  const rewrite = templates.filter((row) => !row.deterministic);
+  const visible = group === "instant" ? instant : rewrite;
+  const current = visible[index] ?? null;
+  const count = visible.length;
+
+  const selectGroup = useCallback((next: TemplateGroup) => {
+    setGroup(next);
+    // The carousel indexes into the filtered list, so an index carried over
+    // from a longer group would point at a different template -- or past the
+    // end of a shorter one.
+    setIndex(0);
+    // The note names the template a previous Apply wrote. Carrying it across
+    // a group change would leave it describing something the carousel is no
+    // longer showing.
+    setAppliedNote(null);
+  }, []);
 
   const go = useCallback(
     (next: number) => {
@@ -82,7 +110,10 @@ export default function EditorTemplatePanel({ sending, onApply }: Props) {
       </div>
     );
   }
-  if (!current) {
+  // Only when the server offered nothing at all. An empty *group* keeps the
+  // whole panel, tabs included, and says so in the body below -- replacing
+  // the panel there would hide the only control that gets you back out.
+  if (templates.length === 0) {
     return (
       <div className="flex h-full items-center justify-center p-3">
         <p className="text-sm text-muted-foreground">{t("templateEmpty")}</p>
@@ -90,8 +121,8 @@ export default function EditorTemplatePanel({ sending, onApply }: Props) {
     );
   }
 
-  const previewSrc = templatePreviewUrl(current.name);
-  const showImage = !broken[current.name];
+  const previewSrc = current ? templatePreviewUrl(current.name) : null;
+  const showImage = current ? !broken[current.name] : false;
 
   return (
     <div
@@ -109,6 +140,21 @@ export default function EditorTemplatePanel({ sending, onApply }: Props) {
         }
       }}
     >
+      <Tabs value={group} onValueChange={(next) => selectGroup(next as TemplateGroup)}>
+        <TabsList className="w-full">
+          <TabsTrigger value="instant" className="flex-1">
+            {t("templateGroupInstant", { count: instant.length })}
+          </TabsTrigger>
+          <TabsTrigger value="rewrite" className="flex-1">
+            {t("templateGroupRewrite", { count: rewrite.length })}
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+      <p className="shrink-0 text-[11px] leading-relaxed text-muted-foreground">
+        {group === "instant" ? t("templateGroupInstantHint") : t("templateGroupRewriteHint")}
+      </p>
+
+      {current ? (
       <header className="flex shrink-0 items-start justify-between gap-2">
         <div className="min-w-0">
           <h2 className="truncate text-base font-semibold text-foreground">
@@ -142,6 +188,7 @@ export default function EditorTemplatePanel({ sending, onApply }: Props) {
           {t("templateApply")}
         </Button>
       </header>
+      ) : null}
 
       {appliedNote ? (
         <div
@@ -169,7 +216,11 @@ export default function EditorTemplatePanel({ sending, onApply }: Props) {
       ) : null}
 
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-paper">
-        {showImage ? (
+        {!current ? (
+          <p className="px-4 text-center text-sm text-muted-foreground">
+            {t("templateGroupEmpty")}
+          </p>
+        ) : showImage && previewSrc ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             key={current.name}
@@ -183,7 +234,7 @@ export default function EditorTemplatePanel({ sending, onApply }: Props) {
         )}
       </div>
 
-      {current.description ? (
+      {current?.description ? (
         <p className="line-clamp-3 shrink-0 text-xs leading-relaxed text-muted-foreground">
           {current.description}
         </p>
@@ -204,7 +255,7 @@ export default function EditorTemplatePanel({ sending, onApply }: Props) {
           ref={stripRef}
           className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto py-0.5 [scrollbar-width:thin]"
         >
-          {templates.map((row, i) => {
+          {visible.map((row, i) => {
             const active = i === index;
             return (
               <button

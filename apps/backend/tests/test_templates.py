@@ -330,10 +330,14 @@ def test_denylist_entries_each_carry_a_reason():
     assert set(DENYLIST) == {
         "exp-cover-letter",
         "modernpro-coverletter",
+        "aspirationally",
         "hadronic-rirekisho",
         "rirekisho-ofa",
         "shokumu-keirekisho-ofa",
+        "cv-nikudanngo",
         "scienceicons",
+        "heading-resume",
+        "mahou-cv",
     }
     assert all(reason for reason in DENYLIST.values())
 
