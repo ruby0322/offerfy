@@ -93,10 +93,24 @@ from app.services.typst_compile import compile_typst_with_stderr, typst_binary
 DENYLIST: dict[str, str] = {
     "exp-cover-letter": "cover letter, not a resume",
     "modernpro-coverletter": "cover letter, not a resume",
+    # Its own typst.toml: "for academic cover letters, teaching statements, or
+    # research statements". The name does not say so, which is why the first
+    # pass of this list -- built by reading names -- let it through.
+    "aspirationally": "cover letter template, not a resume",
     "hadronic-rirekisho": "Japanese rirekisho form, not a resume",
     "rirekisho-ofa": "Japanese rirekisho form, not a resume",
     "shokumu-keirekisho-ofa": "Japanese rirekisho form, not a resume",
+    # Its own typst.toml: "Create a Japanese-style resume (履歴書) in the
+    # standard format". Same category as the three above, missed for the same
+    # reason: the name carries no hint of it.
+    "cv-nikudanngo": "Japanese rirekisho form, not a resume",
     "scienceicons": "icon library, not a resume template",
+    # Both are genuinely resume templates that pass every mechanical gate.
+    # They are excluded because the person who owns this product looked at
+    # them and did not want them offered -- recorded as judgement rather than
+    # dressed up as a rule, because no rule generalises from them.
+    "heading-resume": "excluded on design review 2026-11-09",
+    "mahou-cv": "excluded on design review 2026-11-09",
 }
 
 

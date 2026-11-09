@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-06T08:02:46.079852+00:00",
+  "generated_at": "2026-11-09T04:03:02.636742+00:00",
   "typst_version": "typst 0.15.1 (9dfd3a08)",
   "rows": [
     {
@@ -68,13 +68,13 @@
     {
       "name": "aspirationally",
       "version": "0.1.1",
-      "ok": true,
+      "ok": false,
       "pages": 2,
       "needs_inline_data": false,
       "font_warnings": [],
       "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "ok"
+      "reason": "cover letter template, not a resume"
     },
     {
       "name": "ats-friendly-resume",
@@ -373,13 +373,13 @@
     {
       "name": "cv-nikudanngo",
       "version": "0.1.0",
-      "ok": true,
+      "ok": false,
       "pages": 2,
       "needs_inline_data": false,
       "font_warnings": [],
       "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "ok"
+      "reason": "Japanese rirekisho form, not a resume"
     },
     {
       "name": "cv-soft-and-hard",
@@ -587,13 +587,13 @@
     {
       "name": "heading-resume",
       "version": "0.1.0",
-      "ok": true,
+      "ok": false,
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
       "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "ok"
+      "reason": "excluded on design review 2026-11-09"
     },
     {
       "name": "humanistically",
@@ -727,13 +727,13 @@
     {
       "name": "mahou-cv",
       "version": "0.1.0",
-      "ok": true,
+      "ok": false,
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [],
       "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "ok"
+      "reason": "excluded on design review 2026-11-09"
     },
     {
       "name": "medieval-resume",
@@ -881,7 +881,7 @@
     },
     {
       "name": "moderner-cv",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "ok": false,
       "pages": 1,
       "needs_inline_data": false,
