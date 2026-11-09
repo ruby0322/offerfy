@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-09T04:03:02.636742+00:00",
+  "generated_at": "2026-11-09T05:23:25.198355+00:00",
   "typst_version": "typst 0.15.1 (9dfd3a08)",
   "rows": [
     {
@@ -49,21 +49,13 @@
     {
       "name": "altacv",
       "version": "1.7.0",
-      "ok": false,
+      "ok": true,
       "pages": 2,
       "needs_inline_data": false,
-      "font_warnings": [
-        "font awesome 7 free solid",
-        "font awesome 7 brands",
-        "font awesome 7 free"
-      ],
-      "installable_fonts": [
-        "font awesome 7 free solid",
-        "font awesome 7 brands",
-        "font awesome 7 free"
-      ],
+      "font_warnings": [],
+      "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "font warning: font awesome 7 free solid"
+      "reason": "ok"
     },
     {
       "name": "aspirationally",
@@ -169,27 +161,13 @@
     {
       "name": "butterick-resume",
       "version": "0.1.1",
-      "ok": false,
+      "ok": true,
       "pages": 1,
       "needs_inline_data": false,
-      "font_warnings": [
-        "source sans 3",
-        "source sans 3",
-        "source sans 3",
-        "source serif 4",
-        "source sans 3",
-        "source serif 4"
-      ],
-      "installable_fonts": [
-        "source sans 3",
-        "source sans 3",
-        "source sans 3",
-        "source serif 4",
-        "source sans 3",
-        "source serif 4"
-      ],
+      "font_warnings": [],
+      "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "font warning: source sans 3"
+      "reason": "ok"
     },
     {
       "name": "calligraphics",
@@ -198,30 +176,10 @@
       "pages": 1,
       "needs_inline_data": false,
       "font_warnings": [
-        "source sans pro",
-        "source sans 3",
-        "inria sans",
-        "inria sans",
-        "inria sans",
-        "inria sans",
-        "inria sans",
-        "font awesome 7 free",
-        "font awesome 7 brands",
-        "inria sans",
-        "inria sans"
+        "source sans pro"
       ],
       "installable_fonts": [
-        "source sans pro",
-        "source sans 3",
-        "inria sans",
-        "inria sans",
-        "inria sans",
-        "inria sans",
-        "inria sans",
-        "font awesome 7 free",
-        "font awesome 7 brands",
-        "inria sans",
-        "inria sans"
+        "source sans pro"
       ],
       "unavailable_fonts": [],
       "reason": "font warning: source sans pro"
@@ -244,25 +202,13 @@
     {
       "name": "chicv-ripoff",
       "version": "1.1.4",
-      "ok": false,
+      "ok": true,
       "pages": 2,
       "needs_inline_data": false,
-      "font_warnings": [
-        "montserrat",
-        "montserrat",
-        "font awesome 6 free solid",
-        "font awesome 6 brands",
-        "font awesome 6 free"
-      ],
-      "installable_fonts": [
-        "montserrat",
-        "montserrat",
-        "font awesome 6 free solid",
-        "font awesome 6 brands",
-        "font awesome 6 free"
-      ],
+      "font_warnings": [],
+      "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "font warning: montserrat"
+      "reason": "ok"
     },
     {
       "name": "chuli-cv",
@@ -311,23 +257,13 @@
     {
       "name": "cobalt-cv",
       "version": "0.1.0",
-      "ok": false,
+      "ok": true,
       "pages": 1,
       "needs_inline_data": false,
-      "font_warnings": [
-        "font awesome 7 free solid",
-        "font awesome 7 free solid",
-        "font awesome 7 brands",
-        "font awesome 7 brands"
-      ],
-      "installable_fonts": [
-        "font awesome 7 free solid",
-        "font awesome 7 free solid",
-        "font awesome 7 brands",
-        "font awesome 7 brands"
-      ],
+      "font_warnings": [],
+      "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "font warning: font awesome 7 free solid"
+      "reason": "ok"
     },
     {
       "name": "coral-cv",
@@ -458,18 +394,12 @@
         "consolas",
         "calibri",
         "cabin",
-        "cabin",
-        "font awesome 7 free",
-        "font awesome 7 brands",
-        "font awesome 7 free solid"
+        "cabin"
       ],
       "installable_fonts": [
         "cabin",
         "cabin",
-        "cabin",
-        "font awesome 7 free",
-        "font awesome 7 brands",
-        "font awesome 7 free solid"
+        "cabin"
       ],
       "unavailable_fonts": [
         "consolas",
@@ -601,14 +531,10 @@
       "ok": false,
       "pages": 3,
       "needs_inline_data": false,
-      "font_warnings": [
-        "cantarell"
-      ],
-      "installable_fonts": [
-        "cantarell"
-      ],
+      "font_warnings": [],
+      "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "font warning: cantarell"
+      "reason": "3 pages"
     },
     {
       "name": "imprecv",
@@ -711,14 +637,9 @@
       "pages": 2,
       "needs_inline_data": false,
       "font_warnings": [
-        "calibri",
-        "font awesome 7 free solid",
-        "font awesome 7 brands"
+        "calibri"
       ],
-      "installable_fonts": [
-        "font awesome 7 free solid",
-        "font awesome 7 brands"
-      ],
+      "installable_fonts": [],
       "unavailable_fonts": [
         "calibri"
       ],
@@ -743,7 +664,6 @@
       "needs_inline_data": false,
       "font_warnings": [
         "calluna",
-        "inter",
         "calluna",
         "cronos pro",
         "cronos lt",
@@ -751,9 +671,7 @@
         "cronos pro lt",
         "calluna"
       ],
-      "installable_fonts": [
-        "inter"
-      ],
+      "installable_fonts": [],
       "unavailable_fonts": [
         "calluna",
         "calluna",
@@ -779,23 +697,13 @@
     {
       "name": "metronic",
       "version": "1.1.0",
-      "ok": false,
+      "ok": true,
       "pages": 1,
       "needs_inline_data": false,
-      "font_warnings": [
-        "inter",
-        "font awesome 6 free solid",
-        "font awesome 6 brands",
-        "font awesome 6 free"
-      ],
-      "installable_fonts": [
-        "inter",
-        "font awesome 6 free solid",
-        "font awesome 6 brands",
-        "font awesome 6 free"
-      ],
+      "font_warnings": [],
+      "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "font warning: inter"
+      "reason": "ok"
     },
     {
       "name": "min-resume",
@@ -811,17 +719,13 @@
     {
       "name": "minimal-cv",
       "version": "0.2.0",
-      "ok": false,
+      "ok": true,
       "pages": 1,
       "needs_inline_data": false,
-      "font_warnings": [
-        "inria sans"
-      ],
-      "installable_fonts": [
-        "inria sans"
-      ],
+      "font_warnings": [],
+      "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "font warning: inria sans"
+      "reason": "ok"
     },
     {
       "name": "minimalistic-latex-cv",
@@ -842,17 +746,11 @@
       "needs_inline_data": true,
       "font_warnings": [
         "fira sans",
-        "academicons",
-        "font awesome 7 free",
-        "font awesome 7 brands",
-        "font awesome 7 free solid"
+        "academicons"
       ],
       "installable_fonts": [
         "fira sans",
-        "academicons",
-        "font awesome 7 free",
-        "font awesome 7 brands",
-        "font awesome 7 free solid"
+        "academicons"
       ],
       "unavailable_fonts": [],
       "reason": "font warning: fira sans"
@@ -882,19 +780,13 @@
     {
       "name": "moderner-cv",
       "version": "0.2.2",
-      "ok": false,
+      "ok": true,
       "pages": 1,
       "needs_inline_data": false,
-      "font_warnings": [
-        "font awesome 7 free",
-        "font awesome 7 brands"
-      ],
-      "installable_fonts": [
-        "font awesome 7 free",
-        "font awesome 7 brands"
-      ],
+      "font_warnings": [],
+      "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "font warning: font awesome 7 free"
+      "reason": "ok"
     },
     {
       "name": "modernpro-coverletter",
@@ -902,29 +794,21 @@
       "ok": false,
       "pages": 1,
       "needs_inline_data": false,
-      "font_warnings": [
-        "pt serif"
-      ],
-      "installable_fonts": [
-        "pt serif"
-      ],
+      "font_warnings": [],
+      "installable_fonts": [],
       "unavailable_fonts": [],
       "reason": "cover letter, not a resume"
     },
     {
       "name": "modernpro-cv",
       "version": "2.1.2",
-      "ok": false,
+      "ok": true,
       "pages": 1,
       "needs_inline_data": false,
-      "font_warnings": [
-        "pt serif"
-      ],
-      "installable_fonts": [
-        "pt serif"
-      ],
+      "font_warnings": [],
+      "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "font warning: pt serif"
+      "reason": "ok"
     },
     {
       "name": "monofolio",
@@ -984,17 +868,13 @@
     {
       "name": "pesha",
       "version": "0.4.0",
-      "ok": false,
+      "ok": true,
       "pages": 2,
       "needs_inline_data": false,
-      "font_warnings": [
-        "cantarell"
-      ],
-      "installable_fonts": [
-        "cantarell"
-      ],
+      "font_warnings": [],
+      "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "font warning: cantarell"
+      "reason": "ok"
     },
     {
       "name": "polycv",
@@ -1047,17 +927,13 @@
     {
       "name": "rasko-europass",
       "version": "1.0.0",
-      "ok": false,
+      "ok": true,
       "pages": 2,
       "needs_inline_data": false,
-      "font_warnings": [
-        "open sans"
-      ],
-      "installable_fonts": [
-        "open sans"
-      ],
+      "font_warnings": [],
+      "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "font warning: open sans"
+      "reason": "ok"
     },
     {
       "name": "readable-classic",
@@ -1098,17 +974,13 @@
     {
       "name": "resumania",
       "version": "1.0.0",
-      "ok": false,
+      "ok": true,
       "pages": 1,
       "needs_inline_data": false,
-      "font_warnings": [
-        "open sans"
-      ],
-      "installable_fonts": [
-        "open sans"
-      ],
+      "font_warnings": [],
+      "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "font warning: open sans"
+      "reason": "ok"
     },
     {
       "name": "resume-ng",
@@ -1168,17 +1040,13 @@
     {
       "name": "silver-dev-cv",
       "version": "1.0.2",
-      "ok": false,
+      "ok": true,
       "pages": 1,
       "needs_inline_data": false,
-      "font_warnings": [
-        "pt serif"
-      ],
-      "installable_fonts": [
-        "pt serif"
-      ],
+      "font_warnings": [],
+      "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "font warning: pt serif"
+      "reason": "ok"
     },
     {
       "name": "simple-cv",
@@ -1205,21 +1073,13 @@
     {
       "name": "simple-xd-resume",
       "version": "0.1.0",
-      "ok": false,
+      "ok": true,
       "pages": 1,
       "needs_inline_data": false,
-      "font_warnings": [
-        "source sans 3",
-        "font awesome 7 free",
-        "font awesome 7 brands"
-      ],
-      "installable_fonts": [
-        "source sans 3",
-        "font awesome 7 free",
-        "font awesome 7 brands"
-      ],
+      "font_warnings": [],
+      "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "font warning: source sans 3"
+      "reason": "ok"
     },
     {
       "name": "swe-cv",
@@ -1288,39 +1148,13 @@
     {
       "name": "typographic-resume",
       "version": "0.2.0",
-      "ok": false,
+      "ok": true,
       "pages": 1,
       "needs_inline_data": false,
-      "font_warnings": [
-        "roboto",
-        "roboto",
-        "roboto",
-        "roboto",
-        "roboto",
-        "roboto",
-        "montserrat",
-        "libre baskerville",
-        "libre baskerville",
-        "libre baskerville",
-        "montserrat",
-        "roboto"
-      ],
-      "installable_fonts": [
-        "roboto",
-        "roboto",
-        "roboto",
-        "roboto",
-        "roboto",
-        "roboto",
-        "montserrat",
-        "libre baskerville",
-        "libre baskerville",
-        "libre baskerville",
-        "montserrat",
-        "roboto"
-      ],
+      "font_warnings": [],
+      "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "font warning: roboto"
+      "reason": "ok"
     },
     {
       "name": "vantage-cv",
@@ -1336,17 +1170,13 @@
     {
       "name": "vercanard",
       "version": "1.0.3",
-      "ok": false,
+      "ok": true,
       "pages": 1,
       "needs_inline_data": false,
-      "font_warnings": [
-        "inria sans"
-      ],
-      "installable_fonts": [
-        "inria sans"
-      ],
+      "font_warnings": [],
+      "installable_fonts": [],
       "unavailable_fonts": [],
-      "reason": "font warning: inria sans"
+      "reason": "ok"
     },
     {
       "name": "vivid-cv",
