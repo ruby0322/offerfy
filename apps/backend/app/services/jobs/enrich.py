@@ -5,10 +5,23 @@ Offerfy's catalogue gives every posting only free-text title/company/location.
 Two of the planned filters -- seniority and function -- can be read off the
 title alone most of the time, the way a human skims a job board: the title
 names a level ("Staff", "Senior", "Intern") and/or a role ("Backend Engineer",
-"Product Designer"). Both derivations are ordered-list, first-match-wins
-scans, the same shape as scope.py's title_in_scope, for the same reason: it
-keeps the vocabulary in data (job_taxonomy.json) instead of in branching
-code, so tuning a rule never touches this module.
+"Product Designer"). Neither derivation hardcodes a needle in Python -- both
+read their vocabulary from job_taxonomy.json, the same shape as scope.py's
+title_in_scope, so tuning a rule never touches this module.
+
+`seniority_of` and `function_of` resolve a multi-needle-match tie in
+deliberately opposite ways -- do not "tidy" one to match the other.
+`seniority_of` is an ordered-list, first-match-wins scan: job_taxonomy.json
+lists `staff_plus` before `senior` on purpose, which is why "Member of
+Technical Staff" resolves to `senior` and not `staff_plus` -- rule order
+there is load-bearing. `function_of` is longest-needle-wins across every
+rule: its categories (backend, data, infra, ...) have no natural precedence
+over each other, so "first rule in file order whose needle matches" would
+just be an accident of list position -- and was one: a short bare qualifier
+(" data ") once shadowed a longer, more specific compound
+("infrastructure engineer") purely because the data rule happened to sit
+earlier in the file. Longest-match removes that whole class of accident
+instead of requiring a correct re-reading of file order on every edit.
 
 Unknown is kept, not guessed into the nearest bucket -- same bias as
 scope.py. A title that names no seniority level at all, including the
@@ -60,6 +73,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -281,21 +295,65 @@ def location_facets(
     return LocationFacets(country, region, city)
 
 
+def _longest_matching_function(
+    folded_text: str,
+    rules: tuple[FunctionRule, ...],
+    needles_of: Callable[[FunctionRule], tuple[str, ...]],
+) -> str | None:
+    """The function owned by the single longest needle that matches.
+
+    Same precedent as `_best_country_match` above: job_taxonomy.json's
+    function_rules are an unordered bag of categories (unlike
+    seniority_rules -- see `seniority_of`'s docstring), so "first rule in
+    file order whose needle matches" is an accident of list position, not
+    a deliberate precedence. A short bare qualifier like " data " sitting
+    earlier in the file must not shadow a longer, more specific compound
+    like "infrastructure engineer" sitting later in it -- that exact
+    shadowing was a real regression (`function_of("Data Infrastructure
+    Engineer", "")` briefly came back "data" instead of "infra") caused by
+    this module's own first-match-wins function_of before this fix.
+    """
+    best: tuple[int, str] | None = None
+    for rule in rules:
+        for needle in needles_of(rule):
+            if needle in folded_text and (best is None or len(needle) > best[0]):
+                best = (len(needle), rule.function)
+    return best[1] if best is not None else None
+
+
 def function_of(
     title: str, description_text: str, taxonomy: Taxonomy | None = None
 ) -> str:
-    """Title needles, across every rule, win over any rule's description
-    needles. See the module docstring for why.
+    """Longest matching needle wins; title needles, as a whole phase, still
+    win over any description needle regardless of length.
+
+    `function_of` and `seniority_of` resolve ties in opposite ways, on
+    purpose. `seniority_of` stays ordered-rules-first-match: its rule
+    order is deliberate and load-bearing (`staff_plus` listed before
+    `senior` is why "Member of Technical Staff" resolves to `senior`
+    rather than `staff_plus` -- see its docstring), so reordering or
+    "tidying" it into longest-match would silently change results.
+    `function_of`'s rule order carries no such meaning -- the categories
+    (backend, data, infra, ...) have no natural precedence over one
+    another -- so longest-match is strictly safer here: it removes the
+    whole class of a short bare qualifier accidentally shadowing a longer,
+    more specific compound elsewhere in the file, instead of leaving that
+    to be re-discovered one ordering accident at a time. Do not swap
+    either function's strategy for the other's.
     """
     config = taxonomy or default_taxonomy()
     folded_title = f" {title.casefold()} "
-    for rule in config.function_rules:
-        if any(needle in folded_title for needle in rule.title_needles):
-            return rule.function
+    title_match = _longest_matching_function(
+        folded_title, config.function_rules, lambda rule: rule.title_needles
+    )
+    if title_match is not None:
+        return title_match
     folded_description = f" {description_text.casefold()} "
-    for rule in config.function_rules:
-        if any(needle in folded_description for needle in rule.description_needles):
-            return rule.function
+    description_match = _longest_matching_function(
+        folded_description, config.function_rules, lambda rule: rule.description_needles
+    )
+    if description_match is not None:
+        return description_match
     return "other"
 
 
@@ -313,6 +371,80 @@ def description_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+# Rows at a time for the job_ids=None backfill path. The live catalogue is
+# ~11k active postings at up to MAX_DESCRIPTION_CHARS (200k) each; loading
+# all of them as full Job ORM entities (description_html included, never
+# read by any derivation) at once was the memory risk the brief warned
+# about. Chosen column projection already cuts most of that weight -- this
+# batches the rest so peak memory is bounded by one batch, not the table.
+_BACKFILL_BATCH_SIZE = 500
+
+# The only columns any of the three derivations (seniority_of, function_of,
+# location_facets) ever reads. description_html is deliberately excluded --
+# nothing in this module looks at it, so loading it would be pure waste on
+# every row, backfill or not.
+_ENRICH_COLUMNS = (
+    Job.id,
+    Job.source,
+    Job.title,
+    Job.location,
+    Job.remote,
+    Job.description_text,
+)
+
+
+def _enrich_job_rows(
+    db: Session,
+    rows: list,
+    *,
+    taxonomy: Taxonomy,
+    force: bool,
+    stamp: datetime,
+) -> int:
+    """Derive and upsert JobFacets for one already-loaded batch of rows.
+
+    `rows` are `_ENRICH_COLUMNS`-projected Row objects, not Job entities --
+    callers never load more than that. The existing JobFacets rows for just
+    this batch are fetched in one bulk query keyed by job_id, so the
+    two-query-per-batch shape `enrich_jobs` promises holds whether the
+    batch is a handful of explicit `job_ids` or one chunk of a backfill.
+    """
+    if not rows:
+        return 0
+
+    existing = {
+        facet.job_id: facet
+        for facet in db.query(JobFacets)
+        .filter(JobFacets.job_id.in_([row.id for row in rows]))
+        .all()
+    }
+
+    written = 0
+    for row in rows:
+        new_hash = description_hash(row.description_text)
+        facet = existing.get(row.id)
+        if facet is not None and not force and facet.description_hash == new_hash:
+            continue
+
+        loc = location_facets(
+            row.location, source=row.source, remote=row.remote, taxonomy=taxonomy
+        )
+        if facet is None:
+            facet = JobFacets(job_id=row.id)
+            db.add(facet)
+        facet.seniority = seniority_of(row.title, taxonomy)
+        facet.function = function_of(row.title, row.description_text, taxonomy)
+        facet.country = loc.country
+        facet.region = loc.region
+        facet.city = loc.city
+        facet.description_hash = new_hash
+        facet.enriched_at = stamp
+        written += 1
+
+    db.flush()
+    return written
+
+
 def enrich_jobs(
     db: Session,
     *,
@@ -323,17 +455,22 @@ def enrich_jobs(
     """Derive and store facets for a set of jobs, skipping unchanged ones.
 
     `job_ids=None` means every active posting -- the backfill path. With
-    ~11k rows in the live catalogue, this must not issue a SELECT per row:
-    it loads the candidate jobs in one query and their existing JobFacets
-    rows in a second bulk query keyed by job_id, then compares hashes in
-    memory. The next task calls this per ingest board (up to 119 times a
-    pass) with an explicit `job_ids`, so the same two-query shape has to
-    stay cheap for a handful of ids too.
+    ~11k rows in the live catalogue, this must not issue a SELECT per row,
+    must not load whole Job entities (description_html is never read by
+    any derivation but is the single biggest column on the table), and
+    must not hold all ~11k rows' description_text in memory at once. So
+    this selects only `_ENRICH_COLUMNS`, and for the backfill path walks
+    them in `_BACKFILL_BATCH_SIZE`-row chunks via `yield_per`, handing each
+    chunk to `_enrich_job_rows`, which does its own small bulk lookup of
+    existing JobFacets for just that chunk. The explicit-`job_ids` path
+    (the next task calls this per ingest board, up to 119 times a pass)
+    is small enough that it is always exactly one chunk -- still the same
+    two-query shape, just never split across a `yield_per` loop.
 
     The taxonomy is resolved once per call, here, and threaded through to
     all three derivations -- `default_taxonomy()` is cheap once cached
     (`lru_cache(maxsize=1)`), but there is no reason to pay even that
-    per-row when one lookup covers the whole batch.
+    per-row when one lookup covers the whole call.
 
     A row is skipped when it already exists and its stored
     `description_hash` equals the newly computed one, unless `force`.
@@ -342,50 +479,37 @@ def enrich_jobs(
     check this count rather than row presence alone.
 
     Flushes but does not commit: the caller owns the transaction, the same
-    contract `upsert_jobs` in app.services.jobs.store follows.
+    contract `upsert_jobs` in app.services.jobs.store follows. Flushing
+    once per chunk (rather than once at the very end) is still safe under
+    that contract -- a flush is not a commit, and the caller's rollback on
+    failure undoes every chunk's writes along with everything else in its
+    transaction.
     """
     stamp = now or datetime.now(timezone.utc)
     taxonomy = default_taxonomy()
 
-    query = db.query(Job)
     if job_ids is not None:
         if not job_ids:
             return 0
-        query = query.filter(Job.id.in_(job_ids))
-    else:
-        query = query.filter(Job.is_active.is_(True))
-    jobs = query.all()
-    if not jobs:
-        return 0
-
-    existing = {
-        row.job_id: row
-        for row in db.query(JobFacets)
-        .filter(JobFacets.job_id.in_([job.id for job in jobs]))
-        .all()
-    }
+        rows = (
+            db.query(*_ENRICH_COLUMNS).filter(Job.id.in_(job_ids)).all()
+        )
+        return _enrich_job_rows(db, rows, taxonomy=taxonomy, force=force, stamp=stamp)
 
     written = 0
-    for job in jobs:
-        new_hash = description_hash(job.description_text)
-        row = existing.get(job.id)
-        if row is not None and not force and row.description_hash == new_hash:
-            continue
-
-        loc = location_facets(
-            job.location, source=job.source, remote=job.remote, taxonomy=taxonomy
-        )
-        if row is None:
-            row = JobFacets(job_id=job.id)
-            db.add(row)
-        row.seniority = seniority_of(job.title, taxonomy)
-        row.function = function_of(job.title, job.description_text, taxonomy)
-        row.country = loc.country
-        row.region = loc.region
-        row.city = loc.city
-        row.description_hash = new_hash
-        row.enriched_at = stamp
-        written += 1
-
-    db.flush()
+    batch: list = []
+    query = (
+        db.query(*_ENRICH_COLUMNS)
+        .filter(Job.is_active.is_(True))
+        .yield_per(_BACKFILL_BATCH_SIZE)
+    )
+    for row in query:
+        batch.append(row)
+        if len(batch) >= _BACKFILL_BATCH_SIZE:
+            written += _enrich_job_rows(
+                db, batch, taxonomy=taxonomy, force=force, stamp=stamp
+            )
+            batch = []
+    if batch:
+        written += _enrich_job_rows(db, batch, taxonomy=taxonomy, force=force, stamp=stamp)
     return written

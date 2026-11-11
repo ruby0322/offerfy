@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.models import Job, JobFacets
+from app.services.jobs import enrich as enrich_module
 from app.services.jobs.enrich import (
     LocationFacets,
     description_hash,
@@ -175,6 +176,24 @@ def test_function_of_matches_bare_qualifier_after_a_title_comma(title, expected)
     assert function_of(title, "") == expected
 
 
+@pytest.mark.parametrize("title,expected", [
+    # The bare " data " qualifier needle (added above, to close the
+    # "Role, Qualifier" gap) sits earlier in job_taxonomy.json than infra's
+    # "infrastructure engineer" compound. Under first-match-wins that made
+    # function_of("Data Infrastructure Engineer", "") regress to "data" --
+    # the longer, more specific compound must win regardless of which
+    # rule's needle happens to be checked first.
+    ("Data Infrastructure Engineer", "infra"),
+    # Same shape with a different pair: the bare " security " qualifier
+    # (also added above) sits earlier than hardware's compound needles, so
+    # a title naming both a bare qualifier and a longer hardware compound
+    # must resolve to the longer match, not whichever rule is listed first.
+    ("Security Hardware Engineer", "hardware"),
+])
+def test_function_of_longest_needle_wins_over_rule_order(title, expected):
+    assert function_of(title, "") == expected
+
+
 def test_taxonomy_file_covers_both_vocabularies_exactly():
     taxonomy = load_taxonomy()
     assert {rule.seniority for rule in taxonomy.seniority_rules} <= {
@@ -337,3 +356,48 @@ def test_deleting_a_job_cascades_to_its_facets(db_session):
     db_session.delete(job)
     db_session.commit()
     assert db_session.get(JobFacets, job.id) is None
+
+
+def test_enrich_backfill_walks_active_jobs_in_bounded_batches(db_session, monkeypatch):
+    # Pins the batching behaviour the backfill path (job_ids=None) relies
+    # on to bound peak memory, without fabricating an 11k-row fixture: a
+    # tiny batch size against 5 real jobs is enough to show the scan is
+    # chunked rather than loaded whole. Wrapping the real _enrich_job_rows
+    # (rather than replacing it outright) keeps the assertion honest -- the
+    # jobs still get enriched for real, we just also record how big each
+    # chunk handed to it was.
+    monkeypatch.setattr(enrich_module, "_BACKFILL_BATCH_SIZE", 2)
+    for i in range(5):
+        _add_job(db_session, source_id=f"batch:{i}")
+
+    real_enrich_job_rows = enrich_module._enrich_job_rows
+    batch_sizes = []
+
+    def spy(db, rows, **kwargs):
+        batch_sizes.append(len(rows))
+        return real_enrich_job_rows(db, rows, **kwargs)
+
+    monkeypatch.setattr(enrich_module, "_enrich_job_rows", spy)
+
+    assert enrich_jobs(db_session) == 5
+    assert batch_sizes == [2, 2, 1]
+
+
+def test_enrich_explicit_job_ids_are_not_chunked(db_session, monkeypatch):
+    # The per-board path (explicit job_ids) must stay the original
+    # two-query shape -- never split across the backfill's batching loop,
+    # even when the batch size is tiny enough that it otherwise would be.
+    monkeypatch.setattr(enrich_module, "_BACKFILL_BATCH_SIZE", 2)
+    jobs = [_add_job(db_session, source_id=f"explicit:{i}") for i in range(5)]
+
+    real_enrich_job_rows = enrich_module._enrich_job_rows
+    batch_sizes = []
+
+    def spy(db, rows, **kwargs):
+        batch_sizes.append(len(rows))
+        return real_enrich_job_rows(db, rows, **kwargs)
+
+    monkeypatch.setattr(enrich_module, "_enrich_job_rows", spy)
+
+    assert enrich_jobs(db_session, job_ids=[job.id for job in jobs]) == 5
+    assert batch_sizes == [5]
