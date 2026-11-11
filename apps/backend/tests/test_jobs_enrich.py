@@ -560,3 +560,32 @@ def test_survey_cli_main_prints_a_report(db_session, capsys, monkeypatch):
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "total" in captured.out.lower()
+
+
+# A short needle left unpadded hides inside ordinary words, and the description
+# side is where that bites: a bare "llm" matched the "llm" in "fulfillment", so
+# every DoorDash fulfilment-centre posting -- "Shift Lead - Nashville" and its
+# siblings -- was filed under `ml`. Found in production, against the live
+# catalogue, after `ml` came back as 29% of every enriched posting. "react"
+# ("reactive", "reactor") and "silicon" ("Silicon Valley") are the same class.
+#
+# These are pinned individually rather than by a blanket "every short needle is
+# padded" rule, because padding is not free either: " backend " would stop
+# matching "Frontend/Backend Engineer", which the bare needle catches. Only
+# needles with a demonstrated real-world collision are padded.
+@pytest.mark.parametrize(
+    "title,description,expected",
+    [
+        ("Shift Lead - Nashville", "We run a local fulfillment center.", "other"),
+        ("Warehouse Lead", "Our fulfillment center handles enrollment.", "other"),
+        ("Operations Associate", "Nuclear reactor maintenance.", "other"),
+        ("Backend Engineer", "We build reactive streaming systems.", "backend"),
+        ("Program Manager, Silicon Valley Office", "Office ops.", "product"),
+        # The true positives these needles exist for must still land.
+        ("Research Scientist", "We train large language models with an LLM.", "ml"),
+        ("Frontend Engineer", "We use React.", "frontend"),
+        ("Silicon Design Engineer", "Chip work.", "hardware"),
+    ],
+)
+def test_short_needles_do_not_hide_inside_longer_words(title, description, expected):
+    assert function_of(title, description) == expected

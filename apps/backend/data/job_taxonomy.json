@@ -156,7 +156,9 @@
         "neural network",
         "large language model",
         "language model",
-        "llm",
+        " llm ",
+        " llm,",
+        " llm.",
         "nlp",
         "computer vision",
         "generative ai",
@@ -228,7 +230,9 @@
       "function": "hardware",
       "title_any": [
         "hardware engineer",
-        "silicon",
+        " silicon ",
+        " silicon,",
+        " silicon.",
         " asic ",
         " asic,",
         "fpga",
@@ -311,7 +315,9 @@
         "前端"
       ],
       "description_any": [
-        "react",
+        " react ",
+        " react,",
+        " react.",
         "user interface",
         "browser rendering"
       ]
