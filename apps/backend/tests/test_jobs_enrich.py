@@ -105,6 +105,9 @@ def test_function_of_matches_keyword_adjacent_to_punctuation(title, description,
     ("CTO, Platform Engineering", "manager"),
     ("Lead, Platform Engineering", "senior"),
     ("SDE, Platform Team", "mid"),
+    # "coop" shares the intern rule with " intern ", which already got its
+    # comma variant; "coop" had none, an asymmetry within the same rule.
+    ("Coop, Platform Team", "intern"),
 ])
 def test_seniority_of_matches_acronym_before_a_title_comma(title, expected):
     assert seniority_of(title) == expected
