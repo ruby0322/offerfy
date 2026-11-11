@@ -34,7 +34,8 @@
         "senior staff",
         "principal",
         "distinguished",
-        " fellow",
+        " fellow ",
+        " fellow,",
         "資深主任工程師"
       ]
     },
@@ -45,7 +46,7 @@
         "manager, engineering",
         "manager",
         "director",
-        "head of",
+        " head of ",
         " vp ",
         " vp,",
         "vice president",
@@ -60,7 +61,7 @@
       "seniority": "senior",
       "any": [
         "senior",
-        "sr.",
+        " sr.",
         " sr ",
         " sr,",
         "member of technical staff",
@@ -88,7 +89,8 @@
     {
       "seniority": "intern",
       "any": [
-        " intern",
+        " intern ",
+        " intern,",
         "internship",
         "co-op",
         " coop ",
@@ -99,7 +101,7 @@
       "seniority": "junior",
       "any": [
         "junior",
-        "jr.",
+        " jr.",
         " jr ",
         " jr,",
         "entry level",
@@ -117,7 +119,7 @@
         "analyst",
         "architect",
         "researcher",
-        "sde",
+        " sde ",
         "工程師",
         "開發",
         "研究員",
@@ -131,16 +133,16 @@
       "function": "ml",
       "title_any": [
         "machine learning",
-        "ml engineer",
-        "ml scientist",
+        " ml engineer",
+        " ml scientist",
         "artificial intelligence",
         "deep learning",
         "applied scientist",
         "nlp engineer",
         "computer vision",
-        "ai engineer",
-        "ai researcher",
-        "llm "
+        " ai engineer",
+        " ai researcher",
+        " llm "
       ],
       "description_any": [
         "machine learning",
@@ -174,8 +176,8 @@
         "data pipeline",
         "data warehouse",
         "data lake",
-        "etl",
-        "elt",
+        " etl ",
+        " elt ",
         " sql ",
         "big data"
       ]
@@ -209,12 +211,12 @@
       "title_any": [
         "hardware engineer",
         "silicon",
-        "asic",
+        " asic ",
         "fpga",
         "firmware engineer",
         "pcb",
         "semiconductor",
-        "ic design",
+        " ic design",
         "chip design",
         "rtl design",
         "電路",
@@ -253,9 +255,9 @@
         "ci/cd",
         "on-call rotation",
         "cloud infrastructure",
-        "aws ",
-        "gcp ",
-        "azure "
+        " aws ",
+        " gcp ",
+        " azure "
       ]
     },
     {
@@ -294,10 +296,7 @@
         "full-stack",
         "全端"
       ],
-      "description_any": [
-        "full stack",
-        "fullstack"
-      ]
+      "description_any": []
     },
     {
       "function": "product",
