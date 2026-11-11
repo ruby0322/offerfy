@@ -56,6 +56,14 @@ version = "0.2.9"
 _URL_ARGS = frozenset({"github", "linkedin", "personal-site"})
 
 
+# The starter's own face, and the one every résumé written before the
+# emitters existed is already set in (services.starter._render passes the
+# same string) -- so this is the one emitter whose face must NOT change:
+# re-rendering someone's existing document through it has to leave the
+# type alone. The other three are free, and differ on purpose.
+BODY_FONT: str = "New Computer Modern"
+
+
 def _header_lines(content: ResumeContent) -> list[str]:
     contact = content.contact
     args: list[tuple[str, str]] = [("author", content.name or "")]
@@ -77,7 +85,7 @@ def _header_lines(content: ResumeContent) -> list[str]:
     # accent-color and paper are the starter's own pins (services.starter
     # ._render), not content -- never escaped, always this literal.
     lines.append('  accent-color: "#26428b",')
-    lines.append(f"  font: {font_literal()},")
+    lines.append(f"  font: {font_literal(BODY_FONT)},")
     lines.append('  paper: "a4",')
     lines.append(")")
     return lines

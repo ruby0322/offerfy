@@ -5,8 +5,10 @@ not whether it compiles. `tests/test_emitters_compile.py` is the gated
 module that runs the emitted source through the real compiler.
 """
 
-from app.services.emitters import emitter_for
-from app.services.emitters._common import bullet_lines
+import re
+
+from app.services.emitters import deterministic_pairs, emitter_for
+from app.services.emitters._common import CJK_FALLBACK, bullet_lines
 from app.services.resume_content import Contact, ResumeContent, Section, SkillGroup
 from app.services.typst_escape import typst_value
 from tests.fixtures.golden_content import GOLDEN, MINIMAL
@@ -29,9 +31,16 @@ def test_basic_resume_emitter_pins_the_import_and_the_font():
     src = emitter_for("basic-resume", "0.2.9").emit(GOLDEN).source
     assert src.startswith('#import "@preview/basic-resume:0.2.9"')
     # The font argument is a (latin, cjk) fallback array, not a single
-    # conditional string -- see emitters._common.FALLBACK_FONTS -- so this
+    # conditional string -- see emitters._common.font_literal -- so this
     # checks for the array literal and both faces by name rather than for
     # a bare quoted string.
+    #
+    # New Computer Modern specifically, and this is the one emitter where
+    # that is a requirement rather than a choice: it is the face
+    # services.starter._render already wrote into every résumé created
+    # before the emitters existed, so re-rendering one through here must
+    # not restyle it. The other three deliberately differ -- see
+    # test_each_emitter_sets_a_different_latin_face.
     assert "font: (" in src
     assert "New Computer Modern" in src
     assert "Noto Serif CJK TC" in src
@@ -114,7 +123,7 @@ def test_ats_friendly_emitter_pins_the_import_and_the_font():
     src = emitter_for("ats-friendly-resume", "0.1.1").emit(GOLDEN).source
     assert src.startswith('#import "@preview/ats-friendly-resume:0.1.1"')
     assert "font: (" in src
-    assert "New Computer Modern" in src
+    assert "Source Sans 3" in src
     assert "Noto Serif CJK TC" in src
 
 
@@ -221,11 +230,13 @@ def test_acorn_declares_no_losses_when_the_content_has_none_to_lose():
 
 def test_acorn_overrides_the_calibri_default():
     # resume()'s own default is `font: "Calibri"`, which this host does
-    # not have -- see _common.FALLBACK_FONTS and this emitter's module
-    # docstring on why this matters more here than anywhere else.
+    # not have -- see _common.font_literal and this emitter's module
+    # docstring on why this matters more here than anywhere else. Inria
+    # Sans rather than a serif because Calibri is a humanist sans: the
+    # substitution keeps the genre the package's author chose.
     src = emitter_for("acorn-resume", "0.1.0").emit(GOLDEN).source
     assert "font: (" in src
-    assert "New Computer Modern" in src
+    assert "Inria Sans" in src
     assert "Noto Serif CJK TC" in src
     assert "Calibri" not in src
 
@@ -386,7 +397,7 @@ def test_clean_print_cv_sets_the_font_explicitly():
     src = emitter_for("clean-print-cv", "0.1.0").emit(GOLDEN).source
     assert "#show: cv-page-setup" in src
     assert "#set text(font: (" in src
-    assert "New Computer Modern" in src and "Noto Serif CJK TC" in src
+    assert "PT Serif" in src and "Noto Serif CJK TC" in src
 
 
 def test_clean_print_cv_folds_project_role_into_the_name_field():
@@ -560,3 +571,37 @@ def test_clean_print_cv_omits_the_skills_call_when_every_group_is_empty():
     content = GOLDEN.model_copy(update={"skills": [SkillGroup(category="", items=[])]})
     src = emitter_for("clean-print-cv", "0.1.0").emit(content).source
     assert "#cv-skills(" not in src
+
+
+def _latin_face(name: str, version: str) -> str:
+    """The first face in the emitted document's `font:` array.
+
+    Matches both shapes an emitter writes it in: a keyword passed into
+    the package's own show rule (`font: ("X", "Y")`) and clean-print-cv's
+    standalone `#set text(font: ("X", "Y"))`.
+    """
+    src = emitter_for(name, version).emit(GOLDEN).source
+    match = re.search(r"font: \(([^)]*)\)", src)
+    assert match, f"{name}:{version} emitted no font array at all"
+    faces = [f.strip().strip('"') for f in match.group(1).split(",") if f.strip()]
+    assert faces[-1] == CJK_FALLBACK, f"{name}:{version} dropped the CJK fallback"
+    return faces[0]
+
+
+def test_each_emitter_sets_a_different_latin_face():
+    """The instant half of the picker has to be typographically distinct.
+
+    This is a regression test for a shipped bug, not a style preference.
+    `_common.font_literal()` used to take no arguments and hand every
+    emitter the same `("New Computer Modern", CJK_FALLBACK)` pair, so
+    switching between any two instant templates changed the layout and
+    never the typeface -- while the picker's thumbnails, which Typst
+    Universe renders in each package's own face, promised otherwise. The
+    tests that existed asserted each emitter set *a* font, which stayed
+    green throughout; nothing compared the emitters against each other.
+
+    Parametrizing over the registry instead of naming the four pairs is
+    what makes a fifth emitter unable to join by copying a face.
+    """
+    faces = {pair: _latin_face(*pair) for pair in sorted(deterministic_pairs())}
+    assert len(set(faces.values())) == len(faces), faces

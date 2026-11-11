@@ -17,6 +17,7 @@ from io import BytesIO
 
 import pytest
 from pdfminer.high_level import extract_pages
+from pdfminer.layout import LTChar, LTTextContainer
 from pdfminer.pdfdocument import PDFDocument
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
@@ -338,12 +339,56 @@ def test_the_registry_renders_link_targets_at_all():
 
 
 def _clean_print_cv_contact_row(content: ResumeContent) -> str:
+    """The rendered contact row, reassembled from the glyphs sitting on
+    its own baseline and normalised to single spaces.
+
+    Built this way rather than read off `extract_pdf_text`'s second line
+    because pdfminer's line grouping is font-dependent and the row is
+    not: `contact-sep` (cv-template.typ:43) draws its bar at a fixed 8pt
+    between two `h(5pt)` gaps while the values around it render at the
+    body size, and whether pdfminer calls that one text container or
+    three depends on the body face's advance widths. Under New Computer
+    Modern it was one line; under this emitter's PT Serif the same page
+    -- same glyphs, same baseline, same visual row -- splits into three.
+    Grouping by baseline measures what the page shows under either.
+
+    The gap rule only has to tell `h(5pt)` apart from the near-zero
+    advance between two letters of a word, so the threshold is loose on
+    purpose. A real space character inside a value (a city and country,
+    say) is a glyph like any other and survives the collapse as one
+    space.
+    """
     source = emitter_for("clean-print-cv", "0.1.0").emit(content).source
-    text = extract_pdf_text(compile_typst(source, "pdf"))
-    # The row directly under the name -- the second non-empty line of the
-    # rendered page, by cv-header's own layout.
-    lines = [line for line in text.splitlines() if line.strip()]
-    return lines[1]
+    chars: list[LTChar] = []
+
+    def collect(node) -> None:
+        if isinstance(node, LTChar):
+            chars.append(node)
+        elif hasattr(node, "__iter__"):
+            for child in node:
+                collect(child)
+
+    for page in extract_pages(BytesIO(compile_typst(source, "pdf"))):
+        collect(page)
+    assert chars, "clean-print-cv rendered no text at all"
+
+    # Grouped by text-matrix origin, not by `y0`: `y0` is the bottom of
+    # the glyph box, so the separator's 8pt bar and the body-size values
+    # beside it land on different `y0` values while sharing a baseline --
+    # grouping on it splits the row into "the values" and "the bars" and
+    # quietly returns one of the two.
+    baselines: dict[float, list[LTChar]] = {}
+    for char in chars:
+        baselines.setdefault(round(char.matrix[5], 1), []).append(char)
+    # Top-down: the name block first, then the contact row under it.
+    contact = sorted(baselines[sorted(baselines, reverse=True)[1]], key=lambda c: c.x0)
+
+    out = ""
+    for previous, char in zip([None, *contact], contact):
+        if previous is not None and char.x0 - previous.x1 > 0.3 * char.size:
+            out += " "
+        out += char.get_text()
+    return " ".join(out.split()) + (" " if out.endswith(" ") else "")
 
 
 def test_clean_print_cv_renders_no_separator_junk_for_three_contact_values():
@@ -360,7 +405,7 @@ def test_clean_print_cv_renders_no_separator_junk_for_three_contact_values():
         name="Packed",
         contact=Contact(email="r@example.com", github="github.com/a", website="a.dev"),
     )
-    assert _clean_print_cv_contact_row(content) == "r@example.com  |  github.com/a  |  a.dev"
+    assert _clean_print_cv_contact_row(content) == "r@example.com | github.com/a | a.dev"
 
 
 def test_clean_print_cv_renders_one_trailing_separator_for_two_contact_values():
@@ -370,7 +415,7 @@ def test_clean_print_cv_renders_one_trailing_separator_for_two_contact_values():
     content = ResumeContent(
         name="Two", contact=Contact(email="r@example.com", github="github.com/a")
     )
-    assert _clean_print_cv_contact_row(content).rstrip() == "r@example.com  |  github.com/a  |"
+    assert _clean_print_cv_contact_row(content).rstrip() == "r@example.com | github.com/a |"
 
 
 def test_clean_print_cv_still_renders_two_separators_for_minimal():
@@ -391,4 +436,4 @@ def test_clean_print_cv_still_renders_two_separators_for_minimal():
     row = _clean_print_cv_contact_row(MINIMAL)
     assert row.startswith("jordan@example.com")
     assert row.count("|") == 2
-    assert row.rstrip() == "jordan@example.com  |    |"
+    assert row.rstrip() == "jordan@example.com | |"

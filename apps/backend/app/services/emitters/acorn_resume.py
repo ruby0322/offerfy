@@ -102,11 +102,18 @@ name = "acorn-resume"
 version = "0.1.0"
 
 
+# Closest available face to the Calibri this package asks for and this
+# host does not have (see the module docstring): a humanist sans with a
+# similar genre and a wider, friendlier letterform. Honouring the genre
+# the author chose beats falling back to a serif they did not.
+BODY_FONT: str = "Inria Sans"
+
+
 def _show_lines(content: ResumeContent) -> list[str]:
     return [
         "#show: resume.with(",
         f"  author: {typst_value(content.name or '')},",
-        f"  font: {font_literal()},",
+        f"  font: {font_literal(BODY_FONT)},",
         ")",
     ]
 
