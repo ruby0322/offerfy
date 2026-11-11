@@ -14,6 +14,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.services.jobs.boards import load_workday_boards
+from app.services.jobs.enrich import enrich_jobs
 from app.services.jobs.ingest import SourceResult, refreshed_nothing
 from app.services.jobs.scope import ScopeRules, default_scope
 from app.services.jobs.spotlight import rescore_all
@@ -98,11 +99,27 @@ def ingest_workday_board(
         db.commit()
         return SourceResult("workday", board.slug, "error", error="board not found")
 
-    upserted = upsert_jobs(db, result.new)
+    new_ids = upsert_jobs(db, result.new)
     # Not optional: these rows were skipped for their description, not for their
     # freshness. Without this they age out of validThrough and go noindex while
     # the job is still open.
     touch_jobs(db, source="workday", source_ids=result.still_live)
+    # Only the newly-upserted ids: a touched posting's description_text is
+    # untouched by definition (that is the whole point of skipping its detail
+    # call), so enrich_jobs' description_hash gate would no-op on it anyway --
+    # calling it on `still_live` ids would just be a wasted bulk lookup every
+    # pass. Same swallow-and-record contract as ingest_board: a derivation bug
+    # must cost only the facets row, never the posting or the commit.
+    # Savepoint for the same reason as ingest_board's: see the comment there.
+    # A plain try/except cannot contain a database-level failure, because the
+    # session is left rollback-pending and expire_missing below would be the
+    # one to raise.
+    enrich_error: str | None = None
+    try:
+        with db.begin_nested():
+            enrich_jobs(db, job_ids=new_ids)
+    except Exception as exc:  # noqa: BLE001 - must never fail the pass
+        enrich_error = f"enrich_jobs: {exc}"
     expired = expire_missing(
         db, source="workday", seen_ids=result.seen_ids, prefix=prefix
     )
@@ -114,12 +131,13 @@ def ingest_workday_board(
         started_at=started,
         status="ok",
         ok_count=result.fetched,
-        upserted_count=upserted,
+        upserted_count=len(new_ids),
         expired_count=expired,
+        error_snippet=enrich_error,
     )
     db.commit()
     return SourceResult(
-        "workday", board.slug, "ok", upserted=upserted, fetched=result.fetched
+        "workday", board.slug, "ok", upserted=len(new_ids), fetched=result.fetched
     )
 
 

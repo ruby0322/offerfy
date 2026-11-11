@@ -380,6 +380,51 @@ class Job(Base):
     spotlight_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
 
 
+class JobFacets(Base):
+    """Facets derived from one job's title/description/location, for filters.
+
+    Derived state, not a second source of truth -- same reasoning
+    TalentProfile and ResumeContent carry above: this is a separate table
+    rather than six more columns on Job because the whole row can be
+    dropped and rebuilt from Job's own columns at any time, by
+    app.services.jobs.enrich.enrich_jobs, with nothing lost. Keeping it
+    off Job also means a schema change here never touches the
+    hot-path columns the ingest pipeline writes on every run.
+
+    Primary-keyed on job_id rather than its own id: a job has at most one
+    facets row, and FK ondelete="CASCADE" means a deleted job never leaves
+    an orphan behind.
+
+    seniority and function are NOT NULL -- "unknown" and "other" are real,
+    meaningful members of their vocabularies (see enrich.py's module
+    docstring), not the absence of a value, so a posting whose title and
+    description name neither still gets a row instead of being skipped.
+    country/region/city stay nullable because location_facets truly has
+    nothing to report for some postings.
+
+    description_hash is enrich_jobs' gate: a posting is re-derived once per
+    distinct description_text, not once per ingest pass, so a six-hourly
+    ingest that re-fetches an unchanged posting costs no re-derivation.
+    """
+
+    __tablename__ = "job_facets"
+
+    job_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("jobs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    country: Mapped[str | None] = mapped_column(String(2), nullable=True, index=True)
+    region: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    seniority: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    function: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    description_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    enriched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+
 class JobIngestRun(Base):
     __tablename__ = "job_ingest_runs"
 

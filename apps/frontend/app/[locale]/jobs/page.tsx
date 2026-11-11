@@ -4,7 +4,7 @@ import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
 import JobIndex from "@/components/jobs/JobIndex";
 import { resolveLocale } from "@/lib/locale";
-import { fetchFeaturedJobs, fetchJobList, type JobQuery } from "@/lib/jobs";
+import { fetchFeaturedJobs, fetchJobFacets, fetchJobList, type JobQuery } from "@/lib/jobs";
 import { pageMetadata } from "@/lib/seo";
 
 type Props = {
@@ -36,16 +36,24 @@ export default async function JobsPage({ params, searchParams }: Props) {
   const raw = await searchParams;
   const query: JobQuery = {
     q: first(raw.q),
-    source: first(raw.source),
     remote: first(raw.remote),
+    country: first(raw.country),
+    region: first(raw.region),
+    seniority: first(raw.seniority),
+    function: first(raw.function),
+    postedWithinDays: first(raw.postedWithinDays),
   };
-  const [list, featured] = await Promise.all([fetchJobList(query), fetchFeaturedJobs()]);
+  const [list, featured, facets] = await Promise.all([
+    fetchJobList(query),
+    fetchFeaturedJobs(),
+    fetchJobFacets(),
+  ]);
 
   return (
     <div className="landing-page">
       <Nav variant="landing" />
       <main>
-        <JobIndex locale={locale} query={query} list={list} featured={featured} />
+        <JobIndex locale={locale} query={query} list={list} featured={featured} facets={facets} />
       </main>
       <Footer variant="landing" />
     </div>

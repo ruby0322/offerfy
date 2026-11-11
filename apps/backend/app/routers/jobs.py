@@ -2,15 +2,25 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, func, nulls_last, or_
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Job
-from app.schemas_jobs import JOB_SOURCES, JobDetail, JobList, JobListItem, JobSitemapItem, JobSitemapPage
+from app.models import Job, JobFacets
+from app.schemas_jobs import (
+    JOB_SOURCES,
+    JobDetail,
+    JobFacetOption,
+    JobFacetOptions,
+    JobList,
+    JobListItem,
+    JobSitemapItem,
+    JobSitemapPage,
+)
+from app.services.jobs.enrich import Taxonomy, default_taxonomy
 from app.services.jobs.spotlight import select_featured
 from app.services.jobs.store import freshness_cutoff
 
@@ -80,6 +90,28 @@ def _after_cursor(stamp: datetime | None, job_id: str):
     )
 
 
+def _valid_seniorities(taxonomy: Taxonomy) -> set[str]:
+    # "unknown" is a real value enrich.py writes when no rule matches a
+    # title at all -- it is not a sentinel to exclude from the vocabulary.
+    return {rule.seniority for rule in taxonomy.seniority_rules} | {"unknown"}
+
+
+def _valid_functions(taxonomy: Taxonomy) -> set[str]:
+    # Same reasoning as _valid_seniorities: "other" is a real bucket.
+    return {rule.function for rule in taxonomy.function_rules} | {"other"}
+
+
+def _valid_regions(taxonomy: Taxonomy) -> set[str]:
+    return set(taxonomy.location_regions.values())
+
+
+def _valid_countries(taxonomy: Taxonomy) -> set[str]:
+    # JobFacets.country can only ever hold one of these: location_facets
+    # (enrich.py) sources every country it emits from this same needle
+    # table, so the set is closed, not open, exactly like location_regions.
+    return set(taxonomy.location_countries.values())
+
+
 def _list_item(job: Job) -> JobListItem:
     return JobListItem(
         id=job.id,
@@ -103,6 +135,11 @@ def _filtered_query(
     source: str | None,
     remote: bool | None,
     active: bool | None,
+    country: str | None = None,
+    region: str | None = None,
+    seniority: str | None = None,
+    function: str | None = None,
+    posted_within_days: int | None = None,
 ):
     query = db.query(Job)
     if active is None or active:
@@ -126,6 +163,47 @@ def _filtered_query(
                 Job.location.ilike(term, escape="\\"),
             )
             query = query.filter(match)
+
+    # JobFacets is only joined when a facet filter is actually requested.
+    # Unconditionally joining it would wrongly drop every posting with no
+    # facets row at all (the common case -- ~11k live postings have none
+    # yet, and some Workday postings never will) even on a facet-free
+    # request, which is what test_unfiltered_list_still_returns_jobs_with_no_facets_row
+    # and test_facet_filter_excludes_jobs_with_no_facets_row together pin.
+    # The join is also deliberately INNER rather than LEFT: an unenriched
+    # posting genuinely does not match e.g. seniority=mid, so excluding it
+    # is the intended behavior, not an accident of SQL's NULL semantics --
+    # every filter below is an equality comparison, so a LEFT join would
+    # already exclude the unmatched row too (NULL == value is NULL, not
+    # true); INNER just says that intent directly instead of relying on
+    # that to keep covering for it.
+    if seniority or function or country or region:
+        query = query.join(JobFacets, JobFacets.job_id == Job.id)
+        taxonomy = default_taxonomy()
+        if seniority:
+            if seniority not in _valid_seniorities(taxonomy):
+                raise HTTPException(status_code=422, detail="Invalid seniority")
+            query = query.filter(JobFacets.seniority == seniority)
+        if function:
+            if function not in _valid_functions(taxonomy):
+                raise HTTPException(status_code=422, detail="Invalid function")
+            query = query.filter(JobFacets.function == function)
+        if region:
+            if region not in _valid_regions(taxonomy):
+                raise HTTPException(status_code=422, detail="Invalid region")
+            query = query.filter(JobFacets.region == region)
+        if country:
+            if country not in _valid_countries(taxonomy):
+                raise HTTPException(status_code=422, detail="Invalid country")
+            query = query.filter(JobFacets.country == country)
+
+    if posted_within_days is not None:
+        # Decision: posted_at IS NULL cannot be confirmed within any window,
+        # so it is excluded here, unlike _posted_at_order's nulls_last which
+        # still displays it (at the end) when no age filter is active.
+        cutoff = datetime.now(timezone.utc) - timedelta(days=posted_within_days)
+        query = query.filter(Job.posted_at >= cutoff)
+
     return query
 
 
@@ -135,11 +213,31 @@ def list_jobs(
     source: str | None = None,
     remote: bool | None = None,
     active: bool = True,
+    country: str | None = None,
+    region: str | None = None,
+    seniority: str | None = None,
+    function: str | None = None,
+    posted_within_days: int | None = Query(default=None, ge=1, le=90),
     cursor: str | None = None,
     limit: int = Query(default=20, ge=1, le=LIST_MAX),
     db: Session = Depends(get_db),
 ):
-    query = _filtered_query(db, q=q, source=source, remote=remote, active=active)
+    query = _filtered_query(
+        db,
+        q=q,
+        source=source,
+        remote=remote,
+        active=active,
+        country=country,
+        region=region,
+        seniority=seniority,
+        function=function,
+        posted_within_days=posted_within_days,
+    )
+    # Counted over the filtered set before ordering and cursoring -- the
+    # total describes every matching row, not just the page about to be
+    # returned.
+    total = query.with_entities(func.count(Job.id)).scalar() or 0
     query = query.order_by(*_posted_at_order())
     if cursor:
         stamp, job_id = _decode_cursor(cursor)
@@ -150,7 +248,7 @@ def list_jobs(
         last = rows[limit - 1]
         next_cursor = _encode_cursor(last.posted_at, last.id)
         rows = rows[:limit]
-    return JobList(items=[_list_item(row) for row in rows], next_cursor=next_cursor)
+    return JobList(items=[_list_item(row) for row in rows], next_cursor=next_cursor, total=total)
 
 
 @router.get("/v1/jobs/sitemap", response_model=JobSitemapPage)
@@ -189,7 +287,56 @@ def jobs_sitemap(
 @router.get("/v1/jobs/featured", response_model=JobList)
 def featured_jobs(db: Session = Depends(get_db)):
     rows = select_featured(db)
-    return JobList(items=[_list_item(row) for row in rows], next_cursor=None)
+    # total must be passed explicitly: JobList.total defaults to 0, and
+    # featured_jobs never pages, so leaving it unset would report 0 for a
+    # non-empty list of featured rows.
+    return JobList(items=[_list_item(row) for row in rows], next_cursor=None, total=len(rows))
+
+
+@router.get("/v1/jobs/facets", response_model=JobFacetOptions)
+def jobs_facets(db: Session = Depends(get_db)):
+    """Facet option counts for the catalog's filter UI.
+
+    Declared above GET /v1/jobs/{job_id} -- same ordering requirement as
+    /v1/jobs/sitemap and /v1/jobs/featured, or "facets" is captured as a
+    job id.
+
+    Counts over `is_active` alone -- deliberately the same condition GET
+    /v1/jobs filters on, and deliberately *not* _sitemap_conditions().
+    A dropdown's job is to describe the list it filters, so it has to
+    share that list's scope or its counts do not sum to the list's total.
+    The freshness window drives noindex and validThrough, which govern
+    crawlers, not visitors: a stale-but-active posting is still perfectly
+    reachable on /jobs. Counting over the window would also mean that an
+    ingest outage longer than JOB_FRESHNESS_DAYS emptied every dropdown
+    while the list still showed postings. The sitemap keeps
+    _sitemap_conditions() because for a sitemap the crawler *is* the
+    audience.
+
+    The join to JobFacets is implicitly INNER (an aggregate over a column
+    that lives only on JobFacets), which is also what drops NULLs and
+    rows with no facets row at all out of every bucket.
+    """
+    conditions = (Job.is_active.is_(True),)
+
+    def _options(column) -> list[JobFacetOption]:
+        rows = (
+            db.query(column, func.count())
+            .select_from(Job)
+            .join(JobFacets, JobFacets.job_id == Job.id)
+            .filter(*conditions)
+            .filter(column.isnot(None))
+            .group_by(column)
+            .all()
+        )
+        return [JobFacetOption(value=value, count=count) for value, count in rows]
+
+    return JobFacetOptions(
+        countries=_options(JobFacets.country),
+        regions=_options(JobFacets.region),
+        seniorities=_options(JobFacets.seniority),
+        functions=_options(JobFacets.function),
+    )
 
 
 @router.get("/v1/jobs/{job_id}", response_model=JobDetail)

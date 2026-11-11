@@ -29,6 +29,22 @@ class JobDetail(JobListItem):
 class JobList(BaseModel):
     items: list[JobListItem]
     next_cursor: str | None = None
+    # Defaulted, not required: /v1/jobs/featured builds this same model and
+    # must pass total=len(rows) explicitly, but a required field would break
+    # it the moment anyone forgets -- see the router for that call site.
+    total: int = 0
+
+
+class JobFacetOption(BaseModel):
+    value: str
+    count: int
+
+
+class JobFacetOptions(BaseModel):
+    countries: list[JobFacetOption]
+    regions: list[JobFacetOption]
+    seniorities: list[JobFacetOption]
+    functions: list[JobFacetOption]
 
 
 class JobSitemapItem(BaseModel):
