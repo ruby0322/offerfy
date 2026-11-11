@@ -345,7 +345,15 @@ def test_facets_endpoint_empty_catalogue_returns_empty_lists(client, db_session)
     assert body == {"countries": [], "regions": [], "seniorities": [], "functions": []}
 
 
-def test_facets_endpoint_counts_only_active_fresh_postings(client, db_session):
+def test_facets_endpoint_counts_over_the_same_scope_as_the_list(client, db_session):
+    """Option counts share GET /v1/jobs' scope: active, freshness irrelevant.
+
+    A dropdown describes the list it filters, so the inactive posting is out
+    (the list excludes it) and the stale-but-active one is in (the list shows
+    it). Counting over the freshness window instead would make the counts
+    disagree with `total`, and would empty every dropdown after an ingest
+    outage longer than JOB_FRESHNESS_DAYS while the list still had postings.
+    """
     # One active fresh TW posting, one inactive TW posting, one TW posting
     # last seen beyond JOB_FRESHNESS_DAYS.
     now = datetime.now(timezone.utc)
@@ -368,4 +376,6 @@ def test_facets_endpoint_counts_only_active_fresh_postings(client, db_session):
     enrich_jobs(db_session, job_ids=[active_fresh.id, inactive.id, stale.id])
     db_session.commit()
     body = client.get("/v1/jobs/facets").json()
-    assert {"value": "TW", "count": 1} in body["countries"]
+    # Both active rows, fresh and stale; not the inactive one.
+    assert {"value": "TW", "count": 2} in body["countries"]
+    assert client.get("/v1/jobs?country=TW").json()["total"] == 2

@@ -299,14 +299,25 @@ def jobs_facets(db: Session = Depends(get_db)):
 
     Declared above GET /v1/jobs/{job_id} -- same ordering requirement as
     /v1/jobs/sitemap and /v1/jobs/featured, or "facets" is captured as a
-    job id. Counts over _sitemap_conditions() (active AND within
-    freshness_cutoff()) so the options describe postings a visitor can
-    actually reach, not the whole historical catalog. The join to
-    JobFacets is implicitly INNER (an aggregate over a column that lives
-    only on JobFacets), which is also what drops NULLs and rows with no
-    facets row at all out of every bucket.
+    job id.
+
+    Counts over `is_active` alone -- deliberately the same condition GET
+    /v1/jobs filters on, and deliberately *not* _sitemap_conditions().
+    A dropdown's job is to describe the list it filters, so it has to
+    share that list's scope or its counts do not sum to the list's total.
+    The freshness window drives noindex and validThrough, which govern
+    crawlers, not visitors: a stale-but-active posting is still perfectly
+    reachable on /jobs. Counting over the window would also mean that an
+    ingest outage longer than JOB_FRESHNESS_DAYS emptied every dropdown
+    while the list still showed postings. The sitemap keeps
+    _sitemap_conditions() because for a sitemap the crawler *is* the
+    audience.
+
+    The join to JobFacets is implicitly INNER (an aggregate over a column
+    that lives only on JobFacets), which is also what drops NULLs and
+    rows with no facets row at all out of every bucket.
     """
-    conditions = _sitemap_conditions()
+    conditions = (Job.is_active.is_(True),)
 
     def _options(column) -> list[JobFacetOption]:
         rows = (
