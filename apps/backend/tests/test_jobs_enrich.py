@@ -2,7 +2,6 @@ import pytest
 
 from app.services.jobs.enrich import (
     LocationFacets,
-    _COUNTRY_NAME_NEEDLES,
     function_of,
     load_taxonomy,
     location_facets,
@@ -141,13 +140,14 @@ def test_taxonomy_file_covers_both_vocabularies_exactly():
 
 
 def test_country_name_needles_are_all_real_location_needles():
-    # _COUNTRY_NAME_NEEDLES is hand-maintained code (see the enrich.py
-    # module docstring for why it can't be derived from job_taxonomy.json).
-    # If a needle is renamed or removed from location_countries, this is
-    # the test that should catch the drift instead of location_facets
-    # silently stopping recognizing a country name.
+    # location_country_name_needles is data (job_taxonomy.json), not a
+    # Python frozenset -- see the enrich.py module docstring. If a needle
+    # is renamed or removed from location_countries, this is the test
+    # that should catch the drift instead of location_facets silently
+    # stopping recognizing a country name.
     taxonomy = load_taxonomy()
-    assert _COUNTRY_NAME_NEEDLES <= set(taxonomy.location_countries)
+    assert taxonomy.location_country_name_needles
+    assert taxonomy.location_country_name_needles <= set(taxonomy.location_countries)
 
 
 def test_taxonomy_file_covers_location_vocabularies():
@@ -161,6 +161,14 @@ def test_taxonomy_file_covers_location_vocabularies():
     assert set(taxonomy.location_regions.values()) <= {
         "north_america", "emea", "apac",
     }
+    # And the two region-derivation support lists loaded from the data
+    # file (location_country_name_needles, location_region_name_segments)
+    # must actually be present and non-empty in the shipped data file --
+    # an empty list here would make every segment a city candidate again,
+    # silently reopening the bug the controller's ruling fixed.
+    assert taxonomy.location_country_name_needles
+    assert taxonomy.location_region_name_segments
+    assert taxonomy.location_region_name_segments == {"emea", "apac", "north america"}
 
 
 @pytest.mark.parametrize("raw,source,expected", [

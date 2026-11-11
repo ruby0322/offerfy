@@ -44,13 +44,15 @@ expected, not a bug. Telling those two kinds of needle apart matters only
 for the `city` facet: "Taipei, Taiwan" must still report city "Taipei"
 even though the country came from the "taipei" needle, while "Remote -
 United States" must report no city at all, because "United States" names
-the country itself rather than a place within it. `_COUNTRY_NAME_NEEDLES`
-below is the hardcoded list of needles that name a country (or, for
-Singapore and Hong Kong, a city-state/territory this vocabulary has no
-finer subdivision for) rather than a place inside one -- there is no way
-to derive that distinction from job_taxonomy.json's flat needle->country
-map, so it lives here as code instead of growing a third needle list in
-the JSON.
+the country itself rather than a place within it. `job_taxonomy.json`'s
+`location_country_name_needles` (loaded as `Taxonomy.location_country_name_needles`)
+is the list of needles that name a country (or, for Singapore and Hong
+Kong, a city-state/territory this vocabulary has no finer subdivision
+for) rather than a place inside one, and `location_region_name_segments`
+is the handful of literal region labels ("EMEA", "APAC") an ATS can emit
+directly as a segment instead of a country. Both vocabularies, like
+every other needle list in this module, live in the data file, never in
+Python -- see `seniority_of`'s docstring for why.
 """
 
 from __future__ import annotations
@@ -89,6 +91,8 @@ class Taxonomy:
     location_countries: dict[str, str]
     location_regions: dict[str, str]
     remote_needles: tuple[str, ...]
+    location_country_name_needles: frozenset[str]
+    location_region_name_segments: frozenset[str]
 
 
 def load_taxonomy(path: Path | None = None) -> Taxonomy:
@@ -125,12 +129,20 @@ def load_taxonomy(path: Path | None = None) -> Taxonomy:
     remote_needles = tuple(
         n.casefold() for n in data.get("remote_needles", []) if n
     )
+    location_country_name_needles = frozenset(
+        n.casefold() for n in data.get("location_country_name_needles", []) if n
+    )
+    location_region_name_segments = frozenset(
+        n.casefold() for n in data.get("location_region_name_segments", []) if n
+    )
     return Taxonomy(
         seniority_rules=seniority_rules,
         function_rules=function_rules,
         location_countries=location_countries,
         location_regions=location_regions,
         remote_needles=remote_needles,
+        location_country_name_needles=location_country_name_needles,
+        location_region_name_segments=location_region_name_segments,
     )
 
 
@@ -161,40 +173,6 @@ class LocationFacets:
     city: str | None
 
 
-# Needles in `location_countries` that name the country itself (or, for a
-# city-state/territory this vocabulary has no finer subdivision for --
-# Singapore, Hong Kong -- the whole entity) rather than a city or region
-# within it. See the module docstring for why this list exists and cannot
-# be derived from job_taxonomy.json alone. Every entry here must be a key
-# of `location_countries`; a dedicated test enforces that.
-_COUNTRY_NAME_NEEDLES = frozenset({
-    "united states", "usa", "u.s.",
-    "canada",
-    "united kingdom",
-    "ireland",
-    "germany",
-    "france",
-    "netherlands",
-    "switzerland",
-    "poland",
-    "israel",
-    "india",
-    "singapore",
-    "japan",
-    "south korea", "korea",
-    "taiwan",
-    "china",
-    "hong kong", "香港",
-    "australia",
-})
-
-# Literal region labels an ATS can emit directly as a location segment
-# (e.g. "Remote - EMEA") instead of naming a country. Not derived from
-# `location_regions` (whose keys are needles, not region codes) because
-# these are the region *values* spelled out as prose, which is a
-# different vocabulary.
-_REGION_NAME_SEGMENTS = frozenset({"emea", "apac", "north america"})
-
 _MULTIPLE_LOCATIONS_PLACEHOLDER = "multiple locations"
 
 
@@ -217,10 +195,10 @@ def _is_remote_placeholder(folded_segment: str, taxonomy: Taxonomy) -> bool:
     return any(needle in folded_segment for needle in taxonomy.remote_needles)
 
 
-def _is_country_or_region_name(stripped_segment_folded: str) -> bool:
+def _is_country_or_region_name(segment_casefolded: str, taxonomy: Taxonomy) -> bool:
     return (
-        stripped_segment_folded in _COUNTRY_NAME_NEEDLES
-        or stripped_segment_folded in _REGION_NAME_SEGMENTS
+        segment_casefolded in taxonomy.location_country_name_needles
+        or segment_casefolded in taxonomy.location_region_name_segments
     )
 
 
@@ -284,12 +262,12 @@ def location_facets(
     city: str | None = None
     for segment in segments:
         folded = f" {segment.casefold()} "
-        stripped_folded = segment.casefold()
+        segment_casefolded = segment.casefold()
         if _is_remote_placeholder(folded, config):
             continue
-        if stripped_folded == _MULTIPLE_LOCATIONS_PLACEHOLDER:
+        if segment_casefolded == _MULTIPLE_LOCATIONS_PLACEHOLDER:
             continue
-        if _is_country_or_region_name(stripped_folded):
+        if _is_country_or_region_name(segment_casefolded, config):
             continue
         city = segment
         break

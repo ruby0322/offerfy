@@ -560,5 +560,30 @@
     "遠距",
     "居家辦公",
     "在家工作"
+  ],
+  "location_country_name_needles": [
+    "united states", "usa", "u.s.",
+    "canada",
+    "united kingdom",
+    "ireland",
+    "germany",
+    "france",
+    "netherlands",
+    "switzerland",
+    "poland",
+    "israel",
+    "india",
+    "singapore",
+    "japan",
+    "south korea", "korea",
+    "taiwan",
+    "china",
+    "hong kong", "香港",
+    "australia"
+  ],
+  "location_region_name_segments": [
+    "emea",
+    "apac",
+    "north america"
   ]
 }
