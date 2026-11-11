@@ -105,6 +105,13 @@ def _valid_regions(taxonomy: Taxonomy) -> set[str]:
     return set(taxonomy.location_regions.values())
 
 
+def _valid_countries(taxonomy: Taxonomy) -> set[str]:
+    # JobFacets.country can only ever hold one of these: location_facets
+    # (enrich.py) sources every country it emits from this same needle
+    # table, so the set is closed, not open, exactly like location_regions.
+    return set(taxonomy.location_countries.values())
+
+
 def _list_item(job: Job) -> JobListItem:
     return JobListItem(
         id=job.id,
@@ -157,14 +164,19 @@ def _filtered_query(
             )
             query = query.filter(match)
 
-    # JobFacets is only joined when a facet filter is actually requested,
-    # and the join is INNER: an unenriched posting genuinely does not
-    # match e.g. seniority=mid, so it must be excluded. A LEFT join would
-    # either wrongly admit it or force a NULL guard on every comparison
-    # below. Facet-free requests (the common case -- ~11k live postings
-    # have no facets row yet, and some Workday postings never will) must
-    # keep returning every posting regardless, which is exactly what
-    # skipping the join here preserves.
+    # JobFacets is only joined when a facet filter is actually requested.
+    # Unconditionally joining it would wrongly drop every posting with no
+    # facets row at all (the common case -- ~11k live postings have none
+    # yet, and some Workday postings never will) even on a facet-free
+    # request, which is what test_unfiltered_list_still_returns_jobs_with_no_facets_row
+    # and test_facet_filter_excludes_jobs_with_no_facets_row together pin.
+    # The join is also deliberately INNER rather than LEFT: an unenriched
+    # posting genuinely does not match e.g. seniority=mid, so excluding it
+    # is the intended behavior, not an accident of SQL's NULL semantics --
+    # every filter below is an equality comparison, so a LEFT join would
+    # already exclude the unmatched row too (NULL == value is NULL, not
+    # true); INNER just says that intent directly instead of relying on
+    # that to keep covering for it.
     if seniority or function or country or region:
         query = query.join(JobFacets, JobFacets.job_id == Job.id)
         taxonomy = default_taxonomy()
@@ -181,6 +193,8 @@ def _filtered_query(
                 raise HTTPException(status_code=422, detail="Invalid region")
             query = query.filter(JobFacets.region == region)
         if country:
+            if country not in _valid_countries(taxonomy):
+                raise HTTPException(status_code=422, detail="Invalid country")
             query = query.filter(JobFacets.country == country)
 
     if posted_within_days is not None:

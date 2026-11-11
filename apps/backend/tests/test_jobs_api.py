@@ -249,6 +249,19 @@ def test_invalid_facet_value_is_422(client):
     assert client.get("/v1/jobs?seniority=wizard").status_code == 422
     assert client.get("/v1/jobs?function=vibes").status_code == 422
     assert client.get("/v1/jobs?region=mars").status_code == 422
+    assert client.get("/v1/jobs?country=NOTACOUNTRY").status_code == 422
+
+
+def test_country_filter_accepts_a_valid_country_with_no_matches(client, db_session):
+    # "DE" is a real member of location_countries' value set but nothing in
+    # this fixture is located there -- distinct from "not a country at all",
+    # which 422s instead of returning an empty, successful result.
+    _add_job(db_session, source_id="a:1", title="Backend Engineer", location="Taipei, Taiwan")
+    enrich_jobs(db_session)
+    db_session.commit()
+    body = client.get("/v1/jobs?country=DE")
+    assert body.status_code == 200
+    assert body.json()["total"] == 0
 
 
 def test_total_counts_the_filtered_set_not_the_page(client, db_session):
