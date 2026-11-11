@@ -1,12 +1,43 @@
+from datetime import datetime, timezone
+
 import pytest
 
+from app.models import Job, JobFacets
 from app.services.jobs.enrich import (
     LocationFacets,
+    description_hash,
+    enrich_jobs,
     function_of,
     load_taxonomy,
     location_facets,
     seniority_of,
 )
+
+
+def _add_job(db_session, **kwargs) -> Job:
+    now = kwargs.pop("now", datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc))
+    job = Job(
+        source=kwargs.get("source", "greenhouse"),
+        source_id=kwargs["source_id"],
+        company=kwargs.get("company", "Stripe"),
+        title=kwargs.get("title", "Engineer"),
+        location=kwargs.get("location", "Remote"),
+        remote=kwargs.get("remote", True),
+        apply_url=kwargs.get("apply_url", "https://example.com/apply"),
+        source_url=kwargs.get("source_url", "https://example.com/job"),
+        description_text=kwargs.get("description_text", "Build things"),
+        description_html=kwargs.get("description_html", "<p>Build things</p>"),
+        posted_at=kwargs.get("posted_at", now),
+        first_seen_at=kwargs.get("first_seen_at", now),
+        last_seen_at=kwargs.get("last_seen_at", now),
+        is_active=kwargs.get("is_active", True),
+    )
+    if "id" in kwargs:
+        job.id = kwargs["id"]
+    db_session.add(job)
+    db_session.commit()
+    db_session.refresh(job)
+    return job
 
 
 @pytest.mark.parametrize("title,expected", [
@@ -128,6 +159,22 @@ def test_function_of_matches_acronym_before_a_title_comma(title, expected):
     assert function_of(title, "") == expected
 
 
+@pytest.mark.parametrize("title,expected", [
+    # "Role, Qualifier" where the qualifier is a bare word naming the
+    # function, not a compound like "infrastructure engineer" -- the same
+    # idiom gap seniority_of already closed for "intern"/"coop" etc. (see
+    # test_seniority_of_matches_acronym_before_a_title_comma). Verbatim
+    # repro: Staff Software Engineer, Infrastructure used to resolve to
+    # function "other" despite being unambiguously an infra role.
+    ("Staff Software Engineer, Infrastructure", "infra"),
+    ("Engineer, Infrastructure", "infra"),
+    ("Engineer, Security", "security"),
+    ("Engineer, Data", "data"),
+])
+def test_function_of_matches_bare_qualifier_after_a_title_comma(title, expected):
+    assert function_of(title, "") == expected
+
+
 def test_taxonomy_file_covers_both_vocabularies_exactly():
     taxonomy = load_taxonomy()
     assert {rule.seniority for rule in taxonomy.seniority_rules} <= {
@@ -236,3 +283,57 @@ def test_location_remote_placeholder_between_country_segments_yields_no_city():
     assert location_facets(
         "Remote - United States - Anywhere", source="lever", remote=True
     ) == LocationFacets("US", "north_america", None)
+
+
+def test_enrich_writes_facets_for_a_job(db_session):
+    job = _add_job(db_session, source_id="anthropic:1",
+                   title="Staff Software Engineer, Infrastructure",
+                   location="San Francisco, CA", description_text="Own the fleet.")
+    assert enrich_jobs(db_session, job_ids=[job.id]) == 1
+    row = db_session.get(JobFacets, job.id)
+    assert (row.seniority, row.function, row.country, row.region) == (
+        "staff_plus", "infra", "US", "north_america")
+
+
+def test_enrich_is_a_noop_when_the_description_has_not_changed(db_session):
+    job = _add_job(db_session, source_id="anthropic:2", description_text="Same text.")
+    enrich_jobs(db_session, job_ids=[job.id])
+    assert enrich_jobs(db_session, job_ids=[job.id]) == 0
+
+
+def test_enrich_rewrites_when_the_description_changes(db_session):
+    job = _add_job(db_session, source_id="anthropic:3", title="Engineer, Platform",
+                   description_text="You will write Django.")
+    enrich_jobs(db_session, job_ids=[job.id])
+    job.description_text = "You will own our Kubernetes fleet."
+    db_session.commit()
+    assert enrich_jobs(db_session, job_ids=[job.id]) == 1
+    assert db_session.get(JobFacets, job.id).function == "infra"
+
+
+def test_force_rewrites_an_unchanged_row(db_session):
+    job = _add_job(db_session, source_id="anthropic:4")
+    enrich_jobs(db_session, job_ids=[job.id])
+    assert enrich_jobs(db_session, job_ids=[job.id], force=True) == 1
+
+
+def test_enrich_backfills_every_active_job_when_no_ids_are_given(db_session):
+    _add_job(db_session, source_id="a:1")
+    _add_job(db_session, source_id="a:2")
+    _add_job(db_session, source_id="a:3", is_active=False)
+    assert enrich_jobs(db_session) == 2
+
+
+def test_enrich_handles_a_maximum_length_description(db_session):
+    from app.services.jobs.types import MAX_DESCRIPTION_CHARS
+    job = _add_job(db_session, source_id="a:4", description_text="x" * MAX_DESCRIPTION_CHARS)
+    assert enrich_jobs(db_session, job_ids=[job.id]) == 1
+    assert len(db_session.get(JobFacets, job.id).description_hash) == 64
+
+
+def test_deleting_a_job_cascades_to_its_facets(db_session):
+    job = _add_job(db_session, source_id="a:5")
+    enrich_jobs(db_session, job_ids=[job.id])
+    db_session.delete(job)
+    db_session.commit()
+    assert db_session.get(JobFacets, job.id) is None

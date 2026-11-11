@@ -57,11 +57,17 @@ Python -- see `seniority_of`'s docstring for why.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
+
+from sqlalchemy.orm import Session
+
+from app.models import Job, JobFacets
 
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[3]
@@ -291,3 +297,95 @@ def function_of(
         if any(needle in folded_description for needle in rule.description_needles):
             return rule.function
     return "other"
+
+
+def description_hash(text: str) -> str:
+    """sha256 hex of `description_text` alone.
+
+    Not of title/location/anything else: those feed the three derivations
+    too, but a posting whose title or location is edited without touching
+    its description is rare enough, and cheap enough to catch on the next
+    description change, that widening the hash's input would just mean
+    re-deriving on every minor title tweak. Hex, not raw bytes, because
+    JobFacets.description_hash is a String(64) column -- the same
+    trade-off ResumeContent.derived_from_hash already makes.
+    """
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def enrich_jobs(
+    db: Session,
+    *,
+    job_ids: list[str] | None = None,
+    force: bool = False,
+    now: datetime | None = None,
+) -> int:
+    """Derive and store facets for a set of jobs, skipping unchanged ones.
+
+    `job_ids=None` means every active posting -- the backfill path. With
+    ~11k rows in the live catalogue, this must not issue a SELECT per row:
+    it loads the candidate jobs in one query and their existing JobFacets
+    rows in a second bulk query keyed by job_id, then compares hashes in
+    memory. The next task calls this per ingest board (up to 119 times a
+    pass) with an explicit `job_ids`, so the same two-query shape has to
+    stay cheap for a handful of ids too.
+
+    The taxonomy is resolved once per call, here, and threaded through to
+    all three derivations -- `default_taxonomy()` is cheap once cached
+    (`lru_cache(maxsize=1)`), but there is no reason to pay even that
+    per-row when one lookup covers the whole batch.
+
+    A row is skipped when it already exists and its stored
+    `description_hash` equals the newly computed one, unless `force`.
+    Returns the number of rows written (inserted or updated) -- not the
+    number of jobs considered, which is why the no-op and force tests
+    check this count rather than row presence alone.
+
+    Flushes but does not commit: the caller owns the transaction, the same
+    contract `upsert_jobs` in app.services.jobs.store follows.
+    """
+    stamp = now or datetime.now(timezone.utc)
+    taxonomy = default_taxonomy()
+
+    query = db.query(Job)
+    if job_ids is not None:
+        if not job_ids:
+            return 0
+        query = query.filter(Job.id.in_(job_ids))
+    else:
+        query = query.filter(Job.is_active.is_(True))
+    jobs = query.all()
+    if not jobs:
+        return 0
+
+    existing = {
+        row.job_id: row
+        for row in db.query(JobFacets)
+        .filter(JobFacets.job_id.in_([job.id for job in jobs]))
+        .all()
+    }
+
+    written = 0
+    for job in jobs:
+        new_hash = description_hash(job.description_text)
+        row = existing.get(job.id)
+        if row is not None and not force and row.description_hash == new_hash:
+            continue
+
+        loc = location_facets(
+            job.location, source=job.source, remote=job.remote, taxonomy=taxonomy
+        )
+        if row is None:
+            row = JobFacets(job_id=job.id)
+            db.add(row)
+        row.seniority = seniority_of(job.title, taxonomy)
+        row.function = function_of(job.title, job.description_text, taxonomy)
+        row.country = loc.country
+        row.region = loc.region
+        row.city = loc.city
+        row.description_hash = new_hash
+        row.enriched_at = stamp
+        written += 1
+
+    db.flush()
+    return written
