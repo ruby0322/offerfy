@@ -1,6 +1,13 @@
 import pytest
 
-from app.services.jobs.enrich import function_of, load_taxonomy, seniority_of
+from app.services.jobs.enrich import (
+    LocationFacets,
+    _COUNTRY_NAME_NEEDLES,
+    function_of,
+    load_taxonomy,
+    location_facets,
+    seniority_of,
+)
 
 
 @pytest.mark.parametrize("title,expected", [
@@ -131,3 +138,93 @@ def test_taxonomy_file_covers_both_vocabularies_exactly():
         "backend", "frontend", "fullstack", "ml", "data", "infra",
         "security", "hardware", "product", "design",
     }
+
+
+def test_country_name_needles_are_all_real_location_needles():
+    # _COUNTRY_NAME_NEEDLES is hand-maintained code (see the enrich.py
+    # module docstring for why it can't be derived from job_taxonomy.json).
+    # If a needle is renamed or removed from location_countries, this is
+    # the test that should catch the drift instead of location_facets
+    # silently stopping recognizing a country name.
+    taxonomy = load_taxonomy()
+    assert _COUNTRY_NAME_NEEDLES <= set(taxonomy.location_countries)
+
+
+def test_taxonomy_file_covers_location_vocabularies():
+    # location_countries and location_regions are coupled 1:1 by needle --
+    # location_facets relies on this to look region up by the same needle
+    # that already resolved the country, instead of re-scanning the
+    # string. If a future edit to job_taxonomy.json adds a needle to one
+    # dict but not the other, this is the test that should catch it.
+    taxonomy = load_taxonomy()
+    assert set(taxonomy.location_countries) == set(taxonomy.location_regions)
+    assert set(taxonomy.location_regions.values()) <= {
+        "north_america", "emea", "apac",
+    }
+
+
+@pytest.mark.parametrize("raw,source,expected", [
+    ("San Francisco, CA", "greenhouse", LocationFacets("US", "north_america", "San Francisco")),
+    ("Taipei, Taiwan", "greenhouse", LocationFacets("TW", "apac", "Taipei")),
+    ("London, UK", "lever", LocationFacets("GB", "emea", "London")),
+    ("Remote - United States", "lever", LocationFacets("US", "north_america", None)),
+    ("Hsinchu, Hsinchu City, Taiwan", "workday", LocationFacets("TW", "apac", "Hsinchu")),
+    ("新竹市", "workday", LocationFacets("TW", "apac", "新竹市")),
+    ("Multiple Locations", "smartrecruiters", LocationFacets(None, None, None)),
+])
+def test_location_facets(raw, source, expected):
+    assert location_facets(raw, source=source, remote=None) == expected
+
+
+def test_location_none_yields_empty_facets_without_raising():
+    assert location_facets(None, source="ashby", remote=True) == LocationFacets(None, None, None)
+
+
+def test_remote_flag_does_not_invent_a_country():
+    assert location_facets("Remote", source="ashby", remote=True).country is None
+
+
+def test_location_empty_string_yields_empty_facets_without_raising():
+    assert location_facets("", source="ashby", remote=None) == LocationFacets(None, None, None)
+
+
+def test_location_whitespace_only_yields_empty_facets_without_raising():
+    assert location_facets("   ", source="ashby", remote=None) == LocationFacets(None, None, None)
+
+
+def test_location_punctuation_only_yields_empty_facets_without_raising():
+    assert location_facets(" - , - ", source="ashby", remote=None) == LocationFacets(None, None, None)
+
+
+def test_location_multi_country_string_keeps_the_first_country_mentioned():
+    # Postings that paste together several office locations ("City, Country;
+    # City, Country") name more than one nation in a single field. This
+    # module stays first-match-wins, the same bias used for seniority and
+    # function: the first segment (reading left to right, after the usual
+    # comma/dash split) that resolves a country wins, and any country named
+    # later in the string -- here "Germany" -- is ignored rather than
+    # merged into a list. A future facet could surface every country if the
+    # product needs it; this derivation only ever reports one.
+    assert location_facets(
+        "London, UK; Berlin, Germany", source="greenhouse", remote=None
+    ) == LocationFacets("GB", "emea", "London")
+
+
+def test_location_city_segment_after_country_segment_is_still_found():
+    # "Taiwan, Taipei" puts the bare country name first and the city
+    # second. The country-vs-city ruling says city is the first segment
+    # that is NOT itself exactly a country (or region) name, not simply
+    # "the first segment" -- so the scan must keep going past "Taiwan" to
+    # find "Taipei".
+    assert location_facets("Taiwan, Taipei", source="workday", remote=None) == (
+        LocationFacets("TW", "apac", "Taipei")
+    )
+
+
+def test_location_remote_placeholder_between_country_segments_yields_no_city():
+    # A remote_needles placeholder segment must never be picked as the
+    # city, even when it sits between two other segments and a country
+    # still resolves elsewhere in the string.
+    assert location_facets(
+        "Remote - United States - Anywhere", source="lever", remote=True
+    ) == LocationFacets("US", "north_america", None)

@@ -26,15 +26,37 @@ adjacent technologies, so a title hit always outranks a description hit,
 regardless of rule order.
 
 `load_taxonomy` also loads the location vocabulary (`location_countries`,
-`location_regions`, `remote_needles`) even though nothing in this module
-consumes it yet -- that is for the location-facet derivation landing in the
-next task, which should not need to touch this loader or the shape of
-job_taxonomy.json.
+`location_regions`, `remote_needles`); `location_facets` below is what
+consumes it.
+
+`location_countries` and `location_regions` are keyed by the exact same
+needle set (verified by `test_taxonomy_file_covers_location_vocabularies`)
+-- a needle such as "san francisco" maps to a country ("US") and, under
+the identical key, straight to a region ("north_america"). So once a
+needle resolves the country, the same needle hands back the region for
+free; `location_facets` never scans the string a second time looking for
+a region, it only ever looks one up by the needle that already won.
+
+The needle set mixes country names ("united states", "taiwan") with city
+and region names that happen to pin down a country ("san francisco",
+"新竹", "hsinchu") -- a city needle resolving the country is normal and
+expected, not a bug. Telling those two kinds of needle apart matters only
+for the `city` facet: "Taipei, Taiwan" must still report city "Taipei"
+even though the country came from the "taipei" needle, while "Remote -
+United States" must report no city at all, because "United States" names
+the country itself rather than a place within it. `_COUNTRY_NAME_NEEDLES`
+below is the hardcoded list of needles that name a country (or, for
+Singapore and Hong Kong, a city-state/territory this vocabulary has no
+finer subdivision for) rather than a place inside one -- there is no way
+to derive that distinction from job_taxonomy.json's flat needle->country
+map, so it lives here as code instead of growing a third needle list in
+the JSON.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -130,6 +152,149 @@ def seniority_of(title: str, taxonomy: Taxonomy | None = None) -> str:
         if any(needle in folded for needle in rule.needles):
             return rule.seniority
     return "unknown"
+
+
+@dataclass(frozen=True)
+class LocationFacets:
+    country: str | None
+    region: str | None
+    city: str | None
+
+
+# Needles in `location_countries` that name the country itself (or, for a
+# city-state/territory this vocabulary has no finer subdivision for --
+# Singapore, Hong Kong -- the whole entity) rather than a city or region
+# within it. See the module docstring for why this list exists and cannot
+# be derived from job_taxonomy.json alone. Every entry here must be a key
+# of `location_countries`; a dedicated test enforces that.
+_COUNTRY_NAME_NEEDLES = frozenset({
+    "united states", "usa", "u.s.",
+    "canada",
+    "united kingdom",
+    "ireland",
+    "germany",
+    "france",
+    "netherlands",
+    "switzerland",
+    "poland",
+    "israel",
+    "india",
+    "singapore",
+    "japan",
+    "south korea", "korea",
+    "taiwan",
+    "china",
+    "hong kong", "香港",
+    "australia",
+})
+
+# Literal region labels an ATS can emit directly as a location segment
+# (e.g. "Remote - EMEA") instead of naming a country. Not derived from
+# `location_regions` (whose keys are needles, not region codes) because
+# these are the region *values* spelled out as prose, which is a
+# different vocabulary.
+_REGION_NAME_SEGMENTS = frozenset({"emea", "apac", "north america"})
+
+_MULTIPLE_LOCATIONS_PLACEHOLDER = "multiple locations"
+
+
+def _best_country_match(
+    folded_segment: str, taxonomy: Taxonomy
+) -> tuple[str, str] | None:
+    """Longest needle in `location_countries` that is a substring of the
+    (already space-padded) segment, so "United States" wins over any
+    shorter needle that happens to also be contained in it.
+    """
+    best: tuple[str, str] | None = None
+    for needle, country in taxonomy.location_countries.items():
+        if needle in folded_segment:
+            if best is None or len(needle) > len(best[0]):
+                best = (needle, country)
+    return best
+
+
+def _is_remote_placeholder(folded_segment: str, taxonomy: Taxonomy) -> bool:
+    return any(needle in folded_segment for needle in taxonomy.remote_needles)
+
+
+def _is_country_or_region_name(stripped_segment_folded: str) -> bool:
+    return (
+        stripped_segment_folded in _COUNTRY_NAME_NEEDLES
+        or stripped_segment_folded in _REGION_NAME_SEGMENTS
+    )
+
+
+def location_facets(
+    location: str | None,
+    *,
+    source: str,
+    remote: bool | None,
+    taxonomy: Taxonomy | None = None,
+) -> LocationFacets:
+    """Parse a free-text ATS location string into country / region / city.
+
+    `source` and `remote` are accepted (and not yet used) so the call site
+    in the next task's `enrich_jobs` can pass a job's source and remote
+    flag through uniformly for every derivation in this module, the same
+    way `function_of` always takes a description even for rules that never
+    look at it. `remote` in particular must never be used to invent a
+    country when the string itself names none -- see
+    `test_remote_flag_does_not_invent_a_country`.
+
+    Segments come from splitting on "," and "-" (the two separators every
+    ATS in this catalogue uses), stripped. The first segment that matches
+    any country needle wins the country+region, longest needle first
+    within that segment (`_best_country_match`); matching stops there, so
+    a second, later-named country in the same string (an office paired
+    with another office) is ignored rather than merged -- first-match-wins,
+    the same bias `seniority_of`/`function_of` use. If no segment matches
+    any country needle at all, the whole result is `LocationFacets(None,
+    None, None)` -- no guessing, per the module's unknown-is-kept bias.
+
+    `city` is a separate scan over the same segments, in order, for the
+    first one that is not a remote placeholder, not the literal "multiple
+    locations" placeholder, and not itself exactly a country or region
+    name (`_is_country_or_region_name`). A segment that resolved the
+    country via a city needle (e.g. "Taipei") still qualifies -- what's
+    excluded is a segment that *is* the country's own name (e.g. "United
+    States"), not a segment that merely matched a needle.
+    """
+    config = taxonomy or default_taxonomy()
+    if not location or not location.strip():
+        return LocationFacets(None, None, None)
+
+    segments = [s.strip() for s in re.split(r"[,-]", location)]
+    segments = [s for s in segments if s]
+    if not segments:
+        return LocationFacets(None, None, None)
+
+    country: str | None = None
+    region: str | None = None
+    for segment in segments:
+        folded = f" {segment.casefold()} "
+        match = _best_country_match(folded, config)
+        if match is not None:
+            needle, country = match
+            region = config.location_regions.get(needle)
+            break
+
+    if country is None:
+        return LocationFacets(None, None, None)
+
+    city: str | None = None
+    for segment in segments:
+        folded = f" {segment.casefold()} "
+        stripped_folded = segment.casefold()
+        if _is_remote_placeholder(folded, config):
+            continue
+        if stripped_folded == _MULTIPLE_LOCATIONS_PLACEHOLDER:
+            continue
+        if _is_country_or_region_name(stripped_folded):
+            continue
+        city = segment
+        break
+
+    return LocationFacets(country, region, city)
 
 
 def function_of(
