@@ -3,15 +3,19 @@
 Each emitter still owns its own package's component calls (`#edu(...)`,
 `#work(...)`, whatever `ats-friendly-resume` renames them to) -- that part
 is genuinely package-specific and belongs in each emitter's own module.
-What is not package-specific is the font policy, the dates-helper idiom
+What is not package-specific is the CJK fallback, the dates-helper idiom
 `basic-resume` and its forks share (even where a fork renames the helper
 function itself -- see `dates_expr`'s `helper` argument), the rendering of
 a `SkillGroup` as a markup bullet, the bullet-list rendering of a list of
 strings, and the "heading, then body, or nothing at all when the body is
 empty" shape every section in every emitter so far has used. A second
-emitter re-deciding any of these independently is exactly how the font
-policy would end up with four different CJK regexes instead of one
-answer -- see `FALLBACK_FONTS` below.
+emitter re-deciding any of these independently is exactly how the
+fallback would end up with four different CJK regexes instead of one
+answer -- see `CJK_FALLBACK` below.
+
+The Latin face is the opposite: it belongs to the emitter, because it is
+the one thing a reader notices and the picker's thumbnail already
+promises. See `font_literal`.
 """
 
 from __future__ import annotations
@@ -23,20 +27,38 @@ from app.services.typst_escape import markup_value, typst_value
 
 # Per-glyph fallback, not an all-or-nothing switch: Typst's `font` accepts
 # an array, and every target package here passes it straight to `set
-# text(font: font)` (e.g. basic-resume's own `resume.typ`), so naming both
-# faces once covers a résumé that mixes Latin prose with a single CJK name
-# without retyping the whole document in a different face for it -- the
-# bug a content-sniffing branch (one CJK character anywhere -> switch
-# everything) would otherwise have. "Noto Serif CJK TC" mirrors
-# `app.services.starter.PLACEHOLDERS`' own fallback locale
-# (`generate_starter` defaults an unmatched locale to zh-TW).
-FALLBACK_FONTS: tuple[str, str] = ("New Computer Modern", "Noto Serif CJK TC")
+# text(font: font)` (e.g. basic-resume's own `resume.typ`), so naming a
+# Latin face and this one together covers a résumé that mixes Latin prose
+# with a single CJK name without retyping the whole document in a
+# different face for it -- the bug a content-sniffing branch (one CJK
+# character anywhere -> switch everything) would otherwise have. "Noto
+# Serif CJK TC" mirrors `app.services.starter.PLACEHOLDERS`' own fallback
+# locale (`generate_starter` defaults an unmatched locale to zh-TW).
+CJK_FALLBACK: str = "Noto Serif CJK TC"
 
 
-def font_literal() -> str:
-    """`FALLBACK_FONTS` rendered as the Typst array literal every
-    emitter's `font:` argument should use verbatim."""
-    return typst_value(list(FALLBACK_FONTS))
+def font_literal(*latin: str) -> str:
+    """The Typst array literal for an emitter's `font:` argument: the
+    Latin faces this template wants, then `CJK_FALLBACK`.
+
+    **Every emitter names its own Latin face, and they are deliberately
+    different.** This function used to take no arguments and hand all
+    four emitters `("New Computer Modern", CJK_FALLBACK)`, which made
+    the instant half of the picker typographically uniform: switching
+    between any two of its templates changed the layout and never the
+    typeface, while each thumbnail -- rendered by Typst Universe in that
+    package's own face -- promised otherwise. Treating the Latin face as
+    shared policy was the mistake; the CJK fallback genuinely is shared,
+    and stays here.
+
+    A face named here must be one the host actually has, or Typst warns
+    and renders tofu rather than failing, and the support survey's font
+    gate then drops the template from the picker entirely. Check against
+    `typst fonts --font-path apps/backend/fonts` before naming a new one,
+    and add it to the Dockerfile's font block and the host install in
+    docs/deploy.md.
+    """
+    return typst_value([*latin, CJK_FALLBACK])
 
 
 def dates_expr(

@@ -194,6 +194,13 @@ name = "clean-print-cv"
 version = "0.1.0"
 
 
+# A screen-and-print serif with a larger x-height than the New Computer
+# Modern this package hardcodes -- close enough in genre that the
+# template's own metrics still hold (checked: same page count), far
+# enough that it does not read as basic-resume with the boxes moved.
+BODY_FONT: str = "PT Serif"
+
+
 def _text(value: str | None) -> str:
     """A prose string ready for `typst_value`: `""` for `None`/empty.
     `typst_value` itself now normalises an embedded line break to a
@@ -392,7 +399,7 @@ def emit(content: ResumeContent) -> EmitResult:
         # docstring) -- overriding it this way, immediately after the
         # show rule, is what makes the CJK fallback face take effect
         # instead of the package's own hardcoded "New Computer Modern".
-        f"#set text(font: {font_literal()})",
+        f"#set text(font: {font_literal(BODY_FONT)})",
         "",
         "#cv-header(data.personal)",
     ]

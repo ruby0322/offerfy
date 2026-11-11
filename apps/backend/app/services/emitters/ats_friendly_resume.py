@@ -88,6 +88,14 @@ version = "0.1.1"
 _URL_ARGS = frozenset({"linkedin", "github", "portfolio"})
 
 
+# A plain, wide-aperture sans, because that is what this template is for:
+# the whole point of the ATS-friendly layout is a document a parser reads
+# without guessing, and a grotesque sans is the least decorated thing the
+# host has. Also the clearest break from basic-resume's serif, which is
+# what makes switching between the two visible.
+BODY_FONT: str = "Source Sans 3"
+
+
 def _header_lines(content: ResumeContent) -> list[str]:
     contact = content.contact
     args: list[tuple[str, str]] = [("author", content.name or "")]
@@ -115,7 +123,7 @@ def _header_lines(content: ResumeContent) -> list[str]:
     # silently change the resume's look.
     lines.append("  color-enabled: true,")
     lines.append('  text-color: "#26428b",')
-    lines.append(f"  font: {font_literal()},")
+    lines.append(f"  font: {font_literal(BODY_FONT)},")
     lines.append('  paper: "a4",')
     lines.append(")")
     return lines
