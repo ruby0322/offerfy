@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.services.jobs.ashby import fetch_ashby
 from app.services.jobs.boards import load_boards
+from app.services.jobs.enrich import enrich_jobs
 from app.services.jobs.greenhouse import fetch_greenhouse
 from app.services.jobs.lever import fetch_lever
 from app.services.jobs.scope import ScopeRules, default_scope, title_in_scope
@@ -116,7 +117,17 @@ def ingest_board(
     # forever. smartrecruiters has already scoped itself -- it has to, to avoid a
     # detail request per posting -- so this is a no-op for it.
     kept = [job for job in fetched if title_in_scope(job.title, rules)]
-    upserted = upsert_jobs(db, kept)
+    upserted_ids = upsert_jobs(db, kept)
+    # Enrichment is derived state, not the posting itself: a bug here must
+    # never cost us the posting or the commit, only the facets row (which just
+    # makes that posting invisible to a *filtered* query, not to /jobs
+    # unfiltered). So the exception is swallowed and surfaced on the run row
+    # instead of being allowed to propagate past this point.
+    enrich_error: str | None = None
+    try:
+        enrich_jobs(db, job_ids=upserted_ids)
+    except Exception as exc:  # noqa: BLE001 - must never fail the pass
+        enrich_error = f"enrich_jobs: {exc}"
     expired = expire_missing(
         db,
         source=board.source,
@@ -133,12 +144,13 @@ def ingest_board(
         # Pre-filter count on purpose: ok_count - upserted_count is how many the
         # scope rules dropped, which /admin/jobs surfaces without a new column.
         ok_count=len(fetched),
-        upserted_count=upserted,
+        upserted_count=len(upserted_ids),
         expired_count=expired,
+        error_snippet=enrich_error,
     )
     db.commit()
     return SourceResult(
-        board.source, board.slug, "ok", upserted=upserted, fetched=len(fetched)
+        board.source, board.slug, "ok", upserted=len(upserted_ids), fetched=len(fetched)
     )
 
 

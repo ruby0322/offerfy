@@ -4,7 +4,8 @@ from pathlib import Path
 
 import httpx
 
-from app.models import Job, JobIngestRun
+from app.models import Job, JobFacets, JobIngestRun
+from app.services.jobs import ingest as ingest_module
 from app.services.jobs.ashby import parse_ashby
 from app.services.jobs.boards import boards_path, load_boards, load_workday_boards
 from app.services.jobs.greenhouse import parse_greenhouse
@@ -344,3 +345,137 @@ def test_shipped_workday_board_list_is_well_formed():
         assert b.host.endswith("myworkdayjobs.com"), b
         assert b.tenant and b.site and b.company
         assert b.api("/jobs").startswith(f"https://{b.host}/wday/cxs/{b.tenant}/{b.site}")
+
+
+def _greenhouse_client(payload: dict) -> httpx.Client:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def test_ingest_board_writes_facets(db_session):
+    payload = {
+        "jobs": [
+            {
+                "id": 1,
+                "title": "Senior Backend Engineer",
+                "absolute_url": "https://example.com/a",
+                "content": "Build backend services.",
+                "location": {"name": "Taipei, Taiwan"},
+            },
+        ]
+    }
+    client = _greenhouse_client(payload)
+    result = ingest_board(db_session, client, Board("greenhouse", "stripe", "Stripe"))
+    assert result.status == "ok"
+    row = db_session.query(JobFacets).one()
+    assert (row.seniority, row.function, row.country) == ("senior", "backend", "TW")
+
+
+def test_ingest_board_does_not_fail_when_a_title_is_unparseable(db_session):
+    payload = {
+        "jobs": [
+            {
+                "id": 1,
+                "title": "Wizard of Light Bulb Moments",
+                "absolute_url": "https://example.com/a",
+                "content": "Make magic happen.",
+                "location": {"name": "Remote"},
+            },
+        ]
+    }
+    client = _greenhouse_client(payload)
+    result = ingest_board(db_session, client, Board("greenhouse", "stripe", "Stripe"))
+    assert result.status == "ok"
+    assert db_session.query(JobFacets).one().seniority == "unknown"
+
+
+def test_enrichment_failure_does_not_fail_the_pass(db_session, monkeypatch):
+    """enrich_jobs blowing up must not lose the posting or fail the board.
+
+    A facets row is a nice-to-have derived from a posting that already landed;
+    losing it to a bug in the derivation logic must never take the ingest with
+    it. The error still has to be visible, so it is recorded on the run row.
+    """
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("enrich exploded")
+
+    monkeypatch.setattr(ingest_module, "enrich_jobs", boom)
+
+    payload = {
+        "jobs": [
+            {
+                "id": 1,
+                "title": "Senior Backend Engineer",
+                "absolute_url": "https://example.com/a",
+                "content": "Build backend services.",
+                "location": {"name": "Taipei, Taiwan"},
+            },
+        ]
+    }
+    client = _greenhouse_client(payload)
+    result = ingest_board(db_session, client, Board("greenhouse", "stripe", "Stripe"))
+
+    assert result.status == "ok"
+    assert result.upserted == 1
+    row = db_session.query(Job).filter(Job.source == "greenhouse").one()
+    assert row.title == "Senior Backend Engineer"
+    assert db_session.query(JobFacets).count() == 0
+
+    run = db_session.query(JobIngestRun).one()
+    assert run.status == "ok"
+    assert run.error_snippet is not None
+    assert "enrich exploded" in run.error_snippet
+
+
+def test_a_second_pass_over_unchanged_postings_writes_no_new_facets(db_session):
+    """The hash gate through the real ingest path, not just in isolation."""
+    payload = {
+        "jobs": [
+            {
+                "id": 1,
+                "title": "Senior Backend Engineer",
+                "absolute_url": "https://example.com/a",
+                "content": "Build backend services.",
+                "location": {"name": "Taipei, Taiwan"},
+            },
+        ]
+    }
+    first = ingest_board(
+        db_session, _greenhouse_client(payload), Board("greenhouse", "stripe", "Stripe")
+    )
+    assert first.status == "ok"
+    first_row = db_session.query(JobFacets).one()
+    first_enriched_at = first_row.enriched_at
+
+    second = ingest_board(
+        db_session, _greenhouse_client(payload), Board("greenhouse", "stripe", "Stripe")
+    )
+    assert second.status == "ok"
+    assert db_session.query(JobFacets).count() == 1
+    second_row = db_session.query(JobFacets).one()
+    assert second_row.enriched_at == first_enriched_at
+
+
+def test_a_posting_dropped_by_scope_rules_gets_no_facets_row(db_session):
+    payload = {
+        "jobs": [
+            {
+                "id": 1,
+                "title": "Enterprise Account Executive",
+                "absolute_url": "https://example.com/a",
+                "content": "Sell things.",
+                "location": {"name": "NYC"},
+            },
+        ]
+    }
+    result = ingest_board(
+        db_session, _greenhouse_client(payload), Board("greenhouse", "stripe", "Stripe")
+    )
+    assert result.status == "ok"
+    assert result.upserted == 0
+    # Dropped before upsert_jobs ever saw it -- no Job row, and so no facets row.
+    assert db_session.query(Job).count() == 0
+    assert db_session.query(JobFacets).count() == 0

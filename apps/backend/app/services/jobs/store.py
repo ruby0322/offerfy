@@ -29,11 +29,24 @@ def upsert_jobs(
     jobs: list[NormalizedJob],
     *,
     now: datetime | None = None,
-) -> int:
+) -> list[str]:
+    """Insert-or-update each job, returning the `Job.id` of every row touched.
+
+    Returns ids rather than a bare count so a caller can hand them straight to
+    `enrich.enrich_jobs(job_ids=...)` without a second, per-posting query to
+    look them back up. `Job.id`'s default (`_uuid`) is only applied by the ORM
+    at INSERT time, so a brand new row's id is not actually set until this
+    flushes -- which is why the ids are read only after the one `db.flush()`
+    below, not inside the loop. `len(result)` is the old count for callers
+    that only ever wanted that.
+
+    Flushes but does not commit, the same contract `enrich.enrich_jobs`
+    follows: the caller still owns the transaction and its rollback.
+    """
     if not jobs:
-        return 0
+        return []
     stamp = now or datetime.now(timezone.utc)
-    count = 0
+    rows: list[Job] = []
     for item in jobs:
         row = (
             db.query(Job)
@@ -60,8 +73,9 @@ def upsert_jobs(
         row.posted_at = item.posted_at
         row.last_seen_at = stamp
         row.is_active = True
-        count += 1
-    return count
+        rows.append(row)
+    db.flush()
+    return [row.id for row in rows]
 
 
 def touch_jobs(
