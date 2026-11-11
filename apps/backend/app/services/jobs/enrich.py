@@ -194,6 +194,13 @@ class LocationFacets:
 
 
 _MULTIPLE_LOCATIONS_PLACEHOLDER = "multiple locations"
+# JobFacets.city is String(255) while Job.location is String(512), so a
+# single long segment can overflow the column. SQLite ignores VARCHAR
+# lengths, which is why no test caught this; Postgres raises DataError at
+# enrich's flush. Truncating follows profile.clamp_payload's precedent:
+# truncating loses a clause of a city name, rejecting loses the facets row
+# (and with it the posting's visibility to every filtered query).
+_CITY_MAX_CHARS = 255
 
 
 def _best_country_match(
@@ -289,7 +296,7 @@ def location_facets(
             continue
         if _is_country_or_region_name(segment_casefolded, config):
             continue
-        city = segment
+        city = segment[:_CITY_MAX_CHARS]
         break
 
     return LocationFacets(country, region, city)

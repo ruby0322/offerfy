@@ -250,6 +250,63 @@ def test_location_facets(raw, source, expected):
     assert location_facets(raw, source=source, remote=None) == expected
 
 
+# A needle padded on both sides (" x ") cannot match a token that sits next
+# to punctuation, so every one of them needs its " x," sibling in the same
+# rule. That gap is invisible in review -- it is how " coop " shipped without
+# " coop," and only surfaced in round 3 of review -- so it is a test.
+# Exempt: " head of " is always followed by a noun ("Head of Engineering"), so
+# a comma can never immediately follow it.
+_PADDING_SIBLING_EXEMPT = {" head of "}
+
+
+def test_padded_needles_have_their_punctuation_siblings():
+    taxonomy = load_taxonomy()
+    rules = [(f"seniority:{r.seniority}", r.needles) for r in taxonomy.seniority_rules]
+    rules += [(f"title:{r.function}", r.title_needles) for r in taxonomy.function_rules]
+    rules += [
+        (f"description:{r.function}", r.description_needles)
+        for r in taxonomy.function_rules
+    ]
+    missing = [
+        (name, needle)
+        for name, needles in rules
+        for needle in needles
+        if needle.startswith(" ")
+        and needle.endswith(" ")
+        and len(needle) > 2
+        and needle not in _PADDING_SIBLING_EXEMPT
+        and f" {needle.strip()}," not in set(needles)
+    ]
+    assert missing == []
+
+
+def test_city_is_truncated_to_the_column_width():
+    """A long location segment must not overflow JobFacets.city.
+
+    city is String(255), Job.location is String(512), and a single segment can
+    fill the latter. SQLite ignores VARCHAR lengths so the suite would pass
+    either way; Postgres raises DataError at enrich's flush, which (before the
+    savepoint in ingest_board) took the whole ingest pass with it.
+    """
+    facets = location_facets("Taipei " + "\u9577" * 300, source="workday", remote=None)
+    assert facets.country == "TW"
+    assert facets.city is not None
+    assert len(facets.city) == 255
+
+
+def test_country_and_region_values_fit_their_columns():
+    """The other two facet columns, for the same class of bug.
+
+    Unlike city, neither is ever copied out of the posting: both are *values*
+    from job_taxonomy.json's closed vocabularies, so the bound belongs on the
+    vocabulary rather than on the assignment. country is String(2) and region
+    is String(32) (app/models.py JobFacets).
+    """
+    taxonomy = load_taxonomy()
+    assert all(len(v) <= 2 for v in taxonomy.location_countries.values())
+    assert all(len(v) <= 32 for v in taxonomy.location_regions.values())
+
+
 def test_location_none_yields_empty_facets_without_raising():
     assert location_facets(None, source="ashby", remote=True) == LocationFacets(None, None, None)
 
