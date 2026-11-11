@@ -110,9 +110,14 @@ def ingest_workday_board(
     # calling it on `still_live` ids would just be a wasted bulk lookup every
     # pass. Same swallow-and-record contract as ingest_board: a derivation bug
     # must cost only the facets row, never the posting or the commit.
+    # Savepoint for the same reason as ingest_board's: see the comment there.
+    # A plain try/except cannot contain a database-level failure, because the
+    # session is left rollback-pending and expire_missing below would be the
+    # one to raise.
     enrich_error: str | None = None
     try:
-        enrich_jobs(db, job_ids=new_ids)
+        with db.begin_nested():
+            enrich_jobs(db, job_ids=new_ids)
     except Exception as exc:  # noqa: BLE001 - must never fail the pass
         enrich_error = f"enrich_jobs: {exc}"
     expired = expire_missing(

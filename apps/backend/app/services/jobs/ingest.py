@@ -123,9 +123,19 @@ def ingest_board(
     # makes that posting invisible to a *filtered* query, not to /jobs
     # unfiltered). So the exception is swallowed and surfaced on the run row
     # instead of being allowed to propagate past this point.
+    #
+    # The savepoint is load-bearing, not decorative: a *database*-level failure
+    # (a DataError on a too-long column, a missing job_facets table) leaves the
+    # session rollback-pending, so without it the bare except would swallow the
+    # message and then the very next statement -- expire_missing, below --
+    # would raise PendingRollbackError straight out of ingest_board and abort
+    # the whole 119-board pass. begin_nested() confines the unwind to the facet
+    # writes, leaving the outer transaction usable so expire_missing,
+    # record_run and the commit all still land.
     enrich_error: str | None = None
     try:
-        enrich_jobs(db, job_ids=upserted_ids)
+        with db.begin_nested():
+            enrich_jobs(db, job_ids=upserted_ids)
     except Exception as exc:  # noqa: BLE001 - must never fail the pass
         enrich_error = f"enrich_jobs: {exc}"
     expired = expire_missing(

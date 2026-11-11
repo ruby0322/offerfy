@@ -3,7 +3,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
+from sqlalchemy.exc import PendingRollbackError
 
+from app.db import get_session_factory
 from app.models import Job, JobFacets, JobIngestRun
 from app.services.jobs import ingest as ingest_module
 from app.services.jobs.ashby import parse_ashby
@@ -428,6 +430,69 @@ def test_enrichment_failure_does_not_fail_the_pass(db_session, monkeypatch):
     assert run.status == "ok"
     assert run.error_snippet is not None
     assert "enrich exploded" in run.error_snippet
+
+
+def test_database_level_enrichment_failure_does_not_fail_the_pass(db_session, monkeypatch):
+    """The other failure mode: enrichment fails *in the database*.
+
+    A plain Python exception (the test above) and a DBAPI error are not the
+    same thing. A DBAPI error leaves the session rollback-pending, so a bare
+    try/except around enrich_jobs records the message and then the very next
+    statement -- expire_missing -- raises PendingRollbackError, which escapes
+    ingest_board and aborts every remaining board in the pass. Only a
+    savepoint contains that. This is the Postgres DataError / missing-table
+    shape, reproduced here with a NOT NULL violation because SQLite will not
+    give us the first two.
+    """
+
+    def boom(db, **kwargs):
+        # seniority is NOT NULL: flushing this is a real IntegrityError from
+        # the driver, not a Python-level raise.
+        db.add(
+            JobFacets(
+                job_id="nonexistent",
+                seniority=None,
+                function="other",
+                description_hash="x" * 64,
+            )
+        )
+        db.flush()
+
+    monkeypatch.setattr(ingest_module, "enrich_jobs", boom)
+    payload = {
+        "jobs": [
+            {
+                "id": 1,
+                "title": "Senior Backend Engineer",
+                "absolute_url": "https://example.com/a",
+                "content": "Build backend services.",
+                "location": {"name": "Taipei, Taiwan"},
+            },
+        ]
+    }
+    client = _greenhouse_client(payload)
+    try:
+        result = ingest_board(db_session, client, Board("greenhouse", "stripe", "Stripe"))
+    except PendingRollbackError as exc:  # pragma: no cover - the regression
+        raise AssertionError(
+            f"a database-level enrichment failure escaped the pass: {exc}"
+        ) from exc
+
+    assert result.status == "ok"
+    assert result.upserted == 1
+
+    # The posting survived the commit and is readable on a fresh session.
+    fresh = get_session_factory()()
+    try:
+        row = fresh.query(Job).filter(Job.source == "greenhouse").one()
+        assert row.title == "Senior Backend Engineer"
+        assert fresh.query(JobFacets).count() == 0
+        run = fresh.query(JobIngestRun).one()
+        assert run.status == "ok"
+        assert run.error_snippet is not None
+        assert "enrich_jobs:" in run.error_snippet
+    finally:
+        fresh.close()
 
 
 def test_a_second_pass_over_unchanged_postings_writes_no_new_facets(db_session):
