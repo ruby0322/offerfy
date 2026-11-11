@@ -33,6 +33,19 @@ export type JobDetail = JobListItem & {
 export type JobList = {
   items: JobListItem[];
   next_cursor: string | null;
+  total: number;
+};
+
+export type JobFacetOption = {
+  value: string;
+  count: number;
+};
+
+export type JobFacetOptions = {
+  countries: JobFacetOption[];
+  regions: JobFacetOption[];
+  seniorities: JobFacetOption[];
+  functions: JobFacetOption[];
 };
 
 export type JobSitemapPage = {
@@ -44,8 +57,12 @@ export type JobSitemapPage = {
 
 export type JobQuery = {
   q?: string;
-  source?: string;
   remote?: string;
+  country?: string;
+  region?: string;
+  seniority?: string;
+  function?: string;
+  postedWithinDays?: string;
 };
 
 function backendBase(): string {
@@ -63,16 +80,29 @@ async function backendJson<T>(path: string): Promise<T | null> {
 }
 
 export function hasJobFilters(query: JobQuery): boolean {
-  return Boolean(query.q?.trim() || query.source || query.remote === "true" || query.remote === "false");
+  return Boolean(
+    query.q?.trim() ||
+      query.remote === "true" ||
+      query.remote === "false" ||
+      query.country ||
+      query.region ||
+      query.seniority ||
+      query.function ||
+      query.postedWithinDays,
+  );
 }
 
 export function jobListParams(query: JobQuery, extra?: { cursor?: string; limit?: number }): URLSearchParams {
   const params = new URLSearchParams();
   if (query.q?.trim()) params.set("q", query.q.trim());
-  if (query.source) params.set("source", query.source);
   if (query.remote === "true" || query.remote === "false") {
     params.set("remote", query.remote);
   }
+  if (query.country) params.set("country", query.country);
+  if (query.region) params.set("region", query.region);
+  if (query.seniority) params.set("seniority", query.seniority);
+  if (query.function) params.set("function", query.function);
+  if (query.postedWithinDays) params.set("posted_within_days", query.postedWithinDays);
   if (extra?.cursor) params.set("cursor", extra.cursor);
   params.set("limit", String(extra?.limit ?? 20));
   return params;
@@ -88,19 +118,23 @@ export function jobQueryString(query: JobQuery): string {
 export async function fetchJobList(query: JobQuery): Promise<JobList> {
   const qs = jobListParams(query).toString();
   const data = await backendJson<JobList>(`/v1/jobs?${qs}`);
-  return data ?? { items: [], next_cursor: null };
+  return data ?? { items: [], next_cursor: null, total: 0 };
 }
 
 export async function fetchJobListPage(query: JobQuery, cursor: string): Promise<JobList> {
   const qs = jobListParams(query, { cursor }).toString();
   const res = await fetch(`/api/v1/jobs?${qs}`, { cache: "no-store" });
-  if (!res.ok) return { items: [], next_cursor: null };
+  if (!res.ok) return { items: [], next_cursor: null, total: 0 };
   return (await res.json()) as JobList;
 }
 
 export async function fetchFeaturedJobs(): Promise<JobListItem[]> {
   const data = await backendJson<JobList>("/v1/jobs/featured");
   return data?.items ?? [];
+}
+
+export async function fetchJobFacets(): Promise<JobFacetOptions | null> {
+  return backendJson<JobFacetOptions>("/v1/jobs/facets");
 }
 
 export async function fetchJob(id: string): Promise<JobDetail | null> {

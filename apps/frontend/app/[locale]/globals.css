@@ -419,8 +419,11 @@ textarea {
   font-size: 1rem;
 }
 
-/* One filter per row rather than a 10rem field marooned in a wrapped line. */
-@media (max-width: 639px) {
+/* One filter per row rather than a 10rem field marooned in a wrapped line.
+   899px matches NARROW_SCREEN (lib/use-media-query.ts), the one threshold
+   that decides phone layout across the app -- this file does not invent
+   its own. */
+@media (max-width: 899px) {
   .jobs-field,
   .jobs-filters button {
     width: 100%;
@@ -443,6 +446,12 @@ textarea {
   color: var(--paper);
   border: 1px solid var(--ink);
   font-size: 0.9rem;
+}
+
+.jobs-count {
+  margin-top: 1.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
 }
 
 .jobs-more {

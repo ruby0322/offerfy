@@ -1,6 +1,6 @@
 import { getTranslations } from "next-intl/server";
 import type { AppLocale } from "@/i18n/routing";
-import { hasJobFilters, type JobList, type JobListItem, type JobQuery } from "@/lib/jobs";
+import { hasJobFilters, type JobFacetOptions, type JobList, type JobListItem, type JobQuery } from "@/lib/jobs";
 import JobSearchForm from "@/components/jobs/JobSearchForm";
 import JobResults from "@/components/jobs/JobResults";
 import JobsMarquee from "@/components/jobs/JobsMarquee";
@@ -10,9 +10,10 @@ type Props = {
   query: JobQuery;
   list: JobList;
   featured: JobListItem[];
+  facets: JobFacetOptions | null;
 };
 
-export default async function JobIndex({ locale, query, list, featured }: Props) {
+export default async function JobIndex({ locale, query, list, featured, facets }: Props) {
   const t = await getTranslations("jobs");
   const emptyKey = hasJobFilters(query) ? "emptyFiltered" : "emptyCatalog";
 
@@ -22,11 +23,14 @@ export default async function JobIndex({ locale, query, list, featured }: Props)
       <h1 className="font-display">{t("title")}</h1>
       <p className="jobs-lead">{t("lead")}</p>
       {featured.length > 0 ? <JobsMarquee locale={locale} jobs={featured} /> : null}
-      <JobSearchForm query={query} />
+      <JobSearchForm query={query} facets={facets} />
       {list.items.length === 0 ? (
         <p className="blog-empty">{t(emptyKey)}</p>
       ) : (
-        <JobResults locale={locale} query={query} initial={list} />
+        <>
+          <p className="jobs-count">{t("resultCount", { count: list.total })}</p>
+          <JobResults locale={locale} query={query} initial={list} />
+        </>
       )}
     </div>
   );
