@@ -3,17 +3,19 @@ import test from "node:test";
 import { hasJobFilters, jobListParams, jobQueryString } from "./jobs";
 
 test("jobListParams carries every facet", () => {
-  const params = jobListParams({ q: "backend", country: "TW", seniority: "senior",
+  const params = jobListParams({ q: "backend", country: "TW", region: "apac", seniority: "senior",
     function: "backend", postedWithinDays: "7" });
   assert.equal(params.get("country"), "TW");
+  assert.equal(params.get("region"), "apac");
   assert.equal(params.get("seniority"), "senior");
   assert.equal(params.get("function"), "backend");
   assert.equal(params.get("posted_within_days"), "7");
 });
 
 test("jobListParams omits blank facets", () => {
-  const params = jobListParams({ country: "", seniority: undefined });
+  const params = jobListParams({ country: "", region: undefined, seniority: undefined });
   assert.equal(params.has("country"), false);
+  assert.equal(params.has("region"), false);
   assert.equal(params.has("seniority"), false);
 });
 

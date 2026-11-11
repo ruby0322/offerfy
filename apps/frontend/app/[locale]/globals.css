@@ -407,6 +407,12 @@ textarea {
   color: var(--clay);
 }
 
+/* font-size: 1rem (16px) here is what keeps iOS from zooming in on focus and
+   never zooming back out -- these are focusable fields on a phone. Two
+   selectors beat a single Tailwind utility class on specificity, so a
+   "text-base md:text-sm" (or any other single-class override) added to the
+   input/select in JobSearchForm.tsx will not win and is dead weight; the
+   16px floor has to be raised or lowered right here instead. */
 .jobs-field input,
 .jobs-field select {
   min-width: 10rem;

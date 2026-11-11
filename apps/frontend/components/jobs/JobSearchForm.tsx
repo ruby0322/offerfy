@@ -10,6 +10,33 @@ type Props = {
 
 type JobsMessageKey = Parameters<ReturnType<typeof useTranslations<"jobs">>>[0];
 
+const COUNTRY_KEYS: Record<string, JobsMessageKey> = {
+  AU: "countryAu",
+  CA: "countryCa",
+  CH: "countryCh",
+  CN: "countryCn",
+  DE: "countryDe",
+  FR: "countryFr",
+  GB: "countryGb",
+  HK: "countryHk",
+  IE: "countryIe",
+  IL: "countryIl",
+  IN: "countryIn",
+  JP: "countryJp",
+  KR: "countryKr",
+  NL: "countryNl",
+  PL: "countryPl",
+  SG: "countrySg",
+  TW: "countryTw",
+  US: "countryUs",
+};
+
+const REGION_KEYS: Record<string, JobsMessageKey> = {
+  north_america: "regionNorthAmerica",
+  emea: "regionEmea",
+  apac: "regionApac",
+};
+
 const SENIORITY_KEYS: Record<string, JobsMessageKey> = {
   intern: "seniorityIntern",
   new_grad: "seniorityNewGrad",
@@ -38,6 +65,17 @@ const FUNCTION_KEYS: Record<string, JobsMessageKey> = {
 export default function JobSearchForm({ query, facets }: Props) {
   const t = useTranslations("jobs");
 
+  // Both vocabularies are closed (18 countries, 3 regions), but a value that
+  // arrives from the API ahead of a message-file update must still render
+  // something rather than throw -- so the fallback is the raw value itself,
+  // not another translation key (unlike seniority/function, which fall back
+  // to an "unknown"/"other" key because those buckets have no raw value a
+  // visitor could read).
+  function labeled(keys: Record<string, JobsMessageKey>, value: string): string {
+    const key = keys[value];
+    return key ? t(key) : value;
+  }
+
   return (
     <form className="jobs-filters" method="get">
       <label className="jobs-field">
@@ -47,12 +85,11 @@ export default function JobSearchForm({ query, facets }: Props) {
           name="q"
           defaultValue={query.q ?? ""}
           placeholder={t("queryPlaceholder")}
-          className="text-base md:text-sm"
         />
       </label>
       <label className="jobs-field">
         <span>{t("remoteLabel")}</span>
-        <select name="remote" defaultValue={query.remote ?? ""} className="text-base md:text-sm">
+        <select name="remote" defaultValue={query.remote ?? ""}>
           <option value="">{t("remoteAll")}</option>
           <option value="true">{t("remoteYes")}</option>
           <option value="false">{t("remoteNo")}</option>
@@ -61,11 +98,11 @@ export default function JobSearchForm({ query, facets }: Props) {
       {facets && facets.countries.length > 0 ? (
         <label className="jobs-field">
           <span>{t("countryLabel")}</span>
-          <select name="country" defaultValue={query.country ?? ""} className="text-base md:text-sm">
+          <select name="country" defaultValue={query.country ?? ""}>
             <option value="">{t("countryAll")}</option>
             {facets.countries.map((option) => (
               <option key={option.value} value={option.value}>
-                {option.value}
+                {labeled(COUNTRY_KEYS, option.value)}
               </option>
             ))}
           </select>
@@ -74,11 +111,11 @@ export default function JobSearchForm({ query, facets }: Props) {
       {facets && facets.regions.length > 0 ? (
         <label className="jobs-field">
           <span>{t("regionLabel")}</span>
-          <select name="region" defaultValue={query.region ?? ""} className="text-base md:text-sm">
+          <select name="region" defaultValue={query.region ?? ""}>
             <option value="">{t("regionAll")}</option>
             {facets.regions.map((option) => (
               <option key={option.value} value={option.value}>
-                {option.value}
+                {labeled(REGION_KEYS, option.value)}
               </option>
             ))}
           </select>
@@ -87,7 +124,7 @@ export default function JobSearchForm({ query, facets }: Props) {
       {facets && facets.seniorities.length > 0 ? (
         <label className="jobs-field">
           <span>{t("seniorityLabel")}</span>
-          <select name="seniority" defaultValue={query.seniority ?? ""} className="text-base md:text-sm">
+          <select name="seniority" defaultValue={query.seniority ?? ""}>
             <option value="">{t("seniorityAll")}</option>
             {facets.seniorities.map((option) => (
               <option key={option.value} value={option.value}>
@@ -100,7 +137,7 @@ export default function JobSearchForm({ query, facets }: Props) {
       {facets && facets.functions.length > 0 ? (
         <label className="jobs-field">
           <span>{t("functionLabel")}</span>
-          <select name="function" defaultValue={query.function ?? ""} className="text-base md:text-sm">
+          <select name="function" defaultValue={query.function ?? ""}>
             <option value="">{t("functionAll")}</option>
             {facets.functions.map((option) => (
               <option key={option.value} value={option.value}>
@@ -112,7 +149,7 @@ export default function JobSearchForm({ query, facets }: Props) {
       ) : null}
       <label className="jobs-field">
         <span>{t("postedLabel")}</span>
-        <select name="postedWithinDays" defaultValue={query.postedWithinDays ?? ""} className="text-base md:text-sm">
+        <select name="postedWithinDays" defaultValue={query.postedWithinDays ?? ""}>
           <option value="">{t("postedAll")}</option>
           <option value="7">{t("posted7")}</option>
           <option value="30">{t("posted30")}</option>
