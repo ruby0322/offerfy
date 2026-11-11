@@ -77,6 +77,48 @@ def test_function_of_does_not_match_inside_a_longer_word(title, description):
     assert function_of(title, description) == "other"
 
 
+@pytest.mark.parametrize("title,description,expected", [
+    # " etl " (both-sides padded, no punctuation variant) stopped matching
+    # the moment the word sat at the end of a sentence or before a comma --
+    # exactly how these acronyms show up in prose. Verbatim repro case.
+    ("Engineer, Platform", "We maintain batch ETL.", "data"),
+    # Same acronym, comma-adjacent instead of period-adjacent (the other
+    # literal repro case; written as a full sentence rather than with a
+    # leading ellipsis, since the ellipsis in the bug report stood for
+    # elided context, not three literal periods glued to "ETL").
+    ("Engineer, Platform", "We also handle ETL, plus reporting.", "data"),
+    ("Engineer, Platform", "We built the ELT, then the dashboards.", "data"),
+    ("Engineer, Platform", "Skills needed: SQL.", "data"),
+    ("Engineer, Platform", "Must be comfortable with AWS.", "infra"),
+    ("Engineer, Platform", "We use AWS, GCP, and Azure.", "infra"),
+])
+def test_function_of_matches_keyword_adjacent_to_punctuation(title, description, expected):
+    assert function_of(title, description) == expected
+
+
+@pytest.mark.parametrize("title,expected", [
+    # This catalogue's own "Role, Qualifier" title idiom (see
+    # "Engineering Manager, Billing" and "Staff Software Engineer,
+    # Infrastructure" in the brief's table) puts a comma immediately after
+    # a short acronym needle that was tightened to require a trailing
+    # space -- that space is never there when a comma follows instead.
+    ("CTO, Platform Engineering", "manager"),
+    ("Lead, Platform Engineering", "senior"),
+    ("SDE, Platform Team", "mid"),
+])
+def test_seniority_of_matches_acronym_before_a_title_comma(title, expected):
+    assert seniority_of(title) == expected
+
+
+@pytest.mark.parametrize("title,expected", [
+    ("LLM, Applied Research Engineer", "ml"),
+    ("ASIC, Physical Design Engineer", "hardware"),
+    ("TPM, Platform Reliability", "product"),
+])
+def test_function_of_matches_acronym_before_a_title_comma(title, expected):
+    assert function_of(title, "") == expected
+
+
 def test_taxonomy_file_covers_both_vocabularies_exactly():
     taxonomy = load_taxonomy()
     assert {rule.seniority for rule in taxonomy.seniority_rules} <= {

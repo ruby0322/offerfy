@@ -52,6 +52,7 @@
         "vice president",
         "chief technology officer",
         " cto ",
+        " cto,",
         "經理",
         "主管",
         "總監"
@@ -68,6 +69,7 @@
         "tech lead",
         "technical lead",
         " lead ",
+        " lead,",
         "資深"
       ]
     },
@@ -120,6 +122,7 @@
         "architect",
         "researcher",
         " sde ",
+        " sde,",
         "工程師",
         "開發",
         "研究員",
@@ -142,7 +145,8 @@
         "computer vision",
         " ai engineer",
         " ai researcher",
-        " llm "
+        " llm ",
+        " llm,"
       ],
       "description_any": [
         "machine learning",
@@ -177,8 +181,14 @@
         "data warehouse",
         "data lake",
         " etl ",
+        " etl,",
+        " etl.",
         " elt ",
+        " elt,",
+        " elt.",
         " sql ",
+        " sql,",
+        " sql.",
         "big data"
       ]
     },
@@ -212,6 +222,7 @@
         "hardware engineer",
         "silicon",
         " asic ",
+        " asic,",
         "fpga",
         "firmware engineer",
         "pcb",
@@ -256,8 +267,14 @@
         "on-call rotation",
         "cloud infrastructure",
         " aws ",
+        " aws,",
+        " aws.",
         " gcp ",
-        " azure "
+        " gcp,",
+        " gcp.",
+        " azure ",
+        " azure,",
+        " azure."
       ]
     },
     {
@@ -306,6 +323,7 @@
         "program manager",
         "technical program manager",
         " tpm ",
+        " tpm,",
         "產品經理"
       ],
       "description_any": [
