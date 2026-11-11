@@ -401,3 +401,105 @@ def test_enrich_explicit_job_ids_are_not_chunked(db_session, monkeypatch):
 
     assert enrich_jobs(db_session, job_ids=[job.id for job in jobs]) == 5
     assert batch_sizes == [5]
+
+
+def test_survey_reports_unknown_shares(db_session, capsys):
+    _add_job(db_session, source_id="a:1", title="Senior Backend Engineer", location="Taipei, Taiwan")
+    _add_job(db_session, source_id="a:2", title="Wizard of Light Bulb Moments", location=None)
+    enrich_jobs(db_session); db_session.commit()
+    from app.jobs.survey_facets import survey
+    report = survey(db_session)
+    assert report["total"] == 2
+    assert report["unknown_seniority"] == 1
+    assert report["null_country"] == 1
+
+
+def test_survey_counts_missing_facets_separately_from_unknown_seniority(db_session):
+    # A posting with no job_facets row at all (enrich_jobs never ran on it)
+    # is a different problem from one whose needle lists ran and came back
+    # "unknown" -- conflating the two would send the maintainer tuning
+    # needles when a backfill is what is actually missing.
+    from app.jobs.survey_facets import survey
+
+    _add_job(db_session, source_id="b:1", title="Totally Unenriched Posting")
+    # No enrich_jobs call at all -- this job has no JobFacets row.
+    report = survey(db_session)
+    assert report["total"] == 1
+    assert report["no_facets"] == 1
+    assert report["unknown_seniority"] == 0
+
+
+def test_survey_groups_counts_by_source(db_session):
+    from app.jobs.survey_facets import survey
+
+    _add_job(db_session, source_id="g:1", source="greenhouse",
+              title="Senior Backend Engineer", location="Taipei, Taiwan")
+    _add_job(db_session, source_id="g:2", source="greenhouse",
+              title="Wizard of Light Bulb Moments", location=None)
+    _add_job(db_session, source_id="l:1", source="lever",
+              title="Mystery Role", location=None)
+    enrich_jobs(db_session)
+    db_session.commit()
+
+    report = survey(db_session)
+    by_source = report["by_source"]
+    assert by_source["greenhouse"]["total"] == 2
+    assert by_source["greenhouse"]["unknown_seniority"] == 1
+    assert by_source["greenhouse"]["null_country"] == 1
+    assert by_source["lever"]["total"] == 1
+    assert by_source["lever"]["unknown_seniority"] == 1
+    assert by_source["lever"]["null_country"] == 1
+
+
+def test_survey_limit_caps_rows_considered(db_session):
+    from app.jobs.survey_facets import survey
+
+    for i in range(5):
+        _add_job(db_session, source_id=f"lim:{i}")
+    enrich_jobs(db_session)
+    db_session.commit()
+
+    report = survey(db_session, limit=2)
+    assert report["total"] == 2
+
+
+def test_survey_on_empty_catalogue_returns_zeroes(db_session):
+    from app.jobs.survey_facets import survey
+
+    report = survey(db_session)
+    assert report["total"] == 0
+    assert report["unknown_seniority"] == 0
+    assert report["null_country"] == 0
+    assert report["no_facets"] == 0
+    assert report["by_source"] == {}
+
+
+def test_survey_never_writes_facets(db_session):
+    # Read-only: a maintainer runs this against production, so it must
+    # never call enrich_jobs or otherwise create/modify a job_facets row.
+    from app.jobs.survey_facets import survey
+
+    job = _add_job(db_session, source_id="ro:1", title="Senior Backend Engineer")
+    survey(db_session)
+    assert db_session.get(JobFacets, job.id) is None
+
+
+def test_survey_cli_main_prints_a_report(db_session, capsys, monkeypatch):
+    from app import jobs as jobs_pkg  # noqa: F401
+    import app.jobs.survey_facets as survey_facets
+    from app.db import get_session_factory
+
+    _add_job(db_session, source_id="cli:1", title="Senior Backend Engineer",
+              location="Taipei, Taiwan")
+    db_session.commit()
+
+    # main() opens its own session via get_session_factory(); in this test
+    # environment that factory is already bound to the same in-memory
+    # sqlite engine the db_session fixture uses, via conftest's reset_engine.
+    monkeypatch.setattr(survey_facets, "get_engine", lambda: None)
+    monkeypatch.setattr(survey_facets, "get_session_factory", lambda: get_session_factory())
+
+    exit_code = survey_facets.main([])
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "total" in captured.out.lower()
