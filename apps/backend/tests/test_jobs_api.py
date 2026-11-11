@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from app.models import Job
+from app.services.jobs.enrich import enrich_jobs
 from app.services.jobs.store import JOB_FRESHNESS_DAYS
 
 
@@ -217,3 +218,141 @@ def test_featured_jobs_skips_job_id_route(client, db_session):
     assert len(body["items"]) == 1
     assert body["items"][0]["title"] == "Engineer"
     assert "description_html" not in body["items"][0]
+    assert body["total"] == 1
+
+
+def test_filter_by_seniority(client, db_session):
+    _add_job(db_session, source_id="a:1", title="Staff Engineer")
+    _add_job(db_session, source_id="a:2", title="Junior Developer")
+    enrich_jobs(db_session)
+    db_session.commit()
+    body = client.get("/v1/jobs?seniority=staff_plus").json()
+    assert [item["title"] for item in body["items"]] == ["Staff Engineer"]
+
+
+def test_filter_by_country_and_function(client, db_session):
+    # One Taipei backend posting and one San Francisco ML posting.
+    _add_job(db_session, source_id="a:1", title="Backend Engineer", location="Taipei, Taiwan")
+    _add_job(
+        db_session,
+        source_id="a:2",
+        title="Machine Learning Engineer",
+        location="San Francisco, CA",
+    )
+    enrich_jobs(db_session)
+    db_session.commit()
+    body = client.get("/v1/jobs?country=TW&function=backend").json()
+    assert body["total"] == 1
+
+
+def test_invalid_facet_value_is_422(client):
+    assert client.get("/v1/jobs?seniority=wizard").status_code == 422
+    assert client.get("/v1/jobs?function=vibes").status_code == 422
+    assert client.get("/v1/jobs?region=mars").status_code == 422
+
+
+def test_total_counts_the_filtered_set_not_the_page(client, db_session):
+    # 25 matching active postings, default limit 20.
+    for i in range(25):
+        _add_job(db_session, source_id=f"mid:{i}", title=f"Engineer {i}")
+    enrich_jobs(db_session)
+    db_session.commit()
+    body = client.get("/v1/jobs?seniority=mid").json()
+    assert len(body["items"]) == 20
+    assert body["total"] == 25
+
+
+def test_unfiltered_list_still_returns_jobs_with_no_facets_row(client, db_session):
+    _add_job(db_session, source_id="a:9", title="Engineer")  # never enriched
+    body = client.get("/v1/jobs").json()
+    assert body["total"] == 1
+
+
+def test_facet_filter_excludes_jobs_with_no_facets_row(client, db_session):
+    _add_job(db_session, source_id="a:9", title="Engineer")  # never enriched
+    assert client.get("/v1/jobs?seniority=mid").json()["total"] == 0
+
+
+def test_cursor_paging_under_a_facet_filter_yields_each_row_once(client, db_session):
+    # 25 matching postings; walk every page via next_cursor.
+    for i in range(25):
+        _add_job(db_session, source_id=f"page:{i}", title=f"Engineer {i}")
+    enrich_jobs(db_session)
+    db_session.commit()
+    seen, cursor = [], None
+    while True:
+        url = "/v1/jobs?seniority=mid&limit=10" + (f"&cursor={cursor}" if cursor else "")
+        page = client.get(url).json()
+        seen += [item["id"] for item in page["items"]]
+        cursor = page["next_cursor"]
+        if not cursor:
+            break
+    assert len(seen) == len(set(seen)) == 25
+
+
+def test_posted_within_days_filters_on_posted_at(client, db_session):
+    # One posting 3 days old, one 60 days old, both active and fresh.
+    now = datetime.now(timezone.utc)
+    _add_job(db_session, source_id="a:1", title="Recent", posted_at=now - timedelta(days=3))
+    _add_job(db_session, source_id="a:2", title="Old", posted_at=now - timedelta(days=60))
+    assert client.get("/v1/jobs?posted_within_days=7").json()["total"] == 1
+
+
+def test_posted_within_days_excludes_null_posted_at(client, db_session):
+    """Decision: a posting with no posted_at cannot be confirmed within any
+    window, so posted_within_days excludes it rather than admitting it (the
+    way _posted_at_order's nulls_last sorts it last but still shows it)."""
+    _add_job(db_session, source_id="a:1", title="Undated", posted_at=None)
+    body = client.get("/v1/jobs?posted_within_days=7").json()
+    assert body["total"] == 0
+
+
+def test_seniority_and_function_accept_the_fallback_values(client, db_session):
+    # "unknown" and "other" are real vocabulary members, not sentinels.
+    _add_job(db_session, source_id="a:1", title="Mystery Role")
+    enrich_jobs(db_session)
+    db_session.commit()
+    assert client.get("/v1/jobs?seniority=unknown").status_code == 200
+    assert client.get("/v1/jobs?function=other").status_code == 200
+
+
+def test_seniority_filter_includes_job_with_null_country(client, db_session):
+    # Title gives a seniority but the location string names no country.
+    _add_job(db_session, source_id="a:1", title="Senior Engineer", location="Remote")
+    enrich_jobs(db_session)
+    db_session.commit()
+    body = client.get("/v1/jobs?seniority=senior").json()
+    assert body["total"] == 1
+    facets = client.get("/v1/jobs/facets").json()
+    assert facets["countries"] == []
+
+
+def test_facets_endpoint_empty_catalogue_returns_empty_lists(client, db_session):
+    body = client.get("/v1/jobs/facets").json()
+    assert body == {"countries": [], "regions": [], "seniorities": [], "functions": []}
+
+
+def test_facets_endpoint_counts_only_active_fresh_postings(client, db_session):
+    # One active fresh TW posting, one inactive TW posting, one TW posting
+    # last seen beyond JOB_FRESHNESS_DAYS.
+    now = datetime.now(timezone.utc)
+    active_fresh = _add_job(
+        db_session, source_id="tw:1", location="Taipei, Taiwan", last_seen_at=now
+    )
+    inactive = _add_job(
+        db_session,
+        source_id="tw:2",
+        location="Taipei, Taiwan",
+        is_active=False,
+        last_seen_at=now,
+    )
+    stale = _add_job(
+        db_session,
+        source_id="tw:3",
+        location="Taipei, Taiwan",
+        last_seen_at=now - timedelta(days=JOB_FRESHNESS_DAYS + 1),
+    )
+    enrich_jobs(db_session, job_ids=[active_fresh.id, inactive.id, stale.id])
+    db_session.commit()
+    body = client.get("/v1/jobs/facets").json()
+    assert {"value": "TW", "count": 1} in body["countries"]
