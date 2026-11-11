@@ -143,7 +143,7 @@
     "postedAll": "不限時間",
     "posted7": "過去 7 天",
     "posted30": "過去 30 天",
-    "resultCount": "符合 {count} 筆職缺",
+    "resultCount": "{count, plural, other {符合 # 筆職缺}}",
     "submit": "搜尋",
     "more": "更多職缺",
     "featuredLabel": "值得看的職缺",

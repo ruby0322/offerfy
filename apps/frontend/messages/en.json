@@ -140,7 +140,7 @@
     "postedAll": "Any time",
     "posted7": "Past 7 days",
     "posted30": "Past 30 days",
-    "resultCount": "{count} jobs match",
+    "resultCount": "{count, plural, one {# job matches} other {# jobs match}}",
     "submit": "Search",
     "more": "More jobs",
     "featuredLabel": "Open roles worth a look",

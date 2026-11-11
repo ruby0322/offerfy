@@ -143,7 +143,7 @@
     "postedAll": "不限时间",
     "posted7": "过去 7 天",
     "posted30": "过去 30 天",
-    "resultCount": "符合 {count} 个职位",
+    "resultCount": "{count, plural, other {符合 # 个职位}}",
     "submit": "搜索",
     "more": "更多职位",
     "featuredLabel": "值得看的职位",
