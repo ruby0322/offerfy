@@ -250,3 +250,48 @@ def test_a_failed_build_still_records_spend(
     assert r["error"] == "provider_error"
     assert r["facts_state"] == "missing"
     assert db_session.query(LlmCall).count() == 1
+
+
+def _posting(db_session, n, function="backend", country="TW"):
+    from datetime import timedelta
+    from app.models import Job, JobFacets
+    from app.services.jobs.store import freshness_cutoff
+
+    job = Job(source="greenhouse", source_id=f"cnt-{n}", company="Acme", title="Engineer",
+              apply_url="https://x/a", source_url="https://x/s",
+              last_seen_at=freshness_cutoff() + timedelta(days=3), is_active=True)
+    db_session.add(job)
+    db_session.flush()
+    db_session.add(JobFacets(job_id=job.id, country=country, seniority="mid",
+                             function=function, description_hash="h"))
+    db_session.commit()
+
+
+def test_match_count_is_zero_for_a_user_with_no_preferences(client, db_session):
+    _signed_in(client, db_session, sub="sub-count0")
+    _posting(db_session, 0)
+    assert client.get("/v1/me/matches/count").json() == {"count": 0}
+
+
+def test_match_count_reflects_the_prefilter(client, db_session):
+    user = _signed_in(client, db_session, sub="sub-count3")
+    for i in range(3):
+        _posting(db_session, 100 + i)
+    _posting(db_session, 200, function="design")
+    _posting(db_session, 201, country="JP")
+    client.put("/v1/me/job-preferences",
+               json={"target_functions": ["backend"], "target_locations": ["tw"]})
+    assert client.get("/v1/me/matches/count").json() == {"count": 3}
+
+
+def test_match_count_counts_a_seed_that_was_never_saved(client, db_session):
+    user = _signed_in(client, db_session, sub="sub-countseed")
+    _facts(db_session, user, roles=[{"title": "Backend Engineer"}], locations=["Taipei, Taiwan"])
+    for i in range(2):
+        _posting(db_session, 300 + i)
+    assert client.get("/v1/me/matches/count").json() == {"count": 2}
+    assert db_session.query(JobPreference).filter_by(user_id=user.id).count() == 0
+
+
+def test_match_count_requires_sign_in(client):
+    assert client.get("/v1/me/matches/count").status_code == 401

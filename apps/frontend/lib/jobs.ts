@@ -240,3 +240,39 @@ export function remoteToValue(v: boolean | null): string {
 export function valueToRemote(v: string): boolean | null {
   return v === "true" ? true : v === "false" ? false : null;
 }
+
+// --- Match count -------------------------------------------------------------
+
+export async function fetchMatchCount(): Promise<number> {
+  const raw = await apiJson<{ count?: number }>("/api/v1/me/matches/count");
+  return typeof raw.count === "number" ? raw.count : 0;
+}
+
+export type SummaryLabels = {
+  seniority: (value: string) => string;
+  fn: (value: string) => string;
+  country: (value: string) => string;
+  remote: string;
+};
+
+/**
+ * One line describing what a person is looking for, e.g.
+ * "senior · backend, infra · Taiwan". Empty when the preference says nothing,
+ * so the caller can tell "no preference yet" from "no matches".
+ */
+export function preferenceSummary(
+  pref: Pick<
+    JobPreference,
+    "target_functions" | "target_locations" | "target_seniority" | "remote_required"
+  >,
+  labels: SummaryLabels,
+): string {
+  const parts: string[] = [];
+  if (pref.target_seniority) parts.push(labels.seniority(pref.target_seniority));
+  if (pref.target_functions.length) parts.push(pref.target_functions.map(labels.fn).join(", "));
+  if (pref.remote_required === true) parts.push(labels.remote);
+  else if (pref.target_locations.length) {
+    parts.push(pref.target_locations.map((c) => labels.country(c.toUpperCase())).join(", "));
+  }
+  return parts.join(" · ");
+}

@@ -211,7 +211,11 @@
     "sourceUpload": "Uploaded",
     "tailorCount": "{count, plural, one {# tailored version} other {# tailored versions}}",
     "tailorBadge": "Tailored",
-    "tailorExplainer": "Your master resume is the one you keep improving. A tailored version is a copy aimed at a single job."
+    "tailorExplainer": "Your master resume is the one you keep improving. A tailored version is a copy aimed at a single job.",
+    "matchCount": "{count, plural, one {# match} other {# matches}}",
+    "matchEmpty": "Tell us what you want next to see matching roles.",
+    "editPreferences": "Edit preferences",
+    "browseRoles": "Browse all roles"
   },
   "account": {
     "title": "Who you are",
@@ -762,6 +766,7 @@
           "paragraphs": [
             "Google: to sign you in.",
             "Language-model provider: we send resume, upload, and chat content to an OpenAI-compatible API when you use chat, and — if you have turned on “Open to matching” — to build the profile we show employers.",
+            "Separately from the employer-introduction consent (“Open to matching”), any user with a published resume can ask us to read it for job matching, and when they do we send the resume’s content to our language-model provider to extract the facts used for matching (current role, level and location); that extraction is not sharing your resume with employers, who receive nothing from it.",
             "Employers and recruiters: only if you have turned on “Open to matching”, and only through credentials we issue to named organisations. There is no public or self-serve access.",
             "Infrastructure: database, object storage, and hosting that run Offerfy.",
             "We do not sell personal data. Offerfy does not include a third-party analytics product today."

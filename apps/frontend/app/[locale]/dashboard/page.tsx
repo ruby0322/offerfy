@@ -17,6 +17,8 @@ import {
   logout,
   type Resume,
 } from "@/lib/api";
+import { COUNTRY_KEYS, FUNCTION_KEYS, SENIORITY_KEYS } from "@/components/jobs/JobSearchForm";
+import { fetchJobPreferences, fetchMatchCount, preferenceSummary } from "@/lib/jobs";
 
 function groupResumes(resumes: Resume[]) {
   const masters = resumes.filter((r) => (r.kind ?? "master") === "master");
@@ -83,23 +85,45 @@ function TailorRow({
   );
 }
 
+type MatchLine = { count: number; summary: string };
+
 type Doomed = { resume: Resume; tailorCount: number };
 
 export default function DashboardPage() {
   const t = useTranslations("dashboard");
   const tCommon = useTranslations("common");
   const tPicker = useTranslations("picker");
+  const tJobs = useTranslations("jobs");
   const router = useRouter();
   const toast = useToast();
   const [resumes, setResumes] = useState<Resume[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
+  const [matchLine, setMatchLine] = useState<MatchLine | null>(null);
   const [doomed, setDoomed] = useState<Doomed | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    // Started up front so it runs alongside getMe -> claimResumes -> listResumes
+    // instead of extending that chain. Best-effort: the line just stays hidden.
+    Promise.all([fetchMatchCount(), fetchJobPreferences()])
+      .then(([count, pref]) => {
+        if (cancelled) return;
+        const label = (keys: Record<string, string>, v: string) =>
+          keys[v] ? tJobs(keys[v] as Parameters<typeof tJobs>[0]) : v;
+        setMatchLine({
+          count,
+          summary: preferenceSummary(pref, {
+            seniority: (v) => label(SENIORITY_KEYS, v),
+            fn: (v) => label(FUNCTION_KEYS, v),
+            country: (v) => label(COUNTRY_KEYS, v),
+            remote: tJobs("remote"),
+          }),
+        });
+      })
+      .catch(() => {});
     (async () => {
       try {
         const me = await getMe();
@@ -125,7 +149,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [router, t]);
+  }, [router, t, tJobs]);
 
   const { groups, orphans } = useMemo(() => groupResumes(resumes ?? []), [resumes]);
   // The badges only need explaining to someone who has just grown their first
@@ -185,6 +209,32 @@ export default function DashboardPage() {
             </button>
           </div>
         </div>
+
+        {matchLine ? (
+          <div
+            className="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm"
+            data-testid="dashboard-matches"
+          >
+            <p>
+              {matchLine.summary ? (
+                <>
+                  <span className="font-medium">{t("matchCount", { count: matchLine.count })}</span>
+                  <span className="text-muted-foreground"> {"\u00b7"} {matchLine.summary}</span>
+                </>
+              ) : (
+                <span className="text-muted-foreground">{t("matchEmpty")}</span>
+              )}
+            </p>
+            <span className="flex gap-3">
+              <Link href="/preferences" className="underline">
+                {t("editPreferences")}
+              </Link>
+              <Link href="/jobs" className="underline">
+                {t("browseRoles")}
+              </Link>
+            </span>
+          </div>
+        ) : null}
 
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
 

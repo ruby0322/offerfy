@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import require_user
+from app.jobs.match_sweep import count_matches
 from app.models import JobPreference, User
 from app.schemas_jobs import JobPreferenceIn, JobPreferenceOut, ResumeFactsRefreshOut
 from app.services.jobs.preferences import current_or_seeded
@@ -76,6 +77,18 @@ def put_job_preferences(
     db.commit()
     db.refresh(row)
     return _out(db, user, row)
+
+
+@router.get("/v1/me/matches/count")
+def get_match_count(
+    db: Session = Depends(get_db), user: User = Depends(require_user)
+) -> dict[str, int]:
+    """How many active postings pass the person's preference filter.
+
+    Uses the saved row, or the unsaved seed, so it agrees with what the editor
+    shows. A preference that constrains nothing counts as 0, not the catalogue.
+    """
+    return {"count": count_matches(db, current_or_seeded(db, user))}
 
 
 @router.post("/v1/me/resume-facts/refresh", response_model=ResumeFactsRefreshOut)
