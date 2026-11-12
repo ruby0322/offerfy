@@ -1204,6 +1204,10 @@ class Application(Base):
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
 
+    # Read-only convenience for the dashboard (pipeline eager-loads it). No
+    # schema effect; the foreign key above is the whole relationship in SQL.
+    job: Mapped["Job"] = relationship(viewonly=True, lazy="select")
+
 
 class ResumeContent(Base):
     """A structured snapshot of one resume's content, for switching templates.
