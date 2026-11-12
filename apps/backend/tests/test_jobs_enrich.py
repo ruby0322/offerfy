@@ -637,3 +637,23 @@ def test_the_hash_gate_reacts_to_a_boilerplate_change(db_session):
     db_session.flush()
     recompute_boilerplate(db_session)            # mission drops below the cutoff
     assert enrich_jobs(db_session) == 4          # rewritten unforced, by the hash alone
+
+
+@pytest.mark.parametrize(
+    "description, expected",
+    [
+        ("Our stack is modern.\n  React and TypeScript on the front end.", "frontend"),
+        ("Data team. SQL, dbt and Airflow daily.", "data"),
+    ],
+)
+def test_stripping_does_not_break_padded_needles_without_boilerplate(
+    db_session, description, expected
+):
+    # No boilerplate row exists for this company: stripping must not change
+    # the derived function. A space-padded needle at a segment boundary
+    # (e.g. ' react ', ' sql,') must still match after segments are rejoined.
+    job = _add_job(db_session, source_id="pad", company="NoBoilerplateCo",
+                   title="Member of Staff", description_text=description)
+    assert function_of(job.title, description) == expected   # raw baseline
+    enrich_jobs(db_session)
+    assert db_session.query(JobFacets).one().function == expected

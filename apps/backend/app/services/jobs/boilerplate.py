@@ -28,11 +28,14 @@ Document frequency is over DISTINCT sentences per document: a sentence
 repeated inside one posting counts once toward its own frequency, otherwise
 a single posting could single-handedly make its own sentence "common".
 
-`strip_boilerplate` rejoins survivors with a newline, never a space.
+`strip_boilerplate` rejoins survivors with " \n " (space, newline, space).
 Descriptions hold newline-separated bullets with no terminator; joining
-with a space would splice the tail of one bullet onto the head of the next
-and manufacture a needle ("computer" + "vision") that neither contained.
-Needles are space-padded, and a newline is not a space.
+with a bare space would splice the tail of one bullet onto the head of the
+next and manufacture a needle ("computer" + "vision") that neither
+contained -- the newline prevents that. But needles are space-padded
+(' react ', ' sql,'), and a bare newline is not a space, so a needle at the
+start or end of a segment would stop matching; the surrounding spaces
+restore that boundary match. Both halves are load-bearing.
 
 Text is casefolded once up front, so hashes are over casefolded sentences
 and stripped output is casefolded too, which is what needle matching wants
@@ -108,14 +111,15 @@ def strip_boilerplate(text: str, hashes: frozenset[str]) -> str:
     """Casefolded text without the sentences whose hash is in `hashes`.
 
     Short segments are always kept (they are never boilerplate). Survivors
-    are joined with "\\n", never " ", so no needle forms across a junction.
+    are joined with " \\n " (the newline stops needles splicing across a junction,
+    the spaces keep space-padded needles matching at a segment edge).
     """
     kept = [
         s
         for s in _segments(text)
         if len(s) <= MIN_SENTENCE_CHARS or sentence_hash(s) not in hashes
     ]
-    return "\n".join(kept)
+    return " \n ".join(kept)
 
 
 def normalize_company(name: str) -> str:
