@@ -8,9 +8,9 @@ type Props = {
   facets: JobFacetOptions | null;
 };
 
-type JobsMessageKey = Parameters<ReturnType<typeof useTranslations<"jobs">>>[0];
+export type JobsMessageKey = Parameters<ReturnType<typeof useTranslations<"jobs">>>[0];
 
-const COUNTRY_KEYS: Record<string, JobsMessageKey> = {
+export const COUNTRY_KEYS: Record<string, JobsMessageKey> = {
   AU: "countryAu",
   CA: "countryCa",
   CH: "countryCh",
@@ -37,7 +37,7 @@ const REGION_KEYS: Record<string, JobsMessageKey> = {
   apac: "regionApac",
 };
 
-const SENIORITY_KEYS: Record<string, JobsMessageKey> = {
+export const SENIORITY_KEYS: Record<string, JobsMessageKey> = {
   intern: "seniorityIntern",
   new_grad: "seniorityNewGrad",
   junior: "seniorityJunior",
@@ -48,7 +48,7 @@ const SENIORITY_KEYS: Record<string, JobsMessageKey> = {
   unknown: "seniorityUnknown",
 };
 
-const FUNCTION_KEYS: Record<string, JobsMessageKey> = {
+export const FUNCTION_KEYS: Record<string, JobsMessageKey> = {
   backend: "functionBackend",
   frontend: "functionFrontend",
   fullstack: "functionFullstack",

@@ -27,3 +27,85 @@ test("hasJobFilters sees a facet-only query", () => {
 test("jobQueryString drops limit but keeps facets", () => {
   assert.equal(jobQueryString({ country: "TW" }), "?country=TW");
 });
+
+function stubFetch(body: unknown, calls: { url: string; init?: RequestInit }[]) {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    calls.push({ url, init });
+    return new Response(JSON.stringify(body), { status: 200 });
+  }) as typeof fetch;
+  return () => {
+    globalThis.fetch = original;
+  };
+}
+
+test("saveJobPreferences sends lists, not pipe-delimited strings", async () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  const restore = stubFetch(
+    {
+      target_functions: ["backend", "data"],
+      target_locations: ["tw"],
+      target_seniority: "senior",
+      remote_required: false,
+      activity: "browsing",
+      updated_at: "2026-11-12T00:00:00Z",
+      facts_state: "fresh",
+    },
+    calls,
+  );
+  try {
+    const { saveJobPreferences } = await import("./jobs");
+    await saveJobPreferences({
+      target_functions: ["backend", "data"],
+      target_locations: ["tw"],
+      target_seniority: "senior",
+      remote_required: false,
+      activity: "browsing",
+    });
+  } finally {
+    restore();
+  }
+  assert.equal(calls[0].url, "/api/v1/me/job-preferences");
+  assert.equal(calls[0].init?.method, "PUT");
+  const sent = JSON.parse(String(calls[0].init?.body));
+  assert.deepEqual(sent.target_functions, ["backend", "data"]);
+  assert.deepEqual(sent.target_locations, ["tw"]);
+  // StrictBool server-side: a string or 0/1 here is a 422.
+  assert.strictEqual(sent.remote_required, false);
+});
+
+test("fetchJobPreferences maps an absent seniority to null, not the string 'null'", async () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  const restore = stubFetch(
+    {
+      target_functions: [],
+      target_locations: [],
+      activity: "actively_looking",
+      updated_at: "2026-11-12T00:00:00Z",
+      facts_state: "missing",
+    },
+    calls,
+  );
+  try {
+    const { fetchJobPreferences } = await import("./jobs");
+    const pref = await fetchJobPreferences();
+    assert.strictEqual(pref.target_seniority, null);
+    assert.strictEqual(pref.remote_required, null);
+    assert.equal(pref.facts_state, "missing");
+  } finally {
+    restore();
+  }
+});
+
+test("refreshResumeFacts surfaces a 200-with-error rather than throwing", async () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  const restore = stubFetch({ facts_state: "missing", error: "no_source" }, calls);
+  try {
+    const { refreshResumeFacts } = await import("./jobs");
+    const out = await refreshResumeFacts();
+    assert.equal(out.error, "no_source");
+    assert.equal(calls[0].init?.method, "POST");
+  } finally {
+    restore();
+  }
+});

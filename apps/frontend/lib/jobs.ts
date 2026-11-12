@@ -1,4 +1,5 @@
 import type { AppLocale } from "@/i18n/routing";
+import { apiJson } from "@/lib/api";
 
 // taiwanjobs is retired and no longer ingested, but historical rows keep the
 // value, so it stays in the union and in sourceLabel.
@@ -163,4 +164,69 @@ export function sourceLabel(source: string, locale: AppLocale): string {
   if (source === "smartrecruiters") return "SmartRecruiters";
   if (source === "workday") return "Workday";
   return source;
+}
+
+// --- Job preferences ---------------------------------------------------------
+
+export type PreferenceActivity = "actively_looking" | "browsing" | "paused";
+export type FactsState = "missing" | "stale" | "fresh";
+
+/** Mirrors JobPreferenceOut. Lists on the wire; the pipe form is storage only. */
+export type JobPreference = {
+  target_functions: string[];
+  target_locations: string[];
+  target_seniority: string | null;
+  /** true remote-only, false on-site only, null no preference. */
+  remote_required: boolean | null;
+  activity: PreferenceActivity;
+  updated_at: string;
+  facts_state: FactsState;
+};
+
+/** The body of a full replacement: anything left out is cleared server-side. */
+export type JobPreferenceInput = Pick<
+  JobPreference,
+  "target_functions" | "target_locations" | "target_seniority" | "remote_required" | "activity"
+>;
+
+export type ResumeFactsRefresh = {
+  facts_state: FactsState;
+  error: string | null;
+};
+
+export async function fetchJobPreferences(): Promise<JobPreference> {
+  const raw = await apiJson<Partial<JobPreference>>("/api/v1/me/job-preferences");
+  // ?? null, not String(): an absent seniority must stay a real null.
+  return {
+    target_functions: raw.target_functions ?? [],
+    target_locations: raw.target_locations ?? [],
+    target_seniority: raw.target_seniority ?? null,
+    remote_required: raw.remote_required ?? null,
+    activity: raw.activity ?? "actively_looking",
+    updated_at: raw.updated_at ?? "",
+    facts_state: raw.facts_state ?? "missing",
+  };
+}
+
+export async function saveJobPreferences(input: JobPreferenceInput): Promise<JobPreference> {
+  // Built field by field so nothing but the five known keys can reach the
+  // wire, and remote_required stays a boolean or null (StrictBool: "true" is a 422).
+  const body: JobPreferenceInput = {
+    target_functions: input.target_functions,
+    target_locations: input.target_locations,
+    target_seniority: input.target_seniority,
+    remote_required: input.remote_required,
+    activity: input.activity,
+  };
+  return apiJson<JobPreference>("/api/v1/me/job-preferences", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function refreshResumeFacts(): Promise<ResumeFactsRefresh> {
+  const raw = await apiJson<Partial<ResumeFactsRefresh>>("/api/v1/me/resume-facts/refresh", {
+    method: "POST",
+  });
+  return { facts_state: raw.facts_state ?? "missing", error: raw.error ?? null };
 }
