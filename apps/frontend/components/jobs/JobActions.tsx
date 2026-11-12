@@ -30,6 +30,7 @@ type Props = {
 type State =
   | { kind: "loading" }
   | { kind: "guest" }
+  | { kind: "unknown" }
   | { kind: "ready"; application: Application | null; masterId: string | null };
 
 // The server component cannot know any of this: /jobs/[id] is public and
@@ -63,16 +64,16 @@ export default function JobActions({ jobId, applyUrl, title, company, applyLabel
         if (err instanceof ApiError && err.status === 401) {
           setState({ kind: "guest" });
         } else {
-          // Unknown: show the plain actions rather than a wrong "Save".
-          setState({ kind: "ready", application: null, masterId: null });
-          setError(t("actionFailed"));
+          // Failed to load: assert nothing. A "Save" would be wrong for
+          // someone who has saved this posting already.
+          setState({ kind: "unknown" });
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [jobId, t]);
+  }, [jobId]);
 
   // Present in every state, and in the server-rendered HTML, so the outbound
   // link is always there for a guest and for a crawler. Only a signed-in
@@ -101,6 +102,17 @@ export default function JobActions({ jobId, applyUrl, title, company, applyLabel
           {t("tailorForThisRole")}
         </Link>
         {applyLink}
+      </div>
+    );
+  }
+
+  if (state.kind === "unknown") {
+    return (
+      <div className="flex flex-wrap items-center gap-3">
+        {applyLink}
+        <p className="basis-full text-sm" role="alert">
+          {t("actionFailed")}
+        </p>
       </div>
     );
   }
@@ -178,8 +190,10 @@ export default function JobActions({ jobId, applyUrl, title, company, applyLabel
         type="button"
         className={ACTION}
         onClick={toggleSave}
-        disabled={busy}
+        // Past `saved`, the row is a status label: unsaving would only 409.
+        disabled={busy || (saved && application.status !== "saved")}
         aria-pressed={saved}
+        aria-label={saved && application.status === "saved" ? t("unsave") : undefined}
       >
         {saved ? t("saved") : t("save")}
       </button>

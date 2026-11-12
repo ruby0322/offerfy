@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GROUP_ORDER, groupApplications, type Application } from "./applications";
+import { ApiError } from "./api";
+import { GROUP_ORDER, fetchApplication, groupApplications, type Application } from "./applications";
 
 function row(job_id: string, status: string, last_status_at: string): Application {
   return {
@@ -47,4 +48,38 @@ test("an unknown status does not vanish from the grouping", () => {
   assert.equal(groups[0].status, "saved");
   assert.deepEqual(last, ["closed", "from_the_future"]);
   assert.equal(groups.flatMap((g) => g.items).length, 3);
+});
+
+async function withFetch(res: Response, fn: () => Promise<void>) {
+  const real = globalThis.fetch;
+  globalThis.fetch = async () => res;
+  try {
+    await fn();
+  } finally {
+    globalThis.fetch = real;
+  }
+}
+
+test("fetchApplication gives null on a 404", async () => {
+  await withFetch(new Response('{"detail":"Not found"}', { status: 404 }), async () => {
+    assert.equal(await fetchApplication("j1"), null);
+  });
+});
+
+test("fetchApplication rethrows anything but a 404", async () => {
+  for (const status of [401, 500]) {
+    await withFetch(new Response("{}", { status }), async () => {
+      await assert.rejects(
+        () => fetchApplication("j1"),
+        (err) => err instanceof ApiError && err.status === status,
+      );
+    });
+  }
+});
+
+test("fetchApplication returns the row on a 200", async () => {
+  const body = row("j1", "saved", "2026-11-01T00:00:00Z");
+  await withFetch(new Response(JSON.stringify(body), { status: 200 }), async () => {
+    assert.deepEqual(await fetchApplication("j1"), body);
+  });
 });
