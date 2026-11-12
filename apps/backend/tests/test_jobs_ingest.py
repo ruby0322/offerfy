@@ -601,7 +601,7 @@ def test_refresh_reenriches_a_workday_company_that_no_pass_would_revisit(db_sess
 def test_refresh_is_a_no_op_when_no_company_changed(db_session):
     _add_jobs(db_session, "Anduril", [f"{MISSION} {SOURCING}"] * 6, source="workday")
     db_session.flush()
-    refresh_boilerplate(db_session)
+    assert refresh_boilerplate(db_session) == 6
     assert refresh_boilerplate(db_session) == 0
 
 
@@ -614,16 +614,49 @@ def test_refresh_matches_companies_by_normalized_name(db_session):
 def test_catalog_pass_refreshes_boilerplate_before_the_board_loop(db_session, monkeypatch):
     calls = []
     monkeypatch.setattr(ingest_module, "refresh_boilerplate", lambda db, **kw: calls.append("refresh") or 0)
-    monkeypatch.setattr(ingest_module, "load_boards", lambda: [])
+    monkeypatch.setattr(ingest_module, "load_boards", lambda: [Board("greenhouse", "stripe", "Stripe")])
+
+    def fake_board(db, client, board, **kw):
+        calls.append("board")
+        return SourceResult(board.source, board.slug, "ok")
+
+    monkeypatch.setattr(ingest_module, "ingest_board", fake_board)
     ingest_catalog(db_session, client=None)
-    assert calls == ["refresh"]
+    assert calls == ["refresh", "board"]
 
 
-def test_a_refresh_failure_does_not_fail_the_pass(db_session, monkeypatch):
+def test_a_database_level_refresh_failure_does_not_fail_the_pass(db_session, monkeypatch):
     def boom(db, **kw):
-        raise RuntimeError("derivation exploded")
+        # seniority is NOT NULL: a real driver IntegrityError that leaves the
+        # session rollback-pending unless a savepoint contains it.
+        db.add(JobFacets(job_id="nonexistent", seniority=None, function="other", description_hash="x" * 64))
+        db.flush()
+
     monkeypatch.setattr(ingest_module, "refresh_boilerplate", boom)
-    monkeypatch.setattr(ingest_module, "load_boards", lambda: [])
-    ingest_catalog(db_session, client=None)   # must not raise
-    run = db_session.query(JobIngestRun).one()
-    assert "derivation exploded" in run.error_snippet
+    monkeypatch.setattr(ingest_module, "load_boards", lambda: [Board("greenhouse", "stripe", "Stripe")])
+    payload = {
+        "jobs": [
+            {
+                "id": 1,
+                "title": "Senior Backend Engineer",
+                "absolute_url": "https://example.com/a",
+                "content": "Build backend services.",
+                "location": {"name": "Taipei, Taiwan"},
+            },
+        ]
+    }
+    try:
+        result = ingest_catalog(db_session, client=_greenhouse_client(payload))
+    except PendingRollbackError as exc:  # pragma: no cover - the regression
+        raise AssertionError(f"a refresh failure escaped the pass: {exc}") from exc
+    assert [r.status for r in result.sources] == ["ok"]
+
+    fresh = get_session_factory()()
+    try:
+        assert fresh.query(Job).filter(Job.source == "greenhouse").one().title == "Senior Backend Engineer"
+        runs = {r.source: r for r in fresh.query(JobIngestRun)}
+        assert runs["greenhouse"].status == "ok"
+        assert runs["boilerplate"].status == "error"
+        assert "refresh_boilerplate:" in runs["boilerplate"].error_snippet
+    finally:
+        fresh.close()

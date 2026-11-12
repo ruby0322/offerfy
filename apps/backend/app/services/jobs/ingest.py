@@ -224,7 +224,8 @@ def ingest_catalog(db: Session, client: httpx.Client) -> CatalogResult:
             source="boilerplate",
             board_slug=None,
             started_at=started,
-            status="ok",
+            status="error",
+            error_count=1,
             error_snippet=f"refresh_boilerplate: {exc}",
         )
         db.commit()

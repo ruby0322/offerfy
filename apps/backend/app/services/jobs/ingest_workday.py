@@ -108,9 +108,9 @@ def ingest_workday_board(
     # untouched, but that alone no longer makes enrich_jobs a no-op on it: the
     # description_hash is over the *stripped* text, so it moves when the
     # company's boilerplate moves. Skipping still_live ids is correct for a
-    # different reason now -- ingest_catalog's refresh_boilerplate re-enriches
-    # every active posting of a company whose boilerplate changed, so calling
-    # it here would be a wasted bulk lookup every
+    # different reason now -- in a catalog pass, ingest_catalog's
+    # refresh_boilerplate re-enriches every active posting of a company whose
+    # boilerplate changed, so calling it here would be a wasted bulk lookup every
     # pass. Same swallow-and-record contract as ingest_board: a derivation bug
     # must cost only the facets row, never the posting or the commit.
     # Savepoint for the same reason as ingest_board's: see the comment there.
