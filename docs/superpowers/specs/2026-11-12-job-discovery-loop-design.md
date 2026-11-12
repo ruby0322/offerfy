@@ -185,8 +185,26 @@ visit, then only ever written by the user.
 `tailor_resume_id` (nullable FK, `ON DELETE SET NULL` — deleting the tailor
 must not erase the record that you applied), `status`
 (`saved` | `tailored` | `applied` | `interviewing` | `closed`), `source`
-(`digest` | `search` | `saved`), `applied_at`, `last_status_at`, `notes`.
-`UniqueConstraint(user_id, job_id)`.
+(`digest` | `search`), `applied_at`, `applied_confirmed_at`, `last_status_at`,
+`notes`. `UniqueConstraint(user_id, job_id)`.
+
+`applied_confirmed_at` is nullable and carries one thing: whether the
+optimistic advance to `applied` has been confirmed by the person. The outbound
+click sets `status = applied` and leaves it NULL; the dashboard asks those rows
+"did you apply?", and an answer either stamps it or reverts the row to
+`tailored`. It is a timestamp rather than a sixth status so that nothing which
+reads `status` has to learn a new value, and rather than an inferred window so
+that a person who returns three days later is still asked instead of being
+silently counted as an applicant. Carrying pending-ness in the status enum, or
+deriving it from `last_status_at`, both reach the same place: the
+tailored → applied conversion inflates with claims nobody made.
+
+`source` is `digest | search` only. The earlier draft of this table listed a
+third value, `saved`, which cannot be written by anything: `saved` is a
+*status*, and a row the save action creates originated from browsing, so its
+source is `search`. Keeping both enums overlapping on one word invited exactly
+the confusion of reading `source = saved, status = tailored` and not knowing
+which was meant.
 
 **`digests`** and **`digest_items`** — `digests`: `user_id`, `period_start`,
 `built_at`, `model`, `input_hash`, `status` (`full` | `degraded` | `empty`),
@@ -453,7 +471,12 @@ and four more sections that way is a six-request waterfall.
 2. **New for you** — the latest digest. Five postings, each with tier, reason
    and gap-when-present, unread-badged, each with one action: *Tailor it*. The
    `empty` state names its cause ("41 new roles, none senior backend in Taipei")
-   and offers to widen the preference.
+   and offers to widen the preference. **This card is slice 4.** Until it lands,
+   slot 2 holds the match count — "N new matches" with *Browse all roles* —
+   reusing the count endpoint slice 2 shipped. The slot is the dashboard's only
+   route onward for someone with no applications yet, so it cannot be empty in
+   slice 3, and the count is the honest thing to put there: it is what the
+   deterministic prefilter already knows without any scoring.
 3. **Your applications** — grouped by status, ordered by heat:
    `interviewing` → `applied` → `tailored` → `saved`. One next action per row,
    determined by status: `saved` → *Tailor it*; `tailored` → *Apply*
@@ -463,7 +486,13 @@ and four more sections that way is a six-request waterfall.
    would hide the design's own biggest failure. Applied rows show quiet-time
    ("8 days quiet").
 4. **Master resume health** — one card: published state, facts freshness,
-   whether matching is running on the current version.
+   whether matching is running on the current version (`resume_facts
+   .source_revision_id` against `resumes.published_revision_id`). Freshness is
+   `resume_facts.facts_are_stale`, reused rather than restated — a second
+   staleness rubric here would drift from the one the refresh path enforces.
+   When the card reports a problem it offers *Rebuild now*, calling the
+   already-metered `POST /v1/me/resume-facts/refresh`; it never rebuilds on
+   its own, because a page visit must not spend someone's credits.
 5. **Employers who viewed you** — `disclosure_count` and `last_disclosed_at`,
    which already exist and are already computed in `app/routers/talent_me.py`
    and currently surface only at `app/[locale]/settings/page.tsx:233`.
@@ -489,6 +518,12 @@ way to go hunting.
 **Apply state is self-reported.** Applications happen on the employer's ATS and
 cannot be observed. The outbound click creates or advances an `applications` row
 to `tailored`/`applied` optimistically and asks for confirmation on return.
+
+**The save action ships with slice 3**, not with the signed-in `/jobs` layer it
+is listed under. It is the only writer of `status = saved`, so without it the
+dashboard's `saved` group renders a header with nothing under it for everyone,
+forever — the same failure as a surface that answers confidently for a
+population it cannot serve. It is one endpoint pair and one button.
 
 ### Tailoring from a posting
 
@@ -543,6 +578,14 @@ engagement data.
 - `build_digests.py`: each row of the failure table produces the specified
   `status`, and a build never partially writes.
 - `tests/test_metering.py`: both new call sites present in the inventory.
+- `applications`: the optimistic advance leaves `applied_confirmed_at` NULL, a
+  "no" reverts the row to `tailored`, a confirmed row is never asked again, and
+  `UniqueConstraint(user_id, job_id)` means saving a posting already tailored
+  advances the existing row rather than raising.
+- `GET /v1/dashboard`: one request, not six, and every section's empty state
+  for the person who has no preference row, no facts, no applications and no
+  tailors — that person sees all five sections empty at once, and it is the
+  state the previous slice got wrong four times.
 - `resume_facts.py`: that extracting into it leaves `talent_profiles`
   byte-identical for a fixed input — the disclosure ledger cites those bytes.
 
@@ -572,7 +615,8 @@ behind `match_sweep.py` and the "N new matches" count.
 
 **3 — Applications and the dashboard.** The `applications` table, `job_id` on
 tailor creation, `GET /v1/dashboard`, the pipeline and resume-health and
-employer-views sections, the *Tailor for this role* action on `JobView`.
+employer-views sections, the *Tailor for this role* action on `JobView`, the
+save action, and the interim match-count card in slot 2.
 
 **4 — Scoring and the weekly digest.** Decisions scoring, prose generation and
 its validator, `digests`/`digest_items`, `build_digests.py`, the systemd units,
@@ -580,6 +624,30 @@ and the *New for you* card.
 
 Slices 1–3 deliver the loop with deterministic matching. Slice 4 is what turns a
 filter into a reason to come back.
+
+## Amended 2026-11-12, after slice 2 shipped
+
+Slices 1 and 2 are deployed. Five decisions taken before slice 3 was planned,
+recorded here because the sections above now assume them:
+
+- **The save action moves into slice 3.** Nothing in either slice's original
+  decomposition line could write `status = saved`, so the dashboard's `saved`
+  group had no possible content.
+- **"N new matches" means not yet acted on**: `match_sweep._exclusions`
+  excludes every posting the person has an `applications` row for, any status.
+  Chosen over "unseen since your last visit", which needs a new timestamp and
+  drops the count to zero the moment anyone looks — on a catalogue ingesting
+  every six hours that reads as broken more often than as accurate. The cost of
+  this choice is that a posting someone deliberately skipped keeps counting,
+  because skipping is not recorded.
+- **`applied_confirmed_at`**, nullable, carries the owed confirmation.
+- **Slot 2 holds the match count** until slice 4's digest replaces it.
+- **Resume health reports and offers a rebuild**, never rebuilding on its own.
+
+Two corrections to the sections above, rather than new decisions: `source`
+loses its `saved` value, which no writer could produce and which collided with
+the status of the same name; and freshness is `facts_are_stale` reused, not a
+second rubric.
 
 ## Open, and deliberately deferred
 
