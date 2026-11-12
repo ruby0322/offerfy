@@ -12,7 +12,7 @@ export const CONTACT_EMAIL = "james@offerfy.cc";
 export const EMPLOYER_COUNT = 88;
 export const ORG_DESCRIPTION =
   `Open roles at ${EMPLOYER_COUNT} top tech employers, straight from their own boards. ` +
-  "Fork your resume for one posting and AI scores it against the job before you apply.";
+  "Fork your resume for one posting and edit it against the job description in chat.";
 
 export const OG_LOCALE: Record<AppLocale, string> = {
   en: "en_US",

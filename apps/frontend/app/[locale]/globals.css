@@ -1228,44 +1228,6 @@ textarea {
   }
 }
 
-.landing-honest {
-  border: 1px solid var(--rule);
-  background: var(--sheet, var(--paper));
-  padding: 1.5rem 1.35rem;
-}
-
-@media (min-width: 768px) {
-  .landing-honest {
-    display: grid;
-    grid-template-columns: 0.8fr 1.6fr;
-    gap: 2rem;
-    align-items: start;
-    padding: 1.9rem 1.75rem;
-  }
-}
-
-.landing-honest-title {
-  margin: 0 0 0.6rem;
-  font-size: 1.15rem;
-  line-height: 1.3;
-  letter-spacing: -0.015em;
-  color: var(--ink);
-}
-
-@media (min-width: 768px) {
-  .landing-honest-title {
-    margin-bottom: 0;
-  }
-}
-
-.landing-honest-body {
-  margin: 0;
-  max-width: 68ch;
-  font-size: 0.95rem;
-  line-height: 1.7;
-  color: var(--muted);
-}
-
 .landing-hero {
   display: grid;
   grid-template-columns: 1fr;
