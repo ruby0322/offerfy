@@ -195,8 +195,13 @@ class JobPreferenceIn(BaseModel):
         if v is None:
             return None
         t = default_taxonomy()
+        # "unknown" is a valid /jobs BROWSE filter -- there it means "show me
+        # the postings no rule could classify". As a stated TARGET it is
+        # meaningless: nobody is looking for an unclassified level. Omitting
+        # the field is how you say "no seniority preference".
+        allowed = valid_seniorities(t) - {"unknown"}
         value = v.strip().lower()
-        if value not in valid_seniorities(t):
+        if value not in allowed:
             raise ValueError(f"Invalid seniority: {v!r}")
         return value
 
@@ -207,7 +212,9 @@ class JobPreferenceOut(BaseModel):
     target_seniority: str | None
     remote_required: bool | None
     activity: str
-    updated_at: str
+    # null before the first save: the seed is transient and has no timestamp.
+    # Not "", which a client parsing a timestamp field would choke on.
+    updated_at: str | None
     # "missing" | "stale" | "fresh": whether the editor should offer a rebuild.
     facts_state: str
 

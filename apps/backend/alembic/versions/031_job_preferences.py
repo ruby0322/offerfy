@@ -3,9 +3,11 @@
 What a person wants next -- the intent a resume cannot supply, and the other
 half of a match profile beside resume_facts. See app.models.JobPreference.
 
-This table is seeded once from the facts and thereafter written only by the
-user. A rebuild of resume_facts must never overwrite it; that rule is the
-whole reason it is a separate table rather than more columns on resume_facts.
+A row exists only once the person has saved their own preferences; before
+that the API serves a transient seed computed from the facts on every read
+and stores nothing. Once the row exists it is written only by the user, and a
+rebuild of resume_facts must never overwrite it; that rule is the whole reason
+it is a separate table rather than more columns on resume_facts.
 
 user_id is unique, one row per person, with ondelete="CASCADE": erasing the
 account erases it. target_functions and target_locations are pipe-delimited

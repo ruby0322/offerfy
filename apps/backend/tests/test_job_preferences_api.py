@@ -77,6 +77,25 @@ def test_put_rejects_bad_seniority_location_and_activity(client, db_session):
     assert client.put("/v1/me/job-preferences", json={"target_seniority": "wizard"}).status_code == 422
     assert client.put("/v1/me/job-preferences", json={"target_locations": ["atlantis"]}).status_code == 422
     assert client.put("/v1/me/job-preferences", json={"activity": "sleeping"}).status_code == 422
+    # "unknown" is a valid /jobs browse filter but meaningless as a target.
+    assert client.put("/v1/me/job-preferences", json={"target_seniority": "unknown"}).status_code == 422
+
+
+def test_put_accepts_manager_as_a_target(client, db_session):
+    """It is what seeding writes for 經理/Manager/Director titles, and the
+    editor offers it, so the API must take it."""
+    _signed_in(client, db_session)
+    got = client.put("/v1/me/job-preferences", json={"target_seniority": "manager"})
+    assert got.status_code == 200
+    assert got.json()["target_seniority"] == "manager"
+
+
+def test_updated_at_is_null_for_a_transient_seed_and_set_after_a_save(client, db_session):
+    """Never "": an empty string in a timestamp field trips a parsing client."""
+    _signed_in(client, db_session)
+    assert client.get("/v1/me/job-preferences").json()["updated_at"] is None
+    saved = client.put("/v1/me/job-preferences", json={"target_functions": ["backend"]})
+    assert saved.json()["updated_at"]
 
 
 def test_put_returns_lists_not_pipe_text(client, db_session):

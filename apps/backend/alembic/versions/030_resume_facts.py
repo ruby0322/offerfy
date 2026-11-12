@@ -10,7 +10,7 @@ user_id is unique, one facts row per person, and both foreign keys are
 ondelete="CASCADE": erasing the account or the source resume erases the
 facts, the same as it does for talent_profiles.
 
-Column types and indexes mirror talent_profiles exactly, including
+Column types and indexes mirror talent_profiles closely, including
 String(128) for model and the Text blobs for facts_json (canonical JSON, not
 JSONB, so the bytes survive a round trip). The unique constraint is named to
 match the model, so that create_all and this migration produce the same

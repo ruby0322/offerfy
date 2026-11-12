@@ -21,8 +21,20 @@ which reading was chosen and why.
    matches everything", it is the absence of a match profile. The preference
    seeder hands exactly that row to every user with no resume, and telling
    someone who has said nothing that they have a large match count is a lie dressed
-   as a feature. The check lives in count_matches, not in the query, so
-   prefilter_query stays a pure translation of the preference to SQL.
+   as a feature. The check lives INSIDE prefilter_query, which is the honest
+   place for it: "no preference" translates to the empty set, not to the whole
+   catalogue. Every reader of the prefilter gets the same answer, including
+   the digest candidate selection of a later slice, which reads
+   prefilter_query directly and would otherwise hand 20k-odd postings to every
+   user who has told us nothing.
+
+3. A target seniority OFF the ladder is not an error and not "everything".
+   `manager` is matched EXACTLY (see _band): it is a different axis from the
+   experience ladder, not a rung on it, and the exact match is the only route
+   any preference has to a posting whose facet seniority is `manager`.
+   `unknown` is refused at the API boundary instead (schemas_jobs.py): as a
+   stated target it is meaningless, though it stays a valid /jobs browse
+   filter, where it means "show me the unclassified".
 
 count_matches takes a preference that may be TRANSIENT (current_or_seeded
 returns an un-persisted row). Nothing here reads pref.id or touches the session
@@ -37,7 +49,7 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import func, or_
+from sqlalchemy import false, func, or_
 from sqlalchemy.orm import Query, Session
 
 from app.models import Job, JobFacets, JobPreference
@@ -53,8 +65,21 @@ _rule_members = valid_seniorities(_taxonomy)
 # neither is a level. "unknown" means no rule matched; "manager" is a different
 # axis (people management, not experience). They are deliberately absent from
 # the ladder: left in, "unknown" would sit at index 0 and a target of intern
-# would admit every unclassified posting. Never admitted by band arithmetic.
-_OFF_LADDER = frozenset({"manager", "unknown"})
+# would admit every unclassified posting. Neither is ever admitted by band
+# arithmetic -- a target of `senior` never reaches a `manager` posting.
+#
+# But off the ladder is not the same as unusable as a TARGET. `manager` is a
+# real thing to want, enrich.py stamps it on real postings (Engineering
+# Manager, 產品經理, Director of Engineering), and the preference seeder writes
+# it from the person's own role title. _band therefore matches it EXACTLY:
+# exact-match axis, not a band. Treating it as unplaceable gave a seeded
+# manager a permanent, confident count of 0 and made that whole slice of the
+# catalogue unreachable through preferences.
+_EXACT_AXIS = frozenset({"manager"})
+# Not a level and not a target either: schemas_jobs.py refuses it as a
+# preference target, so it reaches _band only from a hand-built row.
+_NOT_A_LEVEL = frozenset({"unknown"})
+_OFF_LADDER = _EXACT_AXIS | _NOT_A_LEVEL
 
 SENIORITY_LADDER: tuple[str, ...] = tuple(
     json.loads(taxonomy_path().read_text(encoding="utf-8"))["seniority_ladder"]
@@ -72,14 +97,23 @@ if _bad or _unclassified or set(SENIORITY_LADDER) & _OFF_LADDER:  # pragma: no c
 
 
 def _band(target: str | None) -> list[str] | None:
-    """The target rung and its neighbours, clamped at both ends.
+    """The facet seniorities a target admits.
 
-    None means no seniority constraint; [] means a target we cannot place,
-    which matches nothing rather than everything.
+    A target ON the ladder admits its own rung and its neighbours, clamped at
+    both ends. `manager` is not on the ladder and is matched EXACTLY: it is a
+    different axis (people management) rather than a rung, so "within one
+    band" has no meaning for it, and because nothing else can emit it this is
+    the only route a preference has to a `manager` posting.
+
+    None means no seniority constraint. [] means a target we cannot place,
+    which matches nothing rather than everything -- defence in depth only,
+    since the API refuses every value that is neither a rung nor `manager`.
     """
     target = (target or "").strip()
     if not target:
         return None
+    if target in _EXACT_AXIS:
+        return [target]
     if target not in SENIORITY_LADDER:
         return []
     i = SENIORITY_LADDER.index(target)
@@ -97,6 +131,14 @@ def _escape(t: str) -> str:
 def _any_token(column, tokens: list[str]):
     # Whole-token match against the pipe-delimited value, never a substring:
     # '|tw|' must not match 'TWX' and '|ml|' must not match 'html'.
+    #
+    # DEFERRED OPTIMISATION: every column this is called with (JobFacets
+    # .function, .country, .region, .city) holds a SINGLE token, not a pipe
+    # list, so `lower(col).in_(tokens)` would be equivalent, index-usable and
+    # free of the escaping below. It is left as LIKE because the pipe idiom is
+    # the branch-wide convention and the cost is invisible at one query per
+    # page view; revisit when a later slice runs the prefilter once per active
+    # user on a schedule, which is where a sequential scan starts to matter.
     padded = "|" + func.lower(column) + "|"
     # _ and % are LIKE wildcards ('north_america' is a real region): escape.
     return or_(*[padded.like(f"%|{_escape(t)}|%", escape="\\") for t in tokens])
@@ -107,15 +149,32 @@ def _exclusions(query: Query, pref: JobPreference) -> Query:
     return query
 
 
+def constrains_nothing(pref: JobPreference) -> bool:
+    return (
+        not _tokens(pref.target_functions)
+        and not _tokens(pref.target_locations)
+        and not (pref.target_seniority or "").strip()
+        and pref.remote_required is None
+    )
+
+
 def prefilter_query(db: Session, pref: JobPreference) -> Query:
-    """The hard-filtered set. PRECONDITION: the caller must check
-    constrains_nothing(pref) first; for such a preference this returns the whole
-    active catalogue, which is not a match list. count_matches checks it."""
+    """The hard-filtered set: every posting this preference could match.
+
+    A preference that constrains nothing returns the EMPTY set, not the whole
+    catalogue (ruling 2 in the module docstring). The guard lives here rather
+    than in count_matches so that every reader of the prefilter -- including
+    the digest candidate selection of a later slice, which reads this function
+    directly -- gets the same answer.
+    """
     q = (
         db.query(Job)
         .join(JobFacets, JobFacets.job_id == Job.id)
         .filter(Job.is_active.is_(True), Job.last_seen_at >= freshness_cutoff())
     )
+
+    if constrains_nothing(pref):
+        return _exclusions(q.filter(false()), pref)
 
     functions = _tokens(pref.target_functions)
     if functions:
@@ -148,16 +207,9 @@ def prefilter_query(db: Session, pref: JobPreference) -> Query:
     return _exclusions(q, pref)
 
 
-def constrains_nothing(pref: JobPreference) -> bool:
-    return (
-        not _tokens(pref.target_functions)
-        and not _tokens(pref.target_locations)
-        and not (pref.target_seniority or "").strip()
-        and pref.remote_required is None
-    )
-
-
 def count_matches(db: Session, pref: JobPreference) -> int:
+    # Harmlessly redundant since the guard moved into prefilter_query; kept so
+    # the cheap answer costs no round trip.
     if constrains_nothing(pref):
         return 0
     return prefilter_query(db, pref).count()

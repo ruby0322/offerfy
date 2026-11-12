@@ -40,8 +40,10 @@ def _out(db: Session, user: User, row: JobPreference) -> JobPreferenceOut:
         target_seniority=row.target_seniority,
         remote_required=row.remote_required,
         activity=row.activity,
-        # A transient seed has no row yet, hence no timestamp.
-        updated_at=row.updated_at.isoformat() if row.updated_at else "",
+        # A transient seed has no row yet, hence no timestamp. null, never "":
+        # an empty string in a timestamp field trips the first client that
+        # parses it.
+        updated_at=row.updated_at.isoformat() if row.updated_at else None,
         facts_state=_facts_state(db, user),
     )
 

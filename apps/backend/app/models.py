@@ -1105,11 +1105,16 @@ class JobPreference(Base):
     ResumeFacts says where someone is and what they have done; it never says
     what they want. This table is that other half of a match profile.
 
-    It is seeded once from the facts and thereafter written only by the user.
-    A rebuild of resume_facts must never overwrite it. That rule is the whole
-    reason it is a separate table rather than more columns on ResumeFacts:
-    facts are derived and rebuilt on every resume change, preferences are
-    stated and must survive every rebuild untouched.
+    The EXISTENCE OF A ROW is the marker that the person has stated their own
+    preferences, which is why no extra column records it. Until that first
+    save there is no row at all: the API serves a transient seed recomputed
+    from the current facts on every read, so rebuilding the facts of someone
+    who has never saved changes what they see. Once the row exists it is
+    written only by the user, and a rebuild of resume_facts must never
+    overwrite it. That rule is the whole reason this is a separate table
+    rather than more columns on ResumeFacts: facts are derived and rebuilt on
+    every resume change, preferences are stated and must survive every
+    rebuild untouched.
 
     target_functions and target_locations are pipe-delimited and lowercased,
     '|backend|infra|', for the same reason as TalentProfile.skills_text:

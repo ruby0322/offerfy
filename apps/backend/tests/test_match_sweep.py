@@ -1,12 +1,16 @@
 """The deterministic prefilter: SQL that reduces the catalogue to plausible matches."""
 
 import itertools
+import json
 from datetime import timedelta
 
 import pytest
+from pydantic import ValidationError
 
-from app.jobs.match_sweep import SENIORITY_LADDER, count_matches
+from app.jobs.match_sweep import SENIORITY_LADDER, count_matches, prefilter_query
 from app.models import Job, JobFacets, JobPreference
+from app.schemas_jobs import JobPreferenceIn
+from app.services.jobs.enrich import default_taxonomy, valid_seniorities
 from app.services.jobs.store import freshness_cutoff
 
 _seq = itertools.count()
@@ -26,6 +30,17 @@ def _posting(db, *, seniority="mid", function="backend", country="TW", region=No
                          seniority=seniority, function=function, description_hash="h"))
     db.commit()
     return job
+
+
+def _facts_row(roles):
+    """An unsaved ResumeFacts, enough for seed_from_facts (which is pure)."""
+    from app.models import ResumeFacts
+
+    return ResumeFacts(
+        user_id="u", source_resume_id="r", source_revision_id="rev",
+        input_hash="h" * 64,
+        facts_json=json.dumps({"roles": roles, "locations": []}),
+    )
 
 
 def _pref(**kw):
@@ -76,7 +91,48 @@ def test_off_ladder_seniorities_are_never_admitted(db_session, off_ladder, targe
     assert count_matches(db_session, pref) == 0
 
 
-def test_an_unrecognised_target_seniority_matches_nothing(db_session):
+@pytest.mark.parametrize("target", sorted(valid_seniorities(default_taxonomy())))
+def test_every_target_the_api_accepts_reaches_its_own_postings(db_session, target):
+    """Parametrised over EVERY value the vocabulary holds, because the bug this
+    replaces was a value the API accepted and the editor offered but _band
+    could not place -- a seeded `manager` had a permanent count of 0.
+
+    Each value must either be refused at the schema boundary, so no client can
+    set it, or match a posting carrying that very seniority. The old test used
+    "wizard", which the validator rejects, so it pinned a path no client has.
+    """
+    try:
+        JobPreferenceIn(target_seniority=target)
+    except ValidationError:
+        return  # refused at the boundary; nothing reaches _band
+    _posting(db_session, seniority=target)
+    assert count_matches(db_session, _pref(target_seniority=target,
+                                           target_functions="|backend|",
+                                           target_locations="|tw|")) == 1
+
+
+def test_manager_is_an_exact_axis_not_a_band(db_session):
+    """`manager` is a different axis from the ladder, so it admits itself and
+    only itself -- and is the only route any preference has to those postings."""
+    _posting(db_session, seniority="manager")
+    _posting(db_session, seniority="senior")
+    _posting(db_session, seniority="staff_plus")
+    assert count_matches(db_session, _pref(target_seniority="manager",
+                                           target_functions="|backend|")) == 1
+
+
+def test_unknown_is_refused_as_a_target_but_stays_a_browse_filter():
+    with pytest.raises(ValidationError):
+        JobPreferenceIn(target_seniority="unknown")
+    # Still a member of the vocabulary /jobs filters on: "show me the
+    # postings no rule could classify".
+    assert "unknown" in valid_seniorities(default_taxonomy())
+
+
+def test_an_unrecognised_target_seniority_is_refused_at_the_boundary(db_session):
+    with pytest.raises(ValidationError):
+        JobPreferenceIn(target_seniority="wizard")
+    # Defence in depth: a hand-built row still matches nothing, not everything.
     _posting(db_session)
     assert count_matches(db_session, _pref(target_seniority="wizard",
                                            target_functions="|backend|")) == 0
@@ -158,3 +214,31 @@ def test_a_preference_that_constrains_nothing_matches_nothing(db_session):
     empty = _pref()
     assert count_matches(db_session, empty) == 0
     assert count_matches(db_session, _pref(target_functions="|backend|")) == 3
+
+
+def test_prefilter_query_itself_is_empty_for_a_preference_that_constrains_nothing(
+    db_session,
+):
+    """The guard lives in the query, not only in count_matches: a later slice
+    reads prefilter_query directly for digest candidates and must not be handed
+    the whole catalogue for someone who has told us nothing."""
+    for _ in range(3):
+        _posting(db_session)
+    assert prefilter_query(db_session, _pref()).all() == []
+    assert len(prefilter_query(db_session, _pref(target_functions="|backend|")).all()) == 3
+
+
+def test_a_seeded_manager_target_is_not_a_dead_end(db_session):
+    """End to end over the four places that conspired in the original defect:
+    seeding writes what seniority_of returns, the schema accepts it, and the
+    prefilter must then reach the postings carrying it."""
+    from app.services.jobs.preferences import seed_from_facts
+
+    for title in ("Engineering Manager", "Director of Engineering", "產品經理"):
+        seed = seed_from_facts(_facts_row(roles=[{"title": title}]))
+        assert seed["target_seniority"] == "manager", title
+        JobPreferenceIn(target_seniority=seed["target_seniority"])  # not a 422
+
+    _posting(db_session, seniority="manager", function="backend")
+    assert count_matches(db_session, _pref(target_seniority="manager",
+                                           target_functions="|backend|")) == 1
