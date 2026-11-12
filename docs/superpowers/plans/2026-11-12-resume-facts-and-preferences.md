@@ -467,7 +467,11 @@ invent a second vocabulary.
   `location_facets`, `default_taxonomy`.
 - Produces:
   - `seed_from_facts(facts: ResumeFacts | None) -> dict[str, Any]` — pure, no
-    DB write, returns the field values a new `JobPreference` would take.
+    DB write, returns the field values a new `JobPreference` would take. It
+    takes the **row**, not a payload: `ResumeFacts.facts_json` is `Text`, so
+    the first thing it does is parse that into a `TalentProfilePayload`. A
+    `None` row and a row whose JSON has no roles must both produce the empty
+    seed, not raise.
   - `get_or_seed(db, user) -> JobPreference` — returns the existing row
     untouched, or creates one from `seed_from_facts`. Flushes, never commits.
 
@@ -774,13 +778,14 @@ def test_off_ladder_seniorities_are_never_admitted_by_band_arithmetic(db_session
     assert count_matches(db_session, pref) == 0
 
 
-# Review Focus 3
+# Review Focus 3 -- one axis empty, the profile still real because another is set
 def test_an_empty_axis_is_no_constraint_but_the_always_on_filters_still_apply(db_session):
-    _posting(db_session, function="design", country="JP")          # matches: axes empty
+    _posting(db_session, function="design", country="JP")
     _posting(db_session, function="design", country="JP", is_active=False)
     _posting(db_session, function="design", country="JP", stale=True)
-    pref = _pref(target_functions="", target_locations="", target_seniority=None)
-    assert count_matches(db_session, pref) == 1
+    pref = _pref(target_functions="|design|", target_locations="",   # location unset
+                 target_seniority=None)
+    assert count_matches(db_session, pref) == 1      # not 3: inactive and stale drop out
 
 
 @pytest.mark.parametrize(
@@ -829,6 +834,27 @@ because a user who has told us nothing about location should still see matches
 rather than none; but `is_active`, the freshness cutoff and the existence of a
 `JobFacets` row always apply. Say this in the module docstring — the opposite
 reading is defensible and a later reader must know which was chosen.
+
+**With one exception, which is not a special case but the rule's boundary:** a
+preference that constrains *nothing* — no functions, no locations, no
+seniority, `remote_required` is None — is not a filter that matches everything,
+it is the absence of a match profile. `count_matches` returns **0** for it.
+Reporting "21,773 matches" to someone who has told us nothing is a lie dressed
+as a feature, and `get_or_seed` hands exactly that row to every user with no
+resume. Put the check in `count_matches`, not in the query, and pin it:
+
+```python
+def test_a_preference_that_constrains_nothing_matches_nothing(db_session):
+    for _ in range(3):
+        _posting(db_session, function="backend", country="TW")
+    empty = _pref(target_functions="", target_locations="",
+                  target_seniority=None, remote_required=None)
+    assert count_matches(db_session, empty) == 0
+    # but one constraint is enough to make it a real profile
+    assert count_matches(db_session, _pref(target_functions="|backend|",
+                                           target_locations="",
+                                           target_seniority=None)) == 3
+```
 
 Seniority is the one axis with ordering. Build the band from
 `SENIORITY_LADDER.index()`, clamp at both ends, and treat `unknown` and
