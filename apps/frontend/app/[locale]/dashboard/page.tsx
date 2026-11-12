@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
@@ -18,7 +18,12 @@ import {
   type Resume,
 } from "@/lib/api";
 import { COUNTRY_KEYS, FUNCTION_KEYS, SENIORITY_KEYS } from "@/components/jobs/JobSearchForm";
-import { fetchJobPreferences, fetchMatchCount, preferenceSummary } from "@/lib/jobs";
+import ApplicationList from "@/components/dashboard/ApplicationList";
+import EmployerViews from "@/components/dashboard/EmployerViews";
+import MatchCountCard from "@/components/dashboard/MatchCountCard";
+import ResumeHealthCard from "@/components/dashboard/ResumeHealthCard";
+import { fetchDashboard, type Dashboard } from "@/lib/dashboard";
+import { preferenceSummary } from "@/lib/jobs";
 
 function groupResumes(resumes: Resume[]) {
   const masters = resumes.filter((r) => (r.kind ?? "master") === "master");
@@ -85,8 +90,6 @@ function TailorRow({
   );
 }
 
-type MatchLine = { count: number; summary: string };
-
 type Doomed = { resume: Resume; tailorCount: number };
 
 export default function DashboardPage() {
@@ -99,48 +102,57 @@ export default function DashboardPage() {
   const [resumes, setResumes] = useState<Resume[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
-  const [matchLine, setMatchLine] = useState<MatchLine | null>(null);
+  const [dash, setDash] = useState<Dashboard | null>(null);
   const [doomed, setDoomed] = useState<Doomed | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  const reloadDashboard = useCallback(async () => {
+    try {
+      setDash(await fetchDashboard());
+    } catch {
+      /* keep what is on screen */
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-    // Started up front so it runs alongside getMe -> claimResumes -> listResumes
-    // instead of extending that chain. Best-effort: the line just stays hidden.
-    Promise.all([fetchMatchCount(), fetchJobPreferences()])
-      .then(([count, pref]) => {
-        if (cancelled) return;
-        const label = (keys: Record<string, string>, v: string) =>
-          keys[v] ? tJobs(keys[v] as Parameters<typeof tJobs>[0]) : v;
-        setMatchLine({
-          count,
-          summary: preferenceSummary(pref, {
-            seniority: (v) => label(SENIORITY_KEYS, v),
-            fn: (v) => label(FUNCTION_KEYS, v),
-            country: (v) => label(COUNTRY_KEYS, v),
-            remote: tJobs("remote"),
-            onsite: tJobs("remoteNo"),
-          }),
-        });
-      })
-      .catch(() => {});
+    // The dashboard's own data is one request. It starts at once, beside the
+    // resume list below, rather than behind getMe -> claimResumes.
     (async () => {
       try {
-        const me = await getMe();
-        if (!me) {
-          router.replace("/login");
-          return;
-        }
+        const next = await fetchDashboard();
+        if (!cancelled) setDash(next);
+      } catch (err) {
         if (cancelled) return;
-        setEmail(me.email ?? null);
+        if (err instanceof ApiError && err.status === 401) router.replace("/login");
+        else setError(err instanceof ApiError ? err.message : t("needLogin"));
+      }
+    })();
+    getMe()
+      .then((me) => {
+        if (!cancelled) setEmail(me?.email ?? null);
+      })
+      .catch(() => {});
+    // The file manager still needs a just-signed-in guest's anonymous resumes
+    // claimed first, so claim -> list stays a chain, but off the critical path
+    // of everything above it.
+    (async () => {
+      try {
         try {
           await claimResumes();
         } catch {
           /* claim is best-effort */
         }
         const items = await listResumes();
-        if (!cancelled) setResumes(items);
+        if (cancelled) return;
+        setResumes(items);
+        // A claim may have just given this person a master the first
+        // dashboard response did not know about.
+        if (items.some((r) => (r.kind ?? "master") === "master")) {
+          const next = await fetchDashboard().catch(() => null);
+          if (!cancelled && next) setDash(next);
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof ApiError ? err.message : t("needLogin"));
@@ -150,7 +162,20 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [router, t, tJobs]);
+  }, [router, t]);
+
+  const summary = useMemo(() => {
+    if (!dash) return "";
+    const label = (keys: Record<string, string>, v: string) =>
+      keys[v] ? tJobs(keys[v] as Parameters<typeof tJobs>[0]) : v;
+    return preferenceSummary(dash.preference, {
+      seniority: (v) => label(SENIORITY_KEYS, v),
+      fn: (v) => label(FUNCTION_KEYS, v),
+      country: (v) => label(COUNTRY_KEYS, v),
+      remote: tJobs("remote"),
+      onsite: tJobs("remoteNo"),
+    });
+  }, [dash, tJobs]);
 
   const { groups, orphans } = useMemo(() => groupResumes(resumes ?? []), [resumes]);
   // The badges only need explaining to someone who has just grown their first
@@ -200,6 +225,16 @@ export default function DashboardPage() {
           <div>
             <h1 className="rr-page-title">{t("title")}</h1>
             {email ? <p className="mt-2 text-sm text-muted-foreground">{email}</p> : null}
+            {dash ? (
+              <p className="mt-2 text-sm" data-testid="dashboard-profile">
+                {summary ? (
+                  <span className="text-muted-foreground">{summary} {"\u00b7"} </span>
+                ) : null}
+                <Link href="/preferences" className="underline">
+                  {t("editPreferences")}
+                </Link>
+              </p>
+            ) : null}
           </div>
           <div className="flex gap-2">
             <Link href="/new" className="rr-btn">
@@ -211,34 +246,25 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div
-          className="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm"
-          data-testid="dashboard-matches"
-        >
-          <p>
-            {!matchLine ? null : matchLine.summary ? (
-              <>
-                <span className="font-medium">{t("matchCount", { count: matchLine.count })}</span>
-                <span className="text-muted-foreground"> {"\u00b7"} {matchLine.summary}</span>
-              </>
-            ) : (
-              <span className="text-muted-foreground">{t("matchEmpty")}</span>
-            )}
-          </p>
-          <span className="flex gap-3">
-            <Link href="/preferences" className="underline">
-              {t("editPreferences")}
-            </Link>
-            <Link href="/jobs" className="underline">
-              {t("browseRoles")}
-            </Link>
-          </span>
-        </div>
-
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
-        {resumes == null && !error ? (
+        {!dash && !error ? (
           <p className="text-sm text-muted-foreground">{tCommon("loading")}</p>
+        ) : null}
+
+        {dash ? (
+          <div className="mb-10 grid gap-6">
+            <MatchCountCard count={dash.match_count} hasPreference={summary !== ""} />
+            <ApplicationList initial={dash.applications} />
+            <ResumeHealthCard health={dash.resume_health} onRebuilt={reloadDashboard} />
+            <EmployerViews views={dash.employer_views} />
+          </div>
+        ) : null}
+
+        {resumes ? (
+          <h2 className="mb-3 text-sm font-semibold tracking-tight text-muted-foreground">
+            {t("headingResumes")}
+          </h2>
         ) : null}
 
         {resumes && resumes.length === 0 ? (
