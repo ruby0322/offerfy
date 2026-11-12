@@ -438,10 +438,39 @@ The docstring records that this table is **seeded once and thereafter written
 only by the user** — a rebuild of `resume_facts` must never overwrite it. That
 rule is the whole point of it being a separate table from the facts.
 
-- [ ] **Step 4: Verify**
+- [ ] **Step 4: Verify, including both migrations against a throwaway Postgres**
 
 Run: `cd apps/backend && .venv/bin/pytest tests/test_job_preferences.py -v && .venv/bin/alembic heads`
 Expected: PASS, exactly one head.
+
+**Then apply the whole chain to a throwaway Postgres.** This task owns the check
+for *both* `030_resume_facts` and `031_job_preferences`, because it adds the
+last migration of the slice. No test runs Alembic, SQLite ignores `VARCHAR`
+lengths and does not enforce `ON DELETE CASCADE` without
+`PRAGMA foreign_keys=ON`, so the suite cannot catch a column that is too narrow
+or a cascade that is wrong — that is exactly how a 307-character city overflowed
+`JobFacets.city` into production last slice.
+
+**The only Postgres reachable from this host on its default configuration is
+PRODUCTION. `alembic/env.py` reads only `os.environ["DATABASE_URL"]` and
+silently falls back to `alembic.ini`'s `sqlite:///:memory:` when it is unset —
+`Context impl SQLiteImpl` in the output means you are not looking at Postgres
+at all.** So:
+
+- Start a NEW `postgres:16-alpine` container (the image is already pulled) with
+  a distinct name and a free non-default host port. Other projects' containers
+  run on this host; do not stop, remove or connect to any you did not create.
+- Export `DATABASE_URL` explicitly in the command's own environment, pointed at
+  your container, and echo the dialect before running so the evidence is in your
+  report.
+- Run `alembic upgrade head` over the **whole chain from base**, not just the
+  two new revisions — a revision that only applies on top of a pre-existing
+  schema is not verified.
+- Compare `information_schema.columns` for `resume_facts` and
+  `job_preferences` against the models, column by column, and put that table in
+  your report. Check the FK `ondelete` actions too, via `pg_constraint`.
+- Exercise `alembic downgrade` for both revisions and re-upgrade.
+- Remove your container and confirm it is gone.
 
 - [ ] **Step 5: Commit**
 
@@ -556,8 +585,31 @@ git commit -m "feat(jobs): seed job preferences from resume facts via the shared
 - Produces:
   - `GET /v1/me/job-preferences` → `JobPreferenceOut` — seeds on first call and
     persists the seed, so the editor and the matcher agree about what the user
-    is being matched on.
+    is being matched on. It also reports `facts_state`: `"missing"`,
+    `"stale"` or `"fresh"`, so the editor knows whether to offer a rebuild.
   - `PUT /v1/me/job-preferences` with `JobPreferenceIn` → `JobPreferenceOut`.
+  - `POST /v1/me/resume-facts/refresh` → builds the user's `ResumeFacts` via
+    `resume_facts.build_facts` and returns the new `facts_state`.
+
+**Why the refresh endpoint exists, which the plan originally missed.** Nothing
+in this slice called `build_facts`: `build_profile` was its only production
+writer, and that is consent-gated. So a `resume_facts` row would have existed
+only for users who granted `talent_introduction` — and seeding would have come
+back empty for exactly the non-consenting population this slice exists to
+serve. The slice would have shipped looking complete and doing nothing.
+
+It is a `POST`, not a side effect of the `GET`, because extraction is a
+provider call with a 90-second timeout; a `GET` that sometimes takes a minute
+and spends money is a trap. This mirrors the existing talent-profile refresh
+endpoint — read it in `app/routers/talent_me.py` and follow its shape,
+including how it settles the transaction and records spend via
+`record_build_spend`.
+
+`build_facts` is in `test_billable_call_sites_are_wrapped`'s `BILLABLE` list
+with **no caller yet**; yours is the first. That test will fail until the new
+call site is wrapped and added to `EXPECTED_CALL_SITES`. That is the inventory
+working, not an obstacle — wrap it the way `talent_me.py` wraps the profile
+build.
   - Schemas take and return `target_functions` / `target_locations` as **lists
     of strings**, not pipe-delimited text. The pipe encoding is a storage
     detail; an API that leaks it makes every client reimplement the delimiter.
@@ -607,6 +659,31 @@ def test_put_round_trips_the_tri_state_remote_flag(client, db_session):
     for value in (True, False, None):
         got = client.put("/v1/me/job-preferences", json={"remote_required": value}).json()
         assert got["remote_required"] is value
+
+
+def test_get_reports_facts_state(client, db_session):
+    user = _signed_in(client, db_session)
+    assert client.get("/v1/me/job-preferences").json()["facts_state"] == "missing"
+    _facts(db_session, user, roles=[{"title": "Backend Engineer"}])
+    assert client.get("/v1/me/job-preferences").json()["facts_state"] == "fresh"
+
+
+def test_refresh_builds_facts_for_a_user_without_employer_consent(
+    client, db_session, monkeypatch, openai_enabled
+):
+    user = _signed_in(client, db_session)
+    _resume(db_session, user)                      # published, no consent granted
+    _stub(monkeypatch, StubProfileLlm(_said(_profile())))
+    assert client.post("/v1/me/resume-facts/refresh").status_code == 200
+    assert db_session.query(ResumeFacts).filter_by(user_id=user.id).count() == 1
+    assert db_session.query(TalentProfile).filter_by(user_id=user.id).count() == 0
+
+
+def test_refresh_without_a_published_resume_is_not_a_500(client, db_session):
+    _signed_in(client, db_session)
+    r = client.post("/v1/me/resume-facts/refresh")
+    assert r.status_code in (200, 409)             # a named reason, never a crash
+    assert "error" in r.json() or r.json()["facts_state"] == "missing"
 
 
 def test_put_is_a_replacement_so_an_omitted_field_is_cleared(client, db_session):
@@ -696,6 +773,18 @@ save-and-confirm interaction.
 The form states plainly, above the fields, that these preferences drive
 matching and that the user owns them — seeded once from their resume, never
 overwritten afterwards.
+
+**When `facts_state` is `"missing"` or `"stale"`, the editor offers a rebuild**
+that calls `POST /v1/me/resume-facts/refresh`. Without it a user who has never
+granted `talent_introduction` has no facts, so the form seeds empty and there is
+nothing in the UI to fix that. Say what the button does in plain terms — it
+reads the published resume to work out your current role, level and location —
+because it is the moment the resume is sent to the model provider, and the
+privacy sentence in Task 9 describes exactly this.
+
+Keep the two requests separate: the editor loads with one `GET`, and the
+rebuild is an explicit action with a pending state, since it can take up to 90
+seconds.
 
 - [ ] **Step 4: Verify the build and i18n parity**
 
