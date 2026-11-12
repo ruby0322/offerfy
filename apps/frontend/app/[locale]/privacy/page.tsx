@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import LegalDocument from "@/components/legal/LegalDocument";
 import { resolveLocale } from "@/lib/locale";
-import { pageMetadata } from "@/lib/seo";
+import { EMPLOYER_COUNT, pageMetadata } from "@/lib/seo";
 
 type Props = {
   params: Promise<{ locale: string }>;
@@ -17,7 +17,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     locale,
     href: "/privacy",
     title: t("metaTitle"),
-    description: meta("description"),
+    description: meta("description", { count: EMPLOYER_COUNT }),
   });
 }
 

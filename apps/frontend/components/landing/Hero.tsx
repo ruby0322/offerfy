@@ -14,12 +14,15 @@ export default function Hero() {
         <h1 className="font-display mt-4 max-w-[22ch] text-[1.9rem] leading-[1.18] tracking-tight text-ink md:text-[2.65rem]">
           {t("headline")}
         </h1>
-        <p className="mt-4 max-w-[34ch] text-base leading-relaxed text-muted-foreground md:text-lg">
+        <p className="mt-4 max-w-[38ch] text-base leading-relaxed text-muted-foreground md:text-lg">
           {t("sub")}
         </p>
         <div className="mt-8 flex flex-wrap items-center gap-4">
           <Link href="/upload" className="landing-cta">
             {t("ctaUpload")}
+          </Link>
+          <Link href="/jobs" className="landing-cta-ghost">
+            {t("ctaJobs")}
           </Link>
           <Link href="/create" className="landing-cta-link">
             {t("ctaCreate")}

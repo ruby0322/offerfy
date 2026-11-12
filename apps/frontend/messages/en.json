@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Offerfy",
-    "description": "The AI resume editor you’ll keep using. Chat edits this file. No account needed."
+    "description": "Open roles at {count} top tech employers, straight from their own boards. Fork your resume for one posting and AI scores it against the job before you apply."
   },
   "nav": {
     "brand": "Offerfy",
@@ -24,7 +24,7 @@
     "locales": "Language",
     "google": "Google",
     "login": "Log in",
-    "tagline": "Offerfy · get the resume right first",
+    "tagline": "Offerfy · find the role, aim the resume",
     "blog": "Blog",
     "jobs": "Jobs",
     "about": "About",
@@ -46,12 +46,12 @@
   },
   "about": {
     "metaTitle": "About · Offerfy",
-    "metaDescription": "Offerfy is a web resume editor. Chat edits the same Typst file. A public jobs catalog lists official postings; apply on the source site.",
+    "metaDescription": "Offerfy carries open technical roles from 88 employer boards and lets you fork a resume for one posting. No matching, no auto-apply; you apply on the source site.",
     "title": "About",
     "paragraphs": [
       "Offerfy is a web resume editor at https://offerfy.cc. You keep a Typst source file in the browser. Chat can edit that same file. The PDF preview updates from the compile. This is not a generate-and-download product. You can start without creating an account.",
       "We also publish a public job catalog from official employer ATS boards: Greenhouse, Lever, Ashby, SmartRecruiters and Workday. Offerfy does not scrape 104 or LinkedIn. When you apply, you leave Offerfy and use the original posting. You can fork your master resume into a tailored version for one listing, paste in the job description, and have the model score the fit and suggest changes. We do not match your resume to jobs — there is no ranking and no recommendation — and we do not submit applications for you.",
-      "The homepage sells the editor first. Featured listings are real open roles from that catalog. Contact is james@offerfy.cc. There is no public office address."
+      "The homepage leads with the job catalog and the tailoring flow; the editor is how you act on them. Featured listings are real open roles from that catalog. Contact is james@offerfy.cc. There is no public office address."
     ]
   },
   "contact": {
@@ -151,15 +151,37 @@
   },
   "landing": {
     "hero": {
-      "kicker": "Same resume. Keep editing.",
-      "headline": "The AI resume editor you’ll keep using.",
-      "sub": "Chat edits this file. The PDF updates. Not a generate-and-download. No account needed.",
-      "ctaCreate": "or create one",
-      "ctaUpload": "Upload existing"
+      "kicker": "Built for competitive tech candidates",
+      "headline": "Land the roles everyone else is applying to.",
+      "sub": "Open roles at Stripe, OpenAI, NVIDIA and 80+ more, straight from their own boards. Fork your resume for one of them, and AI scores it against the posting before you send it.",
+      "ctaJobs": "Browse open roles",
+      "ctaUpload": "Upload your resume",
+      "ctaCreate": "or start from scratch"
     },
-    "featuredLabel": "Get offers from",
+    "companies": {
+      "title": "Open roles at the companies you’re targeting",
+      "note": "{count} employers, read directly from Greenhouse, Lever, Ashby, SmartRecruiters and Workday. No LinkedIn or 104 scraping, no reposts, no ghost jobs from an aggregator."
+    },
+    "loop": {
+      "title": "The loop you run for every application",
+      "findTitle": "Find the role",
+      "findBody": "Technical roles only, filtered by seniority, function and region. Every listing links back to the employer’s own posting.",
+      "aimTitle": "Fork your resume for it",
+      "aimBody": "A copy aimed at that one job; your master stays untouched. Paste the description and AI names which requirements you evidence, which you evidence weakly, and which you don’t — in the posting’s own words.",
+      "shipTitle": "Ship it clean",
+      "shipBody": "ATS checks run on the compiled PDF, so a parser reads what a human reads. Then you apply on the employer’s site.",
+      "keepTitle": "Keep what it taught you",
+      "keepBody": "A sharper bullet, a number you finally dug up: tell Offerfy to remember it and it attaches to your master, then comes back in every later chat.",
+      "returnLabel": "So the next application starts from a sharper master, not from scratch."
+    },
+    "honest": {
+      "title": "What Offerfy doesn’t do",
+      "body": "No matching. No ranking. No recommendations. No auto-apply, and nothing submitted on your behalf. You pick the job and you send it — Offerfy makes the resume behind it worth reading."
+    },
     "mock": {
-      "chatPrompt": "Tighten the first Offerfy bullet.",
+      "chatPrompt": "Make this bullet match what the posting asks for.",
+      "chatReply": "Named the editor you actually shipped, plus the live preview and the chat that edits it.",
+      "compiling": "compiling",
       "docTitle": "Resume",
       "experience": "Experience"
     }

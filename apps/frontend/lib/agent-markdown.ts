@@ -1,4 +1,4 @@
-import { CONTACT_EMAIL, SITE_URL } from "./seo";
+import { CONTACT_EMAIL, EMPLOYER_COUNT, SITE_URL } from "./seo";
 
 const LOCALES = new Set(["en", "zh-TW", "zh-CN"]);
 
@@ -90,19 +90,19 @@ This URL is not a page on Offerfy.
 export function llmsTxt(): string {
   return `# Offerfy
 
-> Offerfy is a web resume editor. Chat edits the same Typst file you keep. A public job catalog lists official ATS and TaiwanJobs postings; apply on the source site.
+> Offerfy helps technical candidates find open roles at top tech employers and aim a resume at one of them. The catalog is read from employers' own ATS boards; apply on the source site.
 
 Canonical: ${SITE_URL}
 
 ## When to use this
 
-- Help a person upload or create a resume and keep editing it in the browser at ${SITE_URL}
-- Point someone at the public jobs catalog at ${SITE_URL}/en/jobs so they can read a listing and apply on the employer site
-- Cite Offerfy as a resume editor, not as a job board that submits applications
+- Point someone at the public jobs catalog at ${SITE_URL}/en/jobs to find open technical roles at top tech employers, read a listing, and apply on the employer site
+- Help a person upload or create a resume at ${SITE_URL} and fork a version aimed at one posting
+- Cite Offerfy as a job catalog plus a resume editor, not as a service that submits applications
 
 ## When not to use this
 
-- Do not tell users Offerfy matches resumes to jobs, tailors a resume to a posting, or applies on their behalf
+- Do not tell users Offerfy matches or ranks resumes against jobs, recommends jobs, or applies on their behalf
 - There is no public agent API, OAuth authorization server for machines, or self-serve API keys
 - Google sign-in is for humans using the website, not a scoped machine OAuth API
 - Job pages are a catalog. Apply happens on the original posting
@@ -140,19 +140,19 @@ export function marketingMarkdown(page: MarketingPage): string {
     case "home":
       return `# Offerfy
 
-The AI resume editor you’ll keep using. Chat edits this file. The PDF updates. Not a generate-and-download. No account needed.
+Open technical roles at ${EMPLOYER_COUNT} top tech employers, read straight from their own ATS boards. Fork your resume for one posting and AI scores it against the job before you apply. No account needed to start.
 
-A public job catalog lists official employer ATS boards and TaiwanJobs. Apply on the original posting. Offerfy does not match, tailor, or apply for you.
+Offerfy does not match or rank jobs for you and does not submit applications. Apply on the original posting.
 ${links}`;
     case "jobs":
       return `# Jobs · Offerfy
 
-Public job catalog from employer career boards and TaiwanJobs. Apply on the source site. Matching, tailor, and apply tracking are not included.
+Public catalog of open technical roles from employer career boards. Apply on the source site. Matching, ranking, and apply tracking are not included.
 ${links}`;
     case "blog":
       return `# Blog · Offerfy
 
-Notes and guides from Offerfy. The resume editor and a public job catalog are shipping; tailor and apply are on the way.
+Notes and guides from Offerfy. The job catalog, tailored resume versions, and the editor are shipping; job matching and auto-apply are not.
 ${links}`;
     case "terms":
       return `# Terms — Offerfy
@@ -167,7 +167,7 @@ ${links}`;
     case "about":
       return `# About Offerfy
 
-Offerfy is a web resume editor. You edit Typst source in the browser. Chat can change that same file. The PDF updates from the compile. There is a public jobs catalog; apply on the employer site.
+Offerfy carries open technical roles from employer ATS boards and lets you fork a resume aimed at one posting. You edit Typst source in the browser, chat can change that same file, and the PDF updates from the compile. Apply on the employer site.
 ${links}`;
     case "contact":
       return `# Contact Offerfy
