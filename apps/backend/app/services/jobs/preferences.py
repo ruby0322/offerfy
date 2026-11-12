@@ -13,13 +13,14 @@ from the first save onward the preferences belong to the user.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.models import JobPreference, ResumeFacts, User
-from app.schemas import TalentProfilePayload
+from app.schemas import TalentProfilePayload, TalentRole
 from app.services.jobs.enrich import (
     default_taxonomy,
     function_of,
@@ -32,6 +33,11 @@ from app.services.jobs.enrich import (
 # stop at senior; the values are members of the taxonomy's seniority list.
 JUNIOR_MAX_YEARS = 2
 MID_MAX_YEARS = 5
+
+# Values the extractor may store for an ongoing role (TalentRole.start/end
+# comment), compared casefolded.
+_ONGOING = {"present", "至今", "现在", "現在", "current", "now"}
+_YYYY_MM = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 ACTIVITY_DEFAULT = "actively_looking"
 
@@ -57,6 +63,38 @@ def _payload_of(facts: ResumeFacts) -> TalentProfilePayload | None:
         return None
 
 
+def _month(value: str | None) -> str | None:
+    """A YYYY-MM value, or None. These sort correctly as plain strings."""
+    v = (value or "").strip()
+    return v if _YYYY_MM.match(v) else None
+
+
+def _is_ongoing(role: TalentRole) -> bool:
+    end = (role.end or "").strip()
+    if end:
+        return end.casefold() in _ONGOING
+    # No end date at all: resumes often omit it for the current job.
+    return bool((role.start or "").strip())
+
+
+def _current_role(payload: TalentProfilePayload) -> TalentRole | None:
+    """The role that best represents what the person does now.
+
+    The extractor is asked to list roles newest first but nothing enforces
+    it, so order is only the last tiebreak. Ranking: ongoing roles first,
+    latest start among them; otherwise the latest parseable end; otherwise
+    roles[0]. Only YYYY-MM values are compared; unparseable dates rank last.
+    """
+    roles = [r for r in payload.roles if r.title]
+    if not roles:
+        return None
+    ongoing = [r for r in roles if _is_ongoing(r)]
+    if ongoing:
+        # max() keeps the first of equals, so list order breaks ties.
+        return max(ongoing, key=lambda r: _month(r.start) or "")
+    return max(roles, key=lambda r: _month(r.end) or "")
+
+
 def _band_of(years: int | None) -> str | None:
     if years is None:
         return None
@@ -73,8 +111,8 @@ def seed_from_facts(facts: ResumeFacts | None) -> dict[str, Any]:
     Takes the row, not a payload, because facts_json is Text. A None row, or
     one with unparseable JSON or no roles, yields the empty seed.
 
-    Roles are taken in the order the extractor wrote them, newest first, so
-    roles[0] is the latest.
+    The role used is _current_role's pick, not simply roles[0]: the
+    extractor is prompted for newest-first but that is not guaranteed.
 
     The function comes from function_of(title, "") with an empty description:
     a resume has no job description, and the description needles are tuned
@@ -102,7 +140,8 @@ def seed_from_facts(facts: ResumeFacts | None) -> dict[str, Any]:
             countries.append(country.lower())
     seed["target_locations"] = _pipe(countries)
 
-    title = next((r.title for r in payload.roles if r.title), None)
+    current = _current_role(payload)
+    title = current.title if current else None
     if title:
         function = function_of(title, "", taxonomy)
         if function and function != "other":

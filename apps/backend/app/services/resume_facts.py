@@ -105,6 +105,7 @@ PROMPT = (
     "highlights -- employers are introduced through Offerfy, not directly. "
     "locations is city or region only. "
     "Use YYYY-MM for dates, or Present for an ongoing role. "
+    "List roles newest first, whatever order the resume prints them in. "
     "headline is the person's own current role in their words, not a pitch. "
     "summary is at most three sentences, in the resume's own language."
 )

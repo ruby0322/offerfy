@@ -110,8 +110,11 @@ def test_get_or_seed_never_overwrites_a_users_own_row(db_session):
         JobPreference(user_id=u.id, target_functions="|design|", activity="paused")
     )
     db_session.flush()
+    before = db_session.query(JobPreference).filter_by(user_id=u.id).one().updated_at
     got = get_or_seed(db_session, u)
     assert got.target_functions == "|design|" and got.activity == "paused"
+    db_session.flush()
+    assert got.updated_at == before  # onupdate would have moved it
 
 
 def test_get_or_seed_creates_a_row_with_no_facts(db_session):
@@ -119,3 +122,80 @@ def test_get_or_seed_creates_a_row_with_no_facts(db_session):
     got = get_or_seed(db_session, u)
     assert got.id is not None and got.target_functions == ""
     assert get_or_seed(db_session, u).id == got.id
+
+
+def _title_of(roles):
+    return seed_from_facts(_facts(roles=roles))["target_functions"]
+
+
+def test_current_role_is_the_ongoing_one_even_when_listed_oldest_first():
+    roles = [
+        {"title": "Product Designer", "start": "2015-01", "end": "2018-01"},
+        {"title": "Backend Engineer", "start": "2019-01", "end": "Present"},
+    ]
+    assert _title_of(roles) == "|backend|"
+
+
+def test_ongoing_marker_is_case_insensitive_and_accepts_chinese():
+    roles = [
+        {"title": "Backend Engineer", "start": "2015-01", "end": "2018-01"},
+        {"title": "Product Designer", "start": "2019-01", "end": "至今"},
+    ]
+    assert _title_of(roles) == "|design|"
+    roles[1]["end"] = "present"
+    assert _title_of(roles) == "|design|"
+
+
+def test_current_role_with_no_end_date_counts_as_ongoing():
+    roles = [
+        {"title": "Backend Engineer", "start": "2015-01", "end": "2018-01"},
+        {"title": "Product Designer", "start": "2019-01"},
+    ]
+    assert _title_of(roles) == "|design|"
+
+
+def test_concurrent_ongoing_roles_pick_the_latest_start():
+    roles = [
+        {"title": "Product Designer", "start": "2016-01", "end": "Present"},
+        {"title": "Backend Engineer", "start": "2021-06", "end": "Present"},
+    ]
+    assert _title_of(roles) == "|backend|"
+
+
+def test_without_an_ongoing_role_the_latest_end_wins():
+    roles = [
+        {"title": "Product Designer", "start": "2010-01", "end": "2012-01"},
+        {"title": "Backend Engineer", "start": "2013-01", "end": "2017-01"},
+    ]
+    assert _title_of(roles) == "|backend|"
+
+
+def test_unparseable_dates_rank_last_and_order_is_the_final_tiebreak():
+    roles = [
+        {"title": "Product Designer", "start": "sometime", "end": "later"},
+        {"title": "Backend Engineer", "start": "2013-01", "end": "2017-01"},
+    ]
+    assert _title_of(roles) == "|backend|"
+    roles = [{"title": "Product Designer"}, {"title": "Backend Engineer"}]
+    assert _title_of(roles) == "|design|"
+
+
+def test_locations_are_seeded_even_when_there_are_no_roles():
+    # A deliberate decision: where someone lives does not depend on roles.
+    seed = seed_from_facts(_facts(roles=[], locations=["Taipei, Taiwan"]))
+    assert seed["target_locations"] == "|tw|"
+    assert seed["target_functions"] == ""
+
+
+def test_locations_dedupe_keep_order_and_skip_countryless_entries():
+    seed = seed_from_facts(
+        _facts(
+            locations=[
+                "Taipei, Taiwan",
+                "Somewhere Unknown",
+                "San Francisco, United States",
+                "Kaohsiung, Taiwan",
+            ]
+        )
+    )
+    assert seed["target_locations"] == "|tw|us|"
