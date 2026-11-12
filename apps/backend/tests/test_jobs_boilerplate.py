@@ -7,6 +7,7 @@ from app.models import CompanyBoilerplate, Job
 
 from app.services.jobs.boilerplate import (
     BOILERPLATE_MIN_POSTINGS,
+    MIN_SENTENCE_CHARS,
     boilerplate_hashes,
     load_boilerplate,
     recompute_boilerplate,
@@ -40,6 +41,34 @@ def test_a_sentence_repeated_within_one_posting_counts_once():
     docs = [f"{repeated} {repeated} {repeated} {repeated}"]
     docs += [f"Distinct unrelated posting number {i} with its own text." for i in range(5)]
     assert boilerplate_hashes(docs) == frozenset()
+
+
+def test_a_sentence_in_exactly_half_the_corpus_is_boilerplate():
+    # The cutoff is >=, so the boundary belongs to boilerplate: in a corpus of
+    # six, a sentence in three is stripped and one in two is not. Nothing else
+    # pins which side of 0.5 * postings the boundary falls on.
+    half = "This sentence sits in exactly half of this company's postings."
+    under = "This one sits in a third of them and is therefore not boilerplate."
+    docs = [f"{half} Role {i} does different work entirely." for i in range(3)]
+    docs += [f"{under} Role {i} does different work entirely." for i in range(3, 5)]
+    docs.append("A sixth posting that shares no sentence with any other one.")
+    hashes = boilerplate_hashes(docs)
+    assert sentence_hash(half.casefold()) in hashes
+    assert sentence_hash(under.casefold()) not in hashes
+
+
+def test_a_short_segment_is_kept_even_when_its_hash_is_in_the_set():
+    # MIN_SENTENCE_CHARS keeps short segments out of detection, and this is
+    # the other half of that rule: a short segment is never excised either,
+    # whatever the stored set says. Without it, a hash that reached the set by
+    # any other route ("Apply now." stored before the threshold existed, a
+    # company whose row was computed under a different constant) would strip a
+    # fragment that may well be the whole bullet naming the role.
+    short = "Apply now."
+    assert len(short) <= MIN_SENTENCE_CHARS
+    long_one = "A sentence comfortably longer than the minimum, and kept too."
+    text = f"{short}\n{long_one}"
+    assert strip_boilerplate(text, frozenset({sentence_hash(short.casefold())})) == text
 
 
 def test_strip_removes_only_the_boilerplate_sentence():

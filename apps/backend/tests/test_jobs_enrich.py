@@ -2,11 +2,16 @@ from datetime import datetime, timezone
 
 import pytest
 
+from sqlalchemy import event
+
 from app.models import Job, JobFacets
 from app.services.jobs import enrich as enrich_module
 from app.services.jobs.boilerplate import recompute_boilerplate
 from app.services.jobs.enrich import (
     LocationFacets,
+    _ENRICH_COLUMNS,
+    _enrich_job_rows,
+    default_taxonomy,
     description_hash,
     enrich_jobs,
     function_of,
@@ -590,6 +595,46 @@ def test_survey_cli_main_prints_a_report(db_session, capsys, monkeypatch):
 )
 def test_short_needles_do_not_hide_inside_longer_words(title, description, expected):
     assert function_of(title, description) == expected
+
+
+def test_a_batch_costs_two_queries_however_many_rows_it_holds(db_session):
+    # Three docstrings promise this shape -- one bulk JobFacets lookup and one
+    # bulk boilerplate lookup per batch, never a query per row -- and until now
+    # nothing held them to it. Moving load_boilerplate inside the row loop
+    # leaves every other test in this file green while issuing one query per
+    # posting: 21,773 of them on a backfill. Six rows over three companies, so
+    # a per-row lookup counts as six and a per-company one as three.
+    jobs = [
+        _add_job(db_session, source_id=f"q{i}", company=f"Company {i % 3}",
+                 title=f"Engineer {i}", description_text="We build things here.")
+        for i in range(6)
+    ]
+    db_session.flush()
+    rows = (
+        db_session.query(*_ENRICH_COLUMNS).filter(Job.id.in_([j.id for j in jobs])).all()
+    )
+
+    selects: list[str] = []
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT"):
+            selects.append(statement)
+
+    bind = db_session.get_bind()
+    event.listen(bind, "before_cursor_execute", record)
+    try:
+        written = _enrich_job_rows(
+            db_session,
+            rows,
+            taxonomy=default_taxonomy(),
+            force=False,
+            stamp=datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc),
+        )
+    finally:
+        event.remove(bind, "before_cursor_execute", record)
+
+    assert written == 6
+    assert len(selects) == 2, selects
 
 
 MISSION = "We bring cutting-edge autonomy and computer vision to every mission."
