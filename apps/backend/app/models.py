@@ -1150,6 +1150,61 @@ class JobPreference(Base):
     )
 
 
+class Application(Base):
+    """One person's relationship to one posting: saved, tailored, applied...
+
+    One row per (user, job), enforced by the unique constraint. It is the
+    spine of the dashboard: the record that someone went after a posting,
+    independent of whichever resume they used to do it.
+
+    tailor_resume_id is ON DELETE SET NULL, not CASCADE, on purpose. The
+    tailored resume is a means; the application is the fact. Deleting the
+    tailor must not erase the record that you applied. user_id and job_id
+    CASCADE: the row is personal data erased with the account, and is
+    meaningless once its posting is gone.
+
+    status and source have no CHECK constraint, matching
+    JobPreference.activity: their vocabularies (STATUSES, SOURCES in
+    app.services.jobs.applications) may grow and one writer owns them.
+    last_status_at is stamped on creation and again on every update, so it
+    tracks the last change to the row, status or otherwise.
+    """
+
+    __tablename__ = "applications"
+    __table_args__ = (
+        UniqueConstraint("user_id", "job_id", name="applications_user_id_job_id_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    job_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    tailor_resume_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("resumes.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    applied_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    applied_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_status_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+
 class ResumeContent(Base):
     """A structured snapshot of one resume's content, for switching templates.
 
