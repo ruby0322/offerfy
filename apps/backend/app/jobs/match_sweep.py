@@ -49,10 +49,10 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import false, func, or_
+from sqlalchemy import false, func, or_, select
 from sqlalchemy.orm import Query, Session
 
-from app.models import Job, JobFacets, JobPreference
+from app.models import Application, Job, JobFacets, JobPreference
 from app.services.jobs.enrich import (
     default_taxonomy,
     taxonomy_path,
@@ -199,8 +199,23 @@ def _any_token(column, tokens: list[str]):
 
 
 def _exclusions(query: Query, pref: JobPreference) -> Query:
-    """Seam for the applications and recent-digest exclusions (later slices)."""
-    return query
+    """Drop every posting this person already has an application for.
+
+    Any status counts: saved, tailored, applied, interviewing and closed all
+    mean "acted on", so "N new matches" means "not yet acted on". It is a
+    correlated NOT EXISTS on (user_id, job_id), not a fetched id set, because
+    a later slice runs this per active user on a schedule.
+
+    A posting the person deliberately skipped keeps counting: skipping is not
+    recorded. Still to come (slice 4): the recent-digest exclusion, which
+    hooks in here beside this one.
+    """
+    acted_on = (
+        select(1)
+        .where(Application.user_id == pref.user_id, Application.job_id == Job.id)
+        .exists()
+    )
+    return query.filter(~acted_on)
 
 
 def constrains_nothing(pref: JobPreference) -> bool:

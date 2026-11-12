@@ -14,7 +14,7 @@ from app.jobs.match_sweep import (
     expand_functions,
     prefilter_query,
 )
-from app.models import Job, JobFacets, JobPreference
+from app.models import Application, Job, JobFacets, JobPreference, User
 from app.schemas_jobs import JobPreferenceIn
 from app.services.jobs.enrich import default_taxonomy, valid_seniorities
 from app.services.jobs.store import freshness_cutoff
@@ -303,3 +303,57 @@ def test_every_family_member_is_a_real_function():
     from app.services.jobs.enrich import valid_functions
 
     assert _SOFTWARE_FAMILY <= valid_functions(default_taxonomy())
+
+
+# --- applications exclusion ------------------------------------------------
+
+def _person(db, sub):
+    user = User(google_sub=sub, email=f"{sub}@example.com", locale="en", name=sub)
+    db.add(user)
+    db.commit()
+    return user
+
+
+def _act_on(db, user, job, status="saved"):
+    db.add(Application(user_id=user.id, job_id=job.id, status=status, source="search"))
+    db.commit()
+
+
+def _mine(user_id, **kw):
+    pref = _pref(target_functions="|backend|", target_locations="|tw|", **kw)
+    pref.user_id = user_id
+    return pref
+
+
+def test_an_application_row_excludes_a_posting(db_session):
+    me = _person(db_session, "ex-me")
+    acted = _posting(db_session)
+    _posting(db_session)
+    _act_on(db_session, me, acted)
+    pref = _mine(me.id)
+    assert count_matches(db_session, pref) == 1
+    assert acted.id not in {j.id for j in prefilter_query(db_session, pref)}
+
+
+@pytest.mark.parametrize("status", ["saved", "tailored", "applied", "interviewing", "closed"])
+def test_every_status_excludes(db_session, status):
+    me = _person(db_session, "ex-status")
+    _act_on(db_session, me, _posting(db_session), status)
+    assert count_matches(db_session, _mine(me.id)) == 0
+
+
+def test_another_users_application_does_not_exclude(db_session):
+    me = _person(db_session, "ex-mine")
+    other = _person(db_session, "ex-other")
+    _act_on(db_session, other, _posting(db_session))
+    assert count_matches(db_session, _mine(me.id)) == 1
+
+
+def test_the_exclusion_survives_the_constrains_nothing_guard(db_session):
+    me = _person(db_session, "ex-guard")
+    _act_on(db_session, me, _posting(db_session))
+    _posting(db_session)
+    pref = _pref()
+    pref.user_id = me.id
+    assert count_matches(db_session, pref) == 0
+    assert prefilter_query(db_session, pref).count() == 0
