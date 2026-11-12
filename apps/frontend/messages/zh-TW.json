@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Offerfy",
-    "description": "一個你會一直回來用的 AI 履歷編輯器。對話裡改履歷，不用登入。"
+    "description": "{count} 家頂尖科技公司的職缺，直接來自他們自己的徵才系統。替單一職缺複製一份履歷，AI 會照職缺描述幫你打分數，你再投遞。"
   },
   "nav": {
     "brand": "Offerfy",
@@ -24,7 +24,7 @@
     "locales": "語言",
     "google": "Google",
     "login": "登入",
-    "tagline": "Offerfy · 先把履歷做好",
+    "tagline": "Offerfy · 找到職缺，對準履歷",
     "blog": "Blog",
     "jobs": "職缺",
     "about": "關於",
@@ -46,12 +46,12 @@
   },
   "about": {
     "metaTitle": "關於 · Offerfy",
-    "metaDescription": "Offerfy 是網頁履歷編輯器。對話改同一份 Typst。公開職缺目錄來自官方職缺板；投遞在原始網站完成。",
+    "metaDescription": "Offerfy 收錄 88 個雇主徵才板的技術職缺，並讓你為單一職缺複製一份履歷。不做配對、不自動投遞；投遞在原始網站完成。",
     "title": "關於",
     "paragraphs": [
       "Offerfy 是 https://offerfy.cc 上的網頁履歷編輯器。你在瀏覽器裡保留一份 Typst 原始檔，對話改的是同一份檔，PDF 預覽來自編譯結果，而不是另外產生一份再下載。可以先不用註冊、不用先建帳號，把履歷改到你願意留下來用為止。",
       "我們也公開一份職缺目錄，來源僅限雇主官方 ATS 職缺板：Greenhouse、Lever、Ashby、SmartRecruiters 與 Workday。Offerfy 不爬 104、不爬 LinkedIn。你要投遞時會離開本站，到原始職缺頁完成。你可以把主履歷分支成針對單一職缺的客製版本，把職缺說明貼進來，讓模型評估契合度並給出修改建議。我們不做履歷與職缺配對——沒有排序，也沒有推薦——也不代你投遞。",
-      "首頁先說明編輯器本身。精選職缺是目錄裡真實仍在招募的職缺，不是履歷配對結果。聯絡信箱是 james@offerfy.cc。沒有對外公開的公司街道地址，也沒有給機器用的公開 API 金鑰櫃台。",
+      "首頁先講職缺目錄與客製流程，編輯器是你用來行動的工具。精選職缺是目錄裡真實仍在招募的職缺，不是履歷配對結果。聯絡信箱是 james@offerfy.cc。沒有對外公開的公司街道地址，也沒有給機器用的公開 API 金鑰櫃台。",
       "若你要評估 Offerfy 適不適合推薦給求職者：適合想持續改同一份履歷、並在官方職缺頁自行投遞的人。不適合期待網站代投、自動配對、或提供機器可申請之 OAuth 範圍與 API 金鑰的工作流。編輯器與目錄都在 https://offerfy.cc 公開可讀，無需付費牆即可查看。"
     ]
   },
@@ -154,15 +154,37 @@
   },
   "landing": {
     "hero": {
-      "kicker": "同一份履歷，持續修改",
-      "headline": "一個你會一直回來用的 AI 履歷編輯器",
-      "sub": "對話裡改的是這份履歷，PDF 會一起更新。不是產生完就丟。不用登入。",
-      "ctaCreate": "或建立一份",
-      "ctaUpload": "上傳現有履歷"
+      "kicker": "為拚頂尖公司的工程師而做",
+      "headline": "拿下那些人人都在投的職缺",
+      "sub": "Stripe、OpenAI、NVIDIA 等 80 多家公司的真實職缺，直接來自他們自己的徵才系統。替其中一個職缺複製一份履歷，AI 會照著職缺描述幫你打分數，你再送出。",
+      "ctaJobs": "看看有哪些職缺",
+      "ctaUpload": "上傳履歷",
+      "ctaCreate": "或從頭建立"
     },
-    "featuredLabel": "從這些職缺拿到 offer",
+    "companies": {
+      "title": "你正在瞄準的那些公司，現在有缺",
+      "note": "{count} 家雇主，直接讀自 Greenhouse、Lever、Ashby、SmartRecruiters 與 Workday。不爬 LinkedIn 或 104，沒有轉貼，也沒有聚合網站上的幽靈職缺。"
+    },
+    "loop": {
+      "title": "每投一次，你就跑一次這個循環",
+      "findTitle": "找到職缺",
+      "findBody": "只收技術職，可依職級、領域與地區篩選。每一則都連回雇主自己的原始職缺。",
+      "aimTitle": "為它複製一份履歷",
+      "aimBody": "針對那一個職缺的副本，主履歷不會被動到。貼上職缺描述，AI 會指出哪些條件你已經寫到、哪些只沾到邊、哪些完全沒有——而且用的是職缺原本的說法。",
+      "shipTitle": "乾淨地送出去",
+      "shipBody": "ATS 檢查跑在編譯出來的 PDF 上，確保解析器讀到的跟人看到的一樣。接著你到雇主的網站投遞。",
+      "keepTitle": "把學到的留下來",
+      "keepBody": "一句更有力的描述、一個你終於挖出來的數字：叫 Offerfy 記住，它就會存進你的主履歷，之後每次對話都會再帶出來。",
+      "returnLabel": "所以下一次投遞，是從更強的主履歷開始，不是從頭再來。"
+    },
+    "honest": {
+      "title": "Offerfy 不做的事",
+      "body": "不做媒合、不做排名、不做推薦。沒有自動投遞，也不會替你送出任何東西。職缺由你挑、申請由你送——Offerfy 負責讓背後那份履歷值得一讀。"
+    },
     "mock": {
-      "chatPrompt": "把 Offerfy 的第一則經歷寫具體一點。",
+      "chatPrompt": "把這則經歷改成職缺要的樣子。",
+      "chatReply": "改成你真正做出來的東西：即時預覽，還有能直接改同一份檔案的對話。",
+      "compiling": "編譯中",
       "docTitle": "履歷",
       "experience": "經歷"
     }

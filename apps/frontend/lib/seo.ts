@@ -5,8 +5,14 @@ import { routing, type AppLocale } from "@/i18n/routing";
 export const SITE_URL = "https://offerfy.cc";
 export const SITE_NAME = "Offerfy";
 export const CONTACT_EMAIL = "james@offerfy.cc";
+// Employers whose boards the catalog actually carries. Single-sourced because
+// it is a factual claim in six places (metadata, Organization JSON-LD, the
+// agent markdown and the landing wall); components/landing/companies.test.ts
+// fails it against apps/backend/data/*.json when a board is added or dropped.
+export const EMPLOYER_COUNT = 88;
 export const ORG_DESCRIPTION =
-  "The AI resume editor you’ll keep using. Chat edits this file. No account needed.";
+  `Open roles at ${EMPLOYER_COUNT} top tech employers, straight from their own boards. ` +
+  "Fork your resume for one posting and AI scores it against the job before you apply.";
 
 export const OG_LOCALE: Record<AppLocale, string> = {
   en: "en_US",

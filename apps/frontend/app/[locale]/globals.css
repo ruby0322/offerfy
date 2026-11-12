@@ -962,6 +962,310 @@ textarea {
   color: var(--ink);
 }
 
+.landing-cta-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 600;
+  border-radius: var(--radius);
+  padding: 0.65rem 1.15rem;
+  border: 1px solid var(--rule);
+}
+
+.landing-cta-ghost:hover {
+  background: var(--hover);
+  border-color: var(--ink);
+}
+
+.landing-section {
+  padding-bottom: 3.5rem;
+}
+
+.landing-section-title {
+  font-size: 1.35rem;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  margin: 0 0 1.25rem;
+}
+
+@media (min-width: 768px) {
+  .landing-section-title {
+    font-size: 1.6rem;
+  }
+}
+
+.landing-section-note {
+  margin: 1.25rem 0 0;
+  max-width: 62ch;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.landing-rail {
+  display: grid;
+  gap: 0.7rem;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent);
+}
+
+.landing-rail-row {
+  display: flex;
+  width: max-content;
+  gap: 0.7rem;
+}
+
+/* Each row holds its list twice, so translating by half lands exactly on the
+   copy and the loop has no seam. Different durations keep the rows from
+   marching in lockstep. */
+.landing-rail-a {
+  animation: landing-rail-left 46s linear infinite;
+}
+
+.landing-rail-b {
+  animation: landing-rail-right 54s linear infinite;
+}
+
+.landing-rail-c {
+  animation: landing-rail-left 62s linear infinite;
+}
+
+@keyframes landing-rail-left {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes landing-rail-right {
+  from {
+    transform: translateX(-50%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.landing-rail:hover .landing-rail-row {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-rail-row {
+    animation: none;
+  }
+}
+
+.landing-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  border: 1px solid var(--rule);
+  background: var(--sheet, var(--paper));
+  border-radius: 999px;
+  padding: 0.45rem 0.95rem;
+}
+
+.landing-chip svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.landing-chip-name {
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.landing-chip-word {
+  font-family: var(--font-display), "Noto Serif CJK TC", "Noto Serif CJK SC", Georgia, serif;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.landing-loop-track {
+  border: 1px solid var(--rule);
+  background: var(--sheet, var(--paper));
+}
+
+.landing-loop {
+  display: grid;
+  grid-template-columns: 1fr;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+@media (min-width: 768px) {
+  .landing-loop {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.landing-loop-step {
+  padding: 1.15rem 1.25rem 1.35rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.landing-loop-step:last-child {
+  border-bottom: 0;
+}
+
+@media (min-width: 768px) {
+  .landing-loop-step {
+    border-bottom: 0;
+    border-right: 1px solid var(--rule);
+  }
+
+  .landing-loop-step:last-child {
+    border-right: 0;
+  }
+}
+
+.landing-loop-index {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--clay);
+  font-variant-numeric: tabular-nums;
+}
+
+.landing-loop-title {
+  margin: 0.35rem 0 0.5rem;
+  font-size: 1.05rem;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+
+.landing-loop-body {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.65;
+  color: var(--muted);
+}
+
+/* The return leg. It hangs off the bottom of the track, runs right to left,
+   and its arrowhead turns up into step 01 — the loop closing. */
+.landing-loop-return {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-top: 1px solid var(--rule);
+  background: color-mix(in srgb, var(--clay) 5%, var(--sheet, var(--paper)));
+  padding: 0.85rem 1.25rem;
+}
+
+.landing-loop-arrow {
+  position: relative;
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--clay);
+  opacity: 0.7;
+}
+
+/* The left end turns up, crossing back into step 01. */
+.landing-loop-arrow::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 17px;
+  background: var(--clay);
+}
+
+.landing-loop-arrow::before {
+  content: "";
+  position: absolute;
+  left: -4.5px;
+  bottom: 17px;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 8px solid var(--clay);
+}
+
+.landing-loop-return-text {
+  flex: 0 1 auto;
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--muted);
+  text-align: right;
+}
+
+@media (max-width: 767px) {
+  .landing-loop-return {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
+  }
+
+  .landing-loop-arrow {
+    flex: 0 0 auto;
+  }
+
+  .landing-loop-return-text {
+    text-align: left;
+  }
+}
+
+.landing-honest {
+  border: 1px solid var(--rule);
+  background: var(--sheet, var(--paper));
+  padding: 1.5rem 1.35rem;
+}
+
+@media (min-width: 768px) {
+  .landing-honest {
+    display: grid;
+    grid-template-columns: 0.8fr 1.6fr;
+    gap: 2rem;
+    align-items: start;
+    padding: 1.9rem 1.75rem;
+  }
+}
+
+.landing-honest-title {
+  margin: 0 0 0.6rem;
+  font-size: 1.15rem;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+
+@media (min-width: 768px) {
+  .landing-honest-title {
+    margin-bottom: 0;
+  }
+}
+
+.landing-honest-body {
+  margin: 0;
+  max-width: 68ch;
+  font-size: 0.95rem;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
 .landing-hero {
   display: grid;
   grid-template-columns: 1fr;
@@ -979,6 +1283,10 @@ textarea {
 
 .landing-mock {
   min-height: 18rem;
+  /* The card has a floor its content does not always reach; without this the
+     body keeps its natural height and the divider stops short of the bottom. */
+  display: flex;
+  flex-direction: column;
   background: var(--sheet);
   border: 1px solid var(--rule);
   font-size: 0.75rem;
@@ -1006,11 +1314,27 @@ textarea {
   white-space: nowrap;
 }
 
-.landing-mock-tabs {
+/* Both bars sit at the top of their own column, so they share a height: a
+   difference between them would knock the two panes out of alignment at the
+   divider. The pill on the active tab is the tallest thing in either. */
+.landing-mock-bar {
   display: flex;
+  align-items: center;
   gap: 0.35rem;
-  padding: 0.45rem 0.7rem;
+  min-height: 2.4rem;
+  padding: 0.35rem 0.7rem;
   border-bottom: 1px solid var(--rule);
+}
+
+.landing-mock-previewbar {
+  justify-content: space-between;
+}
+
+.landing-mock-panename {
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 .landing-mock-tabs span {
@@ -1028,6 +1352,7 @@ textarea {
   display: grid;
   grid-template-columns: 1fr;
   min-height: 14rem;
+  flex: 1 1 auto;
 }
 
 @media (min-width: 640px) {
@@ -1038,7 +1363,18 @@ textarea {
 
 .landing-mock-left,
 .landing-mock-preview {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.landing-mock-pane {
+  flex: 1 1 auto;
   padding: 0.75rem 0.85rem;
+  /* Phones stack the panes, and there both the Typst source and the open diff
+     run a few pixels past 12.5rem — enough to jog the mock's height mid-loop.
+     Pin the floor above the tallest phase; 640px up keeps the measured 12.5. */
+  min-height: 13.5rem;
 }
 
 .landing-mock-left {
@@ -1046,16 +1382,153 @@ textarea {
 }
 
 @media (min-width: 640px) {
+  .landing-mock-pane {
+    min-height: 12.5rem;
+  }
+
   .landing-mock-left {
     border-right: 1px solid var(--rule);
     border-bottom: 0;
   }
 }
 
+.landing-mock-chat {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The composer keeps its box while being typed into and loses the border once
+   sent, so the prompt text never moves between the two states. */
 .landing-mock-prompt {
-  margin: 0 0 0.6rem;
+  margin: 0;
+  width: 100%;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
   color: var(--ink);
   line-height: 1.4;
+  transition: border-color 0.3s ease, background-color 0.3s ease;
+}
+
+.landing-mock-prompt[data-composing="true"] {
+  border-color: var(--rule);
+  background: var(--paper);
+}
+
+.landing-mock-caret {
+  display: inline-block;
+  width: 1px;
+  height: 0.75rem;
+  margin-left: 1px;
+  vertical-align: -1px;
+  background: var(--ink);
+  animation: landing-mock-blink 1.1s steps(1, end) infinite;
+}
+
+@keyframes landing-mock-blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  50.01%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.landing-mock-thinking,
+.landing-mock-reply {
+  margin: 0.45rem 0 0;
+  padding-left: 0.45rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* Held at the finished reply's height so streaming text does not push the diff
+   around underneath it. */
+.landing-mock-reply {
+  min-height: 3.4rem;
+}
+
+.landing-mock-thinking {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 3.4rem;
+}
+
+.landing-mock-dot {
+  width: 0.3rem;
+  height: 0.3rem;
+  border-radius: 999px;
+  background: var(--clay);
+  animation: landing-mock-pulse 1s ease-in-out infinite;
+}
+
+@keyframes landing-mock-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.landing-mock-diffbar {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+  padding-left: 0.45rem;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  transform: translateY(3px);
+}
+
+.landing-mock-diffbar[data-shown="true"] {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.landing-mock-chev {
+  width: 0;
+  height: 0;
+  border-left: 3.5px solid transparent;
+  border-right: 3.5px solid transparent;
+  border-top: 5px solid var(--muted);
+  transform: rotate(-90deg);
+  transition: transform 0.25s ease;
+}
+
+.landing-mock-chev[data-open="true"] {
+  transform: rotate(0deg);
+}
+
+.landing-mock-add {
+  color: var(--success);
+}
+
+.landing-mock-del {
+  color: var(--destructive);
+}
+
+.landing-mock-difflines {
+  width: 100%;
+  max-height: 0;
+  margin-top: 0.3rem;
+  overflow: hidden;
+}
+
+.landing-mock-difflines[data-open="true"] {
+  max-height: 8rem;
+  transition: max-height 0.35s ease;
+}
+
+.landing-mock-difflines .chat-diff {
+  font-size: 0.62rem;
 }
 
 .landing-mock-source {
@@ -1067,9 +1540,18 @@ textarea {
   white-space: pre-wrap;
 }
 
-.landing-mock-hl {
-  background: color-mix(in srgb, var(--clay) 18%, var(--sheet));
+/* Lit once the line has finished writing, and stays lit across the preview
+   swap: it is the only thing tying the edited source to the changed PDF. A
+   background fade rather than a left-to-right sweep, because the line wraps and
+   a sized background paints per line box. */
+.landing-mock-line {
   color: var(--ink);
+  background-color: transparent;
+  transition: background-color 0.4s ease;
+}
+
+.landing-mock-line[data-lit="true"] {
+  background-color: color-mix(in srgb, var(--clay) 18%, var(--sheet));
 }
 
 .landing-mock-preview {
@@ -1109,10 +1591,27 @@ textarea {
   line-height: 1.45;
 }
 
+/* Both bullets share one grid cell, so the cell is always as tall as the longer
+   of the two and swapping them cannot reflow the hero. */
+.landing-mock-swap {
+  display: grid;
+}
+
+.landing-mock-cell {
+  grid-area: 1 / 1;
+  opacity: 0;
+}
+
+.landing-mock-cell[data-shown="true"] {
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .landing-mock,
   .landing-mock * {
     transition: none;
+    animation: none;
   }
 }
 

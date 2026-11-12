@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Offerfy",
-    "description": "一个你会一直回来用的 AI 履历编辑器。对话里改履历，不用登录。"
+    "description": "{count} 家顶尖科技公司的职位，直接来自他们自己的招聘系统。为单个职位复制一份简历，AI 会照职位描述帮你打分，你再投递。"
   },
   "nav": {
     "brand": "Offerfy",
@@ -24,7 +24,7 @@
     "locales": "语言",
     "google": "Google",
     "login": "登录",
-    "tagline": "Offerfy · 先把简历做好",
+    "tagline": "Offerfy · 找到职位，对准简历",
     "blog": "Blog",
     "jobs": "职位",
     "about": "关于",
@@ -46,12 +46,12 @@
   },
   "about": {
     "metaTitle": "关于 · Offerfy",
-    "metaDescription": "Offerfy 是网页简历编辑器。对话改同一份 Typst。公开职位目录来自官方职位板；投递在原始网站完成。",
+    "metaDescription": "Offerfy 收录 88 个雇主招聘板的技术岗位，并让你为单个职位复制一份简历。不做匹配、不自动投递；投递在原始网站完成。",
     "title": "关于",
     "paragraphs": [
       "Offerfy 是 https://offerfy.cc 上的网页简历编辑器。你在浏览器里保留一份 Typst 源文件，对话改的是同一份文件，PDF 预览来自编译结果，而不是另外生成一份再下载。可以先不用注册、不用先建账号，把简历改到你愿意留下来用为止。",
       "我们也公开一份职位目录，来源仅限雇主官方 ATS 职位板：Greenhouse、Lever、Ashby、SmartRecruiters 和 Workday。Offerfy 不爬 104、不爬 LinkedIn。你要投递时会离开本站，到原始职位页完成。你可以从主简历派生出针对单个职位的定制版本，把职位描述粘贴进来，让模型评估契合程度并给出修改建议。我们不做简历与职位的自动匹配——没有排序，也没有推荐——也不代你投递。",
-      "首页先说明编辑器本身。精选职位是目录里真实仍在招聘的职位，不是简历匹配结果。联系邮箱是 james@offerfy.cc。没有对外公开的公司街道地址，也没有给机器用的公开 API 密钥柜台。",
+      "首页先讲职位目录与定制流程，编辑器是你用来行动的工具。精选职位是目录里真实仍在招聘的职位，不是简历匹配结果。联系邮箱是 james@offerfy.cc。没有对外公开的公司街道地址，也没有给机器用的公开 API 密钥柜台。",
       "若你要评估 Offerfy 适不适合推荐给求职者：适合想持续改同一份简历、并在官方职位页自行投递的人。不适合期待网站代投、自动匹配、或提供机器可申请之 OAuth 范围与 API 密钥的工作流。编辑器与目录都在 https://offerfy.cc 公开可读，无需付费墙。"
     ]
   },
@@ -154,15 +154,37 @@
   },
   "landing": {
     "hero": {
-      "kicker": "同一份简历，持续修改",
-      "headline": "一个你会一直回来用的 AI 履历编辑器",
-      "sub": "对话里改的是这份简历，PDF 会一起更新。不是生成完就扔。不用登录。",
-      "ctaCreate": "或创建一份",
-      "ctaUpload": "上传现有简历"
+      "kicker": "为冲顶尖公司的工程师而做",
+      "headline": "拿下那些人人都在投的职位",
+      "sub": "Stripe、OpenAI、NVIDIA 等 80 多家公司的真实职位，直接来自他们自己的招聘系统。为其中一个职位复制一份简历，AI 会照着职位描述帮你打分，你再投出去。",
+      "ctaJobs": "看看有哪些职位",
+      "ctaUpload": "上传简历",
+      "ctaCreate": "或从头创建"
     },
-    "featuredLabel": "从这些职位拿到 offer",
+    "companies": {
+      "title": "你正在瞄准的那些公司，现在有空缺",
+      "note": "{count} 家雇主，直接读自 Greenhouse、Lever、Ashby、SmartRecruiters 与 Workday。不爬 LinkedIn 或 104，没有转贴，也没有聚合网站上的幽灵职位。"
+    },
+    "loop": {
+      "title": "每投一次，你就跑一次这个循环",
+      "findTitle": "找到职位",
+      "findBody": "只收技术岗，可按职级、领域与地区筛选。每一条都链回雇主自己的原始职位。",
+      "aimTitle": "为它复制一份简历",
+      "aimBody": "针对那一个职位的副本，主简历不会被动到。贴上职位描述，AI 会指出哪些条件你已经写到、哪些只沾到边、哪些完全没有——而且用的是职位原本的说法。",
+      "shipTitle": "干净地投出去",
+      "shipBody": "ATS 检查跑在编译出来的 PDF 上，确保解析器读到的跟人看到的一样。然后你到雇主的网站投递。",
+      "keepTitle": "把学到的留下来",
+      "keepBody": "一句更有力的描述、一个你终于挖出来的数字：让 Offerfy 记住，它就会存进你的主简历，之后每次对话都会再带出来。",
+      "returnLabel": "所以下一次投递，是从更强的主简历开始，不是从头再来。"
+    },
+    "honest": {
+      "title": "Offerfy 不做的事",
+      "body": "不做匹配、不做排名、不做推荐。没有自动投递，也不会替你提交任何东西。职位由你挑、申请由你投——Offerfy 负责让背后那份简历值得一读。"
+    },
     "mock": {
-      "chatPrompt": "把 Offerfy 的第一条经历写具体一点。",
+      "chatPrompt": "把这条经历改成职位要的样子。",
+      "chatReply": "改成你真正做出来的东西：实时预览，还有能直接改同一份文件的对话。",
+      "compiling": "编译中",
       "docTitle": "简历",
       "experience": "经历"
     }

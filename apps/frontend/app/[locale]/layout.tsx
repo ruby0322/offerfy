@@ -6,7 +6,7 @@ import ThemeProvider from "@/components/ThemeProvider";
 import ToastProvider from "@/components/Toaster";
 import { routing } from "@/i18n/routing";
 import { resolveLocale } from "@/lib/locale";
-import { pageMetadata, SITE_URL } from "@/lib/seo";
+import { EMPLOYER_COUNT, pageMetadata, SITE_URL } from "@/lib/seo";
 import "./globals.css";
 
 const fraunces = Fraunces({
@@ -45,7 +45,7 @@ export async function generateMetadata({
       locale,
       href: "/",
       title: t("title"),
-      description: t("description"),
+      description: t("description", { count: EMPLOYER_COUNT }),
     }),
   };
 }
