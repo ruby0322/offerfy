@@ -160,7 +160,13 @@ def mark_applied(db: Session, *, user: User, job_id: str) -> Application:
 
 
 def confirm_applied(db: Session, *, application: Application) -> Application:
-    """The person answered 'yes, I applied'. Idempotent."""
+    """The person answered 'yes, I applied'. Idempotent.
+
+    Only an applied row can be confirmed; a stale tab answering 'yes' for a
+    row that is not at applied changes nothing.
+    """
+    if application.status != "applied":
+        return application
     if application.applied_confirmed_at is None:
         application.applied_confirmed_at = _utcnow()
     db.commit()

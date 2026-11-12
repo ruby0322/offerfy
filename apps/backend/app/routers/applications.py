@@ -70,8 +70,10 @@ def save_application(
     user: User = Depends(require_user),
 ):
     """Save a posting. Idempotent: a second save returns the row untouched."""
+    # 422 for a reference carried in the body, 404 for one carried in the
+    # path (see mark_applied): the collection URL exists, the payload is bad.
     if db.get(Job, body.job_id) is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=422, detail="Job not found")
     row = service.save(db, user=user, job_id=body.job_id, source=body.source)
     return _out(db, row)
 
@@ -106,6 +108,7 @@ def unsave_application(
 def mark_applied(
     job_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)
 ):
+    # The id is in the path, so a missing posting is a missing resource: 404.
     if db.get(Job, job_id) is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return _out(db, service.mark_applied(db, user=user, job_id=job_id))
@@ -134,11 +137,14 @@ def patch_application(
     user: User = Depends(require_user),
 ):
     row = _owned(db, user, job_id)
-    if body.status is not None:
-        row = service.set_status(db, application=row, status=body.status)
     if "notes" in body.model_fields_set:
         # Written here, not in the service: notes carry no transition, and
         # last_status_at has no onupdate, so this leaves "days quiet" alone.
+        # Written before set_status so that service's commit is the request's
+        # only one; with no status, commit here.
         row.notes = body.notes
+    if body.status is not None:
+        row = service.set_status(db, application=row, status=body.status)
+    else:
         db.commit()
     return _out(db, row)

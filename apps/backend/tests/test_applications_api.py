@@ -48,7 +48,8 @@ def test_save_rejects_an_unknown_source_and_an_unknown_job(client, db_session):
     _signed_in(client, db_session)
     job = _job(db_session)
     assert client.post("/v1/me/applications", json={"job_id": job.id, "source": "x"}).status_code == 422
-    assert client.post("/v1/me/applications", json={"job_id": "nope"}).status_code == 404
+    res = client.post("/v1/me/applications", json={"job_id": "nope"})
+    assert res.status_code == 422 and res.json()["detail"] == "Job not found"
 
 
 def test_get_returns_the_row_or_404(client, db_session):
@@ -81,7 +82,8 @@ def test_delete_refuses_once_the_row_has_moved_on(client, db_session):
 def test_delete_of_nothing_is_404(client, db_session):
     _signed_in(client, db_session)
     job = _job(db_session)
-    assert client.delete(f"/v1/me/applications/{job.id}").status_code == 404
+    res = client.delete(f"/v1/me/applications/{job.id}")
+    assert res.status_code == 404 and res.json()["detail"] == "Application not found"
 
 
 def test_applied_then_confirm_true_stamps_and_false_reverts(client, db_session):
@@ -183,6 +185,7 @@ def test_another_users_application_is_404_not_403(client, db_session):
         client.patch(f"/v1/me/applications/{j}", json={"status": "closed", "notes": "x"}),
     ]
     assert [r.status_code for r in responses] == [404] * 5
+    assert {r.json()["detail"] for r in responses} == {"Application not found"}
 
     db_session.expire_all()
     after = db_session.get(Application, row.id)
@@ -208,3 +211,57 @@ def test_out_carries_the_tailor_resume_id(client, db_session):
     service.link_tailor(db_session, user=user, job_id=job.id, tailor_resume_id=tailor.id)
     body = client.get(f"/v1/me/applications/{job.id}").json()
     assert body["status"] == "tailored" and body["tailor_resume_id"] == tailor.id
+
+
+def test_applied_on_an_unknown_job_is_404(client, db_session):
+    _signed_in(client, db_session)
+    res = client.post("/v1/me/applications/nope/applied")
+    assert res.status_code == 404 and res.json()["detail"] == "Job not found"
+
+
+def test_confirm_true_on_a_row_that_is_not_applied_changes_nothing(client, db_session):
+    user = _signed_in(client, db_session)
+    job = _job(db_session)
+    client.post("/v1/me/applications", json={"job_id": job.id})
+    before = client.get(f"/v1/me/applications/{job.id}").json()
+    res = client.post(f"/v1/me/applications/{job.id}/confirm", json={"applied": True})
+    assert res.status_code == 200 and res.json() == before
+    assert res.json()["applied_confirmed_at"] is None
+    assert _rows(db_session, user)[0].applied_confirmed_at is None
+
+
+def test_patch_with_status_and_notes_applies_both_in_one_commit(client, db_session):
+    user = _signed_in(client, db_session)
+    job = _job(db_session)
+    client.post("/v1/me/applications", json={"job_id": job.id})
+    commits = []
+    from sqlalchemy import event
+    from sqlalchemy.orm import Session
+
+    def record(session):
+        # get_db commits once more at teardown with nothing pending; count only
+        # the commits that carry a change.
+        if session.dirty:
+            commits.append(1)
+
+    event.listen(Session, "before_commit", record)
+    try:
+        res = client.patch(
+            f"/v1/me/applications/{job.id}",
+            json={"status": "interviewing", "notes": "phone screen"},
+        )
+    finally:
+        event.remove(Session, "before_commit", record)
+    assert res.status_code == 200
+    assert (res.json()["status"], res.json()["notes"]) == ("interviewing", "phone screen")
+    row = _rows(db_session, user)[0]
+    assert (row.status, row.notes) == ("interviewing", "phone screen")
+    assert len(commits) == 1
+
+
+def test_patch_notes_over_2000_chars_is_422(client, db_session):
+    _signed_in(client, db_session)
+    job = _job(db_session)
+    client.post("/v1/me/applications", json={"job_id": job.id})
+    assert client.patch(f"/v1/me/applications/{job.id}", json={"notes": "x" * 2001}).status_code == 422
+    assert client.patch(f"/v1/me/applications/{job.id}", json={"notes": "x" * 2000}).status_code == 200

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, StrictBool, field_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator
 
 # Imported, not redeclared: two copies of this tuple silently drift.
 from app.services.jobs.enrich import (
@@ -239,7 +239,7 @@ class ApplicationPatch(BaseModel):
     # Only what a person reports themselves; every other status is reached by
     # the action that implies it. The service re-checks this.
     status: Literal["interviewing", "closed"] | None = None
-    notes: str | None = None
+    notes: str | None = Field(default=None, max_length=2000)
 
 
 class ApplicationOut(BaseModel):

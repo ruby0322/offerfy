@@ -341,3 +341,12 @@ def test_pipeline_breaks_timestamp_ties_by_id(db_session):
         db_session.commit()
         ids.append(a.id)
     assert [r.id for r in pipeline(db_session, user=u)] == sorted(ids)
+
+
+def test_confirm_applied_only_confirms_a_row_at_applied(db_session):
+    u, j = _user(db_session), _job(db_session)
+    row = save(db_session, user=u, job_id=j.id)
+    out = confirm_applied(db_session, application=row)
+    assert out.status == "saved" and out.applied_confirmed_at is None
+    set_status(db_session, application=row, status="interviewing")
+    assert confirm_applied(db_session, application=row).applied_confirmed_at is None
