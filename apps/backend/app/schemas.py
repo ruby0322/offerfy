@@ -54,6 +54,7 @@ class TailorCreate(BaseModel):
     target_label: str | None = None
     target_context: str | None = None
     fork_from: Literal["master", "current"] = "master"
+    job_id: str | None = None
 
 
 class FamilyMember(BaseModel):

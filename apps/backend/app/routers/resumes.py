@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db, get_session_factory
 from app.deps import get_current_user, load_resume_for_owner, owner_context, require_user
-from app.models import GuestSession, Resume, ResumeImport, ResumeRevision, User
+from app.models import GuestSession, Job, Resume, ResumeImport, ResumeRevision, User
 from app.schemas import (
     AtsReport,
     CompileBody,
@@ -34,6 +34,7 @@ from app.services.ats import analyze_pdf
 from app.services.chat_messages import persist_template_switch
 from app.services.emitters import emitter_for
 from app.services.family import create_tailor, family_master, family_tailors
+from app.services.jobs.applications import link_tailor
 from app.services.extract import (
     MAX_UPLOAD_BYTES,
     allowed_upload,
@@ -320,6 +321,10 @@ def create_tailor_route(
     user: User | None = Depends(get_current_user),
 ):
     member = _owned_resume(resume_id, request, response, db, user, ensure=True)
+    # 422 for a reference carried in the body, 404 for one carried in the
+    # path (see POST /v1/me/applications). Checked before anything is written.
+    if body.job_id is not None and db.get(Job, body.job_id) is None:
+        raise HTTPException(status_code=422, detail="Job not found")
     try:
         tailor = create_tailor(
             db,
@@ -331,6 +336,14 @@ def create_tailor_route(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # Guests are dropped here on purpose, not by oversight: applications.user_id
+    # is NOT NULL, so a guest has nowhere to hold the linkage. The tailor is the
+    # point of the request and the linkage is not, so it still returns 201.
+    if body.job_id is not None and user is not None:
+        # create_tailor only flushes, and link_tailor commits: that one commit
+        # lands the tailor and its application together, so neither exists
+        # without the other. The commit below is then a no-op for this path.
+        link_tailor(db, user=user, job_id=body.job_id, tailor_resume_id=tailor.id)
     out = _to_out(db, tailor)
     db.commit()
     return out
