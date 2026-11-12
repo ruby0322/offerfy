@@ -425,6 +425,41 @@ class JobFacets(Base):
     )
 
 
+class CompanyBoilerplate(Base):
+    """The sentences that recur across most of one company's job postings.
+
+    Derived state, rebuildable from the jobs table at any time, same as
+    JobFacets above. Written by the boilerplate pass that strips per-company
+    mission statements out of descriptions before facet matching, so a
+    paragraph every posting from one employer shares cannot decide a
+    posting's function.
+
+    Keyed on the free-text company string rather than on a board or source:
+    boilerplate is a property of the employer's ad template, not of the
+    board that carried it. One employer can appear on two boards (Anduril on
+    greenhouse, Micron on workday) whose postings share the same mission
+    paragraph; keying per board would detect it twice and could return two
+    answers for one employer.
+
+    sentence_hashes is Text holding a JSON array of hex digests, not
+    JSON/JSONB, for the same reason as TalentProfile.profile_json: nothing
+    queries inside the blob, and the array is read and replaced whole.
+    Storing hashes rather than sentence text keeps the row small and stops
+    another employer's posting prose from sitting in this table.
+    """
+
+    __tablename__ = "company_boilerplate"
+
+    company: Mapped[str] = mapped_column(String(255), primary_key=True)
+    # Text, not JSON: same idiom as TalentProfile.profile_json -- the array is
+    # read and replaced as one unit, never queried element by element.
+    sentence_hashes: Mapped[str] = mapped_column(Text, nullable=False)
+    posting_count: Mapped[int] = mapped_column(nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+
 class JobIngestRun(Base):
     __tablename__ = "job_ingest_runs"
 

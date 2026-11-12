@@ -1,3 +1,8 @@
+import json
+from datetime import datetime, timezone
+
+from app.models import CompanyBoilerplate
+
 from app.services.jobs.boilerplate import (
     BOILERPLATE_MIN_POSTINGS,
     boilerplate_hashes,
@@ -64,3 +69,15 @@ def test_cjk_description_without_terminators_survives_as_one_sentence():
     cjk = "我們正在尋找一位資深後端工程師負責支付系統的設計與維護工作"
     assert split_sentences(cjk) == [cjk]
     assert strip_boilerplate(cjk, frozenset()) == cjk
+
+
+def test_company_boilerplate_round_trips_its_hash_array(db_session):
+    db_session.add(CompanyBoilerplate(
+        company="Anduril",
+        sentence_hashes=json.dumps(["a" * 64, "b" * 64]),
+        posting_count=2375,
+        computed_at=datetime.now(timezone.utc),
+    ))
+    db_session.flush()
+    row = db_session.get(CompanyBoilerplate, "Anduril")
+    assert json.loads(row.sentence_hashes) == ["a" * 64, "b" * 64]
