@@ -132,3 +132,88 @@ class AdminIngestOverview(BaseModel):
     # Rows from before migration 014, which have no run_id and so cannot be
     # grouped into a pass. Surfaced rather than silently dropped.
     legacy_row_count: int
+
+
+# --- Job preferences ---------------------------------------------------------
+#
+# The pipe encoding of target_functions / target_locations is a storage detail
+# (see models.JobPreference); the wire format is a list of strings. The columns
+# carry no CHECK constraint on purpose -- the vocabularies may grow -- so this
+# is the only place a bad value can be stopped.
+
+from typing import Literal  # noqa: E402
+
+from pydantic import field_validator  # noqa: E402
+
+from app.services.jobs.enrich import default_taxonomy  # noqa: E402
+
+PREFERENCE_ACTIVITIES = ("actively_looking", "browsing", "paused")
+
+
+def _clean_members(values: list[str], allowed: set[str], what: str) -> list[str]:
+    out: list[str] = []
+    for raw in values:
+        value = raw.strip().lower()
+        if value not in allowed:
+            raise ValueError(f"Invalid {what}: {raw!r}")
+        if value not in out:
+            out.append(value)
+    return out
+
+
+class JobPreferenceIn(BaseModel):
+    """A full replacement of the person's preferences, never a patch.
+
+    An omitted field is cleared (activity returns to its default), because a
+    partial update cannot express "I no longer want a seniority filter".
+    """
+
+    target_functions: list[str] = []
+    target_locations: list[str] = []
+    target_seniority: str | None = None
+    remote_required: bool | None = None
+    activity: Literal["actively_looking", "browsing", "paused"] = "actively_looking"
+
+    @field_validator("target_functions")
+    @classmethod
+    def _functions(cls, v: list[str]) -> list[str]:
+        t = default_taxonomy()
+        allowed = {r.function for r in t.function_rules} | {"other"}
+        return _clean_members(v, allowed, "function")
+
+    @field_validator("target_locations")
+    @classmethod
+    def _locations(cls, v: list[str]) -> list[str]:
+        # Countries, lowercased: what seeding writes (preferences.py).
+        t = default_taxonomy()
+        allowed = {c.lower() for c in t.location_countries.values()}
+        return _clean_members(v, allowed, "location")
+
+    @field_validator("target_seniority")
+    @classmethod
+    def _seniority(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        t = default_taxonomy()
+        allowed = {r.seniority for r in t.seniority_rules} | {"unknown"}
+        value = v.strip().lower()
+        if value not in allowed:
+            raise ValueError(f"Invalid seniority: {v!r}")
+        return value
+
+
+class JobPreferenceOut(BaseModel):
+    target_functions: list[str]
+    target_locations: list[str]
+    target_seniority: str | None
+    remote_required: bool | None
+    activity: str
+    updated_at: str
+    # "missing" | "stale" | "fresh": whether the editor should offer a rebuild.
+    facts_state: str
+
+
+class ResumeFactsRefreshOut(BaseModel):
+    facts_state: str
+    # A named reason when the build did not produce facts; None on success.
+    error: str | None = None
