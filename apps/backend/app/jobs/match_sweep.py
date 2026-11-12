@@ -53,7 +53,12 @@ from sqlalchemy import false, func, or_
 from sqlalchemy.orm import Query, Session
 
 from app.models import Job, JobFacets, JobPreference
-from app.services.jobs.enrich import default_taxonomy, taxonomy_path, valid_seniorities
+from app.services.jobs.enrich import (
+    default_taxonomy,
+    taxonomy_path,
+    valid_functions,
+    valid_seniorities,
+)
 from app.services.jobs.store import freshness_cutoff
 
 # Low to high, read from data/job_taxonomy.json's seniority_ladder. The order
@@ -94,6 +99,55 @@ if _bad or _unclassified or set(SENIORITY_LADDER) & _OFF_LADDER:  # pragma: no c
         f"seniority_ladder out of step with seniority_rules: "
         f"not a rule={_bad}, unclassified={_unclassified}"
     )
+
+# A posting titled "Software Engineer" with no specialisation in its title
+# carries function `software` -- the fallback tier's value, see
+# enrich.function_of. 899 active postings when this was built, and the whole
+# reason the tier exists is that they must be reachable: a target of `backend`
+# sees 506 backend postings and would otherwise miss every generic one that
+# suits it exactly as well.
+#
+# So the function axis is not exact, it is family-aware, and ASYMMETRICALLY:
+#   a specialised target  -> that specialisation PLUS the generic postings
+#   the generic target    -> the whole family
+# A specialist wants their own field plus the unspecialised roles, not a
+# frontend job because they picked backend. Someone who picks the generic
+# target has named no specialisation, so narrowing them to only the 899
+# generic postings would be worse than the unconstrained count they get
+# today -- the family is what they mean.
+#
+# Functions outside the family (product, design, hardware, other) stay exact:
+# a generic software posting does not suit a product manager.
+_GENERIC_FUNCTION = "software"
+_SOFTWARE_FAMILY = frozenset(
+    {_GENERIC_FUNCTION, "backend", "frontend", "fullstack", "ml", "data", "infra", "security"}
+)
+
+# Catches a renamed or removed function in job_taxonomy.json: a family member
+# that is no longer a real facet value would silently widen nothing.
+_not_functions = _SOFTWARE_FAMILY - valid_functions(_taxonomy)
+if _not_functions:  # pragma: no cover
+    raise RuntimeError(
+        f"_SOFTWARE_FAMILY names functions the taxonomy does not define: "
+        f"{_not_functions}"
+    )
+
+
+def expand_functions(targets: list[str]) -> list[str]:
+    """The facet values a set of target functions admits.
+
+    Public because the digest candidate selection of a later slice reads the
+    prefilter directly and must not re-derive this rule differently.
+    """
+    admitted: set[str] = set()
+    for target in targets:
+        if target == _GENERIC_FUNCTION:
+            admitted |= _SOFTWARE_FAMILY
+        elif target in _SOFTWARE_FAMILY:
+            admitted |= {target, _GENERIC_FUNCTION}
+        else:
+            admitted.add(target)
+    return sorted(admitted)
 
 
 def _band(target: str | None) -> list[str] | None:
@@ -178,7 +232,7 @@ def prefilter_query(db: Session, pref: JobPreference) -> Query:
 
     functions = _tokens(pref.target_functions)
     if functions:
-        q = q.filter(_any_token(JobFacets.function, functions))
+        q = q.filter(_any_token(JobFacets.function, expand_functions(functions)))
 
     band = _band(pref.target_seniority)
     if band is not None:

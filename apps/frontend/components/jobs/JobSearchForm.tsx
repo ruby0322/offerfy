@@ -49,6 +49,7 @@ export const SENIORITY_KEYS: Record<string, JobsMessageKey> = {
 };
 
 export const FUNCTION_KEYS: Record<string, JobsMessageKey> = {
+  software: "functionSoftware",
   backend: "functionBackend",
   frontend: "functionFrontend",
   fullstack: "functionFullstack",

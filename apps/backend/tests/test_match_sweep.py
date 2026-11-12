@@ -7,7 +7,13 @@ from datetime import timedelta
 import pytest
 from pydantic import ValidationError
 
-from app.jobs.match_sweep import SENIORITY_LADDER, count_matches, prefilter_query
+from app.jobs.match_sweep import (
+    _SOFTWARE_FAMILY,
+    SENIORITY_LADDER,
+    count_matches,
+    expand_functions,
+    prefilter_query,
+)
 from app.models import Job, JobFacets, JobPreference
 from app.schemas_jobs import JobPreferenceIn
 from app.services.jobs.enrich import default_taxonomy, valid_seniorities
@@ -242,3 +248,58 @@ def test_a_seeded_manager_target_is_not_a_dead_end(db_session):
     _posting(db_session, seniority="manager", function="backend")
     assert count_matches(db_session, _pref(target_seniority="manager",
                                            target_functions="|backend|")) == 1
+
+
+def test_expand_functions_is_asymmetric_by_design():
+    # A specialist gets their own field plus the unspecialised postings --
+    # not a frontend job because they picked backend.
+    assert expand_functions(["backend"]) == ["backend", "software"]
+    assert expand_functions(["backend", "ml"]) == ["backend", "ml", "software"]
+    # The generic target names no specialisation, so it means the family.
+    assert expand_functions(["software"]) == sorted(_SOFTWARE_FAMILY)
+    # Outside the family, exact: a generic software posting does not suit a
+    # product manager.
+    assert expand_functions(["product"]) == ["product"]
+    assert expand_functions(["hardware", "design"]) == ["design", "hardware"]
+    assert expand_functions(["other"]) == ["other"]
+    assert expand_functions([]) == []
+
+
+def test_a_specialist_target_reaches_generic_software_postings(db_session):
+    # The whole point of the fallback tier: 899 live postings titled
+    # "Software Engineer" with no specialisation, which a backend engineer
+    # would otherwise never see.
+    generic = _posting(db_session, function="software")
+    backend = _posting(db_session, function="backend")
+    _posting(db_session, function="frontend")
+    _posting(db_session, function="product")
+    pref = _pref(target_functions="|backend|")
+    assert {j.id for j in prefilter_query(db_session, pref).all()} == {
+        generic.id,
+        backend.id,
+    }
+    assert count_matches(db_session, pref) == 2
+
+
+def test_the_generic_target_reaches_the_whole_family_and_nothing_outside_it(db_session):
+    family = {f: _posting(db_session, function=f) for f in sorted(_SOFTWARE_FAMILY)}
+    for outside in ("product", "design", "hardware", "other"):
+        _posting(db_session, function=outside)
+    pref = _pref(target_functions="|software|")
+    assert {j.id for j in prefilter_query(db_session, pref).all()} == {
+        job.id for job in family.values()
+    }
+
+
+def test_a_non_family_target_stays_exact(db_session):
+    product = _posting(db_session, function="product")
+    _posting(db_session, function="software")
+    _posting(db_session, function="backend")
+    pref = _pref(target_functions="|product|")
+    assert {j.id for j in prefilter_query(db_session, pref).all()} == {product.id}
+
+
+def test_every_family_member_is_a_real_function():
+    from app.services.jobs.enrich import valid_functions
+
+    assert _SOFTWARE_FAMILY <= valid_functions(default_taxonomy())

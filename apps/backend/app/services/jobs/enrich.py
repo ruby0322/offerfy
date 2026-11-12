@@ -113,6 +113,7 @@ class FunctionRule:
 class Taxonomy:
     seniority_rules: tuple[SeniorityRule, ...]
     function_rules: tuple[FunctionRule, ...]
+    function_fallback_rules: tuple[FunctionRule, ...]
     location_countries: dict[str, str]
     location_regions: dict[str, str]
     remote_needles: tuple[str, ...]
@@ -129,18 +130,22 @@ def load_taxonomy(path: Path | None = None) -> Taxonomy:
         )
         for rule in data.get("seniority_rules", [])
     )
-    function_rules = tuple(
-        FunctionRule(
-            function=rule["function"],
-            title_needles=tuple(
-                n.casefold() for n in rule.get("title_any", []) if n
-            ),
-            description_needles=tuple(
-                n.casefold() for n in rule.get("description_any", []) if n
-            ),
+    def function_rules_from(key: str) -> tuple[FunctionRule, ...]:
+        return tuple(
+            FunctionRule(
+                function=rule["function"],
+                title_needles=tuple(
+                    n.casefold() for n in rule.get("title_any", []) if n
+                ),
+                description_needles=tuple(
+                    n.casefold() for n in rule.get("description_any", []) if n
+                ),
+            )
+            for rule in data.get(key, [])
         )
-        for rule in data.get("function_rules", [])
-    )
+
+    function_rules = function_rules_from("function_rules")
+    function_fallback_rules = function_rules_from("function_fallback_rules")
     location_countries = {
         needle.casefold(): value
         for needle, value in data.get("location_countries", {}).items()
@@ -163,6 +168,7 @@ def load_taxonomy(path: Path | None = None) -> Taxonomy:
     return Taxonomy(
         seniority_rules=seniority_rules,
         function_rules=function_rules,
+        function_fallback_rules=function_fallback_rules,
         location_countries=location_countries,
         location_regions=location_regions,
         remote_needles=remote_needles,
@@ -178,8 +184,15 @@ def valid_seniorities(taxonomy: Taxonomy) -> set[str]:
 
 
 def valid_functions(taxonomy: Taxonomy) -> set[str]:
-    # "other" is a real bucket, same reasoning as "unknown" above.
-    return {rule.function for rule in taxonomy.function_rules} | {"other"}
+    # "other" is a real bucket, same reasoning as "unknown" above. The
+    # fallback tier's functions are ordinary facet values -- a caller
+    # filtering /v1/jobs by them must not be rejected -- so they belong in
+    # the vocabulary alongside the specialised ones.
+    return (
+        {rule.function for rule in taxonomy.function_rules}
+        | {rule.function for rule in taxonomy.function_fallback_rules}
+        | {"other"}
+    )
 
 
 def valid_countries(taxonomy: Taxonomy) -> set[str]:
@@ -370,20 +383,36 @@ def function_of(
     more specific compound elsewhere in the file, instead of leaving that
     to be re-discovered one ordering accident at a time. Do not swap
     either function's strategy for the other's.
+
+    `function_fallback_rules` is consulted only after every specialised
+    rule has missed on both the title and the description, and that
+    ordering is the whole point of it being a separate tier rather than
+    another entry in `function_rules`. A generic category cannot be
+    expressed as needles inside a longest-match contest: "software
+    engineer" is 17 characters and "backend" is 7, so a generic rule
+    competing on length would answer `software` for "Senior Software
+    Engineer, Backend" and strip the specialisation off the posting.
+    Measured against the live catalogue when this was built, running the
+    generic needles as an ordinary rule moved 2,864 postings off a real
+    function to gain 899 -- a net loss. As a tier it can only ever claim
+    postings that would otherwise be `other`, which makes the change
+    additive by construction; `test_fallback_tier_never_overrides_a_specialised_function`
+    pins that.
     """
     config = taxonomy or default_taxonomy()
     folded_title = f" {title.casefold()} "
-    title_match = _longest_matching_function(
-        folded_title, config.function_rules, lambda rule: rule.title_needles
-    )
-    if title_match is not None:
-        return title_match
     folded_description = f" {description_text.casefold()} "
-    description_match = _longest_matching_function(
-        folded_description, config.function_rules, lambda rule: rule.description_needles
-    )
-    if description_match is not None:
-        return description_match
+    for rules in (config.function_rules, config.function_fallback_rules):
+        title_match = _longest_matching_function(
+            folded_title, rules, lambda rule: rule.title_needles
+        )
+        if title_match is not None:
+            return title_match
+        description_match = _longest_matching_function(
+            folded_description, rules, lambda rule: rule.description_needles
+        )
+        if description_match is not None:
+            return description_match
     return "other"
 
 

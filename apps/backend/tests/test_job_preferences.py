@@ -51,7 +51,7 @@ def test_remote_required_keeps_false_distinct_from_none(db_session):
 import json  # noqa: E402
 
 from app.models import ResumeFacts  # noqa: E402
-from app.services.jobs.enrich import default_taxonomy  # noqa: E402
+from app.services.jobs.enrich import default_taxonomy, valid_functions  # noqa: E402
 from app.services.jobs.preferences import current_or_seeded, seed_from_facts  # noqa: E402
 
 
@@ -80,9 +80,28 @@ def test_seed_derives_function_and_seniority_from_the_latest_role():
 
 
 def test_seed_uses_the_job_taxonomy_not_a_second_vocabulary():
-    valid = {r.function for r in default_taxonomy().function_rules} | {"other"}
-    seed = seed_from_facts(_facts(roles=[{"title": "Senior Data Scientist"}]))
-    assert set(filter(None, seed["target_functions"].split("|"))) <= valid
+    # valid_functions(), not function_rules: the vocabulary includes the
+    # fallback tier's functions, and a seed may legitimately produce one.
+    valid = valid_functions(default_taxonomy())
+    for title in ("Senior Data Scientist", "Software Engineer", "Engineering Manager"):
+        seed = seed_from_facts(_facts(roles=[{"title": title}]))
+        assert set(filter(None, seed["target_functions"].split("|"))) <= valid
+
+
+def test_a_generic_software_role_seeds_a_function_instead_of_nothing():
+    # Before the fallback tier, function_of("Software Engineer") was "other",
+    # which the seeder skips -- the single most common title in the catalogue
+    # seeded no function at all.
+    seed = seed_from_facts(_facts(roles=[{"title": "Software Engineer"}]))
+    assert seed["target_functions"] == "|software|"
+    assert seed["target_seniority"] == "mid"
+
+
+def test_a_non_software_role_still_seeds_no_function():
+    # "other" is still skipped, and the fallback tier must not have turned
+    # every unclassified title into a software target.
+    seed = seed_from_facts(_facts(roles=[{"title": "Process Engineer"}]))
+    assert seed["target_functions"] == ""
 
 
 def test_seed_from_no_facts_is_empty_not_an_error():

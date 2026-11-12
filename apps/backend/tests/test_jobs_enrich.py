@@ -18,6 +18,7 @@ from app.services.jobs.enrich import (
     load_taxonomy,
     location_facets,
     seniority_of,
+    valid_functions,
 )
 
 
@@ -80,7 +81,10 @@ def test_seniority_of(title, expected):
     ("Product Manager", "", "product"),
     ("Product Designer", "", "design"),
     ("後端工程師", "", "backend"),
-    ("Software Engineer", "", "other"),
+    # Was pinned as "other" until the function_fallback_rules tier landed:
+    # the most common title in the catalogue had no function, so it was
+    # unreachable as a target and invisible to every specialist.
+    ("Software Engineer", "", "software"),
 ])
 def test_function_of(title, description, expected):
     assert function_of(title, description) == expected
@@ -726,3 +730,88 @@ def test_stripping_does_not_break_padded_needles_without_boilerplate(
     assert function_of(job.title, description) == expected   # raw baseline
     enrich_jobs(db_session)
     assert db_session.query(JobFacets).one().function == expected
+
+
+@pytest.mark.parametrize(
+    "title,expected",
+    [
+        ("Software Engineer", "software"),
+        ("Senior Software Engineer", "software"),
+        ("Software Development Engineer II", "software"),
+        ("Software Developer", "software"),
+        ("Software Architect", "software"),
+        ("iOS Engineer", "software"),
+        ("Android Engineer", "software"),
+        ("Engineering Manager, Payments", "software"),
+        ("Tech Lead", "software"),
+        ("Technical Lead", "software"),
+        ("軟體工程師", "software"),
+        ("软件开发工程师", "software"),
+        # The fallback tier is for generic SOFTWARE titles. These are the
+        # engineers who correctly stay in `other` -- 403 process, 289
+        # manufacturing, 203 test and 167 mechanical titles in the live
+        # catalogue when this was written. A bare " engineer " needle in the
+        # fallback tier would swallow every one of them.
+        ("Process Engineer", "other"),
+        ("Manufacturing Engineer", "other"),
+        ("Mechanical Engineer", "other"),
+        ("Test Engineer", "other"),
+        ("Process Support Engineer III", "other"),
+        ("Equipment Technician", "other"),
+        ("Kitchen Operations Associate", "other"),
+    ],
+)
+def test_generic_software_titles_get_the_fallback_function(title, expected):
+    assert function_of(title, "") == expected
+
+
+@pytest.mark.parametrize(
+    "title,expected",
+    [
+        ("Senior Software Engineer, Backend", "backend"),
+        ("Sr Software Engineer Backend", "backend"),
+        ("Full Stack Software Engineer, Growth", "fullstack"),
+        ("Software Engineer, Data and AI Platform", "data"),
+        ("Software Engineer - Trust & Platform Security", "security"),
+        ("Systems Software Engineer - Infrastructure", "infra"),
+        ("Machine Learning Software Engineer", "ml"),
+        ("Engineering Manager, Red Team", "security"),
+        ("Hardware Engineer", "hardware"),
+        ("Product Manager, Developer Tools", "product"),
+    ],
+)
+def test_fallback_tier_never_overrides_a_specialised_function(title, expected):
+    # The generic needles are LONGER than most specialised ones
+    # ("software engineer" is 17 characters, "backend" is 7), so as an
+    # ordinary rule in the longest-match contest they would win and strip
+    # the specialisation off the posting. Measured on the live catalogue,
+    # that moved 2,864 postings off a real function to gain 899.
+    assert function_of(title, "") == expected
+
+
+def test_a_specialised_description_outranks_a_generic_title():
+    # Both specialised passes (title, then description) run before the
+    # fallback tier is consulted at all. That ordering is what makes the
+    # tier additive: it can only ever claim a posting that would otherwise
+    # be "other".
+    assert function_of("Software Engineer", "you will train deep learning models") == "ml"
+    assert function_of("Software Engineer", "mostly writing and reviewing code") == "software"
+
+
+def test_the_fallback_function_is_part_of_the_vocabulary():
+    # /v1/jobs must accept it as a filter, and the preference validator as a
+    # target; both read valid_functions().
+    assert "software" in valid_functions(default_taxonomy())
+
+
+def test_a_taxonomy_with_no_fallback_tier_still_loads(tmp_path):
+    # The key is optional: an older data file must not break the loader.
+    import json
+
+    data = json.loads(enrich_module.taxonomy_path().read_text(encoding="utf-8"))
+    data.pop("function_fallback_rules")
+    path = tmp_path / "taxonomy.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    taxonomy = load_taxonomy(path)
+    assert taxonomy.function_fallback_rules == ()
+    assert function_of("Software Engineer", "", taxonomy) == "other"

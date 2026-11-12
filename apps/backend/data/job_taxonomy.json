@@ -370,6 +370,35 @@
       ]
     }
   ],
+  "_function_fallback_rule": "Same shape as function_rules, consulted only after every function_rules needle has missed on both title and description. This tier is for generic categories that name no specialisation: as an ordinary rule they would win the longest-needle contest and strip specialisations off postings ('software engineer' is 17 characters, 'backend' is 7), so they must not compete with the specialised rules at all. A fallback rule can only ever claim a posting that would otherwise be 'other'. Keep the needles specific to the category: a bare ' engineer ' here would sweep up the process, manufacturing, test and mechanical engineers that correctly sit in 'other'.",
+  "function_fallback_rules": [
+    {
+      "function": "software",
+      "title_any": [
+        "software engineer",
+        "software developer",
+        "software development engineer",
+        "software architect",
+        "application developer",
+        "web developer",
+        "mobile developer",
+        "mobile engineer",
+        "ios engineer",
+        "android engineer",
+        "programmer",
+        " sde ",
+        " sde,",
+        " swe ",
+        " swe,",
+        "tech lead",
+        "technical lead",
+        "engineering manager",
+        "軟體",
+        "软件"
+      ],
+      "description_any": []
+    }
+  ],
   "location_countries": {
     "united states": "US",
     "usa": "US",

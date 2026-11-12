@@ -125,6 +125,7 @@
     "seniorityUnknown": "Unspecified",
     "functionLabel": "Function",
     "functionAll": "Any function",
+    "functionSoftware": "Software (general)",
     "functionBackend": "Backend",
     "functionFrontend": "Frontend",
     "functionFullstack": "Full stack",

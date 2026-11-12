@@ -128,6 +128,7 @@
     "seniorityUnknown": "未分類",
     "functionLabel": "職能",
     "functionAll": "不限職能",
+    "functionSoftware": "軟體（不分領域）",
     "functionBackend": "後端",
     "functionFrontend": "前端",
     "functionFullstack": "全端",
