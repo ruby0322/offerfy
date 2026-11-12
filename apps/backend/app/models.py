@@ -404,11 +404,13 @@ class JobFacets(Base):
 
     description_hash is enrich_jobs' gate: a posting is re-derived once per
     distinct *stripped* description (description_text with the company's
-    boilerplate sentences removed, casefolded), not once per ingest pass, so
-    a six-hourly ingest that re-fetches an unchanged posting costs no
-    re-derivation. Because the input is the stripped text, a change to a
-    company's boilerplate re-derives all its postings with no force, and a
-    case-only edit to a description does not change the hash.
+    boilerplate sentences excised in place, original case kept), not once per
+    ingest pass, so a six-hourly ingest that re-fetches an unchanged posting
+    costs no re-derivation. Because the input is the stripped text, a change
+    to a company's boilerplate re-derives its postings with no force. Case is
+    not folded out of the hash input, so an edit to a description's letter
+    case alone does move the hash -- see description_hash in enrich.py for
+    why that is the cheaper trade.
     """
 
     __tablename__ = "job_facets"

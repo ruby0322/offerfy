@@ -1,6 +1,8 @@
 import json
 from datetime import datetime, timezone
 
+import pytest
+
 from app.models import CompanyBoilerplate, Job
 
 from app.services.jobs.boilerplate import (
@@ -64,6 +66,29 @@ def test_stripping_does_not_splice_a_needle_across_the_junction():
         "\n".join((first, middle, last)), frozenset({sentence_hash(middle.casefold())})
     )
     assert "computer vision" not in kept
+
+
+# The strongest statement of what stripping is: a posting whose company has no
+# boilerplate comes back byte-identical, every separator, capital and bullet
+# where the board put it. This subsumes the padded-needle regression it
+# replaced -- stripping rewrites no separator at all now, so no needle can
+# appear or disappear at a segment edge. An absent row and an empty hash set
+# are the same case here, which recompute_boilerplate's change reporting
+# relies on.
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Our stack:\nReact\nTypeScript\nNode",
+        "Responsibilities:\n- Build services in Go\n- Own our SQL warehouse",
+        "  Leading and trailing space is kept.   \n\n  Mixed CASE too.  ",
+        "\u6211\u5011\u6b63\u5728\u5c0b\u627e\u4e00\u4f4d\u8cc7\u6df1\u5f8c\u7aef\u5de5\u7a0b\u5e2b",
+        "",
+    ],
+)
+def test_no_boilerplate_leaves_the_description_byte_identical(text):
+    assert strip_boilerplate(text, frozenset()) == text
+    unrelated = sentence_hash("a sentence from a completely different employer.")
+    assert strip_boilerplate(text, frozenset({unrelated})) == text
 
 
 # Review Focus 3

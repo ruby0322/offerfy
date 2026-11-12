@@ -639,6 +639,30 @@ def test_the_hash_gate_reacts_to_a_boilerplate_change(db_session):
     assert enrich_jobs(db_session) == 4          # rewritten unforced, by the hash alone
 
 
+# The other direction of the same property, which nobody checked when
+# stripping still re-segmented and rejoined the whole description: inserting a
+# space at every segment boundary made space-padded needles match bullets of
+# bare technology names that the raw text never matched. Bullet lists like
+# these are ubiquitous, and widening description matching is the exact signal
+# this mechanism exists to distrust, so a posting with no boilerplate must
+# derive what its raw text derives -- "other" -- not something stripping
+# manufactured.
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Our stack:\nReact\nTypeScript\nNode",
+        "Responsibilities:\n- Build services in Go\n- Own our SQL\n- Mentor peers",
+        "Day to day:\nSQL\nSpreadsheets\nMeetings",
+    ],
+)
+def test_stripping_does_not_invent_needles_without_boilerplate(db_session, description):
+    job = _add_job(db_session, source_id="invent", company="NoBoilerplateCo",
+                   title="Member of Staff", description_text=description)
+    assert function_of(job.title, description) == "other"   # raw baseline
+    enrich_jobs(db_session)
+    assert db_session.query(JobFacets).one().function == "other"
+
+
 @pytest.mark.parametrize(
     "description, expected",
     [

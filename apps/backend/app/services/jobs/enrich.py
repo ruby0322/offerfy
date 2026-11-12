@@ -376,10 +376,13 @@ def description_hash(text: str) -> str:
 
     Hashing the stripped text is what makes the gate self-invalidating: when
     a company's boilerplate set changes, every one of its postings hashes
-    differently and is re-derived with no `force=True`. A side effect:
-    `strip_boilerplate` casefolds, so a description edited only in letter
-    case no longer changes the hash. That is correct -- `function_of`
-    casefolds anyway, so a case-only edit cannot change any derivation.
+    differently and is re-derived with no `force=True`. Case survives
+    stripping -- `strip_boilerplate` excises spans from the original text and
+    casefolds only what it hashes -- so a description edited in letter case
+    alone still moves this hash and costs one re-derivation, even though
+    `function_of` casefolds and would return the same answer. That waste is
+    rare and one row wide; the alternative, hashing a casefolded copy, would
+    make the gate's input a string no derivation actually reads.
 
     Not of title/location/anything else: those feed the three derivations
     too, but a posting whose title or location is edited without touching

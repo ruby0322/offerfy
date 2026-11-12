@@ -28,18 +28,37 @@ Document frequency is over DISTINCT sentences per document: a sentence
 repeated inside one posting counts once toward its own frequency, otherwise
 a single posting could single-handedly make its own sentence "common".
 
-`strip_boilerplate` rejoins survivors with " \n " (space, newline, space).
-Descriptions hold newline-separated bullets with no terminator; joining
-with a bare space would splice the tail of one bullet onto the head of the
-next and manufacture a needle ("computer" + "vision") that neither
-contained -- the newline prevents that. But needles are space-padded
-(' react ', ' sql,'), and a bare newline is not a space, so a needle at the
-start or end of a segment would stop matching; the surrounding spaces
-restore that boundary match. Both halves are load-bearing.
+`strip_boilerplate` EXCISES the matching sentences in place: it replaces
+each one's span in the original string with a newline and leaves every other
+byte -- case, punctuation, the separators between survivors -- exactly as
+the board published it. It deliberately does not re-segment the text and
+rejoin the survivors, which two earlier attempts did and which cannot be
+made correct: whatever separator the rejoin picks is applied to every
+boundary of every posting, including the postings of companies that have no
+boilerplate at all. A bare "\\n" join dropped the space that space-padded
+needles (' react ', ' sql,') need at a segment edge, so real matches were
+lost; a " \\n " join instead ADDED a space at every edge, so bullet lists of
+bare technology names ("Our stack:\\nReact\\nTypeScript") began matching
+needles their raw text never matched. In-place excision has neither
+failure: a posting with no boilerplate comes back byte-identical, so the
+measured projection this mechanism was accepted on stays reproducible and
+the first run's hash churn is confined to companies that really do have
+boilerplate.
 
-Text is casefolded once up front, so hashes are over casefolded sentences
-and stripped output is casefolded too, which is what needle matching wants
-anyway.
+The anti-splice invariant survives, and is the reason the excised span is
+replaced by a newline rather than by nothing: descriptions hold
+newline-separated bullets with no terminator, so closing the gap would
+splice the tail of one bullet onto the head of the next and manufacture a
+needle ("computer" + "vision") that neither contained.
+
+Hashing casefolds; excision does not. Segments are hashed in casefolded
+form, so a case-only edit cannot change whether a sentence is recognised as
+boilerplate, but the text handed back carries the original case --
+`function_of` casefolds anyway. Identification and excision therefore work
+on two different strings, which is why segments are located as (start, end)
+offsets into the original: casefold is not length-preserving ("ß" folds to
+"ss"), so a casefolded copy's offsets cannot be indexed back into the text
+they came from.
 
 The detection and stripping functions are pure. The database seam at the
 bottom (`recompute_boilerplate`, `load_boilerplate`) is the only part that
@@ -71,9 +90,34 @@ RECOMPUTE_BATCH_SIZE: int = 500
 _SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
+def _segment_spans(text: str) -> list[tuple[int, int]]:
+    """(start, end) of each non-empty segment, as offsets into `text` itself.
+
+    Offsets rather than substrings because `strip_boilerplate` identifies a
+    segment by the hash of its casefolded form but has to cut it out of the
+    original string. Shared with `_segments`, so the text that gets hashed
+    and the span that gets excised cannot drift apart.
+    """
+    bounds: list[tuple[int, int]] = []
+    pos = 0
+    for separator in _SPLIT_RE.finditer(text):
+        bounds.append((pos, separator.start()))
+        pos = separator.end()
+    bounds.append((pos, len(text)))
+
+    spans: list[tuple[int, int]] = []
+    for start, end in bounds:
+        raw = text[start:end]
+        inner_start = start + (len(raw) - len(raw.lstrip()))
+        inner_end = end - (len(raw) - len(raw.rstrip()))
+        if inner_end > inner_start:
+            spans.append((inner_start, inner_end))
+    return spans
+
+
 def _segments(text: str) -> list[str]:
     """Casefolded, stripped, non-empty segments of any length."""
-    return [s for s in (p.strip() for p in _SPLIT_RE.split(text.casefold())) if s]
+    return [text[start:end].casefold() for start, end in _segment_spans(text)]
 
 
 def split_sentences(text: str) -> list[str]:
@@ -108,18 +152,42 @@ def _hashes_from_counts(counts: Counter[str], postings: int) -> frozenset[str]:
 
 
 def strip_boilerplate(text: str, hashes: frozenset[str]) -> str:
-    """Casefolded text without the sentences whose hash is in `hashes`.
+    """`text` with the sentences whose hash is in `hashes` excised in place.
 
-    Short segments are always kept (they are never boilerplate). Survivors
-    are joined with " \\n " (the newline stops needles splicing across a junction,
-    the spaces keep space-padded needles matching at a segment edge).
+    Each matching segment's span is replaced by a newline -- the anti-splice
+    newline, see the module docstring -- and nothing else is rewritten, so a
+    posting that contains none of its company's boilerplate comes back
+    byte-identical. That covers every posting of a company with an empty hash
+    set or no row at all, which is the case the two earlier rejoin-based
+    implementations got wrong. Case is preserved; only the hashing casefolds.
+
+    Short segments are never boilerplate (`MIN_SENTENCE_CHARS`), so they are
+    never excised even when their hash is in `hashes`.
+
+    Leading and trailing whitespace is stripped only when something was
+    actually excised; that is what makes a posting whose every sentence is
+    boilerplate come back as "" rather than as the newlines that replaced it,
+    so `function_of` falls back to the title.
     """
-    kept = [
-        s
-        for s in _segments(text)
-        if len(s) <= MIN_SENTENCE_CHARS or sentence_hash(s) not in hashes
-    ]
-    return " \n ".join(kept)
+    if not hashes:
+        return text
+
+    pieces: list[str] = []
+    cut = 0
+    for start, end in _segment_spans(text):
+        segment = text[start:end].casefold()
+        if len(segment) <= MIN_SENTENCE_CHARS:
+            continue
+        if sentence_hash(segment) not in hashes:
+            continue
+        pieces.append(text[cut:start])
+        pieces.append("\n")
+        cut = end
+
+    if not pieces:
+        return text
+    pieces.append(text[cut:])
+    return "".join(pieces).strip()
 
 
 def normalize_company(name: str) -> str:
