@@ -262,3 +262,82 @@ def test_pipeline_keeps_an_application_whose_posting_went_inactive(db_session):
     db_session.commit()
     rows = pipeline(db_session, user=u)
     assert len(rows) == 1 and rows[0].job.is_active is False
+
+
+@pytest.mark.parametrize("status", ["saved", "tailored", "applied", "ghosted"])
+def test_set_status_accepts_only_the_self_reported_moves(db_session, status):
+    u, j = _user(db_session), _job(db_session)
+    row = mark_applied(db_session, user=u, job_id=j.id)
+    with pytest.raises(ValueError):
+        set_status(db_session, application=row, status=status)
+    assert row.status == "applied"
+
+
+def test_a_notes_only_update_leaves_last_status_at(db_session):
+    u, j = _user(db_session), _job(db_session)
+    row = save(db_session, user=u, job_id=j.id)
+    old = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    row.last_status_at = old
+    db_session.commit()
+    row.notes = "called the recruiter"
+    db_session.commit()
+    db_session.refresh(row)
+    assert row.last_status_at.replace(tzinfo=timezone.utc) == old
+
+
+def test_a_tailor_id_only_update_leaves_last_status_at(db_session):
+    u, j = _user(db_session), _job(db_session)
+    t1, t2 = _tailor(db_session, u), _tailor(db_session, u)
+    row = link_tailor(db_session, user=u, job_id=j.id, tailor_resume_id=t1.id)
+    old = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    row.last_status_at = old
+    db_session.commit()
+    link_tailor(db_session, user=u, job_id=j.id, tailor_resume_id=t2.id)
+    db_session.refresh(row)
+    assert row.tailor_resume_id == t2.id
+    assert row.last_status_at.replace(tzinfo=timezone.utc) == old
+
+
+@pytest.mark.parametrize("status", ["interviewing", "closed"])
+def test_revert_applied_ignores_a_row_that_moved_on(db_session, status):
+    u, j = _user(db_session), _job(db_session)
+    row = mark_applied(db_session, user=u, job_id=j.id)
+    set_status(db_session, application=row, status=status)
+    out = revert_applied(db_session, application=row)
+    assert out.status == status and out.applied_at is not None
+
+
+def test_save_and_link_tailor_reject_an_unknown_source(db_session):
+    u, j = _user(db_session), _job(db_session)
+    t = _tailor(db_session, u)
+    with pytest.raises(ValueError):
+        save(db_session, user=u, job_id=j.id, source="bogus")
+    with pytest.raises(ValueError):
+        link_tailor(
+            db_session, user=u, job_id=j.id, tailor_resume_id=t.id, source="bogus"
+        )
+    assert _count(db_session) == 0
+
+
+def test_mark_applied_on_a_closed_row_changes_nothing(db_session):
+    u, j = _user(db_session), _job(db_session)
+    row = save(db_session, user=u, job_id=j.id)
+    set_status(db_session, application=row, status="closed")
+    out = mark_applied(db_session, user=u, job_id=j.id)
+    assert out.status == "closed" and out.applied_at is None
+
+
+def test_pipeline_breaks_timestamp_ties_by_id(db_session):
+    u = _user(db_session)
+    when = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    ids = []
+    for sid in ("x", "y", "z"):
+        j = _job(db_session, sid)
+        a = Application(
+            user_id=u.id, job_id=j.id, status="saved", source="search",
+            last_status_at=when,
+        )
+        db_session.add(a)
+        db_session.commit()
+        ids.append(a.id)
+    assert [r.id for r in pipeline(db_session, user=u)] == sorted(ids)

@@ -148,7 +148,7 @@ def test_deleting_the_user_removes_the_application(db_session):
     assert db_session.query(Application).filter_by(user_id=uid).count() == 0
 
 
-def test_last_status_at_moves_on_update(db_session):
+def test_last_status_at_is_not_moved_by_the_column_itself(db_session):
     u = _user(db_session, "sub-apps-upd")
     j = _job(db_session, "j-upd")
     old = datetime.now(timezone.utc) - timedelta(days=3)
@@ -160,4 +160,5 @@ def test_last_status_at_moves_on_update(db_session):
     row.status = "applied"
     db_session.commit()
     db_session.refresh(row)
-    assert row.last_status_at.replace(tzinfo=timezone.utc) > old + timedelta(days=2)
+    # No onupdate: only app.services.jobs.applications writes this column.
+    assert row.last_status_at.replace(tzinfo=timezone.utc) == old

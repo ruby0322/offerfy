@@ -1166,8 +1166,9 @@ class Application(Base):
     status and source have no CHECK constraint, matching
     JobPreference.activity: their vocabularies (STATUSES, SOURCES in
     app.services.jobs.applications) may grow and one writer owns them.
-    last_status_at is stamped on creation and again on every update, so it
-    tracks the last change to the row, status or otherwise.
+    last_status_at is stamped on creation and thereafter only by the service,
+    at each status change. It has no onupdate: a notes edit or a tailor-id
+    re-link must not reset the dashboard's "days quiet" clock.
     """
 
     __tablename__ = "applications"
@@ -1197,7 +1198,7 @@ class Application(Base):
         DateTime(timezone=True), nullable=True
     )
     last_status_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+        DateTime(timezone=True), nullable=False, default=_utcnow
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
