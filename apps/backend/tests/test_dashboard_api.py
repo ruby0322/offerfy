@@ -2,10 +2,12 @@ from sqlalchemy import event
 
 from app.config import get_settings
 from app.deps import SESSION_COOKIE, _sign
-from app.models import Application, JobPreference, Resume, User
+from app.models import Application, DisclosureEvent, JobPreference, Resume, User
 from app.services.jobs import applications as service
+from app.services.revisions import pin_current_draft, set_draft_source
 
 from tests.test_applications_service import _job
+from tests.test_match_sweep import _posting
 from tests.test_talent_api import LIST, _bearer, _candidate, _key
 
 TOP_LEVEL = {"preference", "match_count", "applications", "resume_health", "employer_views"}
@@ -36,7 +38,14 @@ def test_the_brand_new_person_gets_every_section_empty(client, db_session):
     assert body["preference"]["target_functions"] == []
     assert body["match_count"] == 0
     assert body["applications"] == []
-    assert body["resume_health"]["has_master"] is False
+    assert body["resume_health"] == {
+        "has_master": False,
+        "published": False,
+        "facts_state": "missing",
+        "matching_revision_current": False,
+        # nothing to rebuild from: no card demanding a rebuild
+        "needs_rebuild": False,
+    }
     assert body["employer_views"] == {"disclosure_count": 0, "last_disclosed_at": None}
 
 
@@ -59,22 +68,113 @@ def test_applications_come_back_in_group_order(client, db_session):
     service.save(db_session, user=user, job_id=interviewing.id)
     row = db_session.query(Application).filter_by(job_id=interviewing.id).one()
     service.set_status(db_session, application=row, status="interviewing")
-    expected = [
-        a.job_id for a in service.pipeline(db_session, user=user)
-    ]
     got = client.get("/v1/dashboard").json()["applications"]
-    assert [a["job_id"] for a in got] == expected
-    assert len(got) == 3
-    assert got[0]["status"] == "interviewing"
+    # GROUP_ORDER: interviewing, applied, tailored, saved. Written out, not
+    # derived from the service, so a wrong ordering there cannot pass.
+    assert [a["status"] for a in got] == ["interviewing", "applied", "saved"]
+    assert [a["job_id"] for a in got] == [interviewing.id, applied.id, saved.id]
     assert got[0]["job_title"] == interviewing.title
 
 
-def test_it_never_persists_a_preference_row(client, db_session):
+def _writes(db_session, call):
+    """Run call() and return every INSERT/UPDATE/DELETE statement it issued."""
+    seen = []
+
+    def watch(conn, cursor, statement, *a):
+        seen.append(statement)
+
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", watch)
+    try:
+        response = call()
+    finally:
+        event.remove(engine, "before_cursor_execute", watch)
+    writes = [
+        st for st in seen if st.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE"))
+    ]
+    return response, writes
+
+
+def test_a_get_writes_nothing(client, db_session):
+    # Pins "the transient seed stays transient" and "a visit spends no
+    # credits" (a facts rebuild or a metered call would have to write).
     user = _signed_in(client, db_session)
-    assert client.get("/v1/dashboard").status_code == 200
+    res, writes = _writes(db_session, lambda: client.get("/v1/dashboard"))
+    assert res.status_code == 200
+    assert writes == []
     db_session.expire_all()
     assert db_session.query(JobPreference).filter_by(user_id=user.id).count() == 0
-    assert db_session.query(Resume).filter_by(user_id=user.id).count() == 0
+
+
+def test_a_populated_person_gets_their_own_non_default_numbers(client, db_session):
+    user = _signed_in(client, db_session)
+    other = User(google_sub="sub-other", email="other@example.com", locale="en")
+    db_session.add(other)
+    db_session.commit()
+
+    # match_count: a saved preference matching one active, fresh, faceted job.
+    _posting(db_session, function="backend", country="TW")
+    db_session.add(
+        JobPreference(
+            user_id=user.id,
+            target_functions="|backend|",
+            target_locations="|tw|",
+            target_seniority=None,
+            remote_required=None,
+        )
+    )
+
+    # employer_views: one disclosure for this user, three for someone else.
+    def disclose(owner, n):
+        for _ in range(n):
+            db_session.add(
+                DisclosureEvent(
+                    user_id=owner.id,
+                    recipient_label="Acme Talent",
+                    recipient_contact="talent@acme.example",
+                    purpose="talent_introduction",
+                    scope="full",
+                    profile_content_hash="h" * 64,
+                    policy_version="2026-10-24",
+                    route="GET /x",
+                )
+            )
+
+    disclose(user, 1)
+    disclose(other, 3)
+
+    # resume_health: a published master for this user only.
+    master = Resume(
+        title="Master", typst_source="= CV", source="create", locale="en",
+        user_id=user.id, kind="master",
+    )
+    db_session.add(master)
+    db_session.flush()
+    set_draft_source(db_session, master, "= CV")
+    pin_current_draft(db_session, master)
+    user.profile_resume_id = master.id
+    db_session.commit()
+
+    body = client.get("/v1/dashboard").json()
+
+    assert body["match_count"] == 1
+    pref = body["preference"]
+    assert pref["target_functions"] == ["backend"]
+    assert isinstance(pref["updated_at"], str) and pref["updated_at"]
+
+    views = body["employer_views"]
+    assert views["disclosure_count"] == 1  # not the other person's 3
+    assert isinstance(views["last_disclosed_at"], str) and views["last_disclosed_at"]
+
+    # A published master with no facts built yet: present and published, the
+    # facts are missing so matching cannot be current, and a rebuild is due.
+    assert body["resume_health"] == {
+        "has_master": True,
+        "published": True,
+        "facts_state": "missing",
+        "matching_revision_current": False,
+        "needs_rebuild": True,
+    }
 
 
 def test_one_request_costs_a_flat_number_of_queries(client, db_session):
