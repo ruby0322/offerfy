@@ -121,9 +121,10 @@ export default function DashboardPage() {
     let cancelled = false;
     // The dashboard's own data is one request. It starts at once, beside the
     // resume list below, rather than behind getMe -> claimResumes.
+    const first = fetchDashboard();
     (async () => {
       try {
-        const next = await fetchDashboard();
+        const next = await first;
         if (!cancelled) {
           setDash(next);
           setError(null);
@@ -153,8 +154,14 @@ export default function DashboardPage() {
         if (cancelled) return;
         setResumes(items);
         // A claim may have just given this person a master the first
-        // dashboard response did not know about.
-        if (items.some((r) => (r.kind ?? "master") === "master")) {
+        // dashboard response did not know about: refetch only when it said
+        // there was none and the list now shows one.
+        const firstDash = await first.catch(() => null);
+        if (
+          firstDash &&
+          !firstDash.resume_health.has_master &&
+          items.some((r) => (r.kind ?? "master") === "master")
+        ) {
           const next = await fetchDashboard().catch(() => null);
           if (!cancelled && next) {
             setDash(next);

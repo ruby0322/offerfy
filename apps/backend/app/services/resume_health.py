@@ -53,7 +53,13 @@ def health(db: Session, *, user: User) -> ResumeHealth:
     state = facts_state(db, user)
     if resume is None:
         # Nothing to rebuild from: not a problem the card should demand fixing.
-        return ResumeHealth(False, False, state, False, False)
+        return ResumeHealth(
+            has_master=False,
+            published=False,
+            facts_state=state,
+            matching_revision_current=False,
+            needs_rebuild=False,
+        )
     facts = facts_for_user(db, user)
     published = resume.published_revision_id is not None
     current = (

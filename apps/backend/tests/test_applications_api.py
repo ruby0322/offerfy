@@ -101,9 +101,20 @@ def test_applied_then_confirm_true_stamps_and_false_reverts(client, db_session):
     reverted = client.post(
         f"/v1/me/applications/{job.id}/confirm", json={"applied": False}
     ).json()
-    assert reverted["status"] == "tailored"
+    # No tailor was ever linked, so the honest place to land is saved.
+    assert reverted["status"] == "saved"
     assert reverted["applied_at"] is None and reverted["applied_confirmed_at"] is None
-    assert [r.status for r in _rows(db_session, user)] == ["tailored"]
+    assert [r.status for r in _rows(db_session, user)] == ["saved"]
+
+
+def test_confirm_false_leaves_a_row_that_can_be_deleted(client, db_session):
+    user = _signed_in(client, db_session)
+    job = _job(db_session)
+    client.post(f"/v1/me/applications/{job.id}/applied")
+    res = client.post(f"/v1/me/applications/{job.id}/confirm", json={"applied": False})
+    assert res.status_code == 200 and res.json()["status"] == "saved"
+    assert client.delete(f"/v1/me/applications/{job.id}").status_code == 204
+    assert _rows(db_session, user) == []
 
 
 def test_confirm_false_on_a_row_that_is_not_applied_changes_nothing(client, db_session):

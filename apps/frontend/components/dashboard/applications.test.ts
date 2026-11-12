@@ -18,7 +18,7 @@ function row(over: Partial<Application> = {}): Application {
     applied_at: null,
     applied_confirmed_at: null,
     last_status_at: "2026-11-10T12:00:00Z",
-    notes: "",
+    notes: null,
     ...over,
   };
 }

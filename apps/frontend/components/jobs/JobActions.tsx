@@ -123,6 +123,22 @@ export default function JobActions({ jobId, applyUrl, title, company, applyLabel
 
   const { application, masterId } = state;
   const saved = application !== null;
+  const pastSaved = application !== null && application.status !== "saved";
+
+  function statusLabel(status: Application["status"]): string {
+    switch (status) {
+      case "tailored":
+        return t("statusTailored");
+      case "applied":
+        return t("statusApplied");
+      case "interviewing":
+        return t("statusInterviewing");
+      case "closed":
+        return t("statusClosed");
+      default:
+        return status;
+    }
+  }
 
   function update(next: Application | null) {
     setState({ kind: "ready", application: next, masterId });
@@ -191,11 +207,12 @@ export default function JobActions({ jobId, applyUrl, title, company, applyLabel
         className={ACTION}
         onClick={toggleSave}
         // Past `saved`, the row is a status label: unsaving would only 409.
-        disabled={busy || (saved && application.status !== "saved")}
-        aria-pressed={saved}
-        aria-label={saved && application.status === "saved" ? t("unsave") : undefined}
+        disabled={busy || pastSaved}
+        aria-pressed={pastSaved ? undefined : saved}
+        // title, not aria-label: the visible text must stay the accessible name.
+        title={saved && !pastSaved ? t("unsave") : undefined}
       >
-        {saved ? t("saved") : t("save")}
+        {pastSaved ? statusLabel(application.status) : saved ? t("saved") : t("save")}
       </button>
       {masterId ? (
         <button type="button" className={ACTION} onClick={tailor} disabled={busy}>

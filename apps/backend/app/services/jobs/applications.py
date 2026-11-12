@@ -174,14 +174,21 @@ def confirm_applied(db: Session, *, application: Application) -> Application:
 
 
 def revert_applied(db: Session, *, application: Application) -> Application:
-    """The person answered 'no, I did not apply': back to tailored.
+    """The person answered 'no, I did not apply': back to where they were.
+
+    The destination depends on the tailor. `applied` is reachable without one
+    (the outbound click on /jobs/[id] creates a saved row and advances it
+    straight to applied), and sending that row to `tailored` would invent a
+    "ready to send" entry with no tailored resume behind it, undeletable
+    because only `saved` rows delete. So: `tailored` when a tailor is linked,
+    otherwise `saved`.
 
     Only an applied row can be un-applied; a stale tab answering 'no' for a
     row that has since moved on (interviewing, closed) changes nothing.
     """
     if application.status != "applied":
         return application
-    application.status = "tailored"
+    application.status = "tailored" if application.tailor_resume_id is not None else "saved"
     application.applied_at = None
     application.applied_confirmed_at = None
     application.last_status_at = _utcnow()

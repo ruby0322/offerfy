@@ -16,7 +16,7 @@ function row(job_id: string, status: string, last_status_at: string): Applicatio
     applied_at: null,
     applied_confirmed_at: null,
     last_status_at,
-    notes: "",
+    notes: null,
   };
 }
 

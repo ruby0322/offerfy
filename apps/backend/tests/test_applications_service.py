@@ -159,13 +159,34 @@ def test_confirm_then_never_owed_again(db_session):
     assert mark_applied(db_session, user=u, job_id=j.id).applied_confirmed_at == first
 
 
-def test_revert_applied_returns_to_tailored_and_clears_both_stamps(db_session):
+def test_revert_applied_after_a_tailor_returns_to_tailored_and_clears_both_stamps(
+    db_session,
+):
     u, j = _user(db_session), _job(db_session)
+    t = _tailor(db_session, u)
+    link_tailor(db_session, user=u, job_id=j.id, tailor_resume_id=t.id)
     row = mark_applied(db_session, user=u, job_id=j.id)
     confirm_applied(db_session, application=row)
     out = revert_applied(db_session, application=row)
     assert out.status == "tailored"
+    assert out.tailor_resume_id == t.id
     assert out.applied_at is None and out.applied_confirmed_at is None
+
+
+def test_revert_applied_without_a_tailor_returns_to_saved_not_a_phantom_tailored(
+    db_session,
+):
+    # The real path: click the outbound link without saving or tailoring (the
+    # row is created at saved and advanced straight to applied), then answer No.
+    u, j = _user(db_session), _job(db_session)
+    row = mark_applied(db_session, user=u, job_id=j.id)
+    assert row.status == "applied" and row.tailor_resume_id is None
+    out = revert_applied(db_session, application=row)
+    assert out.status == "saved"
+    assert out.tailor_resume_id is None
+    assert out.applied_at is None and out.applied_confirmed_at is None
+    # saved is deletable; a phantom tailored row would not be.
+    assert unsave(db_session, user=u, job_id=j.id) is True
 
 
 def test_set_status_moves_to_interviewing_and_closed(db_session):
@@ -186,8 +207,7 @@ def test_set_status_rejects_an_unknown_value(db_session):
 
 
 def test_confirming_does_not_move_last_status_at(db_session):
-    # The column's onupdate fires on any UPDATE, confirmation included; the
-    # service must pin it, since confirming is not a status change.
+    # Confirming is not a status change, so last_status_at must not move.
     u, j = _user(db_session), _job(db_session)
     row = mark_applied(db_session, user=u, job_id=j.id)
     old = datetime(2026, 1, 1, tzinfo=timezone.utc)

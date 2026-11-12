@@ -20,7 +20,7 @@ export type Application = {
   applied_at: string | null;
   applied_confirmed_at: string | null;
   last_status_at: string;
-  notes: string;
+  notes: string | null;
 };
 
 export type ApplicationPatch = {

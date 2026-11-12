@@ -40,9 +40,9 @@ count_matches takes a preference that may be TRANSIENT (current_or_seeded
 returns an un-persisted row). Nothing here reads pref.id or touches the session
 with it.
 
-Scope: the spec also excludes postings with an applications row and postings in
-the user's last four digests. Those tables do not exist until later slices;
-`_exclusions` is the one seam where both attach.
+Scope: the applications exclusion is in place (`_exclusions`). The spec also
+excludes postings in the user's last four digests; that table does not exist
+yet, and `_exclusions` is the seam where it attaches.
 """
 
 from __future__ import annotations
