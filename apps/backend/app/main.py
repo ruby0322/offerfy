@@ -10,6 +10,7 @@ from app.routers import (
     auth,
     chat,
     consent,
+    dashboard,
     health,
     jobs,
     memory,
@@ -51,6 +52,7 @@ def create_app() -> FastAPI:
     application.include_router(models.router)
     application.include_router(preferences.router)
     application.include_router(applications.router)
+    application.include_router(dashboard.router)
     return application
 
 

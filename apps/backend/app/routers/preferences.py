@@ -26,7 +26,7 @@ def _pipe(values: list[str]) -> str:
     return f"|{'|'.join(values)}|" if values else ""
 
 
-def _out(db: Session, user: User, row: JobPreference) -> JobPreferenceOut:
+def preference_out(db: Session, user: User, row: JobPreference) -> JobPreferenceOut:
     return JobPreferenceOut(
         target_functions=_split(row.target_functions),
         target_locations=_split(row.target_locations),
@@ -48,7 +48,7 @@ def get_job_preferences(
     """The saved preferences, or, before the first save, a seed computed from the
     resume facts and not stored. Storing happens only on PUT."""
     row = current_or_seeded(db, user)
-    return _out(db, user, row)
+    return preference_out(db, user, row)
 
 
 @router.put("/v1/me/job-preferences", response_model=JobPreferenceOut)
@@ -71,7 +71,7 @@ def put_job_preferences(
     row.activity = body.activity
     db.commit()
     db.refresh(row)
-    return _out(db, user, row)
+    return preference_out(db, user, row)
 
 
 @router.get("/v1/me/matches/count")

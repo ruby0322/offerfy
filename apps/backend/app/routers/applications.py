@@ -30,8 +30,11 @@ def _iso(value) -> str | None:
     return value.isoformat() if value else None
 
 
-def _out(db: Session, row: Application) -> ApplicationOut:
-    job = db.get(Job, row.job_id)
+def application_out(row: Application) -> ApplicationOut:
+    """Project a row; the posting comes through the row's view-only `job`
+    relationship, so a list built from pipeline() (which eager-loads it)
+    costs no extra queries."""
+    job = row.job
     return ApplicationOut(
         job_id=row.job_id,
         job_title=job.title,
@@ -75,7 +78,7 @@ def save_application(
     if db.get(Job, body.job_id) is None:
         raise HTTPException(status_code=422, detail="Job not found")
     row = service.save(db, user=user, job_id=body.job_id, source=body.source)
-    return _out(db, row)
+    return application_out(row)
 
 
 @router.get("/v1/me/applications/{job_id}", response_model=ApplicationOut)
@@ -83,7 +86,7 @@ def get_application(
     job_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)
 ):
     """The person's row for one posting, for the public job page's Save button."""
-    return _out(db, _owned(db, user, job_id))
+    return application_out(_owned(db, user, job_id))
 
 
 @router.delete("/v1/me/applications/{job_id}", status_code=204)
@@ -111,7 +114,7 @@ def mark_applied(
     # The id is in the path, so a missing posting is a missing resource: 404.
     if db.get(Job, job_id) is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    return _out(db, service.mark_applied(db, user=user, job_id=job_id))
+    return application_out(service.mark_applied(db, user=user, job_id=job_id))
 
 
 @router.post("/v1/me/applications/{job_id}/confirm", response_model=ApplicationOut)
@@ -126,7 +129,7 @@ def confirm_application(
         row = service.confirm_applied(db, application=row)
     else:
         row = service.revert_applied(db, application=row)
-    return _out(db, row)
+    return application_out(row)
 
 
 @router.patch("/v1/me/applications/{job_id}", response_model=ApplicationOut)
@@ -147,4 +150,4 @@ def patch_application(
         row = service.set_status(db, application=row, status=body.status)
     else:
         db.commit()
-    return _out(db, row)
+    return application_out(row)

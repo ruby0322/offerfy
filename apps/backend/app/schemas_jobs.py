@@ -256,3 +256,25 @@ class ApplicationOut(BaseModel):
     applied_confirmed_at: str | None
     last_status_at: str
     notes: str | None
+
+
+class ResumeHealthOut(BaseModel):
+    has_master: bool
+    published: bool
+    facts_state: str
+    matching_revision_current: bool
+    needs_rebuild: bool
+
+
+class EmployerViewsOut(BaseModel):
+    disclosure_count: int
+    # null when no employer has read the profile; never "".
+    last_disclosed_at: str | None
+
+
+class DashboardOut(BaseModel):
+    preference: JobPreferenceOut
+    match_count: int
+    applications: list[ApplicationOut]
+    resume_health: ResumeHealthOut
+    employer_views: EmployerViewsOut
