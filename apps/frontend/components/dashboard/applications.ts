@@ -42,3 +42,19 @@ export function quietDays(app: Application, now: Date = new Date()): number {
 export function readyAgeDays(app: Application, now: Date = new Date()): number | null {
   return app.status === "tailored" ? daysSince(app.last_status_at, now) : null;
 }
+
+export type ResponseChoice = { key: "responseHeardBack" | "responseNotMoving"; status: "interviewing" | "closed" };
+
+/**
+ * What "Log a response" offers once opened. It is the only writer of
+ * `interviewing` and `closed`, and it never guesses: the person says whether
+ * they heard back (an applied row moves to interviewing) or the application
+ * is not moving forward (closed, from applied or interviewing). An
+ * interviewing row has already heard back, so it only offers closing.
+ */
+export function responseChoices(app: Application): ResponseChoice[] {
+  const closed: ResponseChoice = { key: "responseNotMoving", status: "closed" };
+  if (app.status === "applied") return [{ key: "responseHeardBack", status: "interviewing" }, closed];
+  if (app.status === "interviewing") return [closed];
+  return [];
+}

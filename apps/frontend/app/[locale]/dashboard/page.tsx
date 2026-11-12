@@ -110,8 +110,10 @@ export default function DashboardPage() {
   const reloadDashboard = useCallback(async () => {
     try {
       setDash(await fetchDashboard());
+      setError(null);
     } catch {
-      /* keep what is on screen */
+      // A failed refresh after a rebuild leaves the last good view up; the
+      // card's own rebuild error already told the person what went wrong.
     }
   }, []);
 
@@ -122,7 +124,10 @@ export default function DashboardPage() {
     (async () => {
       try {
         const next = await fetchDashboard();
-        if (!cancelled) setDash(next);
+        if (!cancelled) {
+          setDash(next);
+          setError(null);
+        }
       } catch (err) {
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 401) router.replace("/login");
@@ -151,7 +156,10 @@ export default function DashboardPage() {
         // dashboard response did not know about.
         if (items.some((r) => (r.kind ?? "master") === "master")) {
           const next = await fetchDashboard().catch(() => null);
-          if (!cancelled && next) setDash(next);
+          if (!cancelled && next) {
+            setDash(next);
+            setError(null);
+          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -163,6 +171,8 @@ export default function DashboardPage() {
       cancelled = true;
     };
   }, [router, t]);
+
+  const masterId = resumes?.find((r) => (r.kind ?? "master") === "master")?.id ?? null;
 
   const summary = useMemo(() => {
     if (!dash) return "";
@@ -256,7 +266,11 @@ export default function DashboardPage() {
           <div className="mb-10 grid gap-6">
             <MatchCountCard count={dash.match_count} hasPreference={summary !== ""} />
             <ApplicationList initial={dash.applications} />
-            <ResumeHealthCard health={dash.resume_health} onRebuilt={reloadDashboard} />
+            <ResumeHealthCard
+              health={dash.resume_health}
+              masterId={masterId}
+              onRebuilt={reloadDashboard}
+            />
             <EmployerViews views={dash.employer_views} />
           </div>
         ) : null}

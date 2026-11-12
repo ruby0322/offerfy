@@ -8,13 +8,15 @@ import type { ResumeHealth } from "@/lib/dashboard";
 
 type Props = {
   health: ResumeHealth;
+  /** The master's id from the resume list, so an unpublished state can route to it. */
+  masterId: string | null;
   /** Called after a rebuild so the page can refetch the health it shows. */
   onRebuilt: () => void;
 };
 
 // A rebuild spends the person's credits, so it only ever runs from this
 // button, never on a page visit.
-export default function ResumeHealthCard({ health, onRebuilt }: Props) {
+export default function ResumeHealthCard({ health, masterId, onRebuilt }: Props) {
   const t = useTranslations("dashboard");
   const tJobs = useTranslations("jobs");
   const [busy, setBusy] = useState(false);
@@ -58,7 +60,14 @@ export default function ResumeHealthCard({ health, onRebuilt }: Props) {
         <p className="text-sm">{reading}</p>
         {/* Publishing is what a rebuild needs; offered only once it is true. */}
         {!health.published ? (
-          <p className="mt-2 text-sm text-muted-foreground">{t("healthNotPublished")}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
+            <p className="text-muted-foreground">{t("healthNotPublished")}</p>
+            {masterId ? (
+              <Link href={`/editor/${masterId}`} className="underline">
+                {t("open")}
+              </Link>
+            ) : null}
+          </div>
         ) : null}
         {health.needs_rebuild && health.published ? (
           <button type="button" className="rr-btn mt-3" onClick={rebuild} disabled={busy}>

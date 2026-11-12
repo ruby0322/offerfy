@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import {
@@ -10,7 +10,7 @@ import {
   patchApplication,
   type Application,
 } from "@/lib/applications";
-import { nextAction, quietDays, readyAgeDays } from "./applications";
+import { nextAction, quietDays, readyAgeDays, responseChoices } from "./applications";
 
 const ACTION = "inline-block border border-current px-3 py-1.5 text-sm disabled:opacity-50";
 
@@ -28,6 +28,9 @@ export default function ApplicationList({ initial }: Props) {
   const t = useTranslations("dashboard");
   const tJobs = useTranslations("jobs");
   const [rows, setRows] = useState<Application[]>(initial);
+  // A refetched dashboard hands down new rows; useState alone keeps the first.
+  useEffect(() => setRows(initial), [initial]);
+  const [choosingId, setChoosingId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [failedId, setFailedId] = useState<string | null>(null);
   const now = useMemo(() => new Date(), []);
@@ -43,6 +46,7 @@ export default function ApplicationList({ initial }: Props) {
     setFailedId(null);
     try {
       replace(await op());
+      setChoosingId(null);
     } catch {
       setFailedId(app.job_id);
     } finally {
@@ -97,21 +101,26 @@ export default function ApplicationList({ initial }: Props) {
           </span>
         );
       case "logResponse":
-        // Hearing back moves an applied row to interviewing. An interviewing
-        // row has nowhere further to go from here; it opens the posting.
-        return app.status === "applied" ? (
-          <button
-            type="button"
-            className={ACTION}
-            disabled={busy}
-            onClick={() => run(app, () => patchApplication(app.job_id, { status: "interviewing" }))}
-          >
+        // One primary action; it opens a choice so the person says what the
+        // response was. This is the only place interviewing and closed are written.
+        return choosingId === app.job_id ? (
+          <span className="flex items-center gap-2 text-sm">
+            {responseChoices(app).map((c) => (
+              <button
+                key={c.status}
+                type="button"
+                className={ACTION}
+                disabled={busy}
+                onClick={() => run(app, () => patchApplication(app.job_id, { status: c.status }))}
+              >
+                {t(c.key)}
+              </button>
+            ))}
+          </span>
+        ) : (
+          <button type="button" className={ACTION} onClick={() => setChoosingId(app.job_id)}>
             {t("actionLogResponse")}
           </button>
-        ) : (
-          <Link className={ACTION} href={`/jobs/${encodeURIComponent(app.job_id)}`}>
-            {t("actionLogResponse")}
-          </Link>
         );
       default:
         return null;

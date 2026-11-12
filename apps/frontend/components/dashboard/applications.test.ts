@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Application } from "@/lib/applications";
-import { nextAction, quietDays, readyAgeDays } from "./applications";
+import { nextAction, quietDays, readyAgeDays, responseChoices } from "./applications";
 
 const NOW = new Date("2026-11-13T12:00:00Z");
 
@@ -52,5 +52,14 @@ test("readyAgeDays is reported for tailored rows only", () => {
   assert.equal(readyAgeDays(row({ status: "tailored", last_status_at: "2026-11-10T12:00:00Z" }), NOW), 3);
   for (const status of ["saved", "applied", "interviewing", "closed"] as const) {
     assert.equal(readyAgeDays(row({ status }), NOW), null);
+  }
+});
+
+test("log a response is an explicit choice, and the only writer of interviewing and closed", () => {
+  const statuses = (app: Application) => responseChoices(app).map((c) => c.status);
+  assert.deepEqual(statuses(row({ status: "applied" })), ["interviewing", "closed"]);
+  assert.deepEqual(statuses(row({ status: "interviewing" })), ["closed"]);
+  for (const status of ["saved", "tailored", "closed"] as const) {
+    assert.deepEqual(statuses(row({ status })), []);
   }
 });

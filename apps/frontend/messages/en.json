@@ -258,6 +258,8 @@
     "actionTailor": "Tailor",
     "actionApply": "Apply",
     "actionLogResponse": "Log a response",
+    "responseHeardBack": "They replied",
+    "responseNotMoving": "Not moving forward",
     "jobInactive": "No longer listed as open",
     "readyAgo": "{count, plural, =0 {Ready today} one {Ready # day ago} other {Ready # days ago}}",
     "quietDays": "{count, plural, =0 {Applied today} one {# day quiet} other {# days quiet}}",

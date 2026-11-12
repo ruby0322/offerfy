@@ -261,6 +261,8 @@
     "actionTailor": "定制简历",
     "actionApply": "前往投递",
     "actionLogResponse": "记录回复",
+    "responseHeardBack": "对方回复了",
+    "responseNotMoving": "不再推进",
     "jobInactive": "已不在开放列表中",
     "readyAgo": "{count, plural, =0 {今天完成} other {{count} 天前完成}}",
     "quietDays": "{count, plural, =0 {今天投递} other {已 {count} 天没有消息}}",

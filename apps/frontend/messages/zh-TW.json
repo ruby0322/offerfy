@@ -261,6 +261,8 @@
     "actionTailor": "客製履歷",
     "actionApply": "前往投遞",
     "actionLogResponse": "記錄回覆",
+    "responseHeardBack": "對方回覆了",
+    "responseNotMoving": "不再推進",
     "jobInactive": "已不在開放清單中",
     "readyAgo": "{count, plural, =0 {今天完成} other {{count} 天前完成}}",
     "quietDays": "{count, plural, =0 {今天投遞} other {已 {count} 天沒有消息}}",
