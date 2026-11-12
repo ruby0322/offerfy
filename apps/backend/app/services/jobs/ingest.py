@@ -167,12 +167,28 @@ def ingest_board(
     )
 
 
+# enrich_jobs' explicit-job_ids path is deliberately unbatched: it loads every
+# id handed to it in one query. That is fine for the per-board call sites,
+# which pass one board's newly-upserted ids, but a company changed here can be
+# the whole of Micron (2,731 active postings), NVIDIA (1,846) or Applied
+# Materials (1,813) -- ~25MB of description_text resident at once, which the
+# plan's constraint on the catalogue's description_text rules out -- and on the
+# first pass after deploy all 87 companies are changed, back to back inside one
+# savepoint. So this call site does its own chunking. Same number as
+# enrich._BACKFILL_BATCH_SIZE and for the same reason; repeated rather than
+# imported because that one is private to enrich.
+_REENRICH_CHUNK_SIZE = 500
+
+
 def refresh_boilerplate(db: Session, *, now: datetime | None = None) -> int:
     """Recompute every company's boilerplate and re-enrich the companies it moved.
 
     Returns the number of facet rows rewritten. Flushes, never commits.
     `recompute_boilerplate` reports NORMALIZED company names, so postings are
     matched on `normalize_company(Job.company)`, never the raw string.
+
+    A changed company's ids go to `enrich_jobs` in `_REENRICH_CHUNK_SIZE`
+    windows, never as one list: see the constant above.
     """
     changed = recompute_boilerplate(db, now=now)
     if not changed:
@@ -186,7 +202,9 @@ def refresh_boilerplate(db: Session, *, now: datetime | None = None) -> int:
             ids_by_company.setdefault(key, []).append(job_id)
     written = 0
     for ids in ids_by_company.values():
-        written += enrich_jobs(db, job_ids=ids, now=now)
+        for start in range(0, len(ids), _REENRICH_CHUNK_SIZE):
+            window = ids[start : start + _REENRICH_CHUNK_SIZE]
+            written += enrich_jobs(db, job_ids=window, now=now)
     return written
 
 

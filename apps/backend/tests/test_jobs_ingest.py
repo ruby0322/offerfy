@@ -598,6 +598,27 @@ def test_refresh_reenriches_a_workday_company_that_no_pass_would_revisit(db_sess
     assert {f.function for f in db_session.query(JobFacets)} == {"other"}
 
 
+def test_refresh_chunks_a_companys_ids_before_enriching_them(db_session, monkeypatch):
+    # enrich_jobs' job_ids path loads every id it is given in one query, so
+    # this chunking is the only thing bounding peak memory when a changed
+    # company is the whole of Micron. Six rows against a chunk of two, because
+    # a test at the scale that actually hurts would cost what the bug costs.
+    _add_jobs(db_session, "Anduril", [f"{MISSION} {SOURCING}"] * 6, source="workday")
+    db_session.flush()
+    real = ingest_module.enrich_jobs
+    sizes = []
+
+    def spy(db, *, job_ids=None, **kwargs):
+        sizes.append(len(job_ids))
+        return real(db, job_ids=job_ids, **kwargs)
+
+    monkeypatch.setattr(ingest_module, "enrich_jobs", spy)
+    monkeypatch.setattr(ingest_module, "_REENRICH_CHUNK_SIZE", 2)
+
+    assert refresh_boilerplate(db_session) == 6   # every posting still written
+    assert sizes == [2, 2, 2]                     # and never in one batch
+
+
 def test_refresh_is_a_no_op_when_no_company_changed(db_session):
     _add_jobs(db_session, "Anduril", [f"{MISSION} {SOURCING}"] * 6, source="workday")
     db_session.flush()

@@ -496,10 +496,16 @@ def enrich_jobs(
     this selects only `_ENRICH_COLUMNS`, and for the backfill path walks
     them in `_BACKFILL_BATCH_SIZE`-row chunks via `yield_per`, handing each
     chunk to `_enrich_job_rows`, which does its own small bulk lookup of
-    existing JobFacets for just that chunk. The explicit-`job_ids` path
-    (the next task calls this per ingest board, up to 119 times a pass)
-    is small enough that it is always exactly one chunk -- still the same
-    two-query shape, just never split across a `yield_per` loop.
+    existing JobFacets for just that chunk.
+
+    The explicit-`job_ids` path does NOT batch: it loads every id it is
+    given in one query. The per-board call sites pass a single board's
+    newly-upserted ids, which is small, but a caller that can hold a large
+    id list must window it itself -- `refresh_boilerplate` in
+    app.services.jobs.ingest does, because a company it re-enriches can be
+    thousands of postings. Either way each call into `_enrich_job_rows`
+    keeps the same two-query shape, the unbatched path just never splits
+    across a `yield_per` loop.
 
     The taxonomy is resolved once per call, here, and threaded through to
     all three derivations -- `default_taxonomy()` is cheap once cached
