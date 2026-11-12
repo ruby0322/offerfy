@@ -7,6 +7,7 @@ const labels: SummaryLabels = {
   fn: (v) => v,
   country: (v) => (v === "TW" ? "Taiwan" : v),
   remote: "Remote",
+  onsite: "On-site",
 };
 const none = { target_functions: [], target_locations: [], target_seniority: null, remote_required: null };
 
@@ -29,4 +30,8 @@ test("remote-only replaces the location list", () => {
     preferenceSummary({ ...none, target_functions: ["data"], target_locations: ["tw"], remote_required: true }, labels),
     "data · Remote",
   );
+});
+
+test("an on-site-only preference is a summary, not nothing", () => {
+  assert.equal(preferenceSummary({ ...none, remote_required: false }, labels), "On-site");
 });

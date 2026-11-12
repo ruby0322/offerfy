@@ -120,6 +120,7 @@ export default function DashboardPage() {
             fn: (v) => label(FUNCTION_KEYS, v),
             country: (v) => label(COUNTRY_KEYS, v),
             remote: tJobs("remote"),
+            onsite: tJobs("remoteNo"),
           }),
         });
       })
@@ -210,31 +211,29 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {matchLine ? (
-          <div
-            className="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm"
-            data-testid="dashboard-matches"
-          >
-            <p>
-              {matchLine.summary ? (
-                <>
-                  <span className="font-medium">{t("matchCount", { count: matchLine.count })}</span>
-                  <span className="text-muted-foreground"> {"\u00b7"} {matchLine.summary}</span>
-                </>
-              ) : (
-                <span className="text-muted-foreground">{t("matchEmpty")}</span>
-              )}
-            </p>
-            <span className="flex gap-3">
-              <Link href="/preferences" className="underline">
-                {t("editPreferences")}
-              </Link>
-              <Link href="/jobs" className="underline">
-                {t("browseRoles")}
-              </Link>
-            </span>
-          </div>
-        ) : null}
+        <div
+          className="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm"
+          data-testid="dashboard-matches"
+        >
+          <p>
+            {!matchLine ? null : matchLine.summary ? (
+              <>
+                <span className="font-medium">{t("matchCount", { count: matchLine.count })}</span>
+                <span className="text-muted-foreground"> {"\u00b7"} {matchLine.summary}</span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">{t("matchEmpty")}</span>
+            )}
+          </p>
+          <span className="flex gap-3">
+            <Link href="/preferences" className="underline">
+              {t("editPreferences")}
+            </Link>
+            <Link href="/jobs" className="underline">
+              {t("browseRoles")}
+            </Link>
+          </span>
+        </div>
 
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
 

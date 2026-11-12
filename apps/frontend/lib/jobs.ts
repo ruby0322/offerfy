@@ -253,6 +253,7 @@ export type SummaryLabels = {
   fn: (value: string) => string;
   country: (value: string) => string;
   remote: string;
+  onsite: string;
 };
 
 /**
@@ -273,6 +274,6 @@ export function preferenceSummary(
   if (pref.remote_required === true) parts.push(labels.remote);
   else if (pref.target_locations.length) {
     parts.push(pref.target_locations.map((c) => labels.country(c.toUpperCase())).join(", "));
-  }
+  } else if (pref.remote_required === false) parts.push(labels.onsite);
   return parts.join(" · ");
 }
