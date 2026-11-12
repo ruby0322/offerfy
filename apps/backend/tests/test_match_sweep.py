@@ -94,7 +94,8 @@ def test_an_empty_axis_is_no_constraint_but_the_always_on_filters_still_apply(db
     "required,posting_remote,admitted",
     [(True, True, True), (True, False, False),
      (False, True, False), (False, False, True),
-     (None, True, True), (None, False, True)],
+     (None, True, True), (None, False, True),
+     (False, None, True), (True, None, False), (None, None, True)],
 )
 def test_remote_tri_state(db_session, required, posting_remote, admitted):
     _posting(db_session, remote=posting_remote)
@@ -120,18 +121,35 @@ def test_region_and_city_also_satisfy_a_location(db_session):
     assert count_matches(db_session, _pref(target_locations="|emea|")) == 1
 
 
-def test_a_remote_posting_satisfies_a_location_filter_it_does_not_match(db_session):
+def test_locations_are_inert_when_remote_is_required(db_session):
     _posting(db_session, country="US", remote=True)
+    _posting(db_session, country="TW", remote=True)
     assert count_matches(db_session, _pref(target_functions="|backend|",
                                            target_locations="|tw|",
-                                           remote_required=True)) == 1
+                                           remote_required=True)) == 2
 
 
-def test_a_remote_posting_does_not_bypass_location_when_remote_is_not_required(db_session):
-    _posting(db_session, country="US", remote=True)
-    assert count_matches(db_session, _pref(target_functions="|backend|",
-                                           target_locations="|tw|",
-                                           remote_required=None)) == 0
+def test_locations_still_apply_for_on_site_only(db_session):
+    _posting(db_session, country="US", remote=None)
+    _posting(db_session, country="TW", remote=None)
+    assert count_matches(db_session, _pref(target_locations="|tw|",
+                                           remote_required=False)) == 1
+
+
+def test_like_wildcards_in_a_token_are_literal(db_session):
+    _posting(db_session, country="US", region="north-america")
+    assert count_matches(db_session, _pref(target_locations="|north_america|")) == 0
+
+
+def test_whitespace_only_seniority_is_no_constraint(db_session):
+    _posting(db_session)
+    assert count_matches(db_session, _pref(target_seniority="  ",
+                                           target_functions="|backend|")) == 1
+
+
+def test_ladder_rungs_are_all_seniority_rules():
+    from app.services.jobs.enrich import default_taxonomy, valid_seniorities
+    assert set(SENIORITY_LADDER) <= valid_seniorities(default_taxonomy())
 
 
 def test_a_preference_that_constrains_nothing_matches_nothing(db_session):

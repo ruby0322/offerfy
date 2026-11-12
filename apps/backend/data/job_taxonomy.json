@@ -1,6 +1,8 @@
 {
   "_comment": "Deterministic facets derived from a posting's title (seniority, function) and location/remote text (next task). Needles are casefolded substrings matched against the field padded with one space each side -- see enrich.py.",
-  "_seniority_rule": "Ordered list, first match wins. staff_plus and manager are listed before senior; new_grad and intern are listed before junior. 'mid' is deliberately last and generic -- it is the catch-all for a title that names an engineering role but no level word. A title matching none of these, including mid, is 'unknown' in code, not in this file.",
+  "_seniority_ladder": "seniority_ladder is the experience ordering, low to high, used by the per-user match prefilter. It is SEPARATE from seniority_rules, whose order is match priority (staff_plus before senior, mid last). manager and unknown are deliberately not on the ladder. Every rung must also be a seniority_rules member.",
+  "seniority_ladder": ["intern", "new_grad", "junior", "mid", "senior", "staff_plus"],
+  "_seniority_rule": "Ordered list by MATCH PRIORITY, not by level (see seniority_ladder for level). First match wins. staff_plus and manager are listed before senior; new_grad and intern are listed before junior. 'mid' is deliberately last and generic -- it is the catch-all for a title that names an engineering role but no level word. A title matching none of these, including mid, is 'unknown' in code, not in this file.",
   "_function_rule": "Ordered list of {function, title_any, description_any}. title_any is checked across every rule, in order, before any rule's description_any is consulted -- a title hit always outranks a description hit.",
   "seniority_rules": [
     {
