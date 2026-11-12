@@ -1031,6 +1031,74 @@ class TalentProfile(Base):
     user: Mapped[User] = relationship(foreign_keys=[user_id])
 
 
+RESUME_FACTS_SCHEMA_VERSION = 1
+
+
+class ResumeFacts(Base):
+    """The structured facts we extracted from one person's resume, for matching.
+
+    The match-side twin of TalentProfile: the same extraction, the same column
+    types, the same canonical-JSON idiom. It is a separate table rather than a
+    flag on talent_profiles for two reasons. The consent lifetimes differ: a
+    talent profile exists only while the person has opted in to employers
+    seeing it and is deleted on withdrawal, whereas these facts exist so that
+    Offerfy can match jobs for the person's own benefit and never leave their
+    account. The deletion rules differ for the same reason. And talent_profiles'
+    bytes are cited by the append-only disclosure ledger (profile_content_hash),
+    so a second writer or a widened row would make that evidence describe
+    something other than what was disclosed. Keeping the tables apart means
+    nothing written here can move those bytes.
+
+    Derived state, updated in place and rebuildable from the source resume at
+    any time, like TalentProfile.
+    """
+
+    __tablename__ = "resume_facts"
+    __table_args__ = (
+        # Named, not unique=True on the column, so this and alembic produce the
+        # same object -- same reasoning as talent_profiles_user_id_key above.
+        UniqueConstraint("user_id", name="resume_facts_user_id_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # CASCADE for the same reason as talent_profiles.user_id: this is a copy of
+    # personal data, so erasing the account erases it.
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # CASCADE: facts with no source resume are unsourced.
+    source_resume_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False
+    )
+    source_revision_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    # Hash of everything that fed the build, as in TalentProfile.input_hash.
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    schema_version: Mapped[int] = mapped_column(
+        nullable=False, default=RESUME_FACTS_SCHEMA_VERSION, server_default="1"
+    )
+    # Text, not JSON, for the same reason as TalentProfile.profile_json: the
+    # bytes must be stable across a write-read round trip, and nothing queries
+    # inside the blob -- the columns below exist for that.
+    facts_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Denormalised for matching, rebuilt from facts_json on write, never a
+    # second source of truth. Same shapes as TalentProfile's columns.
+    skills_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    search_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    years_experience: Mapped[int | None] = mapped_column(nullable=True)
+
+    built_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, index=True
+    )
+    model: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+
+    user: Mapped[User] = relationship(foreign_keys=[user_id])
+
+
 class ResumeContent(Base):
     """A structured snapshot of one resume's content, for switching templates.
 

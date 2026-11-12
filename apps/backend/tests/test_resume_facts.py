@@ -6,6 +6,12 @@ stops describing what was disclosed -- so the derived columns are pinned here
 against a frozen literal, not against a second live implementation.
 """
 
+import json
+
+import pytest
+from sqlalchemy.exc import IntegrityError
+
+from app.models import ResumeFacts, Resume, User
 from app.schemas import TalentEducation, TalentProfilePayload, TalentRole
 from app.services import resume_facts
 
@@ -201,3 +207,55 @@ def test_derived_columns_filters_missing_parts_and_empty_skills():
 def test_derived_columns_pipe_delimits_skills():
     d = resume_facts.derived_columns(_payload(skills=["Python", "Go"]))
     assert d["skills_text"] == "|python|go|"
+
+
+def _user(db_session, sub="sub-facts"):
+    user = User(
+        google_sub=sub, email=f"{sub}@example.com", locale="en", name="Mei-Ling Chen"
+    )
+    db_session.add(user)
+    db_session.commit()
+    return user
+
+
+def _resume(db_session, user):
+    resume = Resume(
+        title="Master",
+        typst_source="= CV",
+        source="create",
+        locale="en",
+        user_id=user.id,
+        kind="master",
+    )
+    db_session.add(resume)
+    db_session.commit()
+    return resume
+
+
+def _facts(*, user_id, resume_id, skills_text="") -> ResumeFacts:
+    facts = {"skills": ["Python"]}
+    return ResumeFacts(
+        user_id=user_id,
+        source_resume_id=resume_id,
+        source_revision_id="rev-1",
+        input_hash="h" * 64,
+        facts_json=json.dumps(facts, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        skills_text=skills_text,
+        search_text="mei-ling chen python",
+        years_experience=9,
+        model="test-model",
+    )
+
+
+def test_resume_facts_round_trips_and_is_unique_per_user(db_session):
+    u = _user(db_session)
+    r = _resume(db_session, u)
+    db_session.add(_facts(user_id=u.id, resume_id=r.id, skills_text="|python|"))
+    db_session.flush()
+    db_session.expire_all()                      # force a real read, not the identity map
+    row = db_session.query(ResumeFacts).filter_by(user_id=u.id).one()
+    assert json.loads(row.facts_json)["skills"] == ["Python"]
+    assert row.skills_text == "|python|"
+    db_session.add(_facts(user_id=u.id, resume_id=r.id))
+    with pytest.raises(IntegrityError):
+        db_session.flush()
