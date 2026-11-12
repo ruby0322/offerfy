@@ -140,7 +140,7 @@ export function marketingMarkdown(page: MarketingPage): string {
     case "home":
       return `# Offerfy
 
-Open technical roles at ${EMPLOYER_COUNT} top tech employers, read straight from their own ATS boards. Fork your resume for one posting and AI scores it against the job before you apply. No account needed to start.
+Open technical roles at ${EMPLOYER_COUNT} top tech employers, read straight from their own ATS boards. Fork your resume for one posting and edit it against the job description in chat. No account needed to start.
 
 Offerfy does not match or rank jobs for you and does not submit applications. Apply on the original posting.
 ${links}`;

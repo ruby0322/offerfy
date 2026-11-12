@@ -2,7 +2,6 @@ import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
 import CompanyWall from "@/components/landing/CompanyWall";
 import Hero from "@/components/landing/Hero";
-import HonestBlock from "@/components/landing/HonestBlock";
 import TheLoop from "@/components/landing/TheLoop";
 import JsonLd from "@/components/seo/JsonLd";
 import { setRequestLocale } from "next-intl/server";
@@ -25,7 +24,6 @@ export default async function LandingPage({ params }: Props) {
         <Hero />
         <CompanyWall />
         <TheLoop />
-        <HonestBlock />
       </main>
       <Footer variant="landing" />
     </div>

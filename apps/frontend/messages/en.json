@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Offerfy",
-    "description": "Open roles at {count} top tech employers, straight from their own boards. Fork your resume for one posting and AI scores it against the job before you apply."
+    "description": "Open roles at {count} top tech employers, straight from their own boards. Fork your resume for one posting and edit it against the job description in chat."
   },
   "nav": {
     "brand": "Offerfy",
@@ -153,7 +153,7 @@
     "hero": {
       "kicker": "Built for competitive tech candidates",
       "headline": "Land the roles everyone else is applying to.",
-      "sub": "Open roles at Stripe, OpenAI, NVIDIA and 80+ more, straight from their own boards. Fork your resume for one of them, and AI scores it against the posting before you send it.",
+      "sub": "Open roles at Stripe, OpenAI, NVIDIA and 80+ more, straight from their own boards. Fork your resume for one of them, paste the posting, and edit against it in chat before you send it.",
       "ctaJobs": "Browse open roles",
       "ctaUpload": "Upload your resume",
       "ctaCreate": "or start from scratch"
@@ -167,16 +167,12 @@
       "findTitle": "Find the role",
       "findBody": "Technical roles only, filtered by seniority, function and region. Every listing links back to the employer’s own posting.",
       "aimTitle": "Fork your resume for it",
-      "aimBody": "A copy aimed at that one job; your master stays untouched. Paste the description and AI names which requirements you evidence, which you evidence weakly, and which you don’t — in the posting’s own words.",
+      "aimBody": "A copy aimed at that one job; your master stays untouched. Paste the description and it stays with that copy, so every chat turn edits against the posting’s own words instead of from memory.",
       "shipTitle": "Ship it clean",
       "shipBody": "ATS checks run on the compiled PDF, so a parser reads what a human reads. Then you apply on the employer’s site.",
       "keepTitle": "Keep what it taught you",
       "keepBody": "A sharper bullet, a number you finally dug up: tell Offerfy to remember it and it attaches to your master, then comes back in every later chat.",
       "returnLabel": "So the next application starts from a sharper master, not from scratch."
-    },
-    "honest": {
-      "title": "What Offerfy doesn’t do",
-      "body": "No matching. No ranking. No recommendations. No auto-apply, and nothing submitted on your behalf. You pick the job and you send it — Offerfy makes the resume behind it worth reading."
     },
     "mock": {
       "chatPrompt": "Make this bullet match what the posting asks for.",
