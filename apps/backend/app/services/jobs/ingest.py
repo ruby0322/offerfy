@@ -5,10 +5,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.services.jobs.ashby import fetch_ashby
 from app.services.jobs.boards import load_boards
+from app.services.jobs.boilerplate import normalize_company, recompute_boilerplate
 from app.services.jobs.enrich import enrich_jobs
 from app.services.jobs.greenhouse import fetch_greenhouse
 from app.services.jobs.lever import fetch_lever
@@ -16,6 +18,7 @@ from app.services.jobs.scope import ScopeRules, default_scope, title_in_scope
 from app.services.jobs.smartrecruiters import fetch_smartrecruiters
 from app.services.jobs.store import expire_missing, record_run, upsert_jobs
 from app.services.jobs.spotlight import rescore_all
+from app.models import Job
 from app.services.jobs.types import Board, NormalizedJob
 
 
@@ -164,6 +167,29 @@ def ingest_board(
     )
 
 
+def refresh_boilerplate(db: Session, *, now: datetime | None = None) -> int:
+    """Recompute every company's boilerplate and re-enrich the companies it moved.
+
+    Returns the number of facet rows rewritten. Flushes, never commits.
+    `recompute_boilerplate` reports NORMALIZED company names, so postings are
+    matched on `normalize_company(Job.company)`, never the raw string.
+    """
+    changed = recompute_boilerplate(db, now=now)
+    if not changed:
+        return 0
+    ids_by_company: dict[str, list[str]] = {}
+    for job_id, company in db.execute(
+        select(Job.id, Job.company).where(Job.is_active.is_(True))
+    ):
+        key = normalize_company(company)
+        if key in changed:
+            ids_by_company.setdefault(key, []).append(job_id)
+    written = 0
+    for ids in ids_by_company.values():
+        written += enrich_jobs(db, job_ids=ids, now=now)
+    return written
+
+
 def ingest_catalog(db: Session, client: httpx.Client) -> CatalogResult:
     # One id for the whole pass, so ~119 per-board rows can be read back as a
     # single thing. Minted here because this is the only place that knows where
@@ -171,6 +197,37 @@ def ingest_catalog(db: Session, client: httpx.Client) -> CatalogResult:
     run_id = str(uuid.uuid4())
     rules = default_scope()
     results: list[SourceResult] = []
+    # Before the board loop, so each board's own enrichment already sees the
+    # fresh boilerplate set.
+    #
+    # The re-enrichment inside refresh_boilerplate is not optional. Both
+    # enrich_jobs call sites pass only newly-upserted ids, and ingest_workday
+    # enriches only `new_ids` -- its existing rows are never revisited. Five of
+    # the six largest employers in the catalogue are Workday boards (Micron
+    # 2,731 active postings, NVIDIA 1,846, Applied Materials 1,813, Intel,
+    # NXP), so without this call their existing rows would keep facets derived
+    # from stale boilerplate forever, even though the description_hash gate
+    # (over the stripped text) has already moved.
+    #
+    # Savepoint + swallow-and-record, same contract and reason as the
+    # enrich_jobs call in ingest_board: a database-level failure leaves the
+    # session rollback-pending, and a plain try/except would let the next
+    # statement abort the 119-board pass. Costs the facets, never the pass.
+    started = datetime.now(timezone.utc)
+    try:
+        with db.begin_nested():
+            refresh_boilerplate(db)
+    except Exception as exc:  # noqa: BLE001 - must never fail the pass
+        record_run(
+            db,
+            run_id=run_id,
+            source="boilerplate",
+            board_slug=None,
+            started_at=started,
+            status="ok",
+            error_snippet=f"refresh_boilerplate: {exc}",
+        )
+        db.commit()
     for board in load_boards():
         results.append(ingest_board(db, client, board, run_id=run_id, rules=rules))
     rescore_all(db)

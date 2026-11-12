@@ -59,13 +59,15 @@ Usage (compose):
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.db import get_engine, get_session_factory
-from app.models import Job, JobFacets
+from app.models import CompanyBoilerplate, Job, JobFacets
+from app.services.jobs.enrich import function_of
 
 # Three or four example titles per unclassified bucket, per the brief --
 # "14% unknown seniority" is not actionable, "14% unknown seniority, e.g.
@@ -120,6 +122,10 @@ def survey(db: Session, *, limit: int | None = None) -> dict[str, Any]:
         query = query.limit(limit)
 
     overall = _empty_counts()
+    # Postings whose function came from the description alone: a function was
+    # found but the title by itself derives nothing. This is the number that
+    # exposes company boilerplate deciding facets (4,792 of 5,328 for `ml`).
+    description_driven = 0
     by_source: dict[str, dict[str, int]] = {}
     examples: dict[str, list[str]] = {bucket: [] for bucket in _BUCKETS}
 
@@ -143,6 +149,8 @@ def survey(db: Session, *, limit: int | None = None) -> dict[str, Any]:
             source_counts["unknown_seniority"] += 1
             if len(examples["unknown_seniority"]) < _EXAMPLES_CAP:
                 examples["unknown_seniority"].append(title)
+        if function != "other" and function_of(title, "") == "other":
+            description_driven += 1
         if function == "other":
             overall["other_function"] += 1
             source_counts["other_function"] += 1
@@ -154,7 +162,15 @@ def survey(db: Session, *, limit: int | None = None) -> dict[str, Any]:
             if len(examples["null_country"]) < _EXAMPLES_CAP:
                 examples["null_country"].append(title)
 
-    return {**overall, "by_source": by_source, "examples": examples}
+    bp_rows = db.query(CompanyBoilerplate.sentence_hashes).all()
+    return {
+        **overall,
+        "description_driven_function": description_driven,
+        "companies_with_boilerplate": len(bp_rows),
+        "boilerplate_sentences_total": sum(len(json.loads(r[0])) for r in bp_rows),
+        "by_source": by_source,
+        "examples": examples,
+    }
 
 
 def _pct(count: int, total: int) -> str:
@@ -182,6 +198,12 @@ def _print_report(report: dict[str, Any]) -> None:
     _print_bucket("unknown seniority", "unknown_seniority", report, report["examples"]["unknown_seniority"])
     _print_bucket("other function", "other_function", report, report["examples"]["other_function"])
     _print_bucket("null country", "null_country", report, report["examples"]["null_country"])
+
+    print(f"description-driven function: {report['description_driven_function']}/{total}")
+    print(
+        f"companies with boilerplate: {report['companies_with_boilerplate']}"
+        f" ({report['boilerplate_sentences_total']} sentences)"
+    )
 
     by_source = report["by_source"]
     if by_source:

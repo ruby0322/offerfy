@@ -11,7 +11,14 @@ from app.services.jobs import ingest as ingest_module
 from app.services.jobs.ashby import parse_ashby
 from app.services.jobs.boards import boards_path, load_boards, load_workday_boards
 from app.services.jobs.greenhouse import parse_greenhouse
-from app.services.jobs.ingest import CatalogResult, SourceResult, ingest_board
+from app.services.jobs.enrich import enrich_jobs
+from app.services.jobs.ingest import (
+    CatalogResult,
+    SourceResult,
+    ingest_board,
+    ingest_catalog,
+    refresh_boilerplate,
+)
 from app.services.jobs.lever import parse_lever
 from app.services.jobs.sanitize import sanitize_html
 from app.services.jobs.store import expire_missing, record_run, upsert_jobs
@@ -544,3 +551,79 @@ def test_a_posting_dropped_by_scope_rules_gets_no_facets_row(db_session):
     # Dropped before upsert_jobs ever saw it -- no Job row, and so no facets row.
     assert db_session.query(Job).count() == 0
     assert db_session.query(JobFacets).count() == 0
+
+
+MISSION = "We bring cutting-edge autonomy and computer vision to every mission."
+SOURCING = "You will own supplier contracts and the quarterly sourcing review."
+
+
+def _add_jobs(db_session, company, descriptions, *, source="greenhouse"):
+    now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+    start = db_session.query(Job).count()
+    jobs = []
+    for offset, text in enumerate(descriptions):
+        job = Job(
+            source=source,
+            source_id=f"bp-{source}-{start + offset}",
+            company=company,
+            title="Engineer",
+            location="Remote",
+            remote=True,
+            apply_url="https://example.com/apply",
+            source_url="https://example.com/job",
+            description_text=text,
+            description_html=f"<p>{text}</p>",
+            posted_at=now,
+            first_seen_at=now,
+            last_seen_at=now,
+            is_active=True,
+        )
+        db_session.add(job)
+        jobs.append(job)
+    db_session.flush()
+    return jobs
+
+
+def test_refresh_reenriches_a_workday_company_that_no_pass_would_revisit(db_session):
+    # Workday postings are never re-upserted by a catalog pass, so the
+    # explicit re-enrichment inside refresh_boilerplate is the only thing
+    # that can correct them. Seed 6 sharing a mission sentence and enrich
+    # them BEFORE any boilerplate exists, so each starts mission-derived.
+    _add_jobs(db_session, "Anduril", [f"{MISSION} {SOURCING}"] * 6, source="workday")
+    db_session.flush()
+    enrich_jobs(db_session)
+    assert {f.function for f in db_session.query(JobFacets)} == {"ml"}
+
+    assert refresh_boilerplate(db_session) == 6
+    assert {f.function for f in db_session.query(JobFacets)} == {"other"}
+
+
+def test_refresh_is_a_no_op_when_no_company_changed(db_session):
+    _add_jobs(db_session, "Anduril", [f"{MISSION} {SOURCING}"] * 6, source="workday")
+    db_session.flush()
+    refresh_boilerplate(db_session)
+    assert refresh_boilerplate(db_session) == 0
+
+
+def test_refresh_matches_companies_by_normalized_name(db_session):
+    _add_jobs(db_session, "  Anduril ", [f"{MISSION} {SOURCING}"] * 6, source="workday")
+    enrich_jobs(db_session)
+    assert refresh_boilerplate(db_session) == 6
+
+
+def test_catalog_pass_refreshes_boilerplate_before_the_board_loop(db_session, monkeypatch):
+    calls = []
+    monkeypatch.setattr(ingest_module, "refresh_boilerplate", lambda db, **kw: calls.append("refresh") or 0)
+    monkeypatch.setattr(ingest_module, "load_boards", lambda: [])
+    ingest_catalog(db_session, client=None)
+    assert calls == ["refresh"]
+
+
+def test_a_refresh_failure_does_not_fail_the_pass(db_session, monkeypatch):
+    def boom(db, **kw):
+        raise RuntimeError("derivation exploded")
+    monkeypatch.setattr(ingest_module, "refresh_boilerplate", boom)
+    monkeypatch.setattr(ingest_module, "load_boards", lambda: [])
+    ingest_catalog(db_session, client=None)   # must not raise
+    run = db_session.query(JobIngestRun).one()
+    assert "derivation exploded" in run.error_snippet

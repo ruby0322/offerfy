@@ -104,10 +104,13 @@ def ingest_workday_board(
     # freshness. Without this they age out of validThrough and go noindex while
     # the job is still open.
     touch_jobs(db, source="workday", source_ids=result.still_live)
-    # Only the newly-upserted ids: a touched posting's description_text is
-    # untouched by definition (that is the whole point of skipping its detail
-    # call), so enrich_jobs' description_hash gate would no-op on it anyway --
-    # calling it on `still_live` ids would just be a wasted bulk lookup every
+    # Only the newly-upserted ids. A touched posting's description_text is
+    # untouched, but that alone no longer makes enrich_jobs a no-op on it: the
+    # description_hash is over the *stripped* text, so it moves when the
+    # company's boilerplate moves. Skipping still_live ids is correct for a
+    # different reason now -- ingest_catalog's refresh_boilerplate re-enriches
+    # every active posting of a company whose boilerplate changed, so calling
+    # it here would be a wasted bulk lookup every
     # pass. Same swallow-and-record contract as ingest_board: a derivation bug
     # must cost only the facets row, never the posting or the commit.
     # Savepoint for the same reason as ingest_board's: see the comment there.
