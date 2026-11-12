@@ -261,6 +261,7 @@ export async function createTailor(
     target_label?: string;
     target_context?: string;
     fork_from?: "master" | "current";
+    job_id?: string;
   },
 ): Promise<Resume> {
   return asResume(

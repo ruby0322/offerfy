@@ -1,5 +1,6 @@
 import { getTranslations } from "next-intl/server";
 import type { AppLocale } from "@/i18n/routing";
+import JobActions from "@/components/jobs/JobActions";
 import { sourceLabel, type JobDetail } from "@/lib/jobs";
 
 type Props = {
@@ -31,16 +32,15 @@ export default async function JobView({ locale, job }: Props) {
         ) : null}
       </p>
       <h1 className="font-display">{job.title}</h1>
-      <p className="jobs-apply-row">
-        <a
-          className="jobs-apply"
-          href={job.apply_url}
-          rel="noopener noreferrer"
-          target="_blank"
-        >
-          {t("apply", { source: sourceLabel(job.source, locale) })}
-        </a>
-      </p>
+      <div className="jobs-apply-row">
+        <JobActions
+          jobId={job.id}
+          applyUrl={job.apply_url}
+          title={job.title}
+          company={job.company}
+          applyLabel={t("apply", { source: sourceLabel(job.source, locale) })}
+        />
+      </div>
       <p className="jobs-attribution">
         {t("attribution")}{" "}
         <a href={job.source_url} rel="noopener noreferrer" target="_blank">
