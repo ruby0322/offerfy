@@ -20,7 +20,13 @@ from app.schemas_jobs import (
     JobSitemapItem,
     JobSitemapPage,
 )
-from app.services.jobs.enrich import Taxonomy, default_taxonomy
+from app.services.jobs.enrich import (
+    Taxonomy,
+    default_taxonomy,
+    valid_countries,
+    valid_functions,
+    valid_seniorities,
+)
 from app.services.jobs.spotlight import select_featured
 from app.services.jobs.store import freshness_cutoff
 
@@ -90,26 +96,8 @@ def _after_cursor(stamp: datetime | None, job_id: str):
     )
 
 
-def _valid_seniorities(taxonomy: Taxonomy) -> set[str]:
-    # "unknown" is a real value enrich.py writes when no rule matches a
-    # title at all -- it is not a sentinel to exclude from the vocabulary.
-    return {rule.seniority for rule in taxonomy.seniority_rules} | {"unknown"}
-
-
-def _valid_functions(taxonomy: Taxonomy) -> set[str]:
-    # Same reasoning as _valid_seniorities: "other" is a real bucket.
-    return {rule.function for rule in taxonomy.function_rules} | {"other"}
-
-
 def _valid_regions(taxonomy: Taxonomy) -> set[str]:
     return set(taxonomy.location_regions.values())
-
-
-def _valid_countries(taxonomy: Taxonomy) -> set[str]:
-    # JobFacets.country can only ever hold one of these: location_facets
-    # (enrich.py) sources every country it emits from this same needle
-    # table, so the set is closed, not open, exactly like location_regions.
-    return set(taxonomy.location_countries.values())
 
 
 def _list_item(job: Job) -> JobListItem:
@@ -181,11 +169,11 @@ def _filtered_query(
         query = query.join(JobFacets, JobFacets.job_id == Job.id)
         taxonomy = default_taxonomy()
         if seniority:
-            if seniority not in _valid_seniorities(taxonomy):
+            if seniority not in valid_seniorities(taxonomy):
                 raise HTTPException(status_code=422, detail="Invalid seniority")
             query = query.filter(JobFacets.seniority == seniority)
         if function:
-            if function not in _valid_functions(taxonomy):
+            if function not in valid_functions(taxonomy):
                 raise HTTPException(status_code=422, detail="Invalid function")
             query = query.filter(JobFacets.function == function)
         if region:
@@ -193,7 +181,7 @@ def _filtered_query(
                 raise HTTPException(status_code=422, detail="Invalid region")
             query = query.filter(JobFacets.region == region)
         if country:
-            if country not in _valid_countries(taxonomy):
+            if country not in valid_countries(taxonomy):
                 raise HTTPException(status_code=422, detail="Invalid country")
             query = query.filter(JobFacets.country == country)
 

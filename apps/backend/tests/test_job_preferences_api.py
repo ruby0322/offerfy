@@ -1,8 +1,13 @@
+import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 
 from app.config import get_settings
 from app.deps import SESSION_COOKIE, _sign
-from app.models import JobPreference, ResumeFacts, TalentProfile, User
+from app.models import JobPreference, LlmCall, ResumeFacts, TalentProfile, User
+from app.services import profile as profile_service
+from app.services.resume_facts import input_hash
+from app.services.revisions import pin_current_draft, set_draft_source
 
 from tests.test_talent_profile import StubProfileLlm, _profile, _resume, _said, _stub
 
@@ -23,7 +28,7 @@ def _facts(db_session, user, roles=None, locations=None):
             user_id=user.id,
             source_resume_id=resume.id,
             source_revision_id=resume.published_revision_id,
-            input_hash="h" * 64,
+            input_hash=input_hash(resume.published_revision_id, resume.typst_source, []),
             facts_json=json.dumps(payload),
         )
     )
@@ -83,11 +88,13 @@ def test_put_mutates_in_place_so_the_row_survives(client, db_session):
     client.put("/v1/me/job-preferences", json={"target_functions": ["backend"]})
     first = db_session.query(JobPreference).filter_by(user_id=user.id).one()
     row_id = first.id
+    before = first.updated_at
     client.put("/v1/me/job-preferences", json={"target_functions": ["design"]})
     db_session.expire_all()
     rows = db_session.query(JobPreference).filter_by(user_id=user.id).all()
     assert [r.id for r in rows] == [row_id]
     assert rows[0].target_functions == "|design|"
+    assert rows[0].updated_at > before
 
 
 def test_get_reports_facts_state(client, db_session):
@@ -101,11 +108,8 @@ def test_refresh_builds_facts_for_a_user_without_employer_consent(
     client, db_session, monkeypatch, openai_enabled
 ):
     user = _signed_in(client, db_session)
-    resume = _resume(db_session, user)
-    # The source resume is the one the person pointed at; refresh builds from
-    # it, and does not choose one for them.
-    user.profile_resume_id = resume.id
-    db_session.commit()
+    _resume(db_session, user)
+    assert user.profile_resume_id is None   # no pointer: the whole point
     _stub(monkeypatch, StubProfileLlm(_said(_profile())))
     r = client.post("/v1/me/resume-facts/refresh")
     assert r.status_code == 200
@@ -122,10 +126,23 @@ def test_refresh_without_a_published_resume_is_not_a_500(client, db_session):
     assert r.json()["error"]
 
 
-def test_put_is_a_replacement_so_an_omitted_field_is_cleared(client, db_session):
+def test_put_is_a_replacement_so_every_omitted_field_is_cleared(client, db_session):
     _signed_in(client, db_session)
-    client.put("/v1/me/job-preferences", json={"target_functions": ["backend"]})
-    assert client.put("/v1/me/job-preferences", json={}).json()["target_functions"] == []
+    full = {
+        "target_functions": ["backend"],
+        "target_locations": ["tw"],
+        "target_seniority": "senior",
+        "remote_required": True,
+        "activity": "paused",
+    }
+    got = client.put("/v1/me/job-preferences", json=full).json()
+    assert {k: got[k] for k in full} == full
+    got = client.put("/v1/me/job-preferences", json={}).json()
+    assert got["target_functions"] == []
+    assert got["target_locations"] == []
+    assert got["target_seniority"] is None
+    assert got["remote_required"] is None
+    assert got["activity"] == "actively_looking"
 
 
 def test_one_users_preferences_are_invisible_to_another(client, db_session):
@@ -139,3 +156,84 @@ def test_endpoints_require_sign_in(client):
     assert client.get("/v1/me/job-preferences").status_code == 401
     assert client.put("/v1/me/job-preferences", json={}).status_code == 401
     assert client.post("/v1/me/resume-facts/refresh").status_code == 401
+
+
+def _ready(client, db_session, monkeypatch, sub):
+    user = _signed_in(client, db_session, sub=sub)
+    resume = _resume(db_session, user)
+    _stub(monkeypatch, StubProfileLlm(_said(_profile())))
+    return user, resume
+
+
+def test_refresh_with_no_pointer_then_republish_reads_stale(
+    client, db_session, monkeypatch, openai_enabled
+):
+    user, resume = _ready(client, db_session, monkeypatch, "sub-stale")
+    assert user.profile_resume_id is None
+    assert client.post("/v1/me/resume-facts/refresh").json()["facts_state"] == "fresh"
+    set_draft_source(db_session, resume, "= CV\nChen Wei\nNew job")
+    pin_current_draft(db_session, resume)
+    db_session.commit()
+    assert client.get("/v1/me/job-preferences").json()["facts_state"] == "stale"
+
+
+def test_employer_path_still_reports_no_source_without_a_pointer(
+    client, db_session, monkeypatch, openai_enabled
+):
+    user, _ = _ready(client, db_session, monkeypatch, "sub-employer")
+    client.put("/v1/me/consents/talent_introduction", json={"granted": True})
+    result = asyncio.run(profile_service.build_profile(db_session, user))
+    assert result.profile is None
+    assert result.error == "no_source"
+
+
+def test_a_pointer_to_an_unpublished_resume_is_no_source_not_a_fallback(
+    client, db_session, monkeypatch, openai_enabled
+):
+    user, _ = _ready(client, db_session, monkeypatch, "sub-unpub")
+    draft = _resume(db_session, user, publish=False, title="Draft")
+    user.profile_resume_id = draft.id
+    db_session.commit()
+    r = client.post("/v1/me/resume-facts/refresh").json()
+    assert r["error"] == "no_source"
+    assert r["facts_state"] == "missing"
+
+
+def test_a_later_edited_second_master_does_not_flip_the_source(
+    client, db_session, monkeypatch, openai_enabled
+):
+    user, first = _ready(client, db_session, monkeypatch, "sub-sticky")
+    client.post("/v1/me/resume-facts/refresh")
+    second = _resume(db_session, user, source="= Other\nCV", title="Second")
+    # Edit the second master later; Resume.updated_at moves, nothing publishes.
+    second.typst_source = "= Other\nedited"
+    second.updated_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    db_session.commit()
+    facts = db_session.query(ResumeFacts).filter_by(user_id=user.id).one()
+    assert facts.source_resume_id == first.id
+    assert client.get("/v1/me/job-preferences").json()["facts_state"] == "fresh"
+
+
+def test_a_tailor_is_never_the_default_source(
+    client, db_session, monkeypatch, openai_enabled
+):
+    from app.services.resume_facts import default_source
+
+    user, master = _ready(client, db_session, monkeypatch, "sub-tailor")
+    tailor = _resume(db_session, user, title="Tailor")
+    tailor.kind = "tailor"
+    tailor.parent_resume_id = master.id
+    db_session.commit()
+    assert default_source(db_session, user).id == master.id
+
+
+def test_a_failed_build_still_records_spend(
+    client, db_session, monkeypatch, openai_enabled
+):
+    user = _signed_in(client, db_session, sub="sub-fail")
+    _resume(db_session, user)
+    _stub(monkeypatch, StubProfileLlm(status_code=500))
+    r = client.post("/v1/me/resume-facts/refresh").json()
+    assert r["error"] == "provider_error"
+    assert r["facts_state"] == "missing"
+    assert db_session.query(LlmCall).count() == 1

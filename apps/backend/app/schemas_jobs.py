@@ -1,8 +1,15 @@
 from datetime import datetime, timezone
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictBool, field_validator
 
 # Imported, not redeclared: two copies of this tuple silently drift.
+from app.services.jobs.enrich import (
+    default_taxonomy,
+    valid_countries,
+    valid_functions,
+    valid_seniorities,
+)
 from app.services.jobs.types import JOB_SOURCES
 
 
@@ -141,12 +148,6 @@ class AdminIngestOverview(BaseModel):
 # carry no CHECK constraint on purpose -- the vocabularies may grow -- so this
 # is the only place a bad value can be stopped.
 
-from typing import Literal  # noqa: E402
-
-from pydantic import field_validator  # noqa: E402
-
-from app.services.jobs.enrich import default_taxonomy  # noqa: E402
-
 PREFERENCE_ACTIVITIES = ("actively_looking", "browsing", "paused")
 
 
@@ -171,22 +172,21 @@ class JobPreferenceIn(BaseModel):
     target_functions: list[str] = []
     target_locations: list[str] = []
     target_seniority: str | None = None
-    remote_required: bool | None = None
+    remote_required: StrictBool | None = None
     activity: Literal["actively_looking", "browsing", "paused"] = "actively_looking"
 
     @field_validator("target_functions")
     @classmethod
     def _functions(cls, v: list[str]) -> list[str]:
         t = default_taxonomy()
-        allowed = {r.function for r in t.function_rules} | {"other"}
-        return _clean_members(v, allowed, "function")
+        return _clean_members(v, valid_functions(t), "function")
 
     @field_validator("target_locations")
     @classmethod
     def _locations(cls, v: list[str]) -> list[str]:
         # Countries, lowercased: what seeding writes (preferences.py).
         t = default_taxonomy()
-        allowed = {c.lower() for c in t.location_countries.values()}
+        allowed = {c.lower() for c in valid_countries(t)}
         return _clean_members(v, allowed, "location")
 
     @field_validator("target_seniority")
@@ -195,9 +195,8 @@ class JobPreferenceIn(BaseModel):
         if v is None:
             return None
         t = default_taxonomy()
-        allowed = {r.seniority for r in t.seniority_rules} | {"unknown"}
         value = v.strip().lower()
-        if value not in allowed:
+        if value not in valid_seniorities(t):
             raise ValueError(f"Invalid seniority: {v!r}")
         return value
 

@@ -171,6 +171,24 @@ def load_taxonomy(path: Path | None = None) -> Taxonomy:
     )
 
 
+def valid_seniorities(taxonomy: Taxonomy) -> set[str]:
+    # "unknown" is a real value enrich.py writes when no rule matches a
+    # title at all -- it is not a sentinel to exclude from the vocabulary.
+    return {rule.seniority for rule in taxonomy.seniority_rules} | {"unknown"}
+
+
+def valid_functions(taxonomy: Taxonomy) -> set[str]:
+    # "other" is a real bucket, same reasoning as "unknown" above.
+    return {rule.function for rule in taxonomy.function_rules} | {"other"}
+
+
+def valid_countries(taxonomy: Taxonomy) -> set[str]:
+    # JobFacets.country can only ever hold one of these: location_facets
+    # sources every country it emits from this same needle table, so the
+    # set is closed.
+    return set(taxonomy.location_countries.values())
+
+
 @lru_cache(maxsize=1)
 def default_taxonomy() -> Taxonomy:
     return load_taxonomy()

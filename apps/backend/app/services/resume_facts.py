@@ -51,6 +51,7 @@ from app.models import (
     RESUME_FACTS_SCHEMA_VERSION,
     TALENT_PROFILE_SCHEMA_VERSION,
     Resume,
+    ResumeRevision,
     ResumeFacts,
     User,
 )
@@ -251,14 +252,65 @@ def source_resume(db: Session, user: User) -> Resume | None:
     return resume
 
 
+def default_source(db: Session, user: User) -> Resume | None:
+    """The resume to read when the person has not pointed at one.
+
+    Only for matching, which must work for people who never opened the talent
+    profile. Candidates are published MASTERS: a tailor is aimed at one job, so
+    it is a poor description of the person.
+
+    The rule is sticky, because a flip means offering a paid rebuild for
+    nothing the person would call a change (Resume.updated_at moves on any
+    edit, so it is deliberately not used):
+    1. the resume the existing facts were built from, if still eligible;
+    2. else the master whose published revision is newest;
+    3. else the smallest id, so the answer is deterministic.
+    family_master is not used: it maps a tailor to its parent and never
+    selects among resumes.
+    """
+    rows = (
+        db.query(Resume, ResumeRevision)
+        .join(ResumeRevision, ResumeRevision.id == Resume.published_revision_id)
+        .filter(Resume.user_id == user.id, Resume.kind == "master")
+        .all()
+    )
+    rows = [(r, rev) for r, rev in rows if rev.typst_source]
+    if not rows:
+        return None
+    existing = facts_for_user(db, user)
+    if existing is not None:
+        for resume, _rev in rows:
+            if resume.id == existing.source_resume_id:
+                return resume
+
+    def newest_then_id(pair):
+        resume, rev = pair
+        stamp = rev.created_at
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        return (-stamp.timestamp(), resume.id)
+
+    return min(rows, key=newest_then_id)[0]
+
+
 def input_hash(revision_id: str, source: str, facts: list[str]) -> str:
     joined = "\x00".join([revision_id, source, "\n".join(facts)])
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 
-def bundle(db: Session, user: User) -> tuple[Resume, str, str, list[str]] | None:
-    """Everything a build reads: the resume, its published revision and facts."""
+def bundle(
+    db: Session, user: User, fall_back: bool = False
+) -> tuple[Resume, str, str, list[str]] | None:
+    """Everything a build reads: the resume, its published revision and facts.
+
+    fall_back=True (matching only) resolves default_source when the person has
+    set no pointer. A pointer that is set is always honoured: if its resume is
+    unpublished the answer is None, never a quietly different resume. The
+    employer path leaves fall_back False and is unchanged.
+    """
     resume = source_resume(db, user)
+    if resume is None and fall_back and not user.profile_resume_id:
+        resume = default_source(db, user)
     if resume is None or resume.published_revision_id is None:
         return None
     source = published_source(db, resume)
@@ -403,7 +455,9 @@ class Extraction:
     input_hash: str = ""
 
 
-async def extract_facts(db: Session, user: User) -> Extraction:
+async def extract_facts(
+    db: Session, user: User, fall_back: bool = False
+) -> Extraction:
     """Read the person's published resume once and return scrubbed facts.
 
     No consent check: that is the caller's decision, because what the result
@@ -418,7 +472,7 @@ async def extract_facts(db: Session, user: User) -> Extraction:
     The call is billable and is metered by the caller (see
     tests/test_metering.py).
     """
-    found = bundle(db, user)
+    found = bundle(db, user, fall_back=fall_back)
     if found is None:
         return Extraction(error="no_source")
     resume, revision_id, source, facts = found
@@ -573,7 +627,8 @@ async def build_facts(db: Session, user: User) -> FactsBuildResult:
     see. Writes resume_facts and nothing else; talent_profiles is a separate
     purpose with a separate grant -- see profile.build_profile.
     """
-    extraction = await extract_facts(db, user)
+    # Matching path: falls back to default_source when no resume was chosen.
+    extraction = await extract_facts(db, user, fall_back=True)
     result = FactsBuildResult(
         error=extraction.error,
         usage=extraction.usage,
@@ -588,10 +643,14 @@ async def build_facts(db: Session, user: User) -> FactsBuildResult:
 
 def facts_are_stale(db: Session, user: User, facts: ResumeFacts) -> bool:
     """True when the facts no longer match what they were built from."""
-    found = bundle(db, user)
+    # Same resolution as build_facts, or a person with no pointer would read
+    # "fresh" forever.
+    found = bundle(db, user, fall_back=True)
     if found is None:
         return False
-    _resume, revision_id, source, memory = found
+    resume, revision_id, source, memory = found
+    if facts.source_resume_id != resume.id:
+        return True
     if facts.source_revision_id != revision_id:
         return True
     return facts.input_hash != input_hash(revision_id, source, memory)
