@@ -41,6 +41,24 @@ on 2026-11-12:
    invent a seventh table for per-user read-state, Slice 2 counts what the
    filters it has can express, and the word "new" waits for Slice 3.
 
+## Amended during execution
+
+Three things in this plan were wrong and were corrected while it ran. The code
+is right; these lines are not, and are left in place so the record shows what
+was planned versus what shipped.
+
+1. **"Seeded once … then only ever written by the user"** (and the same phrasing
+   further down). The seed is **not** persisted. `current_or_seeded` returns the
+   saved row when one exists, otherwise a transient instance computed from the
+   facts; only `PUT` writes. The existence of a row is what marks "the user has
+   edited this". Persisting on `GET` stored an *empty* seed for anyone without
+   facts and nothing ever re-seeded it, so the rebuild button did nothing.
+2. **Task 8's `SENIORITY_LADDER` "read from `data/job_taxonomy.json`".** It could
+   not be: `seniority_rules` is ordered by match priority, not level. An explicit
+   `seniority_ladder` key was added to that file instead.
+3. **Task 6's `GET` "persists the seed, so the editor and the matcher agree".**
+   Superseded by (1); they agree because both compute the same seed.
+
 ## Global Constraints
 
 - **`talent_profiles` must not change.** No migration touches it, and for a
