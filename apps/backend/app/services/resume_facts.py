@@ -47,7 +47,13 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import TALENT_PROFILE_SCHEMA_VERSION, Resume, ResumeFacts, User
+from app.models import (
+    RESUME_FACTS_SCHEMA_VERSION,
+    TALENT_PROFILE_SCHEMA_VERSION,
+    Resume,
+    ResumeFacts,
+    User,
+)
 from app.schemas import (
     TALENT_EDUCATION_LIMIT,
     TALENT_HEADLINE_CHARS,
@@ -400,7 +406,7 @@ async def extract_facts(db: Session, user: User) -> Extraction:
     """Read the person's published resume once and return scrubbed facts.
 
     No consent check: that is the caller's decision, because what the result
-    is used for is the caller's decision. Never raises.
+    is used for is the caller's decision. Never raises on a provider failure.
 
     Runs on the OpenAI Responses API regardless of what anyone picked in the
     editor, and on a fixed model rather than this person's choice. The output
@@ -485,10 +491,6 @@ async def extract_facts(db: Session, user: User) -> Extraction:
         )
         result.error = "invalid_payload"
         return result
-    except ValueError:
-        logger.warning("profile build output was not JSON")
-        result.error = "unparseable"
-        return result
 
     # Scrubbed here, in the shared path, so that contacts never reach either
     # table: a person who declined employer processing never agreed to have a
@@ -538,7 +540,8 @@ def facts_for_user(db: Session, user: User) -> ResumeFacts | None:
 def write_facts(db: Session, user: User, extraction: Extraction) -> ResumeFacts:
     """Upsert the facts row from a successful extraction. Flushes, never commits."""
     payload = extraction.payload
-    assert payload is not None and extraction.resume_id is not None
+    if payload is None or extraction.resume_id is None:
+        raise ValueError("write_facts needs a successful extraction")
     row = facts_for_user(db, user)
     if row is None:
         row = ResumeFacts(user_id=user.id)
@@ -548,6 +551,7 @@ def write_facts(db: Session, user: User, extraction: Extraction) -> ResumeFacts:
     row.input_hash = extraction.input_hash
     row.facts_json = canonical_json(payload)
     row.model = extraction.model[:128]
+    row.schema_version = RESUME_FACTS_SCHEMA_VERSION
     row.built_at = _utcnow()
     columns = derived_columns(payload)
     # The facts table carries only the match-side columns; display_name and
@@ -560,7 +564,8 @@ def write_facts(db: Session, user: User, extraction: Extraction) -> ResumeFacts:
 
 
 async def build_facts(db: Session, user: User) -> FactsBuildResult:
-    """Build or rebuild this person's facts. Never raises.
+    """Build or rebuild this person's facts. Never raises on a provider failure
+    (a database failure while writing still propagates).
 
     No consent check, deliberately: these are the person's own facts, kept for
     their own benefit (matching jobs for them), not something an employer can

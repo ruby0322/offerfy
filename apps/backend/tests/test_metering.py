@@ -48,7 +48,7 @@ BILLABLE = (
 EXPECTED_CALL_SITES = {
     ("routers/chat.py", "aiter_chat_edit"),       # the turn + the repair loop
     ("services/profile.py", "extract_facts"),     # inside build_profile; its callers wrap
-    ("services/resume_facts.py", "extract_facts"),  # inside build_facts; its callers wrap
+    ("services/resume_facts.py", "extract_facts"),  # inside build_facts (no caller yet)
     ("services/import_runner.py", "aiter_chat_edit"),  # one turn, system_guard
     ("routers/talent_me.py", "build_profile"),    # pointer change + refresh
     ("jobs/refresh_profiles.py", "build_profile"),  # nightly, system_guard
@@ -104,9 +104,10 @@ def test_every_module_that_calls_a_billable_function_imports_the_seam():
         "services/llm/turn.py",
         "services/layout.py",
         # extract_facts is the provider call itself. These two modules reach it
-        # only from inside build_profile / build_facts, and the *callers* of
-        # those carry the metered() wrap; wrapping here too would record twice.
-        # A new caller of build_facts is caught by BILLABLE above.
+        # only from inside build_profile (whose callers carry the metered()
+        # wrap; wrapping here too would record twice) and build_facts, which
+        # has no caller yet. Task 6 adds the first, and
+        # test_billable_call_sites_are_wrapped fires when it does.
         "services/profile.py",
         "services/resume_facts.py",
     }

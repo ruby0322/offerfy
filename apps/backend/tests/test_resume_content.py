@@ -6,7 +6,7 @@ and its "every section defaults to empty" shape (the thing that makes
 `extras` safe to leave unset when a resume genuinely has no extra section).
 
 The second half covers `extract_content`, the one model call that fills a
-snapshot (a direct httpx call, mirroring services.profile.build_profile), and
+snapshot (a direct httpx call, mirroring services.resume_facts.extract_facts), and
 `record_extract_spend`, its telemetry.
 """
 

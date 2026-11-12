@@ -139,6 +139,13 @@ def delete_profile_for_user(db: Session, user: User) -> bool:
     Deliberately does not touch disclosure_events. The record of who already
     received the profile has to outlive the profile, which is why that table
     has no foreign key to this row.
+
+    Equally deliberately does not touch resume_facts. The facts row is the
+    person's own data, kept so Offerfy can match jobs for them, and
+    withdrawing from employer search must not also cost them their matching.
+    Do not "tidy" this by deleting the facts too; it is pinned by
+    test_withdrawing_consent_deletes_the_profile_and_keeps_the_facts in
+    tests/test_talent_profile.py, and that test failing is the bug, not the test.
     """
     profile = profile_for_user(db, user)
     if profile is None:
@@ -204,7 +211,7 @@ class ProfileBuildResult:
 
 
 async def build_profile(db: Session, user: User) -> ProfileBuildResult:
-    """Build or rebuild this person's profile. Never raises.
+    """Build or rebuild this person's profile. Never raises on a provider failure.
 
     Consent is required here, not only on the read path: the talent_profiles
     row exists only for the talent_introduction purpose. The extraction itself
