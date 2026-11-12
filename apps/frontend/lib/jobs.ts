@@ -230,3 +230,13 @@ export async function refreshResumeFacts(): Promise<ResumeFactsRefresh> {
   });
   return { facts_state: raw.facts_state ?? "missing", error: raw.error ?? null };
 }
+
+// The remote select's value is a string; the wire wants true / false / null
+// (StrictBool: "true" or 1 is a 422), and false must never collapse to null.
+export function remoteToValue(v: boolean | null): string {
+  return v === null ? "" : v ? "true" : "false";
+}
+
+export function valueToRemote(v: string): boolean | null {
+  return v === "true" ? true : v === "false" ? false : null;
+}

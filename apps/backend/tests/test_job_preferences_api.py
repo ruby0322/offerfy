@@ -35,14 +35,27 @@ def _facts(db_session, user, roles=None, locations=None):
     db_session.commit()
 
 
-def test_get_seeds_on_first_call_and_persists_it(client, db_session):
+def test_get_seeds_on_first_call_without_persisting_it(client, db_session):
     user = _signed_in(client, db_session)
     _facts(db_session, user, roles=[{"title": "Staff Backend Engineer"}],
            locations=["Taipei, Taiwan"])
     body = client.get("/v1/me/job-preferences").json()
     assert body["target_functions"] == ["backend"]
     assert body["target_locations"] == ["tw"]
-    assert db_session.query(JobPreference).filter_by(user_id=user.id).count() == 1
+    # Computed, not stored: a row would mean "the user has edited this".
+    assert db_session.query(JobPreference).filter_by(user_id=user.id).count() == 0
+
+
+def test_seed_follows_the_facts_until_the_first_save(client, db_session):
+    user = _signed_in(client, db_session)
+    assert client.get("/v1/me/job-preferences").json()["target_functions"] == []
+    _facts(db_session, user, roles=[{"title": "Backend Engineer"}])
+    assert client.get("/v1/me/job-preferences").json()["target_functions"] == ["backend"]
+    client.put("/v1/me/job-preferences", json={"target_functions": ["design"]})
+    row = db_session.query(ResumeFacts).filter_by(user_id=user.id).one()
+    row.facts_json = json.dumps({"roles": [{"title": "Product Manager"}], "locations": []})
+    db_session.commit()
+    assert client.get("/v1/me/job-preferences").json()["target_functions"] == ["design"]
 
 
 def test_get_for_a_user_with_no_resume_returns_empty_not_500(client, db_session):

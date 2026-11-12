@@ -109,3 +109,33 @@ test("refreshResumeFacts surfaces a 200-with-error rather than throwing", async 
     restore();
   }
 });
+
+test("saveJobPreferences keeps null as null for remote and seniority", async () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  const restore = stubFetch({}, calls);
+  try {
+    const { saveJobPreferences } = await import("./jobs");
+    await saveJobPreferences({
+      target_functions: [],
+      target_locations: [],
+      target_seniority: null,
+      remote_required: null,
+      activity: "paused",
+    });
+  } finally {
+    restore();
+  }
+  const sent = JSON.parse(String(calls[0].init?.body));
+  assert.strictEqual(sent.remote_required, null);
+  assert.strictEqual(sent.target_seniority, null);
+  assert.ok("remote_required" in sent && "target_seniority" in sent);
+});
+
+test("remote tri-state maps to select values and back without loss", async () => {
+  const { remoteToValue, valueToRemote } = await import("./jobs");
+  for (const v of [true, false, null] as const) {
+    assert.strictEqual(valueToRemote(remoteToValue(v)), v);
+  }
+  assert.equal(remoteToValue(false), "false");
+  assert.strictEqual(valueToRemote(""), null);
+});

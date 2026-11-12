@@ -7,8 +7,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Link } from "@/i18n/navigation";
 import { ApiError } from "@/lib/api";
 import {
+  fetchJobPreferences,
   refreshResumeFacts,
+  remoteToValue,
   saveJobPreferences,
+  valueToRemote,
   type JobPreference,
   type PreferenceActivity,
 } from "@/lib/jobs";
@@ -21,21 +24,11 @@ import {
 
 type Props = {
   initial: JobPreference;
-  /** Re-reads the preference after a rebuild: the seed may have changed it. */
-  onReload: () => Promise<void>;
 };
 
 const ACTIVITIES: PreferenceActivity[] = ["actively_looking", "browsing", "paused"];
 
-// The select's value is a string; the wire wants true / false / null.
-function remoteToValue(v: boolean | null): string {
-  return v === null ? "" : v ? "true" : "false";
-}
-function valueToRemote(v: string): boolean | null {
-  return v === "true" ? true : v === "false" ? false : null;
-}
-
-export default function PreferenceEditor({ initial, onReload }: Props) {
+export default function PreferenceEditor({ initial }: Props) {
   const t = useTranslations("preferences");
   const tJobs = useTranslations("jobs");
 
@@ -70,14 +63,27 @@ export default function PreferenceEditor({ initial, onReload }: Props) {
     ...Object.keys(FUNCTION_KEYS),
     ...functions.filter((v) => !(v in FUNCTION_KEYS)),
   ];
+  // Case-insensitive throughout: a stored "TW" must show as checked and
+  // unchecking it must remove it, or it would survive a save unseen.
+  const lowerLocations = locations.map((v) => v.toLowerCase());
   const locationValues = [
     ...Object.keys(COUNTRY_KEYS).map((c) => c.toLowerCase()),
-    ...locations.filter((v) => !(v.toUpperCase() in COUNTRY_KEYS)),
+    ...lowerLocations.filter((v) => !(v.toUpperCase() in COUNTRY_KEYS)),
   ];
   const seniorityValues = [
     ...Object.keys(SENIORITY_KEYS),
     ...(seniority && !(seniority in SENIORITY_KEYS) ? [seniority] : []),
   ];
+
+  function applyPreference(p: JobPreference) {
+    setFunctions(p.target_functions);
+    setLocations(p.target_locations);
+    setSeniority(p.target_seniority ?? "");
+    setRemote(p.remote_required);
+    setActivity(p.activity);
+    setFactsState(p.facts_state);
+    setSaved(false);
+  }
 
   async function save() {
     setSaving(true);
@@ -91,11 +97,7 @@ export default function PreferenceEditor({ initial, onReload }: Props) {
         remote_required: remote,
         activity,
       });
-      setFunctions(out.target_functions);
-      setLocations(out.target_locations);
-      setSeniority(out.target_seniority ?? "");
-      setRemote(out.remote_required);
-      setActivity(out.activity);
+      applyPreference(out);
       setSaved(true);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("saveError"));
@@ -109,7 +111,6 @@ export default function PreferenceEditor({ initial, onReload }: Props) {
     setRebuildMsg(null);
     try {
       const out = await refreshResumeFacts();
-      setFactsState(out.facts_state);
       if (out.error) {
         setRebuildMsg({
           text: out.error === "no_source" ? t("rebuildNoSource") : t("rebuildFailed"),
@@ -117,9 +118,12 @@ export default function PreferenceEditor({ initial, onReload }: Props) {
         });
       } else {
         setRebuildMsg({ text: t("rebuildDone"), bad: false });
-        // Only the facts changed; the fields below are the person's and are
-        // left exactly as they are, so no reload of their state here.
-        await onReload();
+        // Until the first save the preference is computed from the facts on
+        // every GET, so the rebuild can change what it says. Re-read and load
+        // the form from it. After a save the server returns the saved row, so
+        // this leaves the person's own choices as they were.
+        const next = await fetchJobPreferences();
+        applyPreference(next);
       }
     } catch {
       setRebuildMsg({ text: t("rebuildFailed"), bad: true });
@@ -193,8 +197,8 @@ export default function PreferenceEditor({ initial, onReload }: Props) {
                 <label key={value} className="flex items-center gap-2">
                   <input
                     type="checkbox"
-                    checked={locations.includes(value)}
-                    onChange={() => toggle(locations, setLocations, value)}
+                    checked={lowerLocations.includes(value)}
+                    onChange={() => toggle(lowerLocations, setLocations, value)}
                   />
                   {labeled(COUNTRY_KEYS, value.toUpperCase())}
                 </label>

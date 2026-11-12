@@ -249,7 +249,6 @@
   },
   "preferences": {
     "title": "Job preferences",
-    "needLogin": "Please sign in with Google first.",
     "ownershipTitle": "These preferences are yours",
     "ownership": "Job matching uses exactly what you set here. We seeded it once from your resume; we never overwrite it afterwards, so anything you change stays changed.",
     "loadError": "Could not load your preferences. Try again.",
@@ -268,10 +267,10 @@
     "activityPaused": "Paused",
     "rebuildTitleMissing": "We have not read your resume yet",
     "rebuildTitleStale": "Your resume has changed since we last read it",
-    "rebuildBody": "This reads your published resume to work out your current role, level and location. To do that, the resume is sent to our AI model provider. It can take up to 90 seconds. It only fills in what we know about you; it does not change the choices below.",
+    "rebuildBody": "This reads your published resume to work out your current role, level and location. To do that, the resume is sent to our AI model provider. It can take up to 90 seconds. If you have not saved your preferences yet, the choices below are filled in from it. Once you have saved, your choices are never changed by this.",
     "rebuild": "Read my resume",
     "rebuilding": "Reading your resume… this can take up to 90 seconds",
-    "rebuildDone": "Done. Your resume has been read.",
+    "rebuildDone": "Done. We read your resume. If you had not saved yet, the choices below now reflect it.",
     "rebuildFailed": "We could not read your resume. Try again in a moment.",
     "rebuildNoSource": "Publish a resume first, then try again.",
     "seePrivacy": "How we handle your resume"

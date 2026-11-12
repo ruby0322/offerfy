@@ -9,7 +9,7 @@ from app.db import get_db
 from app.deps import require_user
 from app.models import JobPreference, User
 from app.schemas_jobs import JobPreferenceIn, JobPreferenceOut, ResumeFactsRefreshOut
-from app.services.jobs.preferences import get_or_seed
+from app.services.jobs.preferences import current_or_seeded
 from app.services.metering import metered, preflight
 from app.services.profile import record_build_spend
 from app.services.resume_facts import build_facts, facts_are_stale, facts_for_user
@@ -39,7 +39,8 @@ def _out(db: Session, user: User, row: JobPreference) -> JobPreferenceOut:
         target_seniority=row.target_seniority,
         remote_required=row.remote_required,
         activity=row.activity,
-        updated_at=row.updated_at.isoformat(),
+        # A transient seed has no row yet, hence no timestamp.
+        updated_at=row.updated_at.isoformat() if row.updated_at else "",
         facts_state=_facts_state(db, user),
     )
 
@@ -48,10 +49,9 @@ def _out(db: Session, user: User, row: JobPreference) -> JobPreferenceOut:
 def get_job_preferences(
     db: Session = Depends(get_db), user: User = Depends(require_user)
 ):
-    """Seeds from the resume facts on first call and persists the seed, so the
-    editor and the matcher agree about what the person is matched on."""
-    row = get_or_seed(db, user)
-    db.commit()
+    """The saved preferences, or, before the first save, a seed computed from the
+    resume facts and not stored. Storing happens only on PUT."""
+    row = current_or_seeded(db, user)
     return _out(db, user, row)
 
 
@@ -65,7 +65,9 @@ def put_job_preferences(
     from the body is cleared (activity returns to its default)."""
     # Mutate the loaded row in place: updated_at's onupdate fires only on an
     # UPDATE, so delete-and-reinsert would reset it to creation time.
-    row = get_or_seed(db, user)
+    row = current_or_seeded(db, user)
+    if row not in db:
+        db.add(row)
     row.target_functions = _pipe(body.target_functions)
     row.target_locations = _pipe(body.target_locations)
     row.target_seniority = body.target_seniority

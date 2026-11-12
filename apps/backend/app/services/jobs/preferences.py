@@ -6,8 +6,9 @@ locations go through the very same functions over the very same file. There
 is no second vocabulary here: if the job side says "staff_plus", the resume
 side says "staff_plus", so the two cannot drift.
 
-Seeding happens once. get_or_seed returns an existing row untouched, because
-from the first save onward the preferences belong to the user.
+Seeding is computed, not stored. current_or_seeded returns a saved row
+untouched, because from the first save onward the preferences belong to the
+user; before that it returns a transient seed that is never persisted.
 """
 
 from __future__ import annotations
@@ -157,16 +158,18 @@ def seed_from_facts(facts: ResumeFacts | None) -> dict[str, Any]:
     return seed
 
 
-def get_or_seed(db: Session, user: User) -> JobPreference:
-    """The user's preferences row, seeded from their facts if none exists.
+def current_or_seeded(db: Session, user: User) -> JobPreference:
+    """The user's saved preferences, or a transient seed computed from facts.
 
-    An existing row is returned untouched. Flushes, never commits.
+    A saved row is returned untouched. Otherwise the result is a JobPreference
+    that is NOT added to the session and NOT flushed: it is recomputed from the
+    current facts on every call until the user saves. The existence of a row is
+    therefore the "the user has edited this" marker, which is why no extra
+    column is needed, and why rebuilding the facts of a person who has never
+    saved changes what they see. Callers that persist it must db.add it.
     """
     row = db.query(JobPreference).filter(JobPreference.user_id == user.id).one_or_none()
     if row is not None:
         return row
     facts = db.query(ResumeFacts).filter(ResumeFacts.user_id == user.id).one_or_none()
-    row = JobPreference(user_id=user.id, **seed_from_facts(facts))
-    db.add(row)
-    db.flush()
-    return row
+    return JobPreference(user_id=user.id, **seed_from_facts(facts))

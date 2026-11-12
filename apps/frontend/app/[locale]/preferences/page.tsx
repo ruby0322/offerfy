@@ -34,17 +34,6 @@ export default function PreferencesPage() {
     void load();
   }, [load]);
 
-  // After a rebuild only the facts moved. Re-read, but do not remount the
-  // editor over edits the person has not saved yet.
-  const reload = useCallback(async () => {
-    try {
-      const next = await fetchJobPreferences();
-      setPref((prev) => (prev ? { ...prev, facts_state: next.facts_state } : next));
-    } catch {
-      /* the editor already reports the rebuild's own outcome */
-    }
-  }, []);
-
   return (
     <div className="rr-shell">
       <Nav variant="app" />
@@ -54,7 +43,7 @@ export default function PreferencesPage() {
         {!pref && !error ? (
           <p className="text-sm text-muted-foreground">{tCommon("loading")}</p>
         ) : null}
-        {pref ? <PreferenceEditor initial={pref} onReload={reload} /> : null}
+        {pref ? <PreferenceEditor initial={pref} /> : null}
       </main>
       <Footer variant="app" />
     </div>

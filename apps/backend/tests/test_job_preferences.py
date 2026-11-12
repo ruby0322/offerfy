@@ -52,7 +52,7 @@ import json  # noqa: E402
 
 from app.models import ResumeFacts  # noqa: E402
 from app.services.jobs.enrich import default_taxonomy  # noqa: E402
-from app.services.jobs.preferences import get_or_seed, seed_from_facts  # noqa: E402
+from app.services.jobs.preferences import current_or_seeded, seed_from_facts  # noqa: E402
 
 
 def _facts(roles=None, locations=None, years_experience=None):
@@ -104,24 +104,26 @@ def test_seed_falls_back_to_years_band_when_title_is_unknown():
     assert seed["target_seniority"] == "junior"
 
 
-def test_get_or_seed_never_overwrites_a_users_own_row(db_session):
+def test_current_or_seeded_never_overwrites_a_users_own_row(db_session):
     u = _user(db_session, "sub-prefs-seed-1")
     db_session.add(
         JobPreference(user_id=u.id, target_functions="|design|", activity="paused")
     )
     db_session.flush()
     before = db_session.query(JobPreference).filter_by(user_id=u.id).one().updated_at
-    got = get_or_seed(db_session, u)
+    got = current_or_seeded(db_session, u)
     assert got.target_functions == "|design|" and got.activity == "paused"
     db_session.flush()
     assert got.updated_at == before  # onupdate would have moved it
 
 
-def test_get_or_seed_creates_a_row_with_no_facts(db_session):
+def test_current_or_seeded_with_no_facts_is_transient_and_not_stored(db_session):
     u = _user(db_session, "sub-prefs-seed-2")
-    got = get_or_seed(db_session, u)
-    assert got.id is not None and got.target_functions == ""
-    assert get_or_seed(db_session, u).id == got.id
+    got = current_or_seeded(db_session, u)
+    assert got.target_functions == "" and got.id is None
+    db_session.flush()
+    assert got not in db_session
+    assert db_session.query(JobPreference).filter_by(user_id=u.id).count() == 0
 
 
 def _title_of(roles):
