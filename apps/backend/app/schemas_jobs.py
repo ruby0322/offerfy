@@ -223,3 +223,36 @@ class ResumeFactsRefreshOut(BaseModel):
     facts_state: str
     # A named reason when the build did not produce facts; None on success.
     error: str | None = None
+
+
+class ApplicationCreate(BaseModel):
+    job_id: str
+    source: Literal["digest", "search"] = "search"
+
+
+class ApplicationConfirm(BaseModel):
+    # Strict: "no" must not arrive as a truthy string.
+    applied: StrictBool
+
+
+class ApplicationPatch(BaseModel):
+    # Only what a person reports themselves; every other status is reached by
+    # the action that implies it. The service re-checks this.
+    status: Literal["interviewing", "closed"] | None = None
+    notes: str | None = None
+
+
+class ApplicationOut(BaseModel):
+    job_id: str
+    job_title: str
+    company: str
+    apply_url: str
+    # Reported, not filtered: a person's own history shows a closed posting.
+    job_is_active: bool
+    status: str
+    source: str
+    tailor_resume_id: str | None
+    applied_at: str | None
+    applied_confirmed_at: str | None
+    last_status_at: str
+    notes: str | None

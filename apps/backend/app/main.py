@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from app.db import ensure_schema
 from app.routers import (
     account,
+    applications,
     admin,
     auth,
     chat,
@@ -49,6 +50,7 @@ def create_app() -> FastAPI:
     application.include_router(usage.router)
     application.include_router(models.router)
     application.include_router(preferences.router)
+    application.include_router(applications.router)
     return application
 
 
