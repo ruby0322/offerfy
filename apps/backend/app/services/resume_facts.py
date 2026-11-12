@@ -654,3 +654,11 @@ def facts_are_stale(db: Session, user: User, facts: ResumeFacts) -> bool:
     if facts.source_revision_id != revision_id:
         return True
     return facts.input_hash != input_hash(revision_id, source, memory)
+
+
+def facts_state(db: Session, user: User) -> str:
+    """"missing", "stale" or "fresh": the one rule every surface reads."""
+    facts = facts_for_user(db, user)
+    if facts is None:
+        return "missing"
+    return "stale" if facts_are_stale(db, user, facts) else "fresh"

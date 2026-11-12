@@ -13,7 +13,7 @@ from app.schemas_jobs import JobPreferenceIn, JobPreferenceOut, ResumeFactsRefre
 from app.services.jobs.preferences import current_or_seeded
 from app.services.metering import metered, preflight
 from app.services.profile import record_build_spend
-from app.services.resume_facts import build_facts, facts_are_stale, facts_for_user
+from app.services.resume_facts import build_facts, facts_state
 
 router = APIRouter()
 
@@ -24,13 +24,6 @@ def _split(text: str) -> list[str]:
 
 def _pipe(values: list[str]) -> str:
     return f"|{'|'.join(values)}|" if values else ""
-
-
-def _facts_state(db: Session, user: User) -> str:
-    facts = facts_for_user(db, user)
-    if facts is None:
-        return "missing"
-    return "stale" if facts_are_stale(db, user, facts) else "fresh"
 
 
 def _out(db: Session, user: User, row: JobPreference) -> JobPreferenceOut:
@@ -44,7 +37,7 @@ def _out(db: Session, user: User, row: JobPreference) -> JobPreferenceOut:
         # an empty string in a timestamp field trips the first client that
         # parses it.
         updated_at=row.updated_at.isoformat() if row.updated_at else None,
-        facts_state=_facts_state(db, user),
+        facts_state=facts_state(db, user),
     )
 
 
@@ -115,5 +108,5 @@ async def refresh_resume_facts(
             db.rollback()
         record_build_spend(db, user, result, meter)
     return ResumeFactsRefreshOut(
-        facts_state=_facts_state(db, user), error=result.error
+        facts_state=facts_state(db, user), error=result.error
     )
