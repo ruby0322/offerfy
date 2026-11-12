@@ -5,7 +5,10 @@ Usage:
 
 Run once after migration 029_company_boilerplate. force=True is deliberate and
 belongs only here: the first recompute must rewrite rows whose stored hash
-predates the change of the hash input from raw to stripped text.
+predates the change of the hash input from raw to stripped text. Anywhere
+else it is wrong, because it bypasses the description_hash skip and so
+re-derives every posting in the catalogue on every ingest pass -- the gate
+that keeps a six-hourly pass from re-deriving 21,773 unchanged rows.
 """
 
 from __future__ import annotations
@@ -31,11 +34,21 @@ def main(argv: list[str] | None = None) -> int:
     try:
         changed = recompute_boilerplate(session)
         reenriched = enrich_jobs(session, force=True)
-        session.commit()
+        # Counted before the commit, deliberately: a failure in this read after
+        # a successful commit would report rc 1 on a remediation that in fact
+        # landed. recompute_boilerplate has flushed, so the numbers are the
+        # ones about to be committed.
+        #
+        # Total stored sentence hashes across all companies, NOT the number of
+        # rows -- it is the number that says whether detection found anything
+        # (1,806 across 87 companies in the measurement this work argues from),
+        # and companies_changed already stands next to it. Do not "fix" it to
+        # a row count.
         sentences = sum(
             len(json.loads(blob))
             for blob in session.scalars(select(CompanyBoilerplate.sentence_hashes))
         )
+        session.commit()
     except Exception as exc:
         session.rollback()
         print(str(exc), file=sys.stderr)

@@ -452,6 +452,13 @@ class CompanyBoilerplate(Base):
     queries inside the blob, and the array is read and replaced whole.
     Storing hashes rather than sentence text keeps the row small and stops
     another employer's posting prose from sitting in this table.
+
+    computed_at means LAST RECOMPUTED, not last changed: recompute_boilerplate
+    stamps it on every row that clears BOILERPLATE_MIN_POSTINGS, whether or
+    not that company's hash set moved. It answers "how fresh is this
+    detection", never "when did this employer last edit its mission
+    statement". posting_count is the corpus that produced this array, for the
+    same diagnostic purpose.
     """
 
     __tablename__ = "company_boilerplate"

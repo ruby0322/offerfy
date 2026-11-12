@@ -162,12 +162,17 @@ def survey(db: Session, *, limit: int | None = None) -> dict[str, Any]:
             if len(examples["null_country"]) < _EXAMPLES_CAP:
                 examples["null_country"].append(title)
 
-    bp_rows = db.query(CompanyBoilerplate.sentence_hashes).all()
+    # recompute_boilerplate writes a row for every company clearing
+    # BOILERPLATE_MIN_POSTINGS, including ones whose hash array came back
+    # empty, so the row count would report "companies with >= 5 active
+    # postings" under a name that promises something else. Count the rows
+    # that actually strip something.
+    bp_arrays = [json.loads(r[0]) for r in db.query(CompanyBoilerplate.sentence_hashes)]
     return {
         **overall,
         "description_driven_function": description_driven,
-        "companies_with_boilerplate": len(bp_rows),
-        "boilerplate_sentences_total": sum(len(json.loads(r[0])) for r in bp_rows),
+        "companies_with_boilerplate": sum(1 for hashes in bp_arrays if hashes),
+        "boilerplate_sentences_total": sum(len(hashes) for hashes in bp_arrays),
         "by_source": by_source,
         "examples": examples,
     }

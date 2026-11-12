@@ -107,11 +107,20 @@ def ingest_workday_board(
     # Only the newly-upserted ids. A touched posting's description_text is
     # untouched, but that alone no longer makes enrich_jobs a no-op on it: the
     # description_hash is over the *stripped* text, so it moves when the
-    # company's boilerplate moves. Skipping still_live ids is correct for a
-    # different reason now -- in a catalog pass, ingest_catalog's
-    # refresh_boilerplate re-enriches every active posting of a company whose
-    # boilerplate changed, so calling it here would be a wasted bulk lookup every
-    # pass. Same swallow-and-record contract as ingest_board: a derivation bug
+    # company's boilerplate moves. What covers the still_live ids is the
+    # catalog pass, where ingest_catalog's refresh_boilerplate re-enriches
+    # every active posting of a company whose boilerplate changed; repeating
+    # that here would be a wasted bulk lookup on every Workday run.
+    #
+    # That is a six-hourly backstop, not an invariant. A Workday-only run (the
+    # daily timer) corrects nothing by itself, and a brand-new Workday board is
+    # enriched on its own first pass against a boilerplate row that does not
+    # exist yet -- recompute only sees its postings once they are stored -- so
+    # those rows stay mission-derived until the next catalog pass. The catalog
+    # timer bounds that at ~6h, and boilerplate is mission-statement stable, so
+    # the staleness is accepted rather than designed away.
+    #
+    # Same swallow-and-record contract as ingest_board: a derivation bug
     # must cost only the facets row, never the posting or the commit.
     # Savepoint for the same reason as ingest_board's: see the comment there.
     # A plain try/except cannot contain a database-level failure, because the

@@ -403,10 +403,11 @@ def description_hash(text: str) -> str:
 # batches the rest so peak memory is bounded by one batch, not the table.
 _BACKFILL_BATCH_SIZE = 500
 
-# The only columns any of the three derivations (seniority_of, function_of,
-# location_facets) ever reads. description_html is deliberately excluded --
-# nothing in this module looks at it, so loading it would be pure waste on
-# every row, backfill or not.
+# Everything _enrich_job_rows reads, and nothing more. Six of these feed the
+# three derivations (seniority_of, function_of, location_facets); Job.company
+# is here for the per-batch boilerplate lookup, which is not a derivation.
+# description_html is deliberately excluded -- nothing in this module looks at
+# it, so loading it would be pure waste on every row, backfill or not.
 _ENRICH_COLUMNS = (
     Job.id,
     Job.source,

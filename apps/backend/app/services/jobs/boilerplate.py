@@ -212,6 +212,11 @@ def recompute_boilerplate(db: Session, *, now: datetime | None = None) -> set[st
     The catalogue's description_text is ~200MB, so only company and text are
     selected, streamed in RECOMPUTE_BATCH_SIZE chunks, and reduced at once
     to per-company sentence-hash counters; no text is retained.
+
+    `computed_at` is rewritten on every row that clears the minimum, changed
+    or not, so it records when the row was last recomputed rather than when
+    its hash set last moved -- the returned set is the only answer to "what
+    changed".
     """
     now = now or datetime.now(timezone.utc)
     counters: dict[str, Counter[str]] = {}
@@ -224,8 +229,12 @@ def recompute_boilerplate(db: Session, *, now: datetime | None = None) -> set[st
     for company, text in db.execute(stmt):
         key = normalize_company(company)
         postings[key] += 1
+        # No `text or ""` guard: Job.description_text is nullable=False with
+        # default "", which is also what enrich.py's strip_boilerplate call
+        # site relies on. One convention across both, so neither reads as the
+        # careless one.
         counters.setdefault(key, Counter()).update(
-            {sentence_hash(s) for s in split_sentences(text or "")}
+            {sentence_hash(s) for s in split_sentences(text)}
         )
 
     existing = {row.company: row for row in db.scalars(select(CompanyBoilerplate))}
