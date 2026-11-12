@@ -145,8 +145,8 @@ give it storage and call sites.
 
 ```python
 def test_split_sentences_folds_and_drops_short_fragments():
-    text = "We build AI. " + "A" * 40 + ". Hi."
-    assert split_sentences(text) == ["we build ai.", ("a" * 40).lower() + "."]
+    long_one = "This Sentence Is Comfortably Longer Than The Minimum."
+    assert split_sentences(f"{long_one} Too short.") == [long_one.casefold()]
 
 
 def test_boilerplate_is_the_sentence_in_at_least_half_the_corpus():
@@ -177,13 +177,14 @@ def test_stripping_every_sentence_yields_empty_text_not_a_crash():
     assert strip_boilerplate(only, frozenset({sentence_hash(only.casefold())})) == ""
 
 
-# Review Focus 2
+# Review Focus 2 -- newline-separated bullets, which carry no terminator, so
+# a space-join really would splice "computer" and "vision" into the needle.
 def test_stripping_does_not_splice_a_needle_across_the_junction():
-    first = "Our platform is powered by a bespoke in-house computer."
-    middle = "This middle sentence is pure boilerplate and will be removed."
-    last = "Vision is one of our stated company values, we are told."
+    first = "Tooling we use day to day includes a bespoke computer"
+    middle = "This middle line is shared boilerplate and gets removed"
+    last = "vision and robotics stack maintained by the platform team"
     kept = strip_boilerplate(
-        " ".join((first, middle, last)), frozenset({sentence_hash(middle.casefold())})
+        "\n".join((first, middle, last)), frozenset({sentence_hash(middle.casefold())})
     )
     assert "computer vision" not in kept
 
@@ -536,32 +537,82 @@ git commit -m "fix(jobs): strip company boilerplate before deriving function"
 - Test: `apps/backend/tests/test_jobs_ingest.py` (append)
 
 **Interfaces:**
-- Consumes: Task 3's `recompute_boilerplate`; Task 4's `enrich_jobs`.
-- Produces: no signature change to `ingest_catalog(db, client) -> CatalogResult`.
+- Consumes: Task 3's `recompute_boilerplate`, `normalize_company`; Task 4's
+  `enrich_jobs`.
+- Produces: `refresh_boilerplate(db: Session, *, now: datetime | None = None) -> int`
+  in `app/services/jobs/ingest.py` — recomputes, re-enriches the active
+  postings of every changed company, returns the number of facet rows
+  rewritten. Flushes, never commits. `ingest_catalog(db, client) -> CatalogResult`
+  keeps its signature.
 
-- [ ] **Step 1: Write the failing test**
+**Why a named function and not three lines inside `ingest_catalog`:** no
+existing test calls `ingest_catalog` — the suite tests `ingest_board` and
+monkeypatches `ingest_module.enrich_jobs` (see
+`tests/test_jobs_ingest.py:396`). `ingest_catalog` needs the real board
+config and live HTTP, so behaviour buried inside it is effectively
+untestable. The behaviour goes in `refresh_boilerplate`, tested directly;
+`ingest_catalog`'s own test only checks that it calls it.
+
+**Test helpers:** these live in `tests/test_jobs_ingest.py`, which has
+neither `_add_jobs` (Task 3 put that in `tests/test_jobs_boilerplate.py`)
+nor the `MISSION`/`SOURCING` constants. Add a local copy of each; the
+helper here also needs a `source` keyword, because these rows must be
+`source="workday"` for the test to mean what it says.
+
+- [ ] **Step 1: Write the failing tests**
 
 ```python
-def test_catalog_pass_recomputes_boilerplate_and_reenriches_changed_companies(db_session, fake_client):
-    # Seed 6 Workday-sourced postings for one company sharing a mission
-    # sentence, already enriched against an EMPTY boilerplate set, so each
-    # currently carries the mission-derived function. Workday postings are
-    # never re-upserted by a catalog pass, so only the explicit
-    # re-enrichment can fix them.
-    ingest_catalog(db_session, fake_client)
-    assert {f.function for f in db_session.query(JobFacets).all()} == {"other"}
+def test_refresh_reenriches_a_workday_company_that_no_pass_would_revisit(db_session):
+    # Workday postings are never re-upserted by a catalog pass, so the
+    # explicit re-enrichment inside refresh_boilerplate is the only thing
+    # that can correct them. Seed 6 sharing a mission sentence and enrich
+    # them BEFORE any boilerplate exists, so each starts mission-derived.
+    _add_jobs(db_session, "Anduril", [f"{MISSION} {SOURCING}"] * 6, source="workday")
+    db_session.flush()
+    enrich_jobs(db_session)
+    assert {f.function for f in db_session.query(JobFacets)} == {"ml"}
+
+    assert refresh_boilerplate(db_session) == 6
+    assert {f.function for f in db_session.query(JobFacets)} == {"other"}
+
+
+def test_refresh_is_a_no_op_when_no_company_changed(db_session):
+    _add_jobs(db_session, "Anduril", [f"{MISSION} {SOURCING}"] * 6, source="workday")
+    db_session.flush()
+    refresh_boilerplate(db_session)
+    assert refresh_boilerplate(db_session) == 0
+
+
+def test_catalog_pass_refreshes_boilerplate_before_the_board_loop(db_session, monkeypatch):
+    calls = []
+    monkeypatch.setattr(ingest_module, "refresh_boilerplate", lambda db, **kw: calls.append("refresh") or 0)
+    monkeypatch.setattr(ingest_module, "load_boards", lambda: [])
+    ingest_catalog(db_session, client=None)
+    assert calls == ["refresh"]
+
+
+def test_a_refresh_failure_does_not_fail_the_pass(db_session, monkeypatch):
+    def boom(db, **kw):
+        raise RuntimeError("derivation exploded")
+    monkeypatch.setattr(ingest_module, "refresh_boilerplate", boom)
+    monkeypatch.setattr(ingest_module, "load_boards", lambda: [])
+    ingest_catalog(db_session, client=None)   # must not raise
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd apps/backend && .venv/bin/pytest tests/test_jobs_ingest.py -k recomputes_boilerplate -v`
-Expected: FAIL — functions are still the mission-derived value
+Run: `cd apps/backend && .venv/bin/pytest tests/test_jobs_ingest.py -k boilerplate -v`
+Expected: FAIL — `cannot import name 'refresh_boilerplate'`
 
-- [ ] **Step 3: Call recompute at the top of the board loop**
+- [ ] **Step 3: Implement `refresh_boilerplate` and call it from `ingest_catalog`**
 
-In `ingest_catalog`, before `for board in load_boards()`, call
-`recompute_boilerplate(db)` and then `enrich_jobs(db, job_ids=...)` for the
-active postings of every company it reports as changed.
+`refresh_boilerplate` calls `recompute_boilerplate(db)`, then for each
+changed normalized company re-enriches that company's active posting ids
+via `enrich_jobs(db, job_ids=...)`, summing the rows written. Match the
+company by the normalized key, not the raw string.
+
+Call it in `ingest_catalog` before `for board in load_boards()`, so the
+pass's own per-board enrichment already sees the fresh set.
 
 The re-enrichment is not optional and is the reason this step cannot be a
 bare recompute: `ingest_workday` enriches only `new_ids`, and five of the
@@ -573,11 +624,6 @@ comment at the call site; it is not recoverable from the code.
 Wrap the whole step in `db.begin_nested()` and swallow-and-record, the same
 contract and for the same reason as the two existing `enrich_jobs` call
 sites: a failure here must cost the facets, never the 119-board pass.
-
-Recompute runs **before** the loop, not after, so the pass's own
-per-board enrichment already sees the fresh set. Boilerplate is stable
-enough that the one-pass lag either way is immaterial; place it first
-because that is the order with no lag at all.
 
 - [ ] **Step 4: Extend the facets survey**
 
