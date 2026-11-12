@@ -204,7 +204,7 @@ def restamp_content(db: Session, resume: Resume, *, source: str) -> None:
 
 # --- extraction: the one model call that fills a snapshot -------------------
 #
-# Mirrors app.services.profile.build_profile closely: a direct httpx call to
+# Mirrors app.services.resume_facts.extract_facts closely: a direct httpx call to
 # the OpenAI Responses API (the only one of our two providers whose strict
 # structured output can guarantee every property answered), a hand-written
 # wire schema rather than one derived from pydantic, and a result dataclass
@@ -219,7 +219,7 @@ def _schema() -> dict[str, Any]:
 
     Strict structured output requires every property in `required` and
     additionalProperties false throughout, which a pydantic schema with
-    defaults does not produce -- see profile._schema, which documents the
+    defaults does not produce -- see resume_facts._schema, which documents the
     same constraint for the same reason. The payload is still validated
     against ResumeContent afterwards, so this is the wire contract and that
     is the truth.

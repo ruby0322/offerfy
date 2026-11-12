@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import pytest
@@ -6,7 +7,7 @@ from fastapi.testclient import TestClient
 from app.config import get_settings
 from app.deps import GUEST_COOKIE, SESSION_COOKIE, _sign
 from app.models import LlmCall, MemoryItem, Resume, TalentProfile, User
-from app.services.profile import _derived
+from app.services.resume_facts import derived_columns as _derived
 from app.services.revisions import pin_current_draft, set_draft_source
 from app.schemas import TalentProfilePayload
 
@@ -19,7 +20,7 @@ OWNER_ROUTES = (
 
 
 class StubProfileLlm:
-    """Stands in for httpx.AsyncClient inside services.profile."""
+    """Stands in for httpx.AsyncClient inside services.resume_facts."""
 
     def __init__(self, payload: dict | None = None, status_code: int = 200, text=None):
         self.payload = payload
@@ -146,7 +147,7 @@ def _point_at(client, resume_id):
 
 
 def _stub(monkeypatch, stub):
-    monkeypatch.setattr("app.services.profile.httpx.AsyncClient", stub)
+    monkeypatch.setattr("app.services.resume_facts.httpx.AsyncClient", stub)
     return stub
 
 
@@ -155,6 +156,16 @@ def _ready(client, db_session, monkeypatch, sub="sub-ready", **kwargs):
     user = _signed_in(client, db_session, sub=sub, name=kwargs.pop("name", "Chen Wei"))
     resume = _resume(db_session, user, **kwargs)
     _grant(client)
+    return user, resume
+
+
+def _unconsenting(client, db_session, monkeypatch, sub="sub-unconsenting", **kwargs):
+    """_ready without the grant: a published resume, a stubbed provider, no consent."""
+    user = _signed_in(client, db_session, sub=sub, name=kwargs.pop("name", "Chen Wei"))
+    resume = _resume(db_session, user, **kwargs)
+    user.profile_resume_id = resume.id
+    db_session.commit()
+    _stub(monkeypatch, StubProfileLlm(_said(_profile())))
     return user, resume
 
 
@@ -837,7 +848,7 @@ def test_build_refuses_rather_than_calling_if_the_fallback_is_not_openai(
     sending the wrong provider's id to an OpenAI endpoint.
     """
     monkeypatch.setattr(
-        "app.services.profile.PROFILE_FALLBACK_MODEL", "claude-haiku-5-5"
+        "app.services.resume_facts.PROFILE_FALLBACK_MODEL", "claude-haiku-5-5"
     )
 
     stub = _stub(monkeypatch, StubProfileLlm(_said(_profile())))
@@ -847,3 +858,95 @@ def test_build_refuses_rather_than_calling_if_the_fallback_is_not_openai(
     assert stub.calls == []
     assert body["build_error"] == "llm_not_configured"
     assert db_session.query(TalentProfile).count() == 0
+
+
+# --- one build, two consumers -------------------------------------------------
+
+
+def test_facts_are_built_without_talent_introduction_consent(
+    client, db_session, monkeypatch, openai_enabled
+):
+    from app.services import resume_facts
+
+    user, _ = _unconsenting(client, db_session, monkeypatch, sub="sub-nocon")
+    result = asyncio.run(resume_facts.build_facts(db_session, user))
+    assert result.error is None
+    assert resume_facts.facts_for_user(db_session, user) is not None
+    assert db_session.query(TalentProfile).filter_by(user_id=user.id).count() == 0
+
+
+def test_build_profile_still_refuses_without_consent_and_writes_nothing(
+    client, db_session, monkeypatch, openai_enabled
+):
+    from app.services import profile, resume_facts
+
+    user, _ = _unconsenting(client, db_session, monkeypatch, sub="sub-refuse")
+    stub = _stub(monkeypatch, StubProfileLlm(_said(_profile())))
+    result = asyncio.run(profile.build_profile(db_session, user))
+    assert result.error == "no_consent"
+    assert stub.calls == []
+    assert resume_facts.facts_for_user(db_session, user) is None
+
+
+def test_contacts_are_scrubbed_on_the_facts_path(
+    client, db_session, monkeypatch, openai_enabled
+):
+    from app.services import resume_facts
+
+    user, _ = _unconsenting(client, db_session, monkeypatch, sub="sub-scrub")
+    _stub(
+        monkeypatch,
+        StubProfileLlm(
+            _said(_profile(summary="reach me at a@b.com or +1 555 123 4567"))
+        ),
+    )
+    asyncio.run(resume_facts.build_facts(db_session, user))
+    blob = resume_facts.facts_for_user(db_session, user).facts_json
+    assert "a@b.com" not in blob and "555" not in blob
+
+
+def test_one_build_writes_both_rows_under_one_input_hash(
+    client, db_session, monkeypatch, openai_enabled
+):
+    from app.services import profile, resume_facts
+
+    user, resume = _ready(client, db_session, monkeypatch, sub="sub-both")
+    user.profile_resume_id = resume.id
+    db_session.commit()
+    stub = _stub(monkeypatch, StubProfileLlm(_said(_profile())))
+    asyncio.run(profile.build_profile(db_session, user))
+    row = db_session.query(TalentProfile).filter_by(user_id=user.id).one()
+    facts = resume_facts.facts_for_user(db_session, user)
+    assert facts.input_hash == row.input_hash
+    assert facts.facts_json == row.profile_json
+    assert len(stub.calls) == 1  # one extraction serving two consumers, not two
+
+
+def test_facts_are_stale_when_the_published_revision_moves(
+    client, db_session, monkeypatch, openai_enabled
+):
+    from app.services import resume_facts
+
+    user, resume = _unconsenting(client, db_session, monkeypatch, sub="sub-stale")
+    asyncio.run(resume_facts.build_facts(db_session, user))
+    facts = resume_facts.facts_for_user(db_session, user)
+    assert resume_facts.facts_are_stale(db_session, user, facts) is False
+    set_draft_source(db_session, resume, resume.typst_source + "\n= More\n")
+    pin_current_draft(db_session, resume)
+    db_session.commit()
+    assert resume_facts.facts_are_stale(db_session, user, facts) is True
+
+
+def test_withdrawing_consent_deletes_the_profile_and_keeps_the_facts(
+    client, db_session, monkeypatch, openai_enabled
+):
+    from app.services import profile, resume_facts
+
+    user, resume = _ready(client, db_session, monkeypatch, sub="sub-withdraw")
+    user.profile_resume_id = resume.id
+    db_session.commit()
+    _stub(monkeypatch, StubProfileLlm(_said(_profile())))
+    asyncio.run(profile.build_profile(db_session, user))
+    assert profile.delete_profile_for_user(db_session, user) is True
+    assert db_session.query(TalentProfile).filter_by(user_id=user.id).count() == 0
+    assert resume_facts.facts_for_user(db_session, user) is not None

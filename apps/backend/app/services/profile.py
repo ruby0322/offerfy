@@ -18,23 +18,23 @@ app.services.resume_facts, because job matching needs the same facts for
 people who have not granted talent_introduction. What stays here is what is
 specific to the employer-facing profile: the consent gate, the provider call,
 the talent_profiles row, staleness, the gated read path and spend recording.
+
+build_profile is a projection: it asks resume_facts.extract_facts for one result and
+writes both talent_profiles (gated) and resume_facts (ungated) from it, under
+one input_hash. It must never call the provider twice.
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-import httpx
-from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
 from app.models import (
     LlmCall,
     Resume,
@@ -42,38 +42,24 @@ from app.models import (
     User,
 )
 from app.schemas import (
-    TALENT_NAME_CHARS,
-    TALENT_SUMMARY_SKILLS,
     TalentProfileDetail,
     TalentProfilePayload,
     TalentProfileSummary,
+    TALENT_SUMMARY_SKILLS,
 )
-from app.services.account import display_name_of
 from app.services.consent import has_consent, has_consent_many
-from app.services.llm import _output_text, _responses_url
-from app.services.llm.providers import openai as openai_provider
-from app.services.model_catalog import spec_or_passthrough
 from app.services.resume_facts import (
-    PROFILE_FALLBACK_MODEL,
-    PROFILE_TIMEOUT,
-    bundle as _bundle,
-    clamp_payload,
-    cut as _cut,
+    bundle,
+    canonical_json,
     derived_columns,
-    input_hash as _input_hash,
-    is_empty as _is_empty,
-    request_body as _request_body,
-    scrub_contacts,
+    extract_facts,
+    input_hash,
     source_resume,
-    usage_of as _usage_of,
+    write_facts,
 )
 from app.services.usage import event_cost_uusd
 
 logger = logging.getLogger(__name__)
-
-
-# Kept so existing importers of the old private name keep working.
-_derived = derived_columns
 
 
 def _utcnow() -> datetime:
@@ -168,13 +154,13 @@ def is_stale(db: Session, user: User, profile: TalentProfile) -> bool:
     Covers republishing the resume and accepting a new memory item, which is
     why input_hash exists beside the revision pointer.
     """
-    bundle = _bundle(db, user)
-    if bundle is None:
+    found = bundle(db, user)
+    if found is None:
         return False
-    _resume, revision_id, source, facts = bundle
+    _resume, revision_id, source, facts = found
     if profile.source_revision_id != revision_id:
         return True
-    return profile.input_hash != _input_hash(revision_id, source, facts)
+    return profile.input_hash != input_hash(revision_id, source, facts)
 
 
 def payload_of(profile: TalentProfile) -> TalentProfilePayload:
@@ -220,137 +206,47 @@ class ProfileBuildResult:
 async def build_profile(db: Session, user: User) -> ProfileBuildResult:
     """Build or rebuild this person's profile. Never raises.
 
-    Consent is required here, not only on the read path: extraction sends
-    resume content to the language-model provider for a purpose that only the
-    talent_introduction grant covers.
+    Consent is required here, not only on the read path: the talent_profiles
+    row exists only for the talent_introduction purpose. The extraction itself
+    needs no grant -- it is shared with resume_facts -- so it runs once and
+    this writes both rows from that one result under one input_hash.
     """
     if not has_consent(db, user=user, purpose="talent_introduction"):
         return ProfileBuildResult(error="no_consent")
-    bundle = _bundle(db, user)
-    if bundle is None:
-        return ProfileBuildResult(error="no_source")
-    resume, revision_id, source, facts = bundle
-    # Runs on the OpenAI Responses API regardless of what anyone picked in
-    # the editor, and on a fixed model rather than this person's choice. Two
-    # reasons, and both are about the output rather than the cost: this call
-    # has to return JSON that validates against TalentProfilePayload, and
-    # `_request_body` shapes a Responses-API structured-output request to get
-    # it. A profile build is also not an interaction anyone is watching, so
-    # there is nothing for a preference to be a preference about.
-    #
-    # That fixed model is PROFILE_FALLBACK_MODEL, *not* the catalogue default
-    # -- see that constant for why the catalogue default cannot serve here.
-    #
-    # It is still metered like any other call, which is why the model id below
-    # is recorded: see jobs/refresh_profiles.py and the system_guard it holds.
-    settings = get_settings()
-    if not openai_provider.OpenAIProvider().configured():
-        return ProfileBuildResult(error="llm_not_configured", resume_id=resume.id)
-    pin = settings.pinned_chat_model()
-    pinned = spec_or_passthrough(pin) if pin else None
-    # An operator pin is honoured only when it names an OpenAI model: pinning
-    # an Anthropic one must not take this feature down with it. Anything else
-    # -- no pin, or a pin naming a non-OpenAI model -- falls back to
-    # PROFILE_FALLBACK_MODEL.
-    spec = (
-        pinned
-        if pinned is not None and pinned.provider == openai_provider.NAME
-        else spec_or_passthrough(PROFILE_FALLBACK_MODEL)
-    )
-    if spec.provider != openai_provider.NAME:
-        # The fallback itself did not resolve to an OpenAI model -- nothing
-        # usable to call, so this makes no request at all rather than sending
-        # the wrong provider's id to this endpoint.
-        return ProfileBuildResult(error="llm_not_configured", resume_id=resume.id)
-    model = spec.id
-    url = _responses_url(settings.openai_base_url or "https://api.openai.com/v1")
-    headers = {
-        "Authorization": f"Bearer {settings.openai_api_key}",
-        "Content-Type": "application/json",
-    }
+    extraction = await extract_facts(db, user)
     result = ProfileBuildResult(
-        model=model, source_chars=len(source), resume_id=resume.id
+        error=extraction.error,
+        usage=extraction.usage,
+        model=extraction.model,
+        source_chars=extraction.source_chars,
+        resume_id=extraction.resume_id,
     )
-    try:
-        async with httpx.AsyncClient(timeout=PROFILE_TIMEOUT) as client:
-            response = await client.post(
-                url, headers=headers, json=_request_body(model, source, facts)
-            )
-            if response.status_code >= 400:
-                logger.warning("profile build failed status=%s", response.status_code)
-                result.error = "provider_error"
-                return result
-            data = response.json()
-    except httpx.HTTPError as exc:
-        logger.warning("profile build transport failed: %s", exc.__class__.__name__)
-        result.error = "provider_error"
-        return result
-    except ValueError:
-        result.error = "unparseable"
-        return result
-
-    if not isinstance(data, dict):
-        result.error = "unparseable"
-        return result
-    result.usage = _usage_of(data)
-    output = data.get("output") if isinstance(data.get("output"), list) else []
-    text = _output_text(data, output)
-    if not text.strip():
-        logger.warning("profile build returned no text status=%s", data.get("status"))
-        result.error = "no_output"
-        return result
-    try:
-        payload = TalentProfilePayload.model_validate_json(text)
-    except ValidationError as exc:
-        # Log where it failed, never what it said: the content is personal
-        # data. Distinct from no_output so the two cannot be confused again.
-        logger.warning(
-            "profile payload rejected: %s",
-            "; ".join(".".join(str(part) for part in err["loc"]) for err in exc.errors()),
-        )
-        result.error = "invalid_payload"
-        return result
-    except ValueError:
-        logger.warning("profile build output was not JSON")
-        result.error = "unparseable"
-        return result
-
-    payload = clamp_payload(scrub_contacts(payload))
-    # A name the person typed, or failing that one Google verified, beats one a
-    # model read off a document. display_name_of settles that precedence in one
-    # place -- the nav shows the same answer, and the name an employer reads
-    # must not be a different one from the name the owner sees.
-    own_name = display_name_of(user)
-    if own_name:
-        payload.display_name = _cut(own_name, TALENT_NAME_CHARS)
-    if _is_empty(payload):
-        logger.warning("profile build produced an empty payload")
-        result.error = "empty"
+    payload = extraction.payload
+    if payload is None:
         return result
 
     # Canonical JSON: the bytes are what content_hash commits to, and
     # disclosure_events will cite that hash as evidence of what a recipient
-    # holds. sort_keys so an identical payload hashes identically.
-    blob = json.dumps(
-        payload.model_dump(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    )
+    # holds.
+    blob = canonical_json(payload)
     columns = derived_columns(payload)
     profile = profile_for_user(db, user)
     if profile is None:
         profile = TalentProfile(user_id=user.id)
         db.add(profile)
-    profile.source_resume_id = resume.id
-    profile.source_revision_id = revision_id
-    profile.input_hash = _input_hash(revision_id, source, facts)
+    profile.source_resume_id = extraction.resume_id
+    profile.source_revision_id = extraction.revision_id
+    profile.input_hash = extraction.input_hash
     profile.profile_json = blob
     profile.content_hash = hashlib.sha256(blob.encode("utf-8")).hexdigest()
-    profile.model = model[:128]
+    profile.model = extraction.model[:128]
     # Set on every write, not just the insert: built_at is what the owner and
     # the reader see as this payload's date.
     profile.built_at = _utcnow()
     for column, value in columns.items():
         setattr(profile, column, value)
     db.flush()
+    write_facts(db, user, extraction)
     result.profile = profile
     return result
 

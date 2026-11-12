@@ -957,7 +957,7 @@ class TalentProfile(Base):
     we were told we may show.
 
     It holds no contact details by construction. There is no column for one,
-    the payload schema has no field for one, and services.profile.scrub_contacts
+    the payload schema has no field for one, and services.resume_facts.scrub_contacts
     strips them from the text fields anyway. A reader who has this still cannot
     reach the person except through Offerfy.
     """
@@ -1012,7 +1012,7 @@ class TalentProfile(Base):
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
 
     # Denormalised for the list endpoint, never a second source of truth:
-    # services.profile rebuilds every one of these from profile_json on write.
+    # services.resume_facts.derived_columns rebuilds every one of these from profile_json on write.
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     headline: Mapped[str | None] = mapped_column(String(255), nullable=True)
     years_experience: Mapped[int | None] = mapped_column(nullable=True)

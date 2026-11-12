@@ -454,7 +454,7 @@ class ConsentState(BaseModel):
 
 # Caps on the payload. They bound what one read hands over.
 #
-# Enforced by services.profile.clamp_payload, NOT by Field(max_length=...) on
+# Enforced by services.resume_facts.clamp_payload, NOT by Field(max_length=...) on
 # the fields below. A length constraint here would make pydantic *reject* a
 # payload that is one bullet point too long, and the whole profile would be
 # thrown away -- which is exactly what happened to the first real resume this
@@ -498,7 +498,7 @@ class TalentProfilePayload(BaseModel):
     and none may be added: introductions go through Offerfy, so a reader who
     has this payload still cannot contact the person directly. Three things
     enforce that -- this schema having nowhere to put one, the prompt saying
-    not to, and services.profile.scrub_contacts removing them from the text
+    not to, and services.resume_facts.scrub_contacts removing them from the text
     fields regardless.
     """
 

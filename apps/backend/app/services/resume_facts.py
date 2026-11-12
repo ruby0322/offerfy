@@ -18,9 +18,14 @@ Keeping ONE prompt, ONE schema and ONE scrubber here is the point. Two copies
 would drift, and the employer side and the match side would silently disagree
 about what a resume says.
 
-This module is pure extraction machinery: it holds no consent logic and
-decides nothing about who may see the result. Anything that does lives in the
-caller. profile.py imports from here; never the reverse.
+This module holds no consent logic and decides nothing about who may see the
+result. extract_facts and build_facts run with no consent check on purpose: the
+facts are the person's own data, used for their own benefit. Anything that
+gates on talent_introduction lives in profile.py, which imports from here;
+never the reverse.
+
+The extraction is paid for once. build_profile calls extract_facts and writes both
+rows from the one result, under one input_hash.
 
 disclosure_events.profile_content_hash cites the exact bytes of what an
 employer was shown, so nothing here may change what a fixed input produces
@@ -30,13 +35,19 @@ without that being a deliberate, reviewed decision.
 from __future__ import annotations
 
 import hashlib
+import json
+import logging
 import re
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from app.models import TALENT_PROFILE_SCHEMA_VERSION, Resume, User
+from app.config import get_settings
+from app.models import TALENT_PROFILE_SCHEMA_VERSION, Resume, ResumeFacts, User
 from app.schemas import (
     TALENT_EDUCATION_LIMIT,
     TALENT_HEADLINE_CHARS,
@@ -50,10 +61,16 @@ from app.schemas import (
     TALENT_YEARS_MAX,
     TalentProfilePayload,
 )
+from app.services.account import display_name_of
 from app.services.family import family_master
+from app.services.llm import _output_text, _responses_url
+from app.services.llm.providers import openai as openai_provider
+from app.services.model_catalog import spec_or_passthrough
 from app.services.memory import accepted_memory_texts
 from app.services.revisions import published_source
 
+
+logger = logging.getLogger(__name__)
 
 PROFILE_TIMEOUT = httpx.Timeout(90.0, connect=10.0)
 
@@ -351,3 +368,224 @@ def usage_of(data: dict[str, Any]) -> dict[str, Any]:
         if isinstance(cached, dict)
         else None,
     }
+
+
+# --- the extraction ----------------------------------------------------------
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+@dataclass
+class Extraction:
+    """What one provider call produced, before anyone decides where it goes.
+
+    A failure never carries a payload. usage/model/source_chars/resume_id are
+    set as far as the build got, so spend can be recorded for a call that was
+    made even when its output was unusable.
+    """
+
+    payload: TalentProfilePayload | None = None
+    error: str | None = None
+    usage: dict[str, Any] = field(default_factory=dict)
+    model: str = ""
+    source_chars: int = 0
+    resume_id: str | None = None
+    revision_id: str = ""
+    input_hash: str = ""
+
+
+async def extract_facts(db: Session, user: User) -> Extraction:
+    """Read the person's published resume once and return scrubbed facts.
+
+    No consent check: that is the caller's decision, because what the result
+    is used for is the caller's decision. Never raises.
+
+    Runs on the OpenAI Responses API regardless of what anyone picked in the
+    editor, and on a fixed model rather than this person's choice. The output
+    has to validate against TalentProfilePayload, and request_body shapes a
+    Responses-API structured-output request to get it; and nobody is watching
+    the call, so there is no preference to honour. The fixed model is
+    PROFILE_FALLBACK_MODEL, not the catalogue default -- see that constant.
+    The call is billable and is metered by the caller (see
+    tests/test_metering.py).
+    """
+    found = bundle(db, user)
+    if found is None:
+        return Extraction(error="no_source")
+    resume, revision_id, source, facts = found
+    settings = get_settings()
+    if not openai_provider.OpenAIProvider().configured():
+        return Extraction(error="llm_not_configured", resume_id=resume.id)
+    pin = settings.pinned_chat_model()
+    pinned = spec_or_passthrough(pin) if pin else None
+    # An operator pin is honoured only when it names an OpenAI model: pinning
+    # an Anthropic one must not take this feature down with it. Anything else
+    # falls back to PROFILE_FALLBACK_MODEL.
+    spec = (
+        pinned
+        if pinned is not None and pinned.provider == openai_provider.NAME
+        else spec_or_passthrough(PROFILE_FALLBACK_MODEL)
+    )
+    if spec.provider != openai_provider.NAME:
+        # The fallback itself did not resolve to an OpenAI model -- nothing
+        # usable to call, so make no request rather than sending the wrong
+        # provider's id to this endpoint.
+        return Extraction(error="llm_not_configured", resume_id=resume.id)
+    model = spec.id
+    url = _responses_url(settings.openai_base_url or "https://api.openai.com/v1")
+    headers = {
+        "Authorization": f"Bearer {settings.openai_api_key}",
+        "Content-Type": "application/json",
+    }
+    result = Extraction(
+        model=model,
+        source_chars=len(source),
+        resume_id=resume.id,
+        revision_id=revision_id,
+        input_hash=input_hash(revision_id, source, facts),
+    )
+    try:
+        async with httpx.AsyncClient(timeout=PROFILE_TIMEOUT) as client:
+            response = await client.post(
+                url, headers=headers, json=request_body(model, source, facts)
+            )
+            if response.status_code >= 400:
+                logger.warning("profile build failed status=%s", response.status_code)
+                result.error = "provider_error"
+                return result
+            data = response.json()
+    except httpx.HTTPError as exc:
+        logger.warning("profile build transport failed: %s", exc.__class__.__name__)
+        result.error = "provider_error"
+        return result
+    except ValueError:
+        result.error = "unparseable"
+        return result
+
+    if not isinstance(data, dict):
+        result.error = "unparseable"
+        return result
+    result.usage = usage_of(data)
+    output = data.get("output") if isinstance(data.get("output"), list) else []
+    text = _output_text(data, output)
+    if not text.strip():
+        logger.warning("profile build returned no text status=%s", data.get("status"))
+        result.error = "no_output"
+        return result
+    try:
+        payload = TalentProfilePayload.model_validate_json(text)
+    except ValidationError as exc:
+        # Log where it failed, never what it said: the content is personal
+        # data. Distinct from no_output so the two cannot be confused again.
+        logger.warning(
+            "profile payload rejected: %s",
+            "; ".join(".".join(str(part) for part in err["loc"]) for err in exc.errors()),
+        )
+        result.error = "invalid_payload"
+        return result
+    except ValueError:
+        logger.warning("profile build output was not JSON")
+        result.error = "unparseable"
+        return result
+
+    # Scrubbed here, in the shared path, so that contacts never reach either
+    # table: a person who declined employer processing never agreed to have a
+    # phone number sitting in a derived table of their own either.
+    payload = clamp_payload(scrub_contacts(payload))
+    # A name the person typed, or failing that one Google verified, beats one a
+    # model read off a document. display_name_of settles that precedence in one
+    # place -- the nav shows the same answer, and the name an employer reads
+    # must not differ from the name the owner sees.
+    own_name = display_name_of(user)
+    if own_name:
+        payload.display_name = cut(own_name, TALENT_NAME_CHARS)
+    if is_empty(payload):
+        logger.warning("profile build produced an empty payload")
+        result.error = "empty"
+        return result
+    result.payload = payload
+    return result
+
+
+def canonical_json(payload: TalentProfilePayload) -> str:
+    """The bytes both tables store. sort_keys so identical payloads hash alike."""
+    return json.dumps(
+        payload.model_dump(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+
+
+# --- the facts table ---------------------------------------------------------
+
+
+@dataclass
+class FactsBuildResult:
+    """What a facts build did. A failure never writes and never overwrites."""
+
+    facts: ResumeFacts | None = None
+    error: str | None = None
+    usage: dict[str, Any] = field(default_factory=dict)
+    model: str = ""
+    source_chars: int = 0
+    resume_id: str | None = None
+
+
+def facts_for_user(db: Session, user: User) -> ResumeFacts | None:
+    return db.query(ResumeFacts).filter(ResumeFacts.user_id == user.id).one_or_none()
+
+
+def write_facts(db: Session, user: User, extraction: Extraction) -> ResumeFacts:
+    """Upsert the facts row from a successful extraction. Flushes, never commits."""
+    payload = extraction.payload
+    assert payload is not None and extraction.resume_id is not None
+    row = facts_for_user(db, user)
+    if row is None:
+        row = ResumeFacts(user_id=user.id)
+        db.add(row)
+    row.source_resume_id = extraction.resume_id
+    row.source_revision_id = extraction.revision_id
+    row.input_hash = extraction.input_hash
+    row.facts_json = canonical_json(payload)
+    row.model = extraction.model[:128]
+    row.built_at = _utcnow()
+    columns = derived_columns(payload)
+    # The facts table carries only the match-side columns; display_name and
+    # headline stay in the JSON.
+    row.skills_text = columns["skills_text"]
+    row.search_text = columns["search_text"]
+    row.years_experience = columns["years_experience"]
+    db.flush()
+    return row
+
+
+async def build_facts(db: Session, user: User) -> FactsBuildResult:
+    """Build or rebuild this person's facts. Never raises.
+
+    No consent check, deliberately: these are the person's own facts, kept for
+    their own benefit (matching jobs for them), not something an employer can
+    see. Writes resume_facts and nothing else; talent_profiles is a separate
+    purpose with a separate grant -- see profile.build_profile.
+    """
+    extraction = await extract_facts(db, user)
+    result = FactsBuildResult(
+        error=extraction.error,
+        usage=extraction.usage,
+        model=extraction.model,
+        source_chars=extraction.source_chars,
+        resume_id=extraction.resume_id,
+    )
+    if extraction.payload is not None:
+        result.facts = write_facts(db, user, extraction)
+    return result
+
+
+def facts_are_stale(db: Session, user: User, facts: ResumeFacts) -> bool:
+    """True when the facts no longer match what they were built from."""
+    found = bundle(db, user)
+    if found is None:
+        return False
+    _resume, revision_id, source, memory = found
+    if facts.source_revision_id != revision_id:
+        return True
+    return facts.input_hash != input_hash(revision_id, source, memory)

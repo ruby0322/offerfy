@@ -28,6 +28,8 @@ APP = Path(__file__).resolve().parents[1] / "app"
 BILLABLE = (
     "aiter_chat_edit",
     "build_profile",
+    "build_facts",
+    "extract_facts",
     "vision_report",
     "read_layout_report",
     "extract_content",
@@ -45,6 +47,8 @@ BILLABLE = (
 # transitively rather than wrapped again -- recording twice would double-bill.
 EXPECTED_CALL_SITES = {
     ("routers/chat.py", "aiter_chat_edit"),       # the turn + the repair loop
+    ("services/profile.py", "extract_facts"),     # inside build_profile; its callers wrap
+    ("services/resume_facts.py", "extract_facts"),  # inside build_facts; its callers wrap
     ("services/import_runner.py", "aiter_chat_edit"),  # one turn, system_guard
     ("routers/talent_me.py", "build_profile"),    # pointer change + refresh
     ("jobs/refresh_profiles.py", "build_profile"),  # nightly, system_guard
@@ -99,6 +103,12 @@ def test_every_module_that_calls_a_billable_function_imports_the_seam():
         # Reached from inside aiter_chat_edit, which its caller wraps.
         "services/llm/turn.py",
         "services/layout.py",
+        # extract_facts is the provider call itself. These two modules reach it
+        # only from inside build_profile / build_facts, and the *callers* of
+        # those carry the metered() wrap; wrapping here too would record twice.
+        # A new caller of build_facts is caught by BILLABLE above.
+        "services/profile.py",
+        "services/resume_facts.py",
     }
     for rel, _name in _call_sites():
         if rel in exempt:
