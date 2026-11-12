@@ -4,6 +4,7 @@ import pytest
 
 from app.models import Job, JobFacets
 from app.services.jobs import enrich as enrich_module
+from app.services.jobs.boilerplate import recompute_boilerplate
 from app.services.jobs.enrich import (
     LocationFacets,
     description_hash,
@@ -589,3 +590,50 @@ def test_survey_cli_main_prints_a_report(db_session, capsys, monkeypatch):
 )
 def test_short_needles_do_not_hide_inside_longer_words(title, description, expected):
     assert function_of(title, description) == expected
+
+
+MISSION = "We bring cutting-edge autonomy and computer vision to every mission."
+SOURCING = "You will own supplier contracts and the quarterly sourcing review."
+
+
+def _anduril_buyers(db_session, count):
+    return [
+        _add_job(db_session, source_id=f"a{i}", company="Anduril",
+                 title=f"Senior Buyer {i}", description_text=f"{MISSION} {SOURCING}")
+        for i in range(count)
+    ]
+
+
+def test_boilerplate_sentence_does_not_decide_the_function(db_session):
+    _anduril_buyers(db_session, 6)
+    db_session.flush()
+    recompute_boilerplate(db_session)
+    enrich_jobs(db_session)
+    assert {f.function for f in db_session.query(JobFacets).all()} == {"other"}
+
+
+def test_a_real_ml_posting_keeps_its_function(db_session):
+    _anduril_buyers(db_session, 5)
+    _add_job(db_session, source_id="perception", company="Anduril",
+             title="Perception Engineer",
+             description_text=f"{MISSION} You will train deep learning models for perception.")
+    db_session.flush()
+    recompute_boilerplate(db_session)
+    enrich_jobs(db_session)
+    fn = {j.title: f.function
+          for j, f in db_session.query(Job, JobFacets).join(JobFacets, JobFacets.job_id == Job.id)}
+    assert fn["Perception Engineer"] == "ml"
+    assert fn["Senior Buyer 0"] == "other"
+
+
+def test_the_hash_gate_reacts_to_a_boilerplate_change(db_session):
+    jobs = _anduril_buyers(db_session, 6)
+    db_session.flush()
+    recompute_boilerplate(db_session)
+    enrich_jobs(db_session)
+    assert enrich_jobs(db_session) == 0          # nothing changed: gate holds
+    for job in jobs[:2]:
+        job.is_active = False
+    db_session.flush()
+    recompute_boilerplate(db_session)            # mission drops below the cutoff
+    assert enrich_jobs(db_session) == 4          # rewritten unforced, by the hash alone

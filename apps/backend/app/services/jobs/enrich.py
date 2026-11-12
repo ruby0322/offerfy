@@ -82,6 +82,11 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.models import Job, JobFacets
+from app.services.jobs.boilerplate import (
+    load_boilerplate,
+    normalize_company,
+    strip_boilerplate,
+)
 
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[3]
@@ -365,7 +370,16 @@ def function_of(
 
 
 def description_hash(text: str) -> str:
-    """sha256 hex of `description_text` alone.
+    """sha256 hex of a posting's description with its company's boilerplate
+    stripped (`enrich_jobs` passes `strip_boilerplate`'s output, not the raw
+    `description_text`).
+
+    Hashing the stripped text is what makes the gate self-invalidating: when
+    a company's boilerplate set changes, every one of its postings hashes
+    differently and is re-derived with no `force=True`. A side effect:
+    `strip_boilerplate` casefolds, so a description edited only in letter
+    case no longer changes the hash. That is correct -- `function_of`
+    casefolds anyway, so a case-only edit cannot change any derivation.
 
     Not of title/location/anything else: those feed the three derivations
     too, but a posting whose title or location is edited without touching
@@ -393,6 +407,7 @@ _BACKFILL_BATCH_SIZE = 500
 _ENRICH_COLUMNS = (
     Job.id,
     Job.source,
+    Job.company,
     Job.title,
     Job.location,
     Job.remote,
@@ -425,10 +440,19 @@ def _enrich_job_rows(
         .filter(JobFacets.job_id.in_([row.id for row in rows]))
         .all()
     }
+    # Second (and last) query: boilerplate for the batch's distinct companies.
+    # An absent row and an empty hash set must take the same path (.get with
+    # an empty default below) -- recompute_boilerplate's change-reporting
+    # relies on that.
+    boilerplate = load_boilerplate(db, {row.company for row in rows})
 
     written = 0
     for row in rows:
-        new_hash = description_hash(row.description_text)
+        stripped = strip_boilerplate(
+            row.description_text,
+            boilerplate.get(normalize_company(row.company), frozenset()),
+        )
+        new_hash = description_hash(stripped)
         facet = existing.get(row.id)
         if facet is not None and not force and facet.description_hash == new_hash:
             continue
@@ -440,7 +464,7 @@ def _enrich_job_rows(
             facet = JobFacets(job_id=row.id)
             db.add(facet)
         facet.seniority = seniority_of(row.title, taxonomy)
-        facet.function = function_of(row.title, row.description_text, taxonomy)
+        facet.function = function_of(row.title, stripped, taxonomy)
         facet.country = loc.country
         facet.region = loc.region
         facet.city = loc.city
