@@ -1099,6 +1099,52 @@ class ResumeFacts(Base):
     user: Mapped[User] = relationship(foreign_keys=[user_id])
 
 
+class JobPreference(Base):
+    """What a person wants next: the intent a resume cannot supply.
+
+    ResumeFacts says where someone is and what they have done; it never says
+    what they want. This table is that other half of a match profile.
+
+    It is seeded once from the facts and thereafter written only by the user.
+    A rebuild of resume_facts must never overwrite it. That rule is the whole
+    reason it is a separate table rather than more columns on ResumeFacts:
+    facts are derived and rebuilt on every resume change, preferences are
+    stated and must survive every rebuild untouched.
+
+    target_functions and target_locations are pipe-delimited and lowercased,
+    '|backend|infra|', for the same reason as TalentProfile.skills_text:
+    LIKE '%|ml|%' cannot match 'html'. remote_required is a genuine
+    tri-state matching Job.remote: True is remote-only, False is on-site
+    only, None is no preference. activity has no CHECK constraint (see
+    028_job_facets): the vocabulary may grow and one writer owns it.
+    """
+
+    __tablename__ = "job_preferences"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="job_preferences_user_id_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # CASCADE: personal data, erased with the account.
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    target_functions: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    target_locations: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    target_seniority: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    remote_required: Mapped[bool | None] = mapped_column(nullable=True)
+    # actively_looking | browsing | paused
+    activity: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="actively_looking"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+
 class ResumeContent(Base):
     """A structured snapshot of one resume's content, for switching templates.
 
