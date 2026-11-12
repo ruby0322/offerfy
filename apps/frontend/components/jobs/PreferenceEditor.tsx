@@ -41,6 +41,8 @@ export default function PreferenceEditor({ initial }: Props) {
 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  // On-screen edits the person has not saved. A rebuild must not revert them.
+  const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildMsg, setRebuildMsg] = useState<{ text: string; bad: boolean } | null>(null);
@@ -51,8 +53,13 @@ export default function PreferenceEditor({ initial }: Props) {
     return key ? tJobs(key) : value;
   }
 
-  function toggle(list: string[], set: (next: string[]) => void, value: string) {
+  function touch() {
     setSaved(false);
+    setDirty(true);
+  }
+
+  function toggle(list: string[], set: (next: string[]) => void, value: string) {
+    touch();
     set(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
   }
 
@@ -70,10 +77,22 @@ export default function PreferenceEditor({ initial }: Props) {
     ...Object.keys(COUNTRY_KEYS).map((c) => c.toLowerCase()),
     ...lowerLocations.filter((v) => !(v.toUpperCase() in COUNTRY_KEYS)),
   ];
+  // "unknown" is offered on /jobs, where it means "show me the postings no
+  // rule could classify". As a stated TARGET it is meaningless and the API
+  // refuses it (422), so it must not be offered here. Leaving the field blank
+  // is how you say "no seniority preference".
+  const offeredSeniorities = Object.keys(SENIORITY_KEYS).filter((v) => v !== "unknown");
   const seniorityValues = [
-    ...Object.keys(SENIORITY_KEYS),
-    ...(seniority && !(seniority in SENIORITY_KEYS) ? [seniority] : []),
+    ...offeredSeniorities,
+    // Anything already held but no longer offered stays visible so it can be
+    // changed, rather than surviving a save the person cannot see.
+    ...(seniority && !offeredSeniorities.includes(seniority) ? [seniority] : []),
   ];
+
+  // Remote-only makes the backend ignore target_locations entirely (a remote
+  // role's country is not where the person works), so the countries must not
+  // look live while it is on.
+  const locationsInert = remote === true;
 
   function applyPreference(p: JobPreference) {
     setFunctions(p.target_functions);
@@ -83,6 +102,7 @@ export default function PreferenceEditor({ initial }: Props) {
     setActivity(p.activity);
     setFactsState(p.facts_state);
     setSaved(false);
+    setDirty(false);
   }
 
   async function save() {
@@ -116,6 +136,13 @@ export default function PreferenceEditor({ initial }: Props) {
           text: out.error === "no_source" ? t("rebuildNoSource") : t("rebuildFailed"),
           bad: true,
         });
+      } else if (dirty) {
+        // Unsaved on-screen edits outrank the seed. Re-reading here would
+        // silently revert them -- and for someone who HAS saved before, the
+        // GET returns the stored row, so it would revert them to the old
+        // saved values rather than to anything the rebuild produced.
+        setRebuildMsg({ text: t("rebuildDoneKeptEdits"), bad: false });
+        setFactsState("fresh");
       } else {
         setRebuildMsg({ text: t("rebuildDone"), bad: false });
         // Until the first save the preference is computed from the facts on
@@ -190,7 +217,14 @@ export default function PreferenceEditor({ initial }: Props) {
             </div>
           </fieldset>
 
-          <fieldset className="flex flex-col gap-2 text-sm">
+          {/* disabled on the fieldset greys and un-ticks every descendant
+              input natively, so the countries cannot be changed while they
+              would have no effect. The choices are kept, not cleared: turning
+              remote-only off brings them straight back. */}
+          <fieldset
+            disabled={locationsInert}
+            className={`flex flex-col gap-2 text-sm ${locationsInert ? "opacity-60" : ""}`}
+          >
             <legend className="mb-1 font-medium">{t("locationsLegend")}</legend>
             <div className="flex flex-wrap gap-x-4 gap-y-2">
               {locationValues.map((value) => (
@@ -204,7 +238,9 @@ export default function PreferenceEditor({ initial }: Props) {
                 </label>
               ))}
             </div>
-            <span className="text-xs text-muted-foreground">{t("locationsHint")}</span>
+            <span className="text-xs text-muted-foreground">
+              {locationsInert ? t("locationsIgnoredRemote") : t("locationsHint")}
+            </span>
           </fieldset>
 
           <label className="flex flex-col gap-1 text-sm">
@@ -213,7 +249,7 @@ export default function PreferenceEditor({ initial }: Props) {
               className={selectClass}
               value={seniority}
               onChange={(e) => {
-                setSaved(false);
+                touch();
                 setSeniority(e.target.value);
               }}
             >
@@ -232,7 +268,7 @@ export default function PreferenceEditor({ initial }: Props) {
               className={selectClass}
               value={remoteToValue(remote)}
               onChange={(e) => {
-                setSaved(false);
+                touch();
                 setRemote(valueToRemote(e.target.value));
               }}
             >
@@ -248,7 +284,7 @@ export default function PreferenceEditor({ initial }: Props) {
               className={selectClass}
               value={activity}
               onChange={(e) => {
-                setSaved(false);
+                touch();
                 setActivity(e.target.value as PreferenceActivity);
               }}
             >

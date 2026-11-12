@@ -179,7 +179,8 @@ export type JobPreference = {
   /** true remote-only, false on-site only, null no preference. */
   remote_required: boolean | null;
   activity: PreferenceActivity;
-  updated_at: string;
+  /** null before the first save: the seed is computed, never stored. */
+  updated_at: string | null;
   facts_state: FactsState;
 };
 
@@ -203,7 +204,7 @@ export async function fetchJobPreferences(): Promise<JobPreference> {
     target_seniority: raw.target_seniority ?? null,
     remote_required: raw.remote_required ?? null,
     activity: raw.activity ?? "actively_looking",
-    updated_at: raw.updated_at ?? "",
+    updated_at: raw.updated_at ?? null,
     facts_state: raw.facts_state ?? "missing",
   };
 }

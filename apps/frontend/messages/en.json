@@ -254,7 +254,7 @@
   "preferences": {
     "title": "Job preferences",
     "ownershipTitle": "These preferences are yours",
-    "ownership": "Job matching uses exactly what you set here. We seeded it once from your resume; we never overwrite it afterwards, so anything you change stays changed.",
+    "ownership": "Job matching uses exactly what you set here. Until you save for the first time, we fill these in from your resume, and refill them whenever we read it again. From your first save onwards they are yours alone: nothing we do with your resume changes them.",
     "loadError": "Could not load your preferences. Try again.",
     "saveError": "Could not save. Try again.",
     "saved": "Saved.",
@@ -277,7 +277,9 @@
     "rebuildDone": "Done. We read your resume. If you had not saved yet, the choices below now reflect it.",
     "rebuildFailed": "We could not read your resume. Try again in a moment.",
     "rebuildNoSource": "Publish a resume first, then try again.",
-    "seePrivacy": "How we handle your resume"
+    "seePrivacy": "How we handle your resume",
+    "locationsIgnoredRemote": "Ignored while “Remote” is selected below: we match remote roles wherever the employer is based. Set Remote back to “No preference” to filter by country again.",
+    "rebuildDoneKeptEdits": "Done. We read your resume. Your unsaved changes below were left as they are — save them, or reload the page to see what your resume suggests."
   },
   "settings": {
     "title": "Settings",
@@ -742,6 +744,7 @@
             "Language: we set an offerfy_locale cookie so the site stays in the language you chose.",
             "Theme: light/dark preference is stored in the browser with localStorage. It is not a cookie.",
             "Resume data: title, Typst source, compiled SVG and PDF, ATS parseability report, and chat messages.",
+            "Match profile: the facts we extract from your resume for job matching — your name, headline and summary, roles and employers, skills, education, languages, locations and years of experience — and the job preferences you set (the roles, countries, level and remote preference you want, and how actively you are looking).",
             "Uploads: PDF, PNG, JPG, JPEG, WEBP, TXT, and MD files, up to 10 MiB, stored in object storage.",
             "Job catalog: we store copies of public job postings from employer ATS board APIs so we can show the catalog. It also still holds archived postings from TaiwanJobs open data, a source we no longer ingest. These listings are not your personal data.",
             "Usage metering: for each model call we record what it billed — token counts, the model name and a cost figure — attached to your account or guest session, so the weekly allowance can be enforced. We also record when a request was refused for reaching a limit, with the tier and which limit it was. Neither record contains your resume, your uploads or your messages."
@@ -766,7 +769,7 @@
           "paragraphs": [
             "Google: to sign you in.",
             "Language-model provider: we send resume, upload, and chat content to an OpenAI-compatible API when you use chat, and — if you have turned on “Open to matching” — to build the profile we show employers.",
-            "Separately from the employer-introduction consent (“Open to matching”), any user with a published resume can ask us to read it for job matching, and when they do we send the resume’s content to our language-model provider to extract the facts used for matching (your name, headline and summary, roles and employers, skills, education, languages, locations and years of experience); that extraction is not sharing your resume with employers, who receive nothing from it.",
+            "Separately from the employer-introduction consent (“Open to matching”), any user with a published resume can ask us to read it for job matching, and when they do we send the resume’s content to our language-model provider to extract the facts used for matching (your name, headline and summary, roles and employers, skills, education, languages, locations and years of experience); that extraction is not sharing your resume with employers, who receive nothing from it. If you have turned on “Open to matching”, building the profile we show employers runs that same extraction, so your matching record is filled in without your asking for it separately. That record is kept for your own job matching: turning “Open to matching” off removes the profile employers can see, but not the matching record.",
             "Employers and recruiters: only if you have turned on “Open to matching”, and only through credentials we issue to named organisations. There is no public or self-serve access.",
             "Infrastructure: database, object storage, and hosting that run Offerfy.",
             "We do not sell personal data. Offerfy does not include a third-party analytics product today."
