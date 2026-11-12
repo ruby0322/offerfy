@@ -1,11 +1,13 @@
 import json
 from datetime import datetime, timezone
 
-from app.models import CompanyBoilerplate
+from app.models import CompanyBoilerplate, Job
 
 from app.services.jobs.boilerplate import (
     BOILERPLATE_MIN_POSTINGS,
     boilerplate_hashes,
+    load_boilerplate,
+    recompute_boilerplate,
     sentence_hash,
     split_sentences,
     strip_boilerplate,
@@ -81,3 +83,76 @@ def test_company_boilerplate_round_trips_its_hash_array(db_session):
     db_session.flush()
     row = db_session.get(CompanyBoilerplate, "Anduril")
     assert json.loads(row.sentence_hashes) == ["a" * 64, "b" * 64]
+
+
+def _add_jobs(db_session, company, descriptions, *, title="Engineer"):
+    now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+    start = db_session.query(Job).count()
+    jobs = []
+    for offset, text in enumerate(descriptions):
+        job = Job(
+            source="greenhouse",
+            source_id=f"bp-{start + offset}",
+            company=company,
+            title=title,
+            location="Remote",
+            remote=True,
+            apply_url="https://example.com/apply",
+            source_url="https://example.com/job",
+            description_text=text,
+            description_html=f"<p>{text}</p>",
+            posted_at=now,
+            first_seen_at=now,
+            last_seen_at=now,
+            is_active=True,
+        )
+        db_session.add(job)
+        jobs.append(job)
+    db_session.flush()
+    return jobs
+
+
+MISSION = "We bring cutting-edge autonomy and computer vision to every mission."
+BODY = "You will own supplier contracts and the quarterly sourcing review."
+
+
+def test_recompute_stores_the_shared_sentence_and_reports_the_change(db_session):
+    _add_jobs(db_session, "Anduril", [f"{MISSION} {BODY} Role {i}." for i in range(6)])
+    assert recompute_boilerplate(db_session) == {"anduril"}
+    assert sentence_hash(MISSION.casefold()) in load_boilerplate(db_session, ["Anduril"])["anduril"]
+
+
+def test_recompute_is_idempotent_and_reports_no_change_the_second_time(db_session):
+    _add_jobs(db_session, "Anduril", [f"{MISSION} {BODY} Role {i}." for i in range(6)])
+    recompute_boilerplate(db_session)
+    assert recompute_boilerplate(db_session) == set()
+
+
+def test_inactive_postings_are_not_part_of_the_corpus(db_session):
+    jobs = _add_jobs(db_session, "Anduril", [f"{MISSION} {BODY} Role {i}." for i in range(6)])
+    for job in jobs[:3]:
+        job.is_active = False
+    db_session.flush()
+    recompute_boilerplate(db_session)
+    assert load_boilerplate(db_session, ["Anduril"]) == {}
+
+
+# Review Focus 5
+def test_company_falling_below_the_minimum_loses_its_stale_row(db_session):
+    jobs = _add_jobs(db_session, "Anduril", [f"{MISSION} {BODY} Role {i}." for i in range(6)])
+    recompute_boilerplate(db_session)
+    for job in jobs[:2]:
+        job.is_active = False
+    db_session.flush()
+    assert recompute_boilerplate(db_session) == {"anduril"}
+    assert load_boilerplate(db_session, ["Anduril"]) == {}
+    assert db_session.get(CompanyBoilerplate, "anduril") is None
+
+
+# Review Focus 4
+def test_company_names_differing_by_case_or_space_share_one_row(db_session):
+    # Three each: below BOILERPLATE_MIN_POSTINGS apart, at it together.
+    _add_jobs(db_session, "Anduril", [f"{MISSION} {BODY} Role {i}." for i in range(3)])
+    _add_jobs(db_session, "  anduril ", [f"{MISSION} {BODY} Role {i}." for i in range(3, 6)])
+    assert recompute_boilerplate(db_session) == {"anduril"}
+    assert sentence_hash(MISSION.casefold()) in load_boilerplate(db_session, ["Anduril"])["anduril"]

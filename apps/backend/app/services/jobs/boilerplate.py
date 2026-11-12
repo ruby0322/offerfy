@@ -34,17 +34,29 @@ with a space would splice the tail of one bullet onto the head of the next
 and manufacture a needle ("computer" + "vision") that neither contained.
 Needles are space-padded, and a newline is not a space.
 
-Everything here is pure: no database, no I/O. Text is casefolded once up
-front, so hashes are over casefolded sentences and stripped output is
-casefolded too, which is what needle matching wants anyway.
+Text is casefolded once up front, so hashes are over casefolded sentences
+and stripped output is casefolded too, which is what needle matching wants
+anyway.
+
+The detection and stripping functions are pure. The database seam at the
+bottom (`recompute_boilerplate`, `load_boilerplate`) is the only part that
+touches a Session; it flushes but never commits, the caller owns the
+transaction, as with `enrich_jobs` and `upsert_jobs`.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
+from datetime import datetime, timezone
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.models import CompanyBoilerplate, Job
 
 BOILERPLATE_MIN_POSTINGS: int = 5
 BOILERPLATE_DOC_FREQUENCY: float = 0.5
@@ -78,12 +90,17 @@ def boilerplate_hashes(descriptions: Iterable[str]) -> frozenset[str]:
     postings to tell a company's voice from coincidence.
     """
     docs = list(descriptions)
-    if len(docs) < BOILERPLATE_MIN_POSTINGS:
-        return frozenset()
     counts: Counter[str] = Counter()
     for doc in docs:
         counts.update({sentence_hash(s) for s in split_sentences(doc)})
-    threshold = BOILERPLATE_DOC_FREQUENCY * len(docs)
+    return _hashes_from_counts(counts, len(docs))
+
+
+def _hashes_from_counts(counts: Counter[str], postings: int) -> frozenset[str]:
+    """The cutoff itself, shared so the streaming path cannot drift from it."""
+    if postings < BOILERPLATE_MIN_POSTINGS:
+        return frozenset()
+    threshold = BOILERPLATE_DOC_FREQUENCY * postings
     return frozenset(h for h, n in counts.items() if n >= threshold)
 
 
@@ -99,3 +116,86 @@ def strip_boilerplate(text: str, hashes: frozenset[str]) -> str:
         if len(s) <= MIN_SENTENCE_CHARS or sentence_hash(s) not in hashes
     ]
     return "\n".join(kept)
+
+
+def normalize_company(name: str) -> str:
+    """The one definition of a company's storage key and lookup key.
+
+    Collapses whitespace runs and casefolds, so "Anduril" and "  anduril "
+    are one company. `recompute_boilerplate` stores rows under this key and
+    `load_boilerplate` normalizes its lookups with it; do not inline the
+    expression elsewhere, import this.
+    """
+    return " ".join(name.split()).casefold()
+
+
+def recompute_boilerplate(db: Session, *, now: datetime | None = None) -> set[str]:
+    """Rebuild every company's boilerplate row from its ACTIVE postings.
+
+    Returns the normalized names of companies whose hash set changed,
+    including companies whose row was deleted because they no longer clear
+    BOILERPLATE_MIN_POSTINGS (otherwise postings would keep being stripped
+    against a corpus that no longer exists). Flushes, never commits.
+
+    The catalogue's description_text is ~200MB, so only company and text are
+    selected, streamed in RECOMPUTE_BATCH_SIZE chunks, and reduced at once
+    to per-company sentence-hash counters; no text is retained.
+    """
+    now = now or datetime.now(timezone.utc)
+    counters: dict[str, Counter[str]] = {}
+    postings: Counter[str] = Counter()
+    stmt = (
+        select(Job.company, Job.description_text)
+        .where(Job.is_active.is_(True))
+        .execution_options(yield_per=RECOMPUTE_BATCH_SIZE)
+    )
+    for company, text in db.execute(stmt):
+        key = normalize_company(company)
+        postings[key] += 1
+        counters.setdefault(key, Counter()).update(
+            {sentence_hash(s) for s in split_sentences(text or "")}
+        )
+
+    existing = {row.company: row for row in db.scalars(select(CompanyBoilerplate))}
+    changed: set[str] = set()
+
+    for key, count in postings.items():
+        if count < BOILERPLATE_MIN_POSTINGS:
+            continue
+        hashes = _hashes_from_counts(counters[key], count)
+        row = existing.get(key)
+        old = frozenset(json.loads(row.sentence_hashes)) if row else frozenset()
+        if hashes != old:
+            changed.add(key)
+        payload = json.dumps(sorted(hashes))
+        if row is None:
+            db.add(CompanyBoilerplate(
+                company=key, sentence_hashes=payload,
+                posting_count=count, computed_at=now,
+            ))
+        else:
+            row.sentence_hashes = payload
+            row.posting_count = count
+            row.computed_at = now
+
+    for key, row in existing.items():
+        if postings[key] < BOILERPLATE_MIN_POSTINGS:
+            if json.loads(row.sentence_hashes):
+                changed.add(key)
+            db.delete(row)
+
+    db.flush()
+    return changed
+
+
+def load_boilerplate(db: Session, companies: Collection[str]) -> dict[str, frozenset[str]]:
+    """Hash sets for `companies` in one query, keyed by normalized name.
+
+    Companies with no row are absent. Lookups are normalized with
+    `normalize_company`, matching how `recompute_boilerplate` stores them.
+    """
+    keys = {normalize_company(c) for c in companies}
+    if not keys:
+        return {}
+    rows = db.scalars(select(CompanyBoilerplate).where(CompanyBoilerplate.company.in_(keys)))
+    return {row.company: frozenset(json.loads(row.sentence_hashes)) for row in rows}
