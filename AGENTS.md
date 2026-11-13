@@ -53,6 +53,25 @@ python3 -c "import json; print(json.load(open('.next/routes-manifest.json'))['re
 # 5. Restart (see §4 if you have no sudo), then smoke (§5).
 ```
 
+**Order, when the release also changes the API.** `docs/deploy.md` step 4 says
+"restart web, then `kill -HUP` the API". That is right for a frontend-only
+change and wrong when the release adds API routes: web-first leaves the new
+frontend calling routes the old API does not have. **Reload the API first** —
+the old frontend never calls the new routes, so the asymmetry only cuts one
+way. Full order for a deploy carrying a migration and both halves:
+
+```
+alembic upgrade head   (hard rule 11 — before any reload, never after)
+npm run build:public   (safe live; the old build serves until the restart)
+kill -HUP  offerfy-api (zero downtime; verify by the listener, not worker count)
+kill -TERM offerfy-web (the only downtime window)
+smoke (§5)
+```
+
+Verified end to end 2026-11-13 deploying slice 3 (migration `032_applications`
+plus new routers plus a rebuilt dashboard). `docs/deploy.md` step 4 still reads
+web-then-API and should be amended to match.
+
 Rollback is a directory swap plus a restart:
 
 ```bash
@@ -72,8 +91,10 @@ run `User=ruby0322` with `Restart=always`, so the owning user can signal the mai
 process and systemd brings it back.
 
 ```bash
-# Frontend: SIGTERM, systemd respawns it. ~40 s of downtime — the npx/next process tree
-# is slow to exit (it sat in `deactivating` for ~36 s), then `activating` → `active`.
+# Frontend: SIGTERM, systemd respawns it. Budget ~40 s of downtime — the npx/next tree
+# can sit in `deactivating` for ~36 s — but it is VARIABLE, not reliably 40 s: on
+# 2026-11-13 a new MainPID was active 4 s after the signal and the site answered 200
+# immediately. Announce 40 s; do not conclude something broke if it returns sooner.
 kill -TERM $(systemctl show -p MainPID --value offerfy-web)
 # Wait for a NEW MainPID and ActiveState=active before smoking:
 systemctl show -p MainPID -p ActiveState -p NRestarts offerfy-web
