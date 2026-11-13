@@ -469,7 +469,10 @@ and four more sections that way is a six-request waterfall.
    Taipei or remote") with an edit affordance. The cause of a wrong digest sits
    above the digest, not three clicks into settings.
 2. **New for you** — the latest digest. Five postings, each with tier, reason
-   and gap-when-present, unread-badged, each with one action: *Tailor it*. The
+   and gap-when-present, unread-badged, each with one action: *Tailor it*.
+   **Superseded by *Amended 2026-11-13, before slice 4*:** this card carries two
+   labelled groups, *Strong fit* and *New this week*, and is not called "New for
+   you". The rest of this item still holds. The
    `empty` state names its cause ("41 new roles, none senior backend in Taipei")
    and offers to widen the preference. **This card is slice 4.** Until it lands,
    slot 2 holds the match count — "N new matches" with *Browse all roles* —
@@ -651,13 +654,146 @@ second rubric.
 
 ## Open, and deliberately deferred
 
-- **Digest size.** Five, decided. Revisit if empty and three-item weeks turn out
-  to be the common case, since "we found three worth your time" reads better as
-  a statement than as a shortfall.
-- **Whether the numeric score is displayed at all.** The rubric gives four
-  labelled tiers, which is what the UI renders. `fit_score` is stored for
-  ordering and evaluation, and showing the number is a later call, not a
-  blocker.
-- **Taiwan-local inventory.** `taiwanjobs` is retired and skipped by
-  `load_boards`. If digests are routinely empty for Taipei-based users, the fix
-  is inventory, not ranking, and that is a separate piece of work.
+All three items that stood here before slice 4 have been closed; see
+*Amended 2026-11-13, before slice 4*. Nothing is open.
+
+
+## Amended 2026-11-13, before slice 4
+
+Slice 4 was about to be planned as specced. Measuring the catalogue first
+changed the design, and two of the three "deliberately deferred" items turned
+out not to be deferrable. Everything here is decided, not proposed.
+
+### What the measurement said
+
+Read-only against production, 21,681 active postings with facets:
+
+| Preference | Eligible pool | New in 7 days |
+|---|---|---|
+| TW + (backend\|software) + mid/senior | **15** | **1** |
+| TW, any function, any seniority | 851 | 62 |
+| Any country + (backend\|software) + mid/senior | 910 | 75 |
+
+Taiwan is 851 postings of which **36 are software-family (4.2%)**; the rest is
+semiconductor — Micron process engineers, Applied Materials module process,
+facilities, shift supervisors, correctly classified. So a five-item weekly
+digest drawn from new postings exhausts a normal Taiwan preference in three
+weeks, and no cadence fixes that: it is arithmetic, not tuning.
+
+Two explanations that would have made this a bug were tested and both failed.
+A missing-country backfill does not help — 704 of 720 Taiwan postings were
+already faceted. The function classifier is not dumping software into `other` —
+sampling that bucket returns genuine fab roles. The spec's own prediction was
+right: *"the fix is inventory, not ranking."*
+
+(A separate, real parser defect was found and fixed in the same pass: 7,098
+active postings — 33% of the catalogue — had a parseable location string and no
+country facet, because `_best_country_match` matched unpadded needles against
+padded segments. Location-filterable went 14,582 → 19,175. It recovered 12
+Taiwan postings, which does not change anything above.)
+
+### Decided: the digest is two tracks, not one
+
+The single five-item digest conflated two different kinds of value, which is
+why it ran dry. They separate:
+
+- **Strong fit** — scored over the **whole eligible pool**, not only new
+  postings. Admits the top two rubric levels only, `Strong fit` and `Good fit`;
+  `Worth a look` and `Not a fit` never appear here, because a track whose
+  promise is quality cannot carry a hedge. A **standing shortlist**: it
+  repeats week to week until the person acts, because dropping a strong match
+  for having been shown once is worse than showing it twice, and the
+  applications exclusion already removes anything saved, tailored or applied
+  to. For a thin market this is the track that works, and it works in week one.
+- **New this week** — postings whose `first_seen_at` falls inside the digest
+  period, so a far smaller scope. Admits anything above `Not a fit`, including
+  `Worth a look`: the best of them may score below the strong-fit set, and that
+  is not a defect, because **being early is itself the advantage.**
+
+The two tracks need different exclusions, and only one of them needs the
+`_exclusions` digest seam. *Strong fit* deliberately has **no** digest-based
+exclusion — repeating is the point — and relies solely on the applications
+exclusion to drop what the person has acted on. *New this week* is bounded by
+its `first_seen_at` window, which already stops it repeating. So the seam
+`match_sweep._exclusions` left for "the recent-digest exclusion" is **not
+needed by either track** and should be closed as unnecessary rather than
+filled.
+
+The framing is the point. *"We found 1 role worth your time"* reads as failure;
+*"1 new role opened this week"* reads as a fact. The same number is honest in
+one track and an apology in the other.
+
+**Score once, classify twice.** A newly-opened posting can qualify for both
+tracks; it still costs one Decisions call per (resume, posting) pair, so the
+two tracks share scoring cost rather than doubling it.
+
+Consequently slot 2's card is **not** called *New for you*. It carries two
+labelled groups, **Strong fit** and **New this week**, either of which may be
+empty.
+
+### Decided: the rest of slice 4's open questions
+
+- **Cadence: weekly**, built Monday ~05:00 Asia/Taipei, clear of the ingest
+  slots. One prose call per user per week. Daily was considered and rejected:
+  it is 7× the prose calls for a track that is empty most days in a thin
+  market, and the strong-fit track makes freshness much less load-bearing.
+- **The numeric score IS displayed**, alongside its tier. No longer deferred,
+  because slice 4 builds the UI. `fit_score` is shown next to the four-level
+  label rather than instead of it.
+- **Digest size: up to five per track**, never padded. Fewer is fine; the prose
+  step is already permitted to return fewer than five and none.
+- **A thin or empty week falls back to slice 3's match-count card.** If neither
+  track has anything to show, slot 2 renders *"N matches — Browse all roles"*,
+  which already exists, is already honest, and is never empty. The digest is an
+  upgrade to that slot, not a replacement for it.
+- **Spend ceiling: stop cleanly.** When a run would exceed the weekly budget or
+  the global ceiling, finish the user in flight, write their digest, then stop
+  and log which users got none. Nobody gets a half-scored digest; the users who
+  miss out get one next week. `system_guard` never 429s itself, so this is the
+  job's own decision.
+- **The degraded path announces itself.** On a Decisions outage the card says
+  so — *"N new roles matching your filters — we couldn't rank them this week"* —
+  rather than showing an unlabelled list that reads as ranked.
+- **Taiwan inventory is still the real answer for thin markets**, and is still
+  separate work. The two-track design makes a thin market usable, not solved.
+
+### Shipping gate: twelve strings slice 4 falsifies
+
+Slice 4 ranks and recommends postings. Twelve live strings across six surfaces
+say it does not, all of them written during the 2026-11-13 truthfulness pass.
+**They must change in the same release that ships slice 4**, not in a sweep
+afterwards:
+
+| | Surface | Locales |
+|---|---|---|
+| `about.paragraphs[1]` | /about | en, zh-TW, zh-CN |
+| `contact.paragraphs[2]` | /contact | en, zh-TW, zh-CN |
+| `legal.terms.sections[1].paragraphs[3]` | Terms | en, zh-TW, zh-CN |
+| `lib/agent-markdown.ts:105` | `/llms.txt` | — |
+| `lib/agent-markdown.ts:145` | home agent markdown | — |
+| `lib/agent-markdown.ts:150` | jobs agent markdown | — |
+
+`agent-markdown.ts` is **three surfaces, not one** — each line is served to a
+different request, and "the four denials plus /llms.txt" undercounts by two.
+
+**The replacement is a rule, not a set of sentences.** All twelve were written
+against "denials are scoped to postings, never to resumes", and slice 4
+falsifies that in exactly the half that made it true. The rule becomes:
+
+> postings get **scored and ordered**; resumes get **assessed in prose, never
+> scored**; nothing is **submitted** on your behalf.
+
+That survives slice 4 and preserves the editor wording standardised on
+2026-11-13 (*assess fit*, 評估契合度 / 评估契合程度). Swapping only the strings
+would leave the next slice inheriting a denial with no record that it was ever
+reasoned about.
+
+One scope note: `about.paragraphs[2]` (zh only) says featured jobs are not a
+resume-matching result. That stays true **only while *Strong fit* is a separate
+surface from featured**. If slice 4 ever personalises the featured list it is
+fourteen strings, not twelve.
+
+Expected sweep counts, so a future grep gets no surprises: four real 錄取/录取
+hits (`ats.disclaimer` and `legal.terms.sections[1].paragraphs[1]`, both
+locales, both correct denials about the ATS check), plus one false positive in
+zh-CN `admin.usageRefusalsNote` where 已登**录用**戶 contains 录用.
