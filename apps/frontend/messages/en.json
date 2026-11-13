@@ -50,7 +50,7 @@
     "title": "About",
     "paragraphs": [
       "Offerfy is a web resume editor at https://offerfy.cc. You keep a Typst source file in the browser. Chat can edit that same file. The PDF preview updates from the compile. This is not a generate-and-download product. You can start without creating an account.",
-      "We also publish a public job catalog from official employer ATS boards: Greenhouse, Lever, Ashby, SmartRecruiters and Workday. Offerfy does not scrape 104 or LinkedIn. When you apply, you leave Offerfy and use the original posting. You can fork your master resume into a tailored version for one listing, paste in the job description, and have the model score the fit and suggest changes. We do not match your resume to jobs — there is no ranking and no recommendation — and we do not submit applications for you.",
+      "We also publish a public job catalog from official employer ATS boards: Greenhouse, Lever, Ashby, SmartRecruiters and Workday. Offerfy does not scrape 104 or LinkedIn. When you apply, you leave Offerfy and use the original posting. You can fork your master resume into a tailored version for one listing, paste in the job description, and have the model assess the fit and suggest changes. We do not rank or recommend postings for you, and we do not submit applications for you.",
       "The homepage leads with the job catalog and the tailoring flow; the editor is how you act on them. Featured listings are real open roles from that catalog. Contact is james@offerfy.cc. There is no public office address."
     ]
   },
@@ -61,7 +61,7 @@
     "paragraphs": [
       "Email james@offerfy.cc for product questions, privacy requests, and signed-in data deletion. There is no public office, no phone desk, and no in-app staff chat.",
       "Google sign-in is for people using the website. There is no self-serve API key, OAuth authorization server for machines, or agent sandbox. Guest use of the editor is rate-limited in production to protect compile and chat.",
-      "Questions about the public jobs catalog — what we ingest, and that apply happens on the source site — can go to the same address. Tailoring a resume to a listing happens in the editor, when you ask for it; we do not apply or match on your behalf."
+      "Questions about the public jobs catalog — what we ingest, and that apply happens on the source site — can go to the same address. Tailoring a resume to a listing happens in the editor, when you ask for it; we do not apply on your behalf, and we do not rank or recommend postings for you."
     ]
   },
   "blog": {
@@ -510,15 +510,15 @@
     "familyMaster": "Master",
     "familyTailor": "Tailored",
     "familyNewTailor": "New tailored version",
-    "familyNewTailorHint": "A copy aimed at one job, scored against that role. Your master stays untouched.",
+    "familyNewTailorHint": "A copy aimed at one job, assessed against that role. Your master stays untouched.",
     "switchBlocked": "Wait for this turn to finish before switching.",
     "leaveSaveError": "Could not save this document, so it stayed open.",
     "switchSaveError": "Could not save this document, so it stayed open.",
     "tailorDialogTitle": "New tailored version from the master",
-    "tailorDialogHint": "Copies the master's saved draft. After you create it, AI scores the resume against the role and suggests what to improve.",
-    "tailorKickstartPrompt": "This is a new tailored version.\n\nTarget role: {role}\n\nJob description:\n{context}\n\nDo this in order, and do not edit the resume yet:\n1. Call read_typst, then score how well the current resume fits this role: what already matches, what is missing, and an overall fit.\n2. Then give concrete, prioritized suggestions to improve it for this job. Wait until I choose what to change before editing the source.",
+    "tailorDialogHint": "Copies the master's saved draft. After you create it, AI assesses how well the resume fits the role and suggests what to improve.",
+    "tailorKickstartPrompt": "This is a new tailored version.\n\nTarget role: {role}\n\nJob description:\n{context}\n\nDo this in order, and do not edit the resume yet:\n1. Call read_typst, then assess how well the current resume fits this role: what already matches, what is missing, and an overall fit.\n2. Then give concrete, prioritized suggestions to improve it for this job. Wait until I choose what to change before editing the source.",
     "tailorKickstartRoleUnknown": "Not specified",
-    "tailorKickstartContextUnknown": "No job description was provided. Score the resume as it stands, and say which role details you still need.",
+    "tailorKickstartContextUnknown": "No job description was provided. Assess the resume as it stands, and say which role details you still need.",
     "tailorTitle": "Name",
     "tailorTargetLabel": "Role (optional)",
     "tailorTargetContext": "Job description (optional)",
@@ -722,7 +722,7 @@
             "Offerfy is a web resume editor. You can create a resume from a starter template or upload a file, edit Typst source, preview a live compile, export a PDF, and check whether that compiled PDF can be parsed by applicant tracking systems (ATS).",
             "ATS checks parseability of the compiled PDF only. They do not predict hireability or job outcomes.",
             "You may use the editor without an account. Signing in with Google saves your resume history.",
-            "Offerfy also publishes a public job catalog collected from employer career-board APIs: Greenhouse, Lever, Ashby, SmartRecruiters and Workday. Applying happens on the original posting. We do not operate 104 or LinkedIn. If you turn on “Open to matching” in your settings, we may introduce you to employers; the Privacy Policy explains what is passed on. When you ask for it, the editor can fork a resume into a tailored copy for a single posting and score how well it fits a job description you paste in. We still do not rank or recommend postings for you, submit applications, or track them."
+            "Offerfy also publishes a public job catalog collected from employer career-board APIs: Greenhouse, Lever, Ashby, SmartRecruiters and Workday. Applying happens on the original posting. We do not operate 104 or LinkedIn. If you turn on “Open to matching” in your settings, we may introduce you to employers; the Privacy Policy explains what is passed on. When you ask for it, the editor can fork a resume into a tailored copy for a single posting and assess how well it fits a job description you paste in. We still do not rank or recommend postings for you, and we do not submit applications on your behalf."
           ]
         },
         {

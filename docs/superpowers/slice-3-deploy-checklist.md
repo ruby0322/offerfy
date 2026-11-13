@@ -47,143 +47,60 @@ line is true under either ruling below. Every surviving negative in that file is
 scoped to **postings**, never to resumes: that is the test that separates what
 the catalog does from what the editor does.
 
-## Open item for the user: what do we call the fit read?
+## Resolved 2026-11-13: the fit-read wording, and the stale denials
 
-**Fourteen places, three locales, and live user-facing UI — not one legal
-sentence.** (Thirteen until 2026-11-13, when a grep for the word rather than a
-re-count of the known list turned up `about.paragraphs[1]` as well. Both
-sessions had counted from each other's lists; neither had swept page body text.) Does not block the deploy. Owned by the user, not by either agent
-session. Widened 2026-11-13 after the landing session went looking for the word
-rather than checking only the two keys already named; I verified every one.
+The user ruled: **"consistent 就好"** — consistency is what matters. Standardised
+on the accurate description rather than on "score", because the feature produces
+a prose read of fit (what matches, what is missing, an overall impression) with
+no number, nothing stored and no posting ranked against another. That is also
+the term the Chinese strings already used in prose: 評估契合度 / 评估契合程度.
 
-The user has said Offerfy does not *score*. The product says it does, in
-thirteen places:
+**Changed, 25 strings across 6 keys.** Every replacement was asserted to match
+exactly once or the whole run aborted.
 
-| Key | Surface | What it says |
-|---|---|---|
-| `editor.tailorKickstartPrompt` ×3 | prompt text | "score how well the current resume fits this role" |
-| `editor.tailorKickstartContextUnknown` ×3 | prompt text | "Score the resume as it stands" |
-| `editor.familyNewTailorHint` ×3 | **user-facing UI** | "A copy aimed at one job, scored against that role" |
-| `editor.tailorDialogHint` ×3 | **user-facing UI** | "AI scores the resume against the role and suggests what to improve" |
-| `legal.terms.sections[1].paragraphs[3]` | Terms, EN only | "score how well it fits a job description you paste in" |
-| `about.paragraphs[1]` | About body, EN only | "have the model score the fit and suggest changes" |
+- the word "score": `editor.familyNewTailorHint`, `editor.tailorDialogHint`,
+  `editor.tailorKickstartPrompt`, `editor.tailorKickstartContextUnknown` (×3
+  locales), plus `legal.terms…paragraphs[3]` and `about.paragraphs[1]` (EN only)
+- stale denials, all false since slice 2/3 shipped: `about.paragraphs[1]`'s
+  "We do not match your resume to jobs", `contact.paragraphs[2]`'s "we do not
+  apply or match on your behalf", `about.paragraphs[3]`'s 自動配對 / 自动匹配
+  (zh only — EN has no fourth paragraph), and `legal.terms…paragraphs[3]`'s
+  "...submit applications, **or track them**"
+- what survived everywhere, because it is true: nothing ranks, recommends or
+  submits. Each denial was rewritten to say exactly that and nothing wider.
+- `editor.cmdJdLabel` / `cmdJdPrompt` keep 比對 in both Chinese locales: that is
+  the *other* sense, comparing a resume against a pasted JD, and is correct.
 
-zh-TW and zh-CN use 評分 / 评分 in all four editor keys, so there is **no
-EN-only divergence here** — the Chinese is equally explicit. Only Terms is an
-EN outlier (zh says 評估契合度 / 评估契合程度, "assess fit").
+**zh-TW terminology, same ruling.** It was split almost exactly in half — 18
+媒合 against 17 配對 for one concept — while zh-CN was already consistent at 38
+匹配. Unified on 媒合, the term `settings.matchingTitle` already used. This also
+fixed a real defect rather than only a style one: the same toggle was called
+「開放配對」 in settings, usage, pricing, admin and Terms but 「開放媒合」 in
+`settings.matchingTitle`, so one UI control had two names.
 
-**The same feature was overclaimed in two places; one got fixed because a
-human caught it.** `landing.loop.aimBody` now describes the tailor with no
-scoring claim at all — "A copy aimed at that one job… every chat turn edits
-against the posting's own words". But its first version, in `c7dc1f7`, said
-"AI names which requirements you evidence, which you evidence weakly, and which
-you don't", a requirement-by-requirement assessment — a *stronger* claim than
-"score". The landing session removed it in `86cab2f` after the user corrected
-it. (An earlier version of this entry said that key was "written deliberately
-without" a scoring claim; that was wrong, and the landing session corrected me.
-The distinction matters: the landing page is accurate because someone was
-caught, not because a standard was applied.)
+Terms was edited in the narrowest possible way — the false clause removed and
+"score" changed, nothing else rewritten. Worth a human read even so, since it is
+the one file here where wording carries legal weight.
 
-So the editor keys are not an isolated slip — they are where the same overclaim
-survived, unexamined, in UI text in three locales. That is the argument for
-ruling: nobody has yet looked at the editor the way the user looked at the
-landing page.
+## Still open: English readers are missing three paragraphs
 
-What the feature actually does, for whoever rules: the model is asked for a
-prose read of fit — what matches, what is missing, an overall impression. No
-number is produced, nothing is stored, and no posting is ranked against another.
-"Assess fit" is the accurate description; "score" overclaims in English and in
-both Chinese variants.
+Found by sweeping rather than counting, and it outlives the item above.
 
-Note the two axes are separable. *Nothing ranks or recommends postings* is true
-and should stay said everywhere. *The editor reads how well a resume fits a JD
-you paste* is true and is what the word "score" is reaching for. Keeping the
-first and renaming the second is the shape of a fix.
+`lib/i18n-parity.test.ts`'s `flatten()` treats a list as a single leaf, so array
+**lengths are never compared**. Counting elements instead: **EN 1073 leaves,
+zh-TW and zh-CN 1076**. The three the English pages do not have:
 
-## Also open: two stale denials the copy fix did not cover
+- `about.paragraphs[3]` — the "is Offerfy suitable for the people you'd
+  recommend it to" paragraph, which is the one an evaluator most wants
+- `contact.paragraphs[3]` and `[4]`
 
-The 2026-11-13 copy fix swept the three meta descriptions and
-`lib/agent-markdown.ts`. Nobody swept **page body text or Terms**, so two
-denials are still live on production:
-
-1. `legal.terms.sections[1].paragraphs[3]`, all three locales — "...submit
-   applications, **or track them**". False since slice 3 shipped; this is the
-   one below.
-2. `about.paragraphs[1]`, all three locales — "**We do not match your resume to
-   jobs** — there is no ranking and no recommendation — and we do not submit
-   applications for you." The em-dash gloss is exactly true and is the honest
-   part. The lead clause collides with a shipped feature the settings page calls
-   "Open to matching" and an endpoint called `/v1/me/matches/count`, which is
-   the same collision the metaDescriptions had. zh-CN is the most defensible of
-   the three: it says 自动匹配, "*automatic* matching".
-
-Neither blocks anything. Both are the same question as the section above —
-one word doing two jobs — and are best ruled on together.
-
-## The same clause, in Terms
-
-**Not fixed, not assigned, and it does not block the deploy — but it should not
-quietly survive it.** `legal.terms.sections[1].paragraphs[3]`, all three
-locales. Flagged by the landing session; I verified every word of it.
-
-It ends: *"We still do not rank or recommend postings for you, submit
-applications, or track them."* The last clause is **now false**, for the same
-reason `jobs.metaDescription` was — slice 3 tracks applications, deliberately
-and as its whole point. zh-TW 「也不會追蹤你的投遞狀態」 and zh-CN
-"也不会跟踪你的投递状态" say the same thing. The rest of the sentence stays
-true: nothing ranks, recommends, or submits.
-
-Second, separable question in the same paragraph: the **EN** version says the
-editor can *"score how well it fits a job description you paste in"*, while
-zh-TW says 評估契合度 and zh-CN 评估契合程度 — "assess fit". EN is the outlier,
-and `editor.tailorKickstartPrompt` does literally instruct the model to "score
-how well the current resume fits this role". That is a prose read: no number, no
-storage, no ranking, nothing persisted. So either Terms should drop the word
-"score" to match the Chinese and what the feature actually feels like, or the
-prompt should stop using it. That is a call about what the product claims, not a
-bug, and it is the user's.
-
-Why neither session touched it: it is Terms of Service, so the risk class is
-different from a meta description, and a clause about what Offerfy does with
-your applications is exactly the kind of sentence that should not be edited by
-whoever happens to notice it. The landing session left it in a commit message as
-a flag; this is the same flag, recorded where the deploy will be read.
-
-## The deploy, once that commit lands
-
-Nothing below has been done yet.
-
-1. **Say the downtime window out loud first.** The web restart is ~5-40s on the
-   live site. The API reload is zero-downtime but takes ~20s to cycle workers,
-   and a route probe inside that window returns the OLD code — a lone 404 is
-   not evidence the reload failed.
-
-2. **Migration.** `032_applications` has never been applied to any production
-   database. It was verified up *and* down against a disposable container, with
-   the FK delete rules, unique constraint and index read back out of
-   `pg_constraint`. One new table; nothing existing is altered, so the rollback
-   is `alembic downgrade -1` and no data is at risk.
-
-3. **Build from the clean worktree, never from this checkout.**
-   `/home/ruby0322/offerfy-verify-slice3` is a detached worktree with
-   `node_modules` hardlinked (`cp -al`; a symlink fails — Turbopack rejects it
-   with "points out of the filesystem root"). `npm run build:public` in
-   `/home/ruby0322/offerfy` would replace the `.next` the live site serves, and
-   it compiles the *working tree*, not HEAD — which is how another session's
-   unreviewed landing rewrite nearly went live earlier today.
-
-4. **Reload the API by the listener, not the worker count.** `kill -HUP` on
-   `offerfy-api`'s MainPID (system scope, no `--user`, no sudo). Judge the
-   reload by `ss -ltnpe | grep 8001` naming workers whose `lstart` is after the
-   merge, then probe: a new route answering 401 is correct, 404 is not.
-
-5. **Restart the web unit by PID from `ss -ltnp`.** `next start` re-execs into a
-   child whose entire command line is `next-server (vX.Y.Z)` — no port, no
-   flags — so a `/proc/*/cmdline` grep finds nothing and the kill silently
-   no-ops. Never `pgrep -f`/`pkill -f`: the caller's own line self-matches.
-
-6. **Smoke per AGENTS.md §5**, then report the new BUILD_ID and MainPID to the
-   landing session, which has been doing the same in reverse.
+So "fixed in all three locales" has been a claim the test could not actually
+check, and the English About and Contact pages are shorter than their Chinese
+counterparts by content, not by phrasing. Two separable jobs, both the user's:
+write the missing English paragraphs (new user-facing copy — not something an
+agent session should invent unasked), and add a length comparison to that test,
+which is about four lines. **Adding the test first would turn the suite red on a
+real pre-existing gap**, so the copy should land first or the two together.
 
 ## Disk, before you add an eleventh backup
 
