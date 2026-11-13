@@ -427,7 +427,7 @@ async def test_out_of_range_pages_fall_back_to_the_whole_document(
 def test_every_rubric_is_an_ordered_scale_with_described_levels():
     # A score is only interpretable if its levels are ordered and distinct, and
     # the model's answer depends on how they are worded, so they are checked.
-    assert set(SCORE_RUBRICS) == {"density", "hierarchy"}
+    assert set(SCORE_RUBRICS) == {"density", "hierarchy", "fit"}
     for name, rubric in SCORE_RUBRICS.items():
         assert rubric["instructions"].endswith("?"), name
         labels = [level["label"] for level in rubric["levels"]]

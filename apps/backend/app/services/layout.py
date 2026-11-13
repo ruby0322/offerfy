@@ -163,6 +163,34 @@ SCORE_RUBRICS: dict[str, dict[str, Any]] = {
             },
         ],
     },
+    # Job matching (services/jobs/score.py), not layout: it lives here because
+    # `_score_questions` builds every score question from this one dict. The
+    # levels run best first and are the display tiers, so unlike the layout
+    # rubrics the endpoint's own 0..1 `score` is not read for it.
+    "fit": {
+        "instructions": (
+            "How well does this person's resume fit this job posting, "
+            "judged only on what the resume and the posting actually say?"
+        ),
+        "levels": [
+            {
+                "label": "Strong fit",
+                "description": "Meets the core requirements at the right level; an obvious one to apply to.",
+            },
+            {
+                "label": "Good fit",
+                "description": "Meets most requirements with a minor gap; a solid application.",
+            },
+            {
+                "label": "Worth a look",
+                "description": "Partly relevant; a real gap in skills, level or direction, but not absurd.",
+            },
+            {
+                "label": "Not a fit",
+                "description": "A different kind of role, or missing what the posting treats as essential.",
+            },
+        ],
+    },
 }
 
 VISION_PREAMBLE = (
