@@ -30,6 +30,44 @@ and separately, opt-in and off by default, "Open to matching" may show
 employers a profile built from your published resume. One word was doing both
 jobs.
 
+**Correction, 2026-11-13: thirteen strings, not eleven.** `agent-markdown.ts`
+has a fourth stale line at **:150** — "Matching, ranking, and apply tracking are
+not included" — missed in the first two counts. So: 9 locale strings (three
+keys × three locales) plus 4 lines in `agent-markdown.ts`. The landing session
+has committed all thirteen as `52d9f17` on `claude/truthful-marketing-copy`,
+based on `8973d2d`, **not pushed**, awaiting the user's own instruction. I
+verified the commit exists, is a descendant of `8973d2d`, and has no remote ref.
+It took `jobs.metaDescription` too, so nothing in that set is left to me.
+
+## Open item for the user: the Terms of Service paragraph
+
+**Not fixed, not assigned, and it does not block the deploy — but it should not
+quietly survive it.** `legal.terms.sections[1].paragraphs[3]`, all three
+locales. Flagged by the landing session; I verified every word of it.
+
+It ends: *"We still do not rank or recommend postings for you, submit
+applications, or track them."* The last clause is **now false**, for the same
+reason `jobs.metaDescription` was — slice 3 tracks applications, deliberately
+and as its whole point. zh-TW 「也不會追蹤你的投遞狀態」 and zh-CN
+"也不会跟踪你的投递状态" say the same thing. The rest of the sentence stays
+true: nothing ranks, recommends, or submits.
+
+Second, separable question in the same paragraph: the **EN** version says the
+editor can *"score how well it fits a job description you paste in"*, while
+zh-TW says 評估契合度 and zh-CN 评估契合程度 — "assess fit". EN is the outlier,
+and `editor.tailorKickstartPrompt` does literally instruct the model to "score
+how well the current resume fits this role". That is a prose read: no number, no
+storage, no ranking, nothing persisted. So either Terms should drop the word
+"score" to match the Chinese and what the feature actually feels like, or the
+prompt should stop using it. That is a call about what the product claims, not a
+bug, and it is the user's.
+
+Why neither session touched it: it is Terms of Service, so the risk class is
+different from a meta description, and a clause about what Offerfy does with
+your applications is exactly the kind of sentence that should not be edited by
+whoever happens to notice it. The landing session left it in a commit message as
+a flag; this is the same flag, recorded where the deploy will be read.
+
 ## The deploy, once that commit lands
 
 Nothing below has been done yet.
