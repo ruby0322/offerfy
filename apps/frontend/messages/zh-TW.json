@@ -291,7 +291,7 @@
     "digestTierStrongFit": "高度契合",
     "digestTierGoodFit": "相當契合",
     "digestTierWorthALook": "值得一看",
-    "digestScore": "分數 {score}",
+    "digestScore": "分數 {score, number, percent}",
     "digestGapLabel": "落差",
     "digestTailor": "客製履歷"
   },

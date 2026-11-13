@@ -30,7 +30,7 @@ function item(over: Partial<DigestItem>): DigestItem {
     track: "strong_fit",
     rank: 1,
     tier: "Strong fit",
-    fit_score: 90,
+    fit_score: 0.9,
     reason: "Because",
     gap: null,
     ...over,

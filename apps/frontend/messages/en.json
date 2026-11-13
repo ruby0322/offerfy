@@ -288,7 +288,7 @@
     "digestTierStrongFit": "Strong fit",
     "digestTierGoodFit": "Good fit",
     "digestTierWorthALook": "Worth a look",
-    "digestScore": "Score {score}",
+    "digestScore": "Score {score, number, percent}",
     "digestGapLabel": "Gap",
     "digestTailor": "Tailor it"
   },
