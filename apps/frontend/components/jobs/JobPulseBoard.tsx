@@ -8,6 +8,13 @@ import type { JobPulse } from "@/lib/jobs";
 /** The one tag the pulse strip's messages use. */
 const strong = (chunks: React.ReactNode) => <b>{chunks}</b>;
 
+/**
+ * The collapsed card's whole content, so the same employer twice is a wasted
+ * slot: "just posted" is often three roles at one company.
+ */
+const MARK_CAP = 8;
+const marksOf = (companies: string[]) => Array.from(new Set(companies)).slice(0, MARK_CAP);
+
 type Props = {
   pulse: JobPulse;
   /** Where "see all new" goes — a board page keeps its own scope. */
@@ -29,6 +36,17 @@ type Props = {
  * zeroes — an empty catalogue means ingest is broken, and "0 open roles ·
  * +0 in the last 24h" is a worse way to say that than the empty state below
  * it already does.
+ *
+ * The two lists are `<details>`, closed by default: between them they own
+ * most of the first screen, and someone who came to search wants them out of
+ * the way. Closed, a card is its heading and its employers' marks — the
+ * glanceable half of a row, and the half that says whether the list is worth
+ * opening — so the titles are traded for a strip of logos rather than for a
+ * bare heading. Native disclosure rather than React state on purpose: this is a
+ * server component, the summary is a real button to a screen reader without
+ * being told so, and the whole thing works before (and without) JavaScript.
+ * "See all new" sits in a foot row rather than the summary, because a link
+ * inside a `<summary>` toggles the card on its way out.
  */
 export default async function JobPulseBoard({
   pulse,
@@ -37,6 +55,8 @@ export default async function JobPulseBoard({
 }: Props) {
   const t = await getTranslations("jobs");
   if (pulse.active_total === 0) return null;
+
+  const mark = (company: string) => <EmployerLogo key={company} company={company} size="sm" />;
 
   return (
     <section className="jobs-pulse" aria-label={t("live")}>
@@ -61,11 +81,16 @@ export default async function JobPulseBoard({
       {boards ? (
       <div className="jobs-pulse-boards">
         {pulse.newest.length > 0 ? (
-          <div className="jobs-pulse-card">
-            <div className="jobs-pulse-head">
+          <details className="jobs-pulse-card">
+            <summary className="jobs-pulse-head">
               <h2>{t("justPosted")}</h2>
-              <Link href={newHref}>{t("seeAllNew")}</Link>
-            </div>
+              <span className="jobs-pulse-marks">
+                {marksOf(pulse.newest.map((job) => job.company)).map(mark)}
+              </span>
+              <span className="jobs-pulse-caret" aria-hidden="true">
+                ▾
+              </span>
+            </summary>
             {pulse.newest.map((job) => (
               <Link key={job.id} href={`/jobs/${job.id}`} className="jobs-pulse-row">
                 <EmployerLogo company={job.company} size="sm" />
@@ -79,14 +104,23 @@ export default async function JobPulseBoard({
                 {job.posted_at ? <JobTime iso={job.posted_at} /> : null}
               </Link>
             ))}
-          </div>
+            <div className="jobs-pulse-foot">
+              <Link href={newHref}>{t("seeAllNew")}</Link>
+            </div>
+          </details>
         ) : null}
 
         {pulse.top_employers.length > 0 ? (
-          <div className="jobs-pulse-card">
-            <div className="jobs-pulse-head">
+          <details className="jobs-pulse-card">
+            <summary className="jobs-pulse-head">
               <h2>{t("hiringHardest")}</h2>
-            </div>
+              <span className="jobs-pulse-marks">
+                {marksOf(pulse.top_employers.map((employer) => employer.company)).map(mark)}
+              </span>
+              <span className="jobs-pulse-caret" aria-hidden="true">
+                ▾
+              </span>
+            </summary>
             {pulse.top_employers.map((employer) => (
               <Link
                 key={employer.company}
@@ -107,7 +141,7 @@ export default async function JobPulseBoard({
                 ) : null}
               </Link>
             ))}
-          </div>
+          </details>
         ) : null}
       </div>
       ) : null}

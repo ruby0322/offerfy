@@ -2822,6 +2822,17 @@ textarea {
   margin-top: 0.9rem;
 }
 
+/* A grid item's default `min-width: auto` is the min-content of its rows,
+   and a row's title is `white-space: nowrap` -- so without this the track
+   sizes to the longest job title ever posted and the whole page scrolls
+   sideways (614px of card in a 390px viewport). `min-width: 0` hands the
+   track back to the 1fr and lets the titles ellipsize as they were meant
+   to; the rows' own `min-width: 0` can only shrink inside a track that is
+   already the right size. */
+.jobs-pulse-card {
+  min-width: 0;
+}
+
 .jobs-pulse-head {
   display: flex;
   align-items: center;
@@ -2838,15 +2849,75 @@ textarea {
   color: var(--clay);
 }
 
-.jobs-pulse-head a {
+.jobs-pulse-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.6rem 1rem;
+  border-top: 1px solid var(--rule);
+}
+
+.jobs-pulse-foot a {
   font-size: 0.8rem;
   color: var(--muted);
   text-decoration: none;
 }
 
-.jobs-pulse-head a:hover {
+.jobs-pulse-foot a:hover {
   color: var(--clay);
   text-decoration: underline;
+}
+
+/* The two lists collapse, and collapsed they keep their employers' marks
+   instead of going blank -- see the comment in JobPulseBoard.tsx. The
+   default triangle goes because the caret on the right is the affordance,
+   and the row is already a pointer. */
+summary.jobs-pulse-head {
+  justify-content: flex-start;
+  gap: 0.6rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+summary.jobs-pulse-head::-webkit-details-marker {
+  display: none;
+}
+
+summary.jobs-pulse-head:hover .jobs-pulse-caret {
+  color: var(--clay);
+}
+
+/* Wraps rather than clips: a logo cut in half down its middle reads as a
+   rendering bug, and MARK_CAP is small enough that the second row is rare. */
+.jobs-pulse-marks {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.jobs-pulse-caret {
+  color: var(--muted);
+  font-size: 0.7rem;
+  transition: transform 0.15s ease;
+}
+
+/* Open, the marks are the rows' own logos one line down, so the strip would
+   only be saying it twice; the caret takes over the right edge. */
+.jobs-pulse-card[open] .jobs-pulse-marks {
+  display: none;
+}
+
+.jobs-pulse-card[open] .jobs-pulse-caret {
+  margin-left: auto;
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jobs-pulse-caret {
+    transition: none;
+  }
 }
 
 .jobs-pulse-row {
@@ -3500,6 +3571,26 @@ textarea {
   .jobs-pulse-boards,
   .jobs-curated-grid {
     grid-template-columns: 1fr;
+  }
+
+  /* Beside the heading there is room for five marks, so the strip takes a
+     line of its own and fits the whole cap on it. */
+  summary.jobs-pulse-head {
+    flex-wrap: wrap;
+    row-gap: 0.55rem;
+  }
+
+  /* `order` and not DOM order, because the marks must stay the summary's
+     last child for the open state to keep reading as heading-then-caret. */
+  .jobs-pulse-marks {
+    order: 2;
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+
+  .jobs-pulse-card .jobs-pulse-caret {
+    order: 1;
+    margin-left: auto;
   }
 
   .jobs-pulse-age {
