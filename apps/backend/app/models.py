@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -1208,6 +1209,96 @@ class Application(Base):
     # Read-only convenience for the dashboard (pipeline eager-loads it). No
     # schema effect; the foreign key above is the whole relationship in SQL.
     job: Mapped["Job"] = relationship(viewonly=True, lazy="select")
+
+
+class Digest(Base):
+    """One person's weekly digest: the shortlist they were shown for a week.
+
+    One row per (user, period_start), enforced by the unique constraint, so a
+    rebuild for the same week finds the existing row rather than adding a
+    second. A digest is frozen once written: nothing here has an onupdate,
+    and the page reads back exactly what was built. built_at, model and
+    input_hash record how it was made; candidate_count is how many postings
+    were scored to produce it. opened_at is stamped the first time the person
+    views it.
+
+    status ("full", "degraded", "empty") has no CHECK constraint, matching
+    JobPreference.activity and Application.status: the vocabulary lives with
+    its one writer in app.services.jobs.digest.
+    """
+
+    __tablename__ = "digests"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "period_start", name="digests_user_id_period_start_key"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    period_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    built_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    model: Mapped[str] = mapped_column(String(64), nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    candidate_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    opened_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class DigestItem(Base):
+    """One posting in one digest, with the score and prose it was shown with.
+
+    track is in the unique constraint because one posting can legitimately
+    appear in both tracks of a single digest (a fresh posting can be both a
+    strong fit and new this week); (digest_id, job_id) alone would forbid
+    exactly that. rank orders the item within its track.
+
+    The four component probabilities (requirements_met, seniority_fit,
+    location_fit, direction_fit) are stored rather than derived: they are the
+    model's judgement at build time, and recomputing them later would give a
+    different answer from the one the person was shown. A degraded digest
+    holds items with no tier, score or prose, so all of those are nullable.
+
+    Like Digest, frozen once written: no onupdate anywhere. track and tier
+    have no CHECK constraint (see app.services.jobs.digest).
+    """
+
+    __tablename__ = "digest_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "digest_id", "job_id", "track", name="digest_items_digest_id_job_id_track_key"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    digest_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("digests.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    job_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    track: Mapped[str] = mapped_column(String(16), nullable=False)
+    tier: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    fit_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gap: Mapped[str | None] = mapped_column(Text, nullable=True)
+    requirements_met: Mapped[float | None] = mapped_column(Float, nullable=True)
+    seniority_fit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_fit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    direction_fit: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class ResumeContent(Base):
