@@ -1397,6 +1397,34 @@ export type AdminIngestOverview = {
   legacy_row_count: number;
 };
 
+/**
+ * One row of `job_ingest_runs`: a single board inside one pass. Roughly 77 of
+ * these per catalog pass, which is why the overview folds them up and only the
+ * drilldown endpoint hands them over individually.
+ *
+ * `source` is not always a board. `ingest_catalog` writes a row with
+ * `source: "boilerplate"` and `board_slug: null` when the pre-loop boilerplate
+ * refresh fails, so anything counting boards has to exclude it.
+ */
+export type AdminIngestRun = {
+  id: string;
+  source: string;
+  board_slug: string | null;
+  started_at: string;
+  finished_at: string | null;
+  status: string;
+  ok_count: number;
+  error_count: number;
+  upserted_count: number;
+  expired_count: number;
+  error_snippet: string | null;
+};
+
+export type AdminIngestRunList = {
+  items: AdminIngestRun[];
+  limit: number;
+};
+
 export async function adminOverview(): Promise<AdminOverview> {
   return apiJson<AdminOverview>("/api/v1/admin/overview");
 }
@@ -1476,4 +1504,10 @@ export async function adminResumeAts(id: string): Promise<AtsReport> {
 
 export async function adminJobsIngest(): Promise<AdminIngestOverview> {
   return apiJson<AdminIngestOverview>("/api/v1/admin/jobs/ingest");
+}
+
+export async function adminJobsIngestPass(runId: string): Promise<AdminIngestRunList> {
+  return apiJson<AdminIngestRunList>(
+    `/api/v1/admin/jobs/ingest/${encodeURIComponent(runId)}`,
+  );
 }
