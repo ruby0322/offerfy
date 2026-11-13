@@ -235,8 +235,13 @@ def test_taxonomy_file_covers_location_vocabularies():
     taxonomy = load_taxonomy()
     assert set(taxonomy.location_countries) == set(taxonomy.location_regions)
     assert set(taxonomy.location_regions.values()) <= {
-        "north_america", "emea", "apac",
+        "north_america", "emea", "apac", "latam",
     }
+    # "latam" arrived with the Brazil/Colombia needles. Mexico deliberately
+    # stayed "north_america": moving it would reclassify rows the Brazil fix
+    # was never measured against, so it is a separate judgement.
+    assert taxonomy.location_regions["mexico"] == "north_america"
+    assert taxonomy.location_regions["brazil"] == "latam"
     # And the two region-derivation support lists loaded from the data
     # file (location_country_name_needles, location_region_name_segments)
     # must actually be present and non-empty in the shipped data file --
@@ -418,6 +423,128 @@ def test_iso2_country_codes_are_deliberately_not_needles():
     taxonomy = load_taxonomy()
     for code in ("ca", "de", "in", "mo", "la", "ma", "il", "ga"):
         assert code not in taxonomy.location_countries, code
+
+
+# --- two gaps measured over 3,000 live postings, 2026-11-13 ---------------
+# Both were found while building the country/city pickers and deliberately
+# left out of that change: neither reaches an existing `job_facets` row until
+# someone runs `enrich_jobs(force=True)` over the catalogue, which is its own
+# job with its own before/after measurement (app.jobs.rederive_facets).
+
+
+@pytest.mark.parametrize("raw,expected", [
+    # Workday's `CC-City` form. 26 of 3,000 sampled postings use it; 12 lost a
+    # city the string plainly names, because the bare country code won the
+    # city slot. Roughly 90 live postings, all EMEA/APAC.
+    ("GB-London", LocationFacets("GB", "emea", "London")),
+    ("NL-Amsterdam", LocationFacets("NL", "emea", "Amsterdam")),
+    ("PL-Warsaw-Lixa C", LocationFacets("PL", "emea", "Warsaw")),
+    # Same form, lowercase code, from the Brazil sample below.
+    ("São Paulo, br", LocationFacets("BR", "latam", "São Paulo")),
+])
+def test_a_bare_two_letter_code_never_takes_the_city_slot(raw, expected):
+    assert location_facets(raw, source="workday", remote=None) == expected
+
+
+def test_the_two_letter_rule_does_not_cost_a_us_state_its_fallback_city():
+    """The skip sits after the state branch, deliberately.
+
+    A US state code is also two letters, and `location_facets` keeps one as a
+    last-resort city when the string offers nothing better -- which is the
+    only reason "New York, NY" still yields a city at all. Skipping every
+    two-letter segment before that branch would have taken it away.
+    """
+    assert location_facets("New York, NY", source="greenhouse", remote=None) == LocationFacets(
+        "US", "north_america", "New York"
+    )
+    # Nothing but a state code in the string: the fallback is all there is.
+    assert location_facets("NY", source="greenhouse", remote=None).city == "NY"
+    assert location_facets("Santa Clara, CA", source="greenhouse", remote=None).city == "Santa Clara"
+
+
+def test_the_two_letter_rule_is_ascii_only():
+    """"台北" is two characters and is a city; "GB" is two characters and is not.
+
+    Counting characters without checking the script would have deleted every
+    CJK-spelled city from the facet.
+    """
+    assert location_facets("台北", source="workday", remote=None).city == "台北"
+    assert location_facets("新竹市", source="workday", remote=None).city == "新竹市"
+
+
+def test_the_two_letter_rule_did_not_become_iso2_country_resolution():
+    """The declined ruling still holds, and this is where the line falls.
+
+    `test_iso2_country_codes_are_deliberately_not_needles` refuses to make
+    ISO-2 codes *country* needles. Dropping them from the *city* scan is a
+    different question and does not reopen it: a code the country scan cannot
+    resolve still yields no country, it just no longer poses as a city.
+
+    "AU-Brisbane-MSO" is the case this leaves on the floor -- the country is
+    lost too, because "brisbane" is not a city needle. Resolving it needs
+    either an ISO-2 country reading (declined) or "brisbane" in
+    `location_countries` (a vocabulary question, not this one).
+    """
+    assert location_facets("Petaling Jaya, my", source="workday", remote=None).country is None
+    assert location_facets("AU-Brisbane-MSO", source="workday", remote=None) == LocationFacets(
+        None, None, None
+    )
+
+
+@pytest.mark.parametrize("raw,expected", [
+    # 19 of 3,000 sampled postings, roughly 138 live, every one of them with
+    # no country, no city and no region -- invisible to every filter. The
+    # plain-ASCII country name resolved to nothing too, so this was a
+    # vocabulary gap and not an encoding one.
+    ("São Paulo", LocationFacets("BR", "latam", "São Paulo")),
+    ("São Paulo, Brazil", LocationFacets("BR", "latam", "São Paulo")),
+    ("São Paulo, São Paulo, Brazil", LocationFacets("BR", "latam", "São Paulo")),
+    ("Sao Paulo, Brazil", LocationFacets("BR", "latam", "Sao Paulo")),
+    ("Bogotá, Colombia", LocationFacets("CO", "latam", "Bogotá")),
+    # Named but unsampled: the needle list covers the region's other
+    # economies so the next posting from one is not a second backfill.
+    ("Buenos Aires, Argentina", LocationFacets("AR", "latam", "Buenos Aires")),
+    ("Santiago, Chile", LocationFacets("CL", "latam", "Santiago")),
+    ("Lima, Peru", LocationFacets("PE", "latam", "Lima")),
+])
+def test_latin_america_resolves_instead_of_yielding_nothing(raw, expected):
+    assert location_facets(raw, source="workday", remote=None) == expected
+
+
+def test_the_sao_paulo_city_alias_can_finally_fire():
+    """`city_aliases` already held "sao paulo" and could never reach it.
+
+    The alias folds the ASCII spelling onto the accented one for the picker,
+    but `canonical_cities` only ever sees a stored city, and the city was
+    None until the country resolved. This is the test that the two halves
+    now meet.
+    """
+    from app.services.jobs.cities import canonical_cities
+
+    stored = location_facets("Sao Paulo, Brazil", source="workday", remote=None).city
+    assert canonical_cities(stored) == ["São Paulo"]
+    accented = location_facets("São Paulo, Brazil", source="workday", remote=None).city
+    assert canonical_cities(accented) == ["São Paulo"]
+
+
+def test_a_new_country_needle_does_not_outrank_a_us_state():
+    """"Brazil, Indiana" is a real US town, and the country scan runs first.
+
+    This is the exact shape of the bug 76446f4 fixed for Indiana/India, so
+    the new needles get the same check. Word boundaries keep "brasil" out of
+    "Brasilia" and "chile" out of "Chilecito"; they cannot help when the
+    whole segment IS the country name, which is why this case is asserted
+    rather than claimed. The live catalogue has no such posting -- if one
+    appears, it needs a city needle, not a weaker country scan.
+    """
+    taxonomy = load_taxonomy()
+    for needle in ("brazil", "brasil", "colombia", "chile", "peru", "argentina"):
+        assert needle in taxonomy.location_countries, needle
+    # Inside a longer word, the needles stay silent.
+    assert location_facets("Chilecito", source="workday", remote=None).country is None
+    assert location_facets("Brasilia", source="workday", remote=None).country is None
+    # And the known collision, documented rather than silently wrong.
+    assert location_facets("Brazil, Indiana", source="workday", remote=None).country == "BR"
 
 
 def test_city_is_truncated_to_the_column_width():
@@ -626,6 +753,38 @@ def test_survey_counts_missing_facets_separately_from_unknown_seniority(db_sessi
     assert report["unknown_seniority"] == 0
 
 
+def test_survey_measures_city_through_the_fold_not_against_null(db_session):
+    """The bucket that makes the city half of a backfill measurable.
+
+    Before the `CC-City` fix, "GB-London" stored city="GB": not NULL, and
+    not a city either. A `city IS NULL` count reported it as covered, so the
+    fix would have moved no number the survey printed. This bucket counts a
+    stored city that folds to nothing through `canonical_cities`, which is
+    exactly what the picker shows.
+    """
+    from app.jobs.survey_facets import survey
+
+    _add_job(db_session, source_id="c:1", title="Engineer", location="London, United Kingdom")
+    _add_job(db_session, source_id="c:2", title="Engineer", location="Multiple Locations")
+    enrich_jobs(db_session)
+    # Put the pre-fix value back by hand: this is what the catalogue holds
+    # today for every CC-City posting, and what the backfill will replace.
+    facets = db_session.query(JobFacets).join(Job).filter(Job.source_id == "c:1").one()
+    facets.city = "GB"
+    db_session.flush()
+
+    report = survey(db_session)
+    assert report["total"] == 2
+    # One stored-but-unpickable ("GB"), one genuinely NULL.
+    assert report["no_pickable_city"] == 2
+    assert any("'GB'" in example for example in report["examples"]["no_pickable_city"])
+
+    # And with the real derivation in place, the London posting is covered.
+    facets.city = "London"
+    db_session.flush()
+    assert survey(db_session)["no_pickable_city"] == 1
+
+
 def test_survey_groups_counts_by_source(db_session):
     from app.jobs.survey_facets import survey
 
@@ -700,6 +859,75 @@ def test_survey_cli_main_prints_a_report(db_session, capsys, monkeypatch):
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "total" in captured.out.lower()
+
+
+# --- the forced re-derive --------------------------------------------------
+# Neither taxonomy fix above reaches an existing row: enrich_jobs's gate is
+# keyed on the description hash and knows nothing about the parser. These
+# tests pin the script that forces it, because the thing it does wrong is
+# silent -- a backfill that skips every row still exits 0.
+
+
+def test_rederive_rewrites_a_row_the_hash_gate_would_have_skipped(db_session, monkeypatch):
+    import app.jobs.rederive_facets as rederive
+    from app.db import get_session_factory
+
+    _add_job(db_session, source_id="rd:1", title="Engineer", location="GB-London")
+    enrich_jobs(db_session)
+    facets = db_session.query(JobFacets).one()
+    # The pre-fix value, by hand: the catalogue holds this today and the
+    # description has not changed, so a plain enrich_jobs leaves it alone.
+    facets.city = "GB"
+    db_session.commit()
+    assert enrich_jobs(db_session) == 0
+
+    monkeypatch.setattr(rederive, "get_engine", lambda: None)
+    monkeypatch.setattr(rederive, "get_session_factory", lambda: get_session_factory())
+    assert rederive.main([]) == 0
+
+    db_session.expire_all()
+    assert db_session.query(JobFacets).one().city == "London"
+
+
+def test_rederive_dry_run_reports_without_writing(db_session, monkeypatch, capsys):
+    """The flag that makes the script safe to point at production first.
+
+    enrich_jobs flushes per chunk and never commits, so the rollback really
+    does undo every chunk -- if that contract ever changes, this is the test
+    that catches it before 21k live rows do.
+    """
+    import app.jobs.rederive_facets as rederive
+    from app.db import get_session_factory
+
+    _add_job(db_session, source_id="rd:2", title="Engineer", location="GB-London")
+    enrich_jobs(db_session)
+    db_session.query(JobFacets).one().city = "GB"
+    db_session.commit()
+
+    monkeypatch.setattr(rederive, "get_engine", lambda: None)
+    monkeypatch.setattr(rederive, "get_session_factory", lambda: get_session_factory())
+    assert rederive.main(["--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "reenriched=1" in out
+    assert "committed=False" in out
+
+    db_session.expire_all()
+    assert db_session.query(JobFacets).one().city == "GB"
+
+
+def test_rederive_reports_a_failure_instead_of_exiting_zero(db_session, monkeypatch, capsys):
+    import app.jobs.rederive_facets as rederive
+    from app.db import get_session_factory
+
+    monkeypatch.setattr(rederive, "get_engine", lambda: None)
+    monkeypatch.setattr(rederive, "get_session_factory", lambda: get_session_factory())
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("derivation exploded")
+
+    monkeypatch.setattr(rederive, "enrich_jobs", boom)
+    assert rederive.main([]) == 1
+    assert "derivation exploded" in capsys.readouterr().err
 
 
 # A short needle left unpadded hides inside ordinary words, and the description

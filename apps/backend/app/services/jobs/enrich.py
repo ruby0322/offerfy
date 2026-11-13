@@ -320,6 +320,33 @@ def _is_country_or_region_name(segment_casefolded: str, taxonomy: Taxonomy) -> b
     )
 
 
+def _is_bare_two_letter_code(segment: str) -> bool:
+    """A two-letter ASCII segment, which is never a city.
+
+    Workday's `CC-City` location form puts an ISO-3166 alpha-2 country code
+    in front of the city: "GB-London", "NL-Amsterdam", "PL-Warsaw-Lixa C".
+    The country resolves from the city needle ("london" -> GB), but the city
+    scan walks the same segments in order and a bare "GB" is not a country
+    name, not a region name and not a US state code, so it used to win the
+    city slot and the city the string plainly names was lost. Roughly 90
+    live postings, all EMEA/APAC.
+
+    This is deliberately a *city-scan* rule, not a country-scan one. Making
+    ISO-2 codes country needles is the thing
+    `test_iso2_country_codes_are_deliberately_not_needles` declines, because
+    "ca"/"de"/"in"/"mo" are unresolvable against US state codes. Dropping a
+    two-letter segment from the city candidates needs no such ruling: there
+    is no city in this catalogue with a two-letter ASCII name, so nothing
+    real is thrown away. `cities.canonical_cities` already hid the damage
+    from the picker (its `_MIN_CHARS = 4` drops "GB"), which is why the
+    symptom was always a *missing* city and never a wrong one.
+
+    ASCII-only on purpose: "台北" and "香港" are two characters and are
+    real place names.
+    """
+    return len(segment) == 2 and segment.isascii() and segment.isalpha()
+
+
 def _us_state_fallback(
     segments: list[str], taxonomy: Taxonomy
 ) -> tuple[str | None, str | None]:
@@ -391,11 +418,13 @@ def location_facets(
 
     `city` is a separate scan over the same segments, in order, for the
     first one that is not a remote placeholder, not the literal "multiple
-    locations" placeholder, and not itself exactly a country or region
-    name (`_is_country_or_region_name`). A segment that resolved the
-    country via a city needle (e.g. "Taipei") still qualifies -- what's
-    excluded is a segment that *is* the country's own name (e.g. "United
-    States"), not a segment that merely matched a needle.
+    locations" placeholder, not itself exactly a country or region name
+    (`_is_country_or_region_name`), and not a bare two-letter ASCII code
+    (`_is_bare_two_letter_code` -- Workday's "GB-London" form). A segment
+    that resolved the country via a city needle (e.g. "Taipei") still
+    qualifies -- what's excluded is a segment that *is* the country's own
+    name (e.g. "United States"), not a segment that merely matched a
+    needle.
     """
     config = taxonomy or default_taxonomy()
     if not location or not location.strip():
@@ -450,6 +479,12 @@ def location_facets(
         ):
             if fallback is None:
                 fallback = segment[:_CITY_MAX_CHARS]
+            continue
+        # After the state branch, not before it: "New York, NY" must still
+        # be able to settle for "NY" when nothing better is in the string.
+        # A non-state two-letter code is not even a fallback -- it carries
+        # no place information the country facet does not already hold.
+        if _is_bare_two_letter_code(segment):
             continue
         city = segment[:_CITY_MAX_CHARS]
         break

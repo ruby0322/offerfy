@@ -35,6 +35,14 @@ Three gates, reported separately because they point at different fixes:
 - `unknown_seniority` / `other_function` / `null_country`: the posting has
   a facets row, but the needle lists found nothing for that one field. The
   fix here is tuning `data/job_taxonomy.json`.
+- `no_pickable_city`: the posting has a facets row whose `city` names no
+  city a person could pick -- it is NULL, or it folds to nothing through
+  `cities.canonical_cities` (a site code, a placeholder, or a bare country
+  code). Measured through the fold rather than against NULL on purpose: the
+  Workday `CC-City` bug stored city="GB" for "GB-London", which is not
+  NULL and is not a city either, so a `city IS NULL` count reported it as
+  covered. Any change to the city derivation has to be measured here or it
+  cannot be seen at all.
 
 Conflating the first with the other three would send the maintainer
 tuning needles when what is actually missing is a backfill run -- see the
@@ -51,9 +59,19 @@ READ-ONLY. This script never calls `enrich_jobs`, never writes a
 `job_facets` row, and never commits anything. It only ever reads what is
 already there -- safe to run against production, which is the whole point.
 
-Usage (compose):
-  docker compose run --rm backend python -m app.jobs.survey_facets
-  docker compose run --rm backend python -m app.jobs.survey_facets --limit 2000
+Usage. Production runs the backend from systemd, not compose -- the unit's
+`WorkingDirectory` is `/home/ruby0322/offerfy/apps/backend` and its
+`EnvironmentFile` is `/home/ruby0322/offerfy/.env.production`, so a one-off
+is the same interpreter with the same env loaded by hand
+(`docs/deploy.md`, "Database migrations", documents this form):
+
+  cd /home/ruby0322/offerfy/apps/backend
+  set -a && . /home/ruby0322/offerfy/.env.production && set +a
+  .venv/bin/python -m app.jobs.survey_facets
+  .venv/bin/python -m app.jobs.survey_facets --limit 2000
+
+The earlier `docker compose run --rm backend ...` line in this docstring was
+wrong: nothing serves this catalogue from compose.
 """
 
 from __future__ import annotations
@@ -67,7 +85,8 @@ from sqlalchemy.orm import Session
 
 from app.db import get_engine, get_session_factory
 from app.models import CompanyBoilerplate, Job, JobFacets
-from app.services.jobs.enrich import function_of
+from app.services.jobs.cities import canonical_cities
+from app.services.jobs.enrich import default_taxonomy, function_of
 
 # Three or four example titles per unclassified bucket, per the brief --
 # "14% unknown seniority" is not actionable, "14% unknown seniority, e.g.
@@ -75,11 +94,17 @@ from app.services.jobs.enrich import function_of
 # just be noise at a terminal.
 _EXAMPLES_CAP = 4
 
-_BUCKETS = ("no_facets", "unknown_seniority", "other_function", "null_country")
+_BUCKETS = (
+    "no_facets",
+    "unknown_seniority",
+    "other_function",
+    "null_country",
+    "no_pickable_city",
+)
 
 
 def _empty_counts() -> dict[str, int]:
-    return {"total": 0, "no_facets": 0, "unknown_seniority": 0, "other_function": 0, "null_country": 0}
+    return {"total": 0, **{bucket: 0 for bucket in _BUCKETS}}
 
 
 def survey(db: Session, *, limit: int | None = None) -> dict[str, Any]:
@@ -92,18 +117,22 @@ def survey(db: Session, *, limit: int | None = None) -> dict[str, Any]:
     repeatable slice), for a quick look at a large catalogue without
     walking all of it.
 
-    Returns a dict with at least `total`, `no_facets`, `unknown_seniority`,
-    `other_function` and `null_country` at the top level (counts over every
-    job considered, independent of each other -- a job can land in more
-    than one bucket at once, e.g. unknown seniority *and* other function),
-    plus `by_source` (the same five counts, per `jobs.source`) and
-    `examples` (up to `_EXAMPLES_CAP` titles per bucket, for exactly the
-    jobs that landed in it).
+    Returns a dict with at least `total` and every bucket in `_BUCKETS` at
+    the top level (counts over every job considered, independent of each
+    other -- a job can land in more than one bucket at once, e.g. unknown
+    seniority *and* other function), plus `by_source` (the same counts, per
+    `jobs.source`) and `examples` (up to `_EXAMPLES_CAP` per bucket, for
+    exactly the jobs that landed in it).
 
     A posting with no `job_facets` row counts only in `no_facets`, never in
-    `unknown_seniority` / `other_function` / `null_country` -- those three
-    describe a field the needles looked at and missed, which is not what
-    happened to a row that was never enriched at all.
+    the other buckets -- those describe a field the needles looked at and
+    missed, which is not what happened to a row that was never enriched at
+    all.
+
+    `no_pickable_city` is the one bucket that is not a plain column read: it
+    runs the stored city through `cities.canonical_cities`, the same fold
+    the picker uses, because a stored city can be non-NULL and still name
+    no city (see the module docstring).
     """
     query = (
         db.query(
@@ -113,6 +142,7 @@ def survey(db: Session, *, limit: int | None = None) -> dict[str, Any]:
             JobFacets.seniority,
             JobFacets.function,
             JobFacets.country,
+            JobFacets.city,
         )
         .outerjoin(JobFacets, JobFacets.job_id == Job.id)
         .filter(Job.is_active.is_(True))
@@ -129,7 +159,8 @@ def survey(db: Session, *, limit: int | None = None) -> dict[str, Any]:
     by_source: dict[str, dict[str, int]] = {}
     examples: dict[str, list[str]] = {bucket: [] for bucket in _BUCKETS}
 
-    for _job_id, source, title, seniority, function, country in query:
+    taxonomy = default_taxonomy()
+    for _job_id, source, title, seniority, function, country, city in query:
         overall["total"] += 1
         source_counts = by_source.setdefault(source, _empty_counts())
         source_counts["total"] += 1
@@ -161,6 +192,14 @@ def survey(db: Session, *, limit: int | None = None) -> dict[str, Any]:
             source_counts["null_country"] += 1
             if len(examples["null_country"]) < _EXAMPLES_CAP:
                 examples["null_country"].append(title)
+        if not canonical_cities(city, taxonomy):
+            overall["no_pickable_city"] += 1
+            source_counts["no_pickable_city"] += 1
+            if len(examples["no_pickable_city"]) < _EXAMPLES_CAP:
+                # The stored value, not the title: a city bucket is read to
+                # find out WHAT was stored instead of a city ("GB", "Fab
+                # 10N/X"), and a job title says nothing about that.
+                examples["no_pickable_city"].append(f"{title} [{city!r}]")
 
     # recompute_boilerplate writes a row for every company clearing
     # BOILERPLATE_MIN_POSTINGS, including ones whose hash array came back
@@ -203,6 +242,9 @@ def _print_report(report: dict[str, Any]) -> None:
     _print_bucket("unknown seniority", "unknown_seniority", report, report["examples"]["unknown_seniority"])
     _print_bucket("other function", "other_function", report, report["examples"]["other_function"])
     _print_bucket("null country", "null_country", report, report["examples"]["null_country"])
+    _print_bucket(
+        "no pickable city", "no_pickable_city", report, report["examples"]["no_pickable_city"]
+    )
 
     print(f"description-driven function: {report['description_driven_function']}/{total}")
     print(
@@ -222,6 +264,7 @@ def _print_report(report: dict[str, Any]) -> None:
                 f" unknown_seniority={counts['unknown_seniority']} ({_pct(counts['unknown_seniority'], counts['total'])})"
                 f" other_function={counts['other_function']} ({_pct(counts['other_function'], counts['total'])})"
                 f" null_country={counts['null_country']} ({_pct(counts['null_country'], counts['total'])})"
+                f" no_pickable_city={counts['no_pickable_city']} ({_pct(counts['no_pickable_city'], counts['total'])})"
             )
 
 
