@@ -119,6 +119,8 @@ class Taxonomy:
     remote_needles: tuple[str, ...]
     location_country_name_needles: frozenset[str]
     location_region_name_segments: frozenset[str]
+    location_us_state_codes: frozenset[str]
+    location_us_state_names: frozenset[str]
 
 
 def load_taxonomy(path: Path | None = None) -> Taxonomy:
@@ -165,6 +167,14 @@ def load_taxonomy(path: Path | None = None) -> Taxonomy:
     location_region_name_segments = frozenset(
         n.casefold() for n in data.get("location_region_name_segments", []) if n
     )
+    # NOT casefolded: the state pass matches the original segment, because
+    # case is the only signal separating "IN" (Indiana) from "In" (English).
+    location_us_state_codes = frozenset(
+        c for c in data.get("location_us_state_codes", []) if c
+    )
+    location_us_state_names = frozenset(
+        n.casefold() for n in data.get("location_us_state_names", []) if n
+    )
     return Taxonomy(
         seniority_rules=seniority_rules,
         function_rules=function_rules,
@@ -174,6 +184,8 @@ def load_taxonomy(path: Path | None = None) -> Taxonomy:
         remote_needles=remote_needles,
         location_country_name_needles=location_country_name_needles,
         location_region_name_segments=location_region_name_segments,
+        location_us_state_codes=location_us_state_codes,
+        location_us_state_names=location_us_state_names,
     )
 
 
@@ -239,18 +251,46 @@ _MULTIPLE_LOCATIONS_PLACEHOLDER = "multiple locations"
 _CITY_MAX_CHARS = 255
 
 
+@lru_cache(maxsize=None)
+def _word_bounded(needle: str) -> re.Pattern[str]:
+    r"""The needle anchored at whichever of its edges is alphanumeric.
+
+    `\b` asserts a word/non-word transition, so putting one after a needle
+    that already ends in punctuation can never match: `\bu\.s\.\b` misses
+    "Remote (U.S.)" because "." and ")" are both non-word. Anchoring only the
+    alphanumeric edges keeps "u.s." matching while still refusing "pusan".
+
+    Cached because the backfill runs this over every segment of every active
+    posting against every needle.
+    """
+    left = r"\b" if needle[:1].isalnum() else ""
+    right = r"\b" if needle[-1:].isalnum() else ""
+    return re.compile(rf"{left}{re.escape(needle)}{right}")
+
+
 def _best_country_match(
     folded_segment: str, taxonomy: Taxonomy
 ) -> tuple[str, str] | None:
-    """Longest needle in `location_countries` that is a substring of the
-    (already space-padded) segment, so "United States" wins over any
-    shorter needle that happens to also be contained in it.
+    """Longest needle in `location_countries` found in the (already
+    space-padded) segment, so "United States" wins over any shorter needle
+    also contained in it.
+
+    An ASCII needle must match on WORD BOUNDARIES. Plain substring matching
+    filed real postings in the wrong country, because a country name is often
+    inside an unrelated place name: "india" is inside "Indianapolis", "usa" is
+    inside "Pusan" and "Jerusalem", "zug" is inside "Zugspitze". Non-ASCII
+    needles stay plain substrings -- CJK has no word boundaries, and `\b`
+    against "新竹" would never match "新竹市".
     """
     best: tuple[str, str] | None = None
     for needle, country in taxonomy.location_countries.items():
-        if needle in folded_segment:
-            if best is None or len(needle) > len(best[0]):
-                best = (needle, country)
+        found = (
+            _word_bounded(needle).search(folded_segment) is not None
+            if needle.isascii()
+            else needle in folded_segment
+        )
+        if found and (best is None or len(needle) > len(best[0])):
+            best = (needle, country)
     return best
 
 
@@ -263,6 +303,48 @@ def _is_country_or_region_name(segment_casefolded: str, taxonomy: Taxonomy) -> b
         segment_casefolded in taxonomy.location_country_name_needles
         or segment_casefolded in taxonomy.location_region_name_segments
     )
+
+
+def _us_state_fallback(
+    segments: list[str], taxonomy: Taxonomy
+) -> tuple[str | None, str | None]:
+    """`("US", "north_america")` when a segment is a bare US state code.
+
+    Runs only after every country needle and token has missed, so a country
+    the string names always wins -- "Toronto, Canada" stays Canada even though
+    "CA" is also California. The match is on the ORIGINAL segment, not the
+    casefolded one: "In-Office" splits on "-" into ["In", "Office"] and "IN"
+    is Indiana, so case is the only thing that separates a state code from an
+    English word. 2,001 live postings are "City, ST" with no country token
+    anywhere in them.
+
+    Spelled-out state names count too, case-insensitively -- "Indiana -
+    Indianapolis" was previously filed as *India*, because "india" is inside
+    "Indiana". The one real ambiguity is Georgia, a US state and a country;
+    it is not a country needle and the live catalogue's Georgia postings are
+    all Atlanta, so a US reading is right for this data and wrong for Tbilisi.
+    """
+    for segment in segments:
+        if (
+            segment in taxonomy.location_us_state_codes
+            or segment.casefold() in taxonomy.location_us_state_names
+        ):
+            alias = "united states"
+            return taxonomy.location_countries.get(alias), taxonomy.location_regions.get(alias)
+    return None, None
+
+
+def _named_region(segments: list[str], taxonomy: Taxonomy) -> str | None:
+    """The region a segment names outright, for strings with no country.
+
+    `location_region_name_segments` holds them spelled as they appear ("north
+    america"); the stored facet value uses the underscored form.
+    """
+    for segment in segments:
+        folded = segment.casefold()
+        if folded in taxonomy.location_region_name_segments:
+            return folded.replace(" ", "_")
+    return None
 
 
 def location_facets(
@@ -320,9 +402,24 @@ def location_facets(
             break
 
     if country is None:
-        return LocationFacets(None, None, None)
+        country, region = _us_state_fallback(segments, config)
 
+    if country is None:
+        # A region the string actually names survives a country we cannot
+        # resolve: "Home based - EMEA". The module's unknown-is-kept bias
+        # forbids *inventing* a country from the remote flag; it does not
+        # require discarding a place the string states, and prefilter_query
+        # matches on region, so these postings become reachable.
+        return LocationFacets(None, _named_region(segments, config), None)
+
+    # Two passes. A US state designation is a poor city -- Workday writes
+    # "US, Oregon, Hillsboro" and the city is Hillsboro -- but it cannot be
+    # excluded outright, because a state name is often also a city and
+    # "New York, NY" must still give "New York". So: prefer a segment that is
+    # not a state designation, and settle for one that is only if nothing
+    # else in the string qualifies.
     city: str | None = None
+    fallback: str | None = None
     for segment in segments:
         folded = f" {segment.casefold()} "
         segment_casefolded = segment.casefold()
@@ -332,10 +429,17 @@ def location_facets(
             continue
         if _is_country_or_region_name(segment_casefolded, config):
             continue
+        if (
+            segment in config.location_us_state_codes
+            or segment_casefolded in config.location_us_state_names
+        ):
+            if fallback is None:
+                fallback = segment[:_CITY_MAX_CHARS]
+            continue
         city = segment[:_CITY_MAX_CHARS]
         break
 
-    return LocationFacets(country, region, city)
+    return LocationFacets(country, region, city if city is not None else fallback)
 
 
 def _longest_matching_function(

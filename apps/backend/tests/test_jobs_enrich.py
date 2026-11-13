@@ -290,6 +290,136 @@ def test_padded_needles_have_their_punctuation_siblings():
     assert missing == []
 
 
+# --- the location parser's three real-catalogue gaps -----------------------
+# Measured 2026-11-13 against production: 7,098 ACTIVE postings had a parseable
+# location string and no country facet -- 33% of the catalogue, invisible to
+# every location-constrained preference. Three causes, each its own test below.
+
+
+@pytest.mark.parametrize("raw,expected_country,expected_city", [
+    # 1,772 postings. Workday writes the country as a bare token; there was no
+    # needle for it, because `needle in f" {segment} "` makes a 2-char needle
+    # unsafe ("us" is a substring of "houston"), so it was simply omitted.
+    # The city is asserted too: a segment that IS the country's own name must
+    # never become the city, and asserting only the country is how "US, CA,
+    # Santa Clara" briefly shipped with city="US".
+    ("US, CA, Santa Clara", "US", "Santa Clara"),
+    ("US, Oregon, Hillsboro", "US", "Hillsboro"),
+    ("US, Arizona, Phoenix", "US", "Phoenix"),
+    ("USA", "US", None),
+    # 303 postings. Country names that were never in the list at all, unlike
+    # Israel / India / Singapore / Japan / Germany, which are.
+    ("Malaysia, Penang", "MY", "Penang"),
+    ("Kuala Lumpur, Malaysia", "MY", "Kuala Lumpur"),
+    ("Mexico - Mexico City", "MX", "Mexico City"),
+    ("Manila, Philippines", "PH", "Manila"),
+])
+def test_a_bare_country_token_or_missing_country_name_resolves(
+    raw, expected_country, expected_city
+):
+    got = location_facets(raw, source="workday", remote=None)
+    assert (got.country, got.city) == (expected_country, expected_city)
+
+
+def test_a_short_country_token_does_not_match_a_word_containing_it():
+    """The reason the token was missing in the first place.
+
+    An exact-segment match is what makes "us" safe; a substring needle would
+    file every Houston and Austin posting in the wrong country.
+    """
+    for raw in ("Houston, Texas", "Austin, Texas", "Pusan"):
+        got = location_facets(raw, source="greenhouse", remote=None)
+        assert got.country in (None, "US"), raw
+    # and specifically: Houston resolves via Texas or not at all, never via "us"
+    assert location_facets("Pusan", source="greenhouse", remote=None).country is None
+
+
+@pytest.mark.parametrize("raw", [
+    "Santa Clara,CA",       # 386 -- Applied Materials
+    "Santa Clara, CA",      # 123 -- Marvell
+    "Boise, ID - Main Site",  # 386 -- Micron
+    "Gloucester,MA",
+    "Kalispell,MT",
+    "Folsom, CA",
+])
+def test_a_us_state_code_resolves_the_country(raw):
+    """2,001 postings. "City, ST" with no country token anywhere."""
+    assert location_facets(raw, source="workday", remote=None).country == "US"
+
+
+def test_the_state_pass_requires_an_uppercase_code_in_the_original_string():
+    """`In-Office` is 43 live Cloudflare postings, and `-` is a separator, so
+    the segments are ["In", "Office"] and "IN" is Indiana. Case is the only
+    signal that separates a state code from an English word, and the country
+    needles throw it away by casefolding -- so the state pass must not.
+    """
+    assert location_facets("In-Office", source="greenhouse", remote=None).country is None
+    assert location_facets("Office-In", source="greenhouse", remote=None).country is None
+    # The same letters as a real code still work when actually capitalised.
+    assert location_facets("Indianapolis, IN", source="workday", remote=None).country == "US"
+
+
+@pytest.mark.parametrize("raw,expected_city", [
+    # Workday puts the state in the middle; the city is what comes after.
+    ("US, CA, Santa Clara", "Santa Clara"),
+    ("US, Oregon, Hillsboro", "Hillsboro"),
+    ("Boise, ID - Main Site", "Boise"),
+    # But a state name is often also a city, so the preference must not be an
+    # exclusion. These were the regression the two-pass scan exists to avoid.
+    ("New York, NY", "New York"),
+    ("New York, New York", "New York"),
+    ("Washington, WA", "Washington"),
+])
+def test_a_state_designation_is_a_last_resort_city_not_a_forbidden_one(raw, expected_city):
+    assert location_facets(raw, source="workday", remote=None).city == expected_city
+
+
+@pytest.mark.parametrize("raw", [
+    "Indiana - Indianapolis",   # 22 postings, previously filed as India
+    "Indiana - Remote",
+    "Virginia - Mclean",
+    "Georgia - Atlanta",
+    "Atlanta, Georgia",
+    "Denver, Colorado",
+])
+def test_a_spelled_out_state_name_also_resolves_the_country(raw):
+    assert location_facets(raw, source="workday", remote=None).country == "US"
+
+
+def test_the_state_pass_never_overrides_a_country_the_string_names():
+    """CA is California and Canada; DE is Delaware and Germany. The state pass
+    runs only after every country needle has missed, so a named country wins.
+    """
+    assert location_facets("Toronto, Canada", source="lever", remote=None).country == "CA"
+    assert location_facets("Berlin, Germany", source="lever", remote=None).country == "DE"
+    assert location_facets("Taipei, Taiwan", source="lever", remote=None).country == "TW"
+
+
+def test_a_named_region_survives_an_unresolvable_country():
+    """147 postings: "Home based - EMEA" named a region and got all-None.
+
+    The module's unknown-is-kept bias forbids *inventing* a country from the
+    remote flag; it does not require discarding a region the string states.
+    prefilter_query matches on region, so these become reachable.
+    """
+    assert location_facets("Home based - EMEA", source="lever", remote=None) == LocationFacets(
+        None, "emea", None
+    )
+    assert location_facets("Home based - APAC", source="lever", remote=None).region == "apac"
+    # Still no invention: a remote flag with no place named stays empty.
+    assert location_facets("Remote", source="ashby", remote=True) == LocationFacets(None, None, None)
+
+
+def test_iso2_country_codes_are_deliberately_not_needles():
+    """Declined, with a reason: CA/DE/IN/MO are unresolvable against US state
+    codes, and the live data behind them is 127 postings (1.8% of the gap) --
+    "Petaling Jaya, my" and "Rehovot,ISR". Ambiguity is not worth 1.8%.
+    """
+    taxonomy = load_taxonomy()
+    for code in ("ca", "de", "in", "mo", "la", "ma", "il", "ga"):
+        assert code not in taxonomy.location_countries, code
+
+
 def test_city_is_truncated_to_the_column_width():
     """A long location segment must not overflow JobFacets.city.
 
