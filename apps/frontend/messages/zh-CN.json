@@ -168,8 +168,8 @@
   "landing": {
     "hero": {
       "kicker": "为冲顶尖公司的工程师而做",
-      "headline": "拿下那些人人都在投的职位",
-      "sub": "Stripe、OpenAI、NVIDIA 等 80 多家公司的真实职位，直接来自他们自己的招聘系统。为其中一个职位复制一份简历，贴上职位描述，在对话里照着它改，再投出去。",
+      "headline": "拿下梦想中的工作",
+      "sub": "从找到来自 Stripe、OpenAI、NVIDIA 等 80 多家顶尖公司的合适职位，到改出一份让雇主信服的简历，再到投递与面试进度，Offerfy 全程都在。",
       "ctaJobs": "看看有哪些职位",
       "ctaUpload": "上传简历",
       "ctaCreate": "或从头创建"
