@@ -69,12 +69,22 @@ zh-TW and zh-CN use 評分 / 评分 in all four editor keys, so there is **no
 EN-only divergence here** — the Chinese is equally explicit. Only Terms is an
 EN outlier (zh says 評估契合度 / 评估契合程度, "assess fit").
 
-**There is already a live inconsistency about this.** `landing.loop.aimBody`
-describes the tailor feature with no scoring claim at all — "A copy aimed at
-that one job… every chat turn edits against the posting's own words" — while
-`editor.familyNewTailorHint` describes the same feature as "scored against that
-role". The landing page and the editor disagree about what the feature does,
-on production, right now. That is an argument for ruling sooner.
+**The same feature was overclaimed in two places; one got fixed because a
+human caught it.** `landing.loop.aimBody` now describes the tailor with no
+scoring claim at all — "A copy aimed at that one job… every chat turn edits
+against the posting's own words". But its first version, in `c7dc1f7`, said
+"AI names which requirements you evidence, which you evidence weakly, and which
+you don't", a requirement-by-requirement assessment — a *stronger* claim than
+"score". The landing session removed it in `86cab2f` after the user corrected
+it. (An earlier version of this entry said that key was "written deliberately
+without" a scoring claim; that was wrong, and the landing session corrected me.
+The distinction matters: the landing page is accurate because someone was
+caught, not because a standard was applied.)
+
+So the editor keys are not an isolated slip — they are where the same overclaim
+survived, unexamined, in UI text in three locales. That is the argument for
+ruling: nobody has yet looked at the editor the way the user looked at the
+landing page.
 
 What the feature actually does, for whoever rules: the model is asked for a
 prose read of fit — what matches, what is missing, an overall impression. No
