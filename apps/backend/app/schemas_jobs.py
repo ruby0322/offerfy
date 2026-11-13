@@ -52,6 +52,53 @@ class JobFacetOptions(BaseModel):
     regions: list[JobFacetOption]
     seniorities: list[JobFacetOption]
     functions: list[JobFacetOption]
+    # The employers with the most open roles, not all of them: 88 boards is
+    # more than a menu should list, and the long tail is reachable by search
+    # inside that menu. employer_total is what the menu's "all N" says, so
+    # the two can never disagree about how many employers the catalog has.
+    companies: list[JobFacetOption] = []
+    employer_total: int = 0
+
+
+class JobCityOptions(BaseModel):
+    """Cities worth offering for one country, biggest first.
+
+    Folded from JobFacets.city at read time by services.jobs.cities -- see
+    that module for why the stored column is not itself a vocabulary. The
+    counts do not sum to the country's total: a posting open in two cities
+    counts once in each.
+    """
+
+    country: str
+    items: list[JobFacetOption]
+
+
+class JobPulseEmployer(BaseModel):
+    company: str
+    open_count: int
+    new_count: int
+
+
+class JobPulse(BaseModel):
+    """The live board above the catalog.
+
+    Every "new" figure here is posted_at-based, deliberately matching what
+    ?posted_within_days= filters on, so the strip, the board and the filtered
+    list can never tell the visitor three different stories. A posting whose
+    board publishes no date (most of Workday) is therefore absent from the
+    new counts while still being in active_total -- undercounting what is
+    new beats inventing a date we were never given.
+
+    refreshed_at is the freshest last_seen_at, i.e. when ingest last
+    confirmed anything, which is the honest answer to "how live is this?".
+    """
+
+    active_total: int
+    new_24h: int
+    employer_count: int
+    refreshed_at: str | None
+    newest: list[JobListItem]
+    top_employers: list[JobPulseEmployer]
 
 
 class JobSitemapItem(BaseModel):

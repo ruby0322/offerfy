@@ -5,21 +5,25 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, func, nulls_last, or_
+from sqlalchemy import and_, case, func, nulls_last, or_
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import Job, JobFacets
 from app.schemas_jobs import (
     JOB_SOURCES,
+    JobCityOptions,
     JobDetail,
     JobFacetOption,
     JobFacetOptions,
     JobList,
     JobListItem,
+    JobPulse,
+    JobPulseEmployer,
     JobSitemapItem,
     JobSitemapPage,
 )
+from app.services.jobs.cities import fold_city_counts, stored_values_for
 from app.services.jobs.enrich import (
     Taxonomy,
     default_taxonomy,
@@ -34,6 +38,15 @@ router = APIRouter()
 
 LIST_MAX = 100
 SITEMAP_PAGE_SIZE = 1000
+PULSE_NEWEST = 5
+PULSE_EMPLOYERS = 5
+FACET_COMPANIES = 24
+CITY_OPTIONS = 12
+# What "new" means everywhere on the live board. One constant, because the
+# strip ("+733 in the last 24h"), the employer leaderboard and the ?posted_
+# within_days= filter are read side by side and must agree.
+PULSE_NEW_HOURS = 24
+PULSE_EMPLOYER_WINDOW_DAYS = 7
 
 def _sitemap_conditions():
     """Rows eligible for the jobs sitemap.
@@ -123,8 +136,10 @@ def _filtered_query(
     source: str | None,
     remote: bool | None,
     active: bool | None,
+    company: str | None = None,
     country: str | None = None,
     region: str | None = None,
+    city: str | None = None,
     seniority: str | None = None,
     function: str | None = None,
     posted_within_days: int | None = None,
@@ -142,6 +157,11 @@ def _filtered_query(
         query = query.filter(Job.remote.is_(True))
     elif remote is False:
         query = query.filter(Job.remote.is_(False))
+    if company:
+        # Equality, not ILIKE: company is picked from a facet we produced, so
+        # it is an exact stored value. A LIKE here would make "Wise" match
+        # "Wisetech" the day such a board is added.
+        query = query.filter(func.lower(Job.company) == company.strip().lower())
     if q:
         term = _like_term(q.strip())
         if term != "%%":
@@ -165,13 +185,20 @@ def _filtered_query(
     # already exclude the unmatched row too (NULL == value is NULL, not
     # true); INNER just says that intent directly instead of relying on
     # that to keep covering for it.
-    if seniority or function or country or region:
+    if seniority or function or country or region or city:
         query = query.join(JobFacets, JobFacets.job_id == Job.id)
         taxonomy = default_taxonomy()
         if seniority:
-            if seniority not in valid_seniorities(taxonomy):
+            # Comma-separated, because a curated board is often one audience
+            # spread over two rungs: "new grad" is new_grad AND junior, and
+            # "ready to move" is mid, senior and staff_plus. The filter UI
+            # still sends exactly one value; this only widens what the URL
+            # can say. Every member is validated, so one bad name is a 422
+            # rather than a silently narrower list.
+            wanted = [part.strip() for part in seniority.split(",") if part.strip()]
+            if not wanted or any(item not in valid_seniorities(taxonomy) for item in wanted):
                 raise HTTPException(status_code=422, detail="Invalid seniority")
-            query = query.filter(JobFacets.seniority == seniority)
+            query = query.filter(JobFacets.seniority.in_(wanted))
         if function:
             if function not in valid_functions(taxonomy):
                 raise HTTPException(status_code=422, detail="Invalid function")
@@ -184,6 +211,21 @@ def _filtered_query(
             if country not in valid_countries(taxonomy):
                 raise HTTPException(status_code=422, detail="Invalid country")
             query = query.filter(JobFacets.country == country)
+        if city and city.strip():
+            # Resolved against the distinct spellings actually stored, not by
+            # LIKE: see services.jobs.cities.stored_values_for for why both
+            # equality and substring get this wrong. The DISTINCT is over a
+            # few hundred values per country, and is only paid when a city
+            # filter is actually asked for.
+            distinct = db.query(JobFacets.city).filter(JobFacets.city.isnot(None))
+            if country:
+                distinct = distinct.filter(JobFacets.country == country)
+            spellings = stored_values_for(
+                city, [row[0] for row in distinct.distinct().all()], taxonomy
+            )
+            # An empty IN () is false in SQL, which is the right answer for a
+            # city no posting names -- an empty list, not an error.
+            query = query.filter(JobFacets.city.in_(spellings))
 
     if posted_within_days is not None:
         # Decision: posted_at IS NULL cannot be confirmed within any window,
@@ -201,8 +243,10 @@ def list_jobs(
     source: str | None = None,
     remote: bool | None = None,
     active: bool = True,
+    company: str | None = None,
     country: str | None = None,
     region: str | None = None,
+    city: str | None = None,
     seniority: str | None = None,
     function: str | None = None,
     posted_within_days: int | None = Query(default=None, ge=1, le=90),
@@ -216,8 +260,10 @@ def list_jobs(
         source=source,
         remote=remote,
         active=active,
+        company=company,
         country=country,
         region=region,
+        city=city,
         seniority=seniority,
         function=function,
         posted_within_days=posted_within_days,
@@ -282,7 +328,19 @@ def featured_jobs(db: Session = Depends(get_db)):
 
 
 @router.get("/v1/jobs/facets", response_model=JobFacetOptions)
-def jobs_facets(db: Session = Depends(get_db)):
+def jobs_facets(
+    q: str | None = None,
+    source: str | None = None,
+    remote: bool | None = None,
+    company: str | None = None,
+    country: str | None = None,
+    region: str | None = None,
+    city: str | None = None,
+    seniority: str | None = None,
+    function: str | None = None,
+    posted_within_days: int | None = Query(default=None, ge=1, le=90),
+    db: Session = Depends(get_db),
+):
     """Facet option counts for the catalog's filter UI.
 
     Declared above GET /v1/jobs/{job_id} -- same ordering requirement as
@@ -305,25 +363,199 @@ def jobs_facets(db: Session = Depends(get_db)):
     that lives only on JobFacets), which is also what drops NULLs and
     rows with no facets row at all out of every bucket.
     """
-    conditions = (Job.is_active.is_(True),)
+    # Every filter GET /v1/jobs takes, applied here too, so a board page or
+    # an already-narrowed search sees the counts *it* would get rather than
+    # the whole catalogue's.
+    #
+    # With one exception, and it is not cosmetic: a facet never filters its
+    # OWN options. Without that, choosing Taiwan leaves the country menu
+    # holding Taiwan alone and there is no way back to anywhere else -- the
+    # menu stops being a way to change your mind and becomes a readout of
+    # what you already picked. So each facet's counts come from the query
+    # with its own key (and, for country, the city that hangs off it)
+    # dropped, which also makes the numbers answer the question the menu is
+    # actually asking: "how many if I switched to this instead".
+    filters = {
+        "q": q,
+        "source": source,
+        "remote": remote,
+        "active": True,
+        "company": company,
+        "country": country,
+        "region": region,
+        "city": city,
+        "seniority": seniority,
+        "function": function,
+        "posted_within_days": posted_within_days,
+    }
 
-    def _options(column) -> list[JobFacetOption]:
+    def _without(*keys: str):
+        narrowed = dict(filters)
+        for key in keys:
+            narrowed[key] = None
+        narrowed["active"] = True
+        return _filtered_query(db, **narrowed).subquery()
+
+    def _options(column_name: str, *drop: str) -> list[JobFacetOption]:
+        column = getattr(JobFacets, column_name)
+        scope = _without(*drop)
         rows = (
             db.query(column, func.count())
-            .select_from(Job)
-            .join(JobFacets, JobFacets.job_id == Job.id)
-            .filter(*conditions)
+            .select_from(scope)
+            .join(JobFacets, JobFacets.job_id == scope.c.id)
             .filter(column.isnot(None))
             .group_by(column)
             .all()
         )
         return [JobFacetOption(value=value, count=count) for value, count in rows]
 
+    employers = _without("company")
+    company_rows = (
+        db.query(employers.c.company, func.count(employers.c.id))
+        .group_by(employers.c.company)
+        .order_by(func.count(employers.c.id).desc(), employers.c.company.asc())
+        .limit(FACET_COMPANIES)
+        .all()
+    )
+    employer_total = db.query(func.count(func.distinct(employers.c.company))).scalar() or 0
+
     return JobFacetOptions(
-        countries=_options(JobFacets.country),
-        regions=_options(JobFacets.region),
-        seniorities=_options(JobFacets.seniority),
-        functions=_options(JobFacets.function),
+        # country drops city too: the cities on offer hang off the country,
+        # so counting countries under a city filter would leave exactly one.
+        countries=_options("country", "country", "city"),
+        regions=_options("region", "region"),
+        seniorities=_options("seniority", "seniority"),
+        functions=_options("function", "function"),
+        companies=[
+            JobFacetOption(value=value, count=count) for value, count in company_rows
+        ],
+        employer_total=int(employer_total),
+    )
+
+
+@router.get("/v1/jobs/cities", response_model=JobCityOptions)
+def jobs_cities(
+    country: str = Query(min_length=2, max_length=2),
+    limit: int = Query(default=CITY_OPTIONS, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """Cities worth offering for one country.
+
+    Declared above GET /v1/jobs/{job_id}, like every other literal path on
+    this router, or "cities" is captured as a job id.
+
+    Scoped to is_active for the same reason /v1/jobs/facets is: a picker has
+    to describe the list it filters. The fold happens in Python over a GROUP
+    BY (a few hundred rows at most), never over the postings themselves.
+    """
+    taxonomy = default_taxonomy()
+    if country not in valid_countries(taxonomy):
+        raise HTTPException(status_code=422, detail="Invalid country")
+    rows = (
+        db.query(JobFacets.city, func.count(JobFacets.job_id))
+        .select_from(Job)
+        .join(JobFacets, JobFacets.job_id == Job.id)
+        .filter(Job.is_active.is_(True), JobFacets.country == country)
+        .filter(JobFacets.city.isnot(None))
+        .group_by(JobFacets.city)
+        .all()
+    )
+    folded = fold_city_counts([(value, count) for value, count in rows], taxonomy)
+    return JobCityOptions(
+        country=country,
+        items=[JobFacetOption(value=name, count=count) for name, count in folded[:limit]],
+    )
+
+
+@router.get("/v1/jobs/pulse", response_model=JobPulse)
+def jobs_pulse(
+    q: str | None = None,
+    source: str | None = None,
+    remote: bool | None = None,
+    company: str | None = None,
+    country: str | None = None,
+    region: str | None = None,
+    city: str | None = None,
+    seniority: str | None = None,
+    function: str | None = None,
+    posted_within_days: int | None = Query(default=None, ge=1, le=90),
+    db: Session = Depends(get_db),
+):
+    """The live board: how big the catalog is, what just landed, who is hiring.
+
+    One endpoint rather than three because the three numbers are read as one
+    sentence; served separately they could be minutes apart and visibly
+    disagree. Declared above GET /v1/jobs/{job_id} -- see jobs_cities.
+    """
+    now = datetime.now(timezone.utc)
+    fresh_cutoff = now - timedelta(hours=PULSE_NEW_HOURS)
+    week_cutoff = now - timedelta(days=PULSE_EMPLOYER_WINDOW_DAYS)
+
+    # Takes the same filters as the list and the facets, so a curated board
+    # gets its own pulse -- "839 open internships, +23 in the last 24h, 61
+    # employers hiring interns" -- from one endpoint rather than a second one
+    # that could drift from this.
+    base = _filtered_query(
+        db,
+        q=q,
+        source=source,
+        remote=remote,
+        active=True,
+        company=company,
+        country=country,
+        region=region,
+        city=city,
+        seniority=seniority,
+        function=function,
+        posted_within_days=posted_within_days,
+    )
+
+    active_total = base.with_entities(func.count(Job.id)).scalar() or 0
+    new_24h = (
+        base.filter(Job.posted_at.isnot(None), Job.posted_at >= fresh_cutoff)
+        .with_entities(func.count(Job.id))
+        .scalar()
+        or 0
+    )
+    employer_count = (
+        base.with_entities(func.count(func.distinct(Job.company))).scalar() or 0
+    )
+    refreshed_at = base.with_entities(func.max(Job.last_seen_at)).scalar()
+
+    newest = (
+        base.filter(Job.posted_at.isnot(None))
+        .order_by(Job.posted_at.desc(), Job.id.desc())
+        .limit(PULSE_NEWEST)
+        .all()
+    )
+
+    # One grouped pass, not a per-employer query: the leaderboard is five
+    # rows but the group is every employer in scope.
+    new_in_window = func.sum(
+        case((and_(Job.posted_at.isnot(None), Job.posted_at >= week_cutoff), 1), else_=0)
+    )
+    employer_rows = (
+        base.with_entities(Job.company, func.count(Job.id), new_in_window)
+        .group_by(Job.company)
+        .order_by(new_in_window.desc(), func.count(Job.id).desc(), Job.company.asc())
+        .limit(PULSE_EMPLOYERS)
+        .all()
+    )
+
+    return JobPulse(
+        active_total=int(active_total),
+        new_24h=int(new_24h),
+        employer_count=int(employer_count),
+        refreshed_at=_iso(refreshed_at),
+        newest=[_list_item(row) for row in newest],
+        top_employers=[
+            JobPulseEmployer(
+                company=company,
+                open_count=int(open_count or 0),
+                new_count=int(new_count or 0),
+            )
+            for company, open_count, new_count in employer_rows
+        ],
     )
 
 

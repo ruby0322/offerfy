@@ -20,7 +20,7 @@ import {
   FUNCTION_KEYS,
   SENIORITY_KEYS,
   type JobsMessageKey,
-} from "@/components/jobs/JobSearchForm";
+} from "@/components/jobs/facet-labels";
 
 type Props = {
   initial: JobPreference;
@@ -47,7 +47,7 @@ export default function PreferenceEditor({ initial }: Props) {
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildMsg, setRebuildMsg] = useState<{ text: string; bad: boolean } | null>(null);
 
-  // Same fallback as JobSearchForm: an unknown value shows itself rather than throws.
+  // Same fallback as the filter bar: an unknown value shows itself rather than throws.
   function labeled(keys: Record<string, JobsMessageKey>, value: string): string {
     const key = keys[value];
     return key ? tJobs(key) : value;

@@ -121,6 +121,11 @@ class Taxonomy:
     location_region_name_segments: frozenset[str]
     location_us_state_codes: frozenset[str]
     location_us_state_names: frozenset[str]
+    # Read by services.jobs.cities, not by any derivation in this module:
+    # JobFacets.city is written verbatim and folded only at read time, so a
+    # new alias takes effect without re-enriching 21k postings.
+    city_aliases: dict[str, str]
+    city_placeholder_needles: frozenset[str]
 
 
 def load_taxonomy(path: Path | None = None) -> Taxonomy:
@@ -175,6 +180,14 @@ def load_taxonomy(path: Path | None = None) -> Taxonomy:
     location_us_state_names = frozenset(
         n.casefold() for n in data.get("location_us_state_names", []) if n
     )
+    city_aliases = {
+        needle.casefold(): str(value)
+        for needle, value in data.get("city_aliases", {}).items()
+        if needle and value
+    }
+    city_placeholder_needles = frozenset(
+        n.casefold() for n in data.get("city_placeholder_needles", []) if n
+    )
     return Taxonomy(
         seniority_rules=seniority_rules,
         function_rules=function_rules,
@@ -186,6 +199,8 @@ def load_taxonomy(path: Path | None = None) -> Taxonomy:
         location_region_name_segments=location_region_name_segments,
         location_us_state_codes=location_us_state_codes,
         location_us_state_names=location_us_state_names,
+        city_aliases=city_aliases,
+        city_placeholder_needles=city_placeholder_needles,
     )
 
 

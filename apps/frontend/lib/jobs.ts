@@ -47,6 +47,30 @@ export type JobFacetOptions = {
   regions: JobFacetOption[];
   seniorities: JobFacetOption[];
   functions: JobFacetOption[];
+  /** The biggest employers only; employer_total is how many there are. */
+  companies: JobFacetOption[];
+  employer_total: number;
+};
+
+export type JobCityOptions = {
+  country: string;
+  items: JobFacetOption[];
+};
+
+export type JobPulseEmployer = {
+  company: string;
+  open_count: number;
+  new_count: number;
+};
+
+export type JobPulse = {
+  active_total: number;
+  new_24h: number;
+  employer_count: number;
+  /** When ingest last confirmed anything, not when this page rendered. */
+  refreshed_at: string | null;
+  newest: JobListItem[];
+  top_employers: JobPulseEmployer[];
 };
 
 export type JobSitemapPage = {
@@ -59,12 +83,27 @@ export type JobSitemapPage = {
 export type JobQuery = {
   q?: string;
   remote?: string;
+  company?: string;
   country?: string;
   region?: string;
+  city?: string;
   seniority?: string;
   function?: string;
   postedWithinDays?: string;
 };
+
+/** The query keys a facet owns, in the order the filter bar shows them. */
+export const JOB_QUERY_KEYS = [
+  "q",
+  "company",
+  "country",
+  "city",
+  "region",
+  "remote",
+  "seniority",
+  "function",
+  "postedWithinDays",
+] as const satisfies readonly (keyof JobQuery)[];
 
 function backendBase(): string {
   return (process.env.BACKEND_INTERNAL_URL || "http://backend:8000").replace(/\/$/, "");
@@ -85,12 +124,23 @@ export function hasJobFilters(query: JobQuery): boolean {
     query.q?.trim() ||
       query.remote === "true" ||
       query.remote === "false" ||
+      query.company ||
       query.country ||
       query.region ||
+      query.city ||
       query.seniority ||
       query.function ||
       query.postedWithinDays,
   );
+}
+
+/** How many filters are set, for "clear N filters". */
+export function jobFilterCount(query: JobQuery): number {
+  return JOB_QUERY_KEYS.filter((key) => {
+    const value = query[key];
+    if (key === "remote") return value === "true" || value === "false";
+    return Boolean(value && value.trim());
+  }).length;
 }
 
 export function jobListParams(query: JobQuery, extra?: { cursor?: string; limit?: number }): URLSearchParams {
@@ -99,6 +149,8 @@ export function jobListParams(query: JobQuery, extra?: { cursor?: string; limit?
   if (query.remote === "true" || query.remote === "false") {
     params.set("remote", query.remote);
   }
+  if (query.company) params.set("company", query.company);
+  if (query.city) params.set("city", query.city);
   if (query.country) params.set("country", query.country);
   if (query.region) params.set("region", query.region);
   if (query.seniority) params.set("seniority", query.seniority);
@@ -129,13 +181,57 @@ export async function fetchJobListPage(query: JobQuery, cursor: string): Promise
   return (await res.json()) as JobList;
 }
 
-export async function fetchFeaturedJobs(): Promise<JobListItem[]> {
-  const data = await backendJson<JobList>("/v1/jobs/featured");
+// NOTE: /v1/jobs/featured (and the spotlight scoring behind it) no longer
+// has a caller. The live board replaced the "worth a look" strip it fed with
+// "just posted" and "hiring hardest", both of which are facts rather than a
+// ranking. The endpoint, its config and its tests are untouched — whether to
+// retire them or give the spotlight a home again is a product call, not a
+// side effect of this redesign.
+
+export async function fetchJobFacets(query: JobQuery = {}): Promise<JobFacetOptions | null> {
+  const params = jobListParams(query);
+  params.delete("limit");
+  const qs = params.toString();
+  return backendJson<JobFacetOptions>(`/v1/jobs/facets${qs ? `?${qs}` : ""}`);
+}
+
+export async function fetchJobPulse(query: JobQuery = {}): Promise<JobPulse | null> {
+  const params = jobListParams(query);
+  params.delete("limit");
+  const qs = params.toString();
+  return backendJson<JobPulse>(`/v1/jobs/pulse${qs ? `?${qs}` : ""}`);
+}
+
+/**
+ * How many roles a query matches, and nothing else. Used for the curated
+ * board counts, where six numbers are wanted and none of the postings are.
+ */
+export async function fetchJobCount(query: JobQuery): Promise<number | undefined> {
+  const qs = jobListParams(query, { limit: 1 }).toString();
+  const data = await backendJson<JobList>(`/v1/jobs?${qs}`);
+  return data?.total;
+}
+
+/** Cities for one country, from the server (board pages render these). */
+export async function fetchJobCitiesServer(country: string): Promise<JobFacetOption[]> {
+  const data = await backendJson<JobCityOptions>(
+    `/v1/jobs/cities?country=${encodeURIComponent(country)}`,
+  );
   return data?.items ?? [];
 }
 
-export async function fetchJobFacets(): Promise<JobFacetOptions | null> {
-  return backendJson<JobFacetOptions>("/v1/jobs/facets");
+/**
+ * Cities for one country, fetched from the browser when the picker opens.
+ * Not preloaded for all 18 countries: that is 18 queries to render one menu
+ * whose contents nobody may ever look at.
+ */
+export async function fetchJobCities(country: string): Promise<JobFacetOption[]> {
+  const res = await fetch(`/api/v1/jobs/cities?country=${encodeURIComponent(country)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) return [];
+  const data = (await res.json()) as JobCityOptions;
+  return data.items ?? [];
 }
 
 export async function fetchJob(id: string): Promise<JobDetail | null> {

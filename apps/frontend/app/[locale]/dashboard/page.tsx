@@ -17,7 +17,7 @@ import {
   logout,
   type Resume,
 } from "@/lib/api";
-import { COUNTRY_KEYS, FUNCTION_KEYS, SENIORITY_KEYS } from "@/components/jobs/JobSearchForm";
+import { COUNTRY_KEYS, FUNCTION_KEYS, SENIORITY_KEYS } from "@/components/jobs/facet-labels";
 import ApplicationList from "@/components/dashboard/ApplicationList";
 import EmployerViews from "@/components/dashboard/EmployerViews";
 import MatchCountCard from "@/components/dashboard/MatchCountCard";

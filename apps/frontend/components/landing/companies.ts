@@ -1,4 +1,8 @@
-import { WALL_GLYPHS, WALL_WORDMARKS, type WallGlyph } from "@/components/landing/glyphs";
+import {
+  EMPLOYER_MARKS,
+  EMPLOYER_NAMES,
+  EMPLOYER_WORDMARKS,
+} from "@/components/employer-marks";
 
 export type WallItem = {
   name: string;
@@ -8,19 +12,23 @@ export type WallItem = {
   hex: string | null;
 };
 
-const GLYPHS: WallItem[] = WALL_GLYPHS.map((glyph: WallGlyph) => ({
-  name: glyph.name,
-  d: glyph.d,
-  hex: glyph.hex,
-}));
+const GLYPHS: WallItem[] = EMPLOYER_NAMES.filter((name) => EMPLOYER_MARKS[name]).map(
+  (name) => ({ name, d: EMPLOYER_MARKS[name].d, hex: EMPLOYER_MARKS[name].hex }),
+);
 
-const WORDS: WallItem[] = WALL_WORDMARKS.map((name) => ({ name, d: null, hex: null }));
+const WORDS: WallItem[] = EMPLOYER_WORDMARKS.map((name) => ({ name, d: null, hex: null }));
 
 /**
  * The wall in display order: wordmarks spread evenly through the marks rather
  * than piled at the end, so no row of the carousel ends up all type. The rows
  * are contiguous slices of this list (see CompanyWall) — slicing cannot alias
  * the spacing the way round-robin dealing does.
+ *
+ * Every employer we carry is on the wall, marked or not: the wall's caption
+ * claims a number (EMPLOYER_COUNT) and showing a curated subset under that
+ * claim would be a quiet overstatement in one direction and a waste of real
+ * logos in the other. Each chip links to that employer's own view of the
+ * catalogue, which is why the list has to be the whole catalogue.
  */
 export const WALL_ITEMS: WallItem[] = (() => {
   const out: WallItem[] = [];
