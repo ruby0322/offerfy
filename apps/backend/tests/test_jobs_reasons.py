@@ -147,12 +147,13 @@ def test_the_undeclared_scan_leaves_ordinary_sentences_alone():
         _item(reason="Your Python work at Acme fits their Postgres stack.",
               resume=("Python", "Acme", "Postgres"), posting=("Initech",)),
         _item(reason="Strong backend experience, and Python is what they use.",
-              resume=("Python",)),
+              resume=("Python",), posting=("Python",)),
         _item(reason="Your six years of Python match a senior role at Initech.",
               resume=("Python",), posting=("Initech",)),
     ]
     for item in ok:
-        assert validate([item], facts=FACTS, scored_ids={"a"})[1] == [], item.reason
+        checked = check([item], facts=FACTS, scored_ids={"a"}, postings=_posting())
+        assert checked.dropped == [], item.reason
 
 
 def test_a_posting_cite_must_correspond_to_the_posting_when_it_is_given():
@@ -168,12 +169,12 @@ def _posting(company="Initech", title="Engineer", location="", requirements="Pyt
                              requirements=requirements)}
 
 
-def test_names_from_company_title_and_location_are_not_claims_about_the_person():
+def test_names_from_company_and_location_are_not_claims_about_the_person():
     cases = [
         ("Your Python work fits the role in Taipei.", _posting(location="Taipei, Taiwan")),
         ("Your Python work fits the Remote role.", _posting(location="Remote")),
         ("Your Python work matches the Backend requirements with AWS.",
-         _posting(title="Backend Engineer (AWS)")),
+         _posting(company="AWS")),
     ]
     for reason, postings in cases:
         item = _item(reason=reason, resume=("Python",), posting=("Python",))
@@ -208,6 +209,47 @@ def test_disclaiming_a_requirement_belongs_in_the_gap_not_the_reason():
     checked = check([as_gap], facts=FACTS, scored_ids={"a"}, postings=postings)
     assert checked.dropped == [] and checked.gaps_rejected == []
     assert checked.kept[0].gap == "Docker is new for you."
+
+
+def test_a_posting_cite_never_exempts_a_requirement_token():
+    # The model listing "Docker" as a posting cite must not launder it.
+    for tech in ("Docker", "AWS"):
+        postings = _posting(requirements=f"Python and {tech}")
+        item = _item(reason=f"Your Python work and {tech} experience fits their stack.",
+                     resume=("Python",), posting=(tech,))
+        assert check([item], facts=FACTS, scored_ids={"a"}, postings=postings).dropped == [
+            ("a", "undeclared")
+        ], tech
+
+
+def test_a_technology_in_the_title_is_not_exempt():
+    postings = _posting(title="Senior Terraform Engineer", requirements="Python")
+    item = _item(reason="Your Python and Terraform experience fits this role.",
+                 resume=("Python",), posting=("Python",))
+    assert check([item], facts=FACTS, scored_ids={"a"}, postings=postings).dropped == [
+        ("a", "undeclared")
+    ]
+    ok = _item(reason="Your Python work fits this role.", resume=("Python",), posting=("Python",))
+    assert check([ok], facts=FACTS, scored_ids={"a"}, postings=postings).dropped == []
+
+
+def test_a_gap_that_claims_the_person_did_the_missing_thing_is_rejected():
+    postings = _posting(requirements="Python and Kubernetes")
+    claim = _item(gap="You have shipped Kubernetes in prod.", gap_missing="Kubernetes",
+                  posting=("Python",))
+    checked = check([claim], facts=FACTS, scored_ids={"a"}, postings=postings)
+    assert checked.kept[0].gap is None and checked.gaps_rejected == ["a"]
+
+
+def test_a_gap_may_not_smuggle_in_a_second_invented_claim():
+    postings = _posting(requirements="Python and Docker")
+    sneaky = _item(gap="Docker experience is missing, you led Terraform migrations.",
+                   gap_missing="Docker", posting=("Python",))
+    checked = check([sneaky], facts=FACTS, scored_ids={"a"}, postings=postings)
+    assert checked.kept[0].gap is None and checked.gaps_rejected == ["a"]
+    fine = _item(gap="Docker experience is missing from your resume.", gap_missing="Docker",
+                 posting=("Python",))
+    assert check([fine], facts=FACTS, scored_ids={"a"}, postings=postings).kept[0].gap
 
 
 def test_a_posting_cite_matching_only_a_label_does_not_correspond():

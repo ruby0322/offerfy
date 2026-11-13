@@ -49,12 +49,21 @@ label); at most MAX_ITEMS prose records are kept, but WHICH postings are sent is
 the caller's cap (Task 5), not this module's.
 
 The scan is split by field. In a `reason`, name-like tokens from the posting's
-company, title and location are exempt (a city or an employer is not a claim
-about the person) but tokens from its REQUIREMENTS are not: a requirement
+company and location are exempt (a city or an employer is not a claim about
+the person) but tokens from its TITLE and REQUIREMENTS are not (titles carry
+technology names; a posting cite never exempts anything): a requirement
 mirrored back as the person's experience is the likeliest invented claim, so it
-must be declared and on the resume. The `gap` is not scanned for requirement
-tokens -- naming a requirement the person lacks is what that field is for; it
-is held to `gap_missing` instead (named, absent from the resume, in the gap).
+must be declared and on the resume. In the `gap`, the gap_missing token is allowed -- naming a requirement the
+person lacks is what that field is for. It is held to `gap_missing` (named,
+absent from the resume, in the gap).
+
+The gap IS also scanned for any other name-like token (exempting gap_missing,
+the company and the location), and must contain an absence or demand marker
+(`_ABSENCE`), since "You have shipped Kubernetes in prod." names only the gap
+token. What stays uncatchable: a gap that frames the gap_missing token ITSELF
+as something the person has done while still containing a marker ("You led
+Docker migrations, which the posting requires"). Token scanning cannot see
+that; the prompt is the only defence.
 
 Fewer than five is allowed and so is none: the honest empty state is only
 honest if the model is permitted to produce it.
@@ -104,14 +113,19 @@ PROMPT = (
     "resume_cites and posting_cites; each resume cite must also appear in the "
     "reason's own words. "
     "Completeness is required: every skill, employer, institution or technology "
-    "named in the reason must appear in resume_cites, and the posting's company, "
-    "title or location may be named freely. A skill or requirement the person "
-    "does not have never goes in the reason: say it in gap and gap_missing. "
-    "A name you did not list is rejected. "
+    "named in the reason must appear in resume_cites. Refer to the posting by its "
+    "company or location, or just say \"this role\": do not name technology "
+    "words from the title or the requirements unless the resume has them and "
+    "you list them. A skill or requirement the person does not have never goes "
+    "in the reason: say it in gap and gap_missing. A name you did not list is "
+    "rejected. "
     "gap is the single most important thing the posting asks for that the "
     "resume does not show, and it is null when there is none; when it is not "
     "null, put the missing thing, as the posting words it, in gap_missing and "
-    "repeat it in the gap. Never write a gap for something the resume lists. "
+    "repeat it in the gap. A gap says what is ABSENT or what the posting asks "
+    "for (not, no, missing, without, lacks, new to, the posting wants); it never "
+    "describes anything the person has done, and it names nothing else. "
+    "Never write a gap for something the resume lists. "
     "Never invent experience: do not claim a skill, employer, title, years or "
     "result that the resume facts do not state, and never guess what the "
     "person did. "
@@ -215,12 +229,13 @@ def _on_resume(facts: Any, cite: str) -> bool:
 class PostingText:
     """The field VALUES of one posting, as shown to the model -- no labels.
 
-    Kept apart because the scan treats them differently. Company, title and
-    location are not claims about the person, so a name found there is exempt.
-    Requirements are: a requirement mirrored back as the person's experience is
-    the most likely invented claim, so in a `reason` a requirement must be
-    declared and on the resume like any other skill. In a `gap` a requirement
-    is exactly what the field is for.
+    Kept apart because the scan treats them differently. Company and location
+    are not claims about the person, so a name found there is exempt. The title
+    is NOT: it routinely contains technology names ("Senior Terraform
+    Engineer"), so a title word in a `reason` must be declared and on the
+    resume. Requirements likewise: a requirement mirrored back as the person's
+    experience is the most likely invented claim. In a `gap` the gap_missing
+    token is exactly what the field is for.
     """
 
     company: str
@@ -284,8 +299,10 @@ def check(
 
     `postings` maps job_id to the posting's field values. When given, a posting
     cite must be found in them (correspondence) and name-like tokens from the
-    posting's company, title and location are exempt from the undeclared scan
-    (requirements are not). Without it the posting half only checks that
+    posting's company and location are exempt from the undeclared scan (title
+    and requirements are not). Posting cites prove the sentence is about THIS
+    posting; they never exempt a token, since that is a different question from
+    whether a word is a claim about the person. Without it the posting half only checks that
     something was declared (presence) and nothing is exempt.
 
     The cap (MAX_ITEMS) is enforced here: the prompt asks for at most five, but
@@ -317,24 +334,25 @@ def check(
             out.dropped.append((job_id, "uncited"))
             continue
         posting_cites = [c for c in item.posting_cites if len(c.strip()) >= MIN_CITE_CHARS]
-        header = ""
+        # Company and location only; see PostingText for why not the title.
+        exempt = ""
         if postings is not None:
             posting = postings.get(job_id)
             posting_cites = [c for c in posting_cites if posting and _mentions(posting.everything, c)]
-            header = posting.header if posting else ""
+            exempt = "\n".join([posting.company, posting.location]) if posting else ""
         if not posting_cites:
             out.dropped.append((job_id, "uncited"))
             continue
         # Completeness is asked of the model in the prompt; this is the cheap
         # check that it kept the promise for name-like tokens.
-        if _undeclared_names(reason, declared + posting_cites + [header], facts):
+        if _undeclared_names(reason, declared + [exempt], facts):
             out.dropped.append((job_id, "undeclared"))
             continue
         seen.add(job_id)
         if len(out.kept) >= MAX_ITEMS:
             out.dropped.append((job_id, "over_cap"))
             continue
-        gap = _checked_gap(item, facts)
+        gap = _checked_gap(item, facts, exempt)
         if gap is None and (item.gap or "").strip():
             out.gaps_rejected.append(job_id)
         out.kept.append(Prose(job_id=job_id, reason=reason, gap=gap))
@@ -353,7 +371,17 @@ def validate(
     return checked.kept, checked.dropped
 
 
-def _checked_gap(item: ProseItem, facts: Any) -> str | None:
+# Words that frame the gap as an absence or as the posting's demand. A gap
+# that has none is describing the person, which is the claim this module exists
+# to stop. ASCII words are matched whole; the CJK ones as substrings.
+_ABSENCE = re.compile(
+    r"(?<![a-z])(?:not|no|never|missing|without|lack\w*|new|absent|unfamiliar|"
+    r"wants?|requires?|needs?|expects?|seeks?|asks?)(?![a-z])|n't|沒有|缺|未|無|不",
+    re.IGNORECASE,
+)
+
+
+def _checked_gap(item: ProseItem, facts: Any, exempt: str = "") -> str | None:
     gap = cut(item.gap, GAP_CHARS)
     missing = (item.gap_missing or "").strip()
     if not gap or not missing:
@@ -363,6 +391,11 @@ def _checked_gap(item: ProseItem, facts: Any) -> str | None:
     if _on_resume(facts, missing):
         return None
     if not _mentions(gap, missing):
+        return None
+    if not _ABSENCE.search(gap):
+        return None
+    # Nothing else name-like may appear: "...you led Terraform migrations".
+    if _undeclared_names(gap, [missing, exempt], facts):
         return None
     return gap
 
