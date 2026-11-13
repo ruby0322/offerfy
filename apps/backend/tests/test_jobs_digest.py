@@ -71,6 +71,29 @@ def test_a_smaller_override_truncates_both_tracks():
     assert dg.ITEMS_PER_TRACK == 5
 
 
+def test_a_negative_override_yields_empty_tracks_not_a_tail_slice():
+    scored = [sc(f"j{i}", S, i / 10) for i in range(4)]
+    out = dg.classify(scored, new_job_ids={"j0"}, items_per_track=-2)
+    assert out == {"strong_fit": [], "new_this_week": []}
+
+
+def test_an_unknown_or_empty_tier_is_in_neither_track():
+    out = dg.classify(
+        [sc("a", "", 0.9), sc("b", "Maybe", 0.8), sc("c", W, 0.1)],
+        new_job_ids={"a", "b", "c"},
+    )
+    assert ids(out["strong_fit"]) == []
+    assert ids(out["new_this_week"]) == ["c"]
+
+
+def test_equal_scores_order_by_job_id_whatever_the_input_order():
+    a, b = sc("a", S, 0.5), sc("b", S, 0.5)
+    for scored in ([a, b], [b, a]):
+        out = dg.classify(scored, new_job_ids={"a", "b"})
+        assert ids(out["strong_fit"]) == ["a", "b"]
+        assert ids(out["new_this_week"]) == ["a", "b"]
+
+
 def test_classify_does_not_mutate_its_input():
     scored = [sc("a", S, 0.1), sc("b", S, 0.9)]
     dg.classify(scored, new_job_ids=set())
@@ -141,6 +164,30 @@ def test_latest_for_user_eager_loads_items_and_jobs_in_order(db_session):
     got = dg.latest_for_user(db_session, user=user)
     db_session.expunge_all()  # any lazy load from here would raise
     assert [(i.rank, i.job.title) for i in got.items] == [(0, "T1"), (1, "T0")]
+
+
+def test_items_are_ordered_by_track_before_rank(db_session):
+    user = make_user(db_session, "u1")
+    d = make_digest(db_session, user, T0)
+    jobs = []
+    for i in range(2):
+        job = Job(
+            source="greenhouse", source_id=str(i), company="Acme", title=f"T{i}",
+            apply_url="https://x", source_url="https://x",
+        )
+        db_session.add(job)
+        jobs.append(job)
+    db_session.flush()
+    # By rank alone strong_fit (0) would lead; by (track, rank) new_this_week does.
+    for job, track, rank in (
+        (jobs[0], "strong_fit", 0), (jobs[0], "new_this_week", 1), (jobs[1], "strong_fit", 2),
+    ):
+        db_session.add(DigestItem(digest_id=d.id, job_id=job.id, rank=rank, track=track))
+    db_session.commit()
+    got = dg.latest_for_user(db_session, user=user)
+    assert [(i.track, i.rank) for i in got.items] == [
+        ("new_this_week", 1), ("strong_fit", 0), ("strong_fit", 2),
+    ]
 
 
 def test_mark_opened_stamps_once_and_is_idempotent(db_session):

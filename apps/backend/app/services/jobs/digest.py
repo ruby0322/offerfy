@@ -38,7 +38,9 @@ TRACKS = ("strong_fit", "new_this_week")
 STRONG_TIERS = ("Strong fit", "Good fit")
 ITEMS_PER_TRACK = 5
 
-_NOT_A_FIT = "Not a fit"
+# An allowlist: the tiers are a closed vocabulary owned by score.py, and a
+# malformed or empty tier must drop out rather than be shown as a match.
+_NEW_TIERS = ("Strong fit", "Good fit", "Worth a look")
 
 
 def classify(
@@ -47,10 +49,12 @@ def classify(
     new_job_ids: set[str] | frozenset[str],
     items_per_track: int | None = None,
 ) -> dict[str, list[Scored]]:
-    limit = ITEMS_PER_TRACK if items_per_track is None else items_per_track
-    ranked = sorted(scored, key=lambda s: s.fit_score, reverse=True)  # stable
+    limit = max(0, ITEMS_PER_TRACK if items_per_track is None else items_per_track)
+    # Ties on score fall to job_id, so rank (persisted) does not depend on the
+    # order the scoring pass happened to return.
+    ranked = sorted(scored, key=lambda s: (-s.fit_score, s.job_id))
     strong = [s for s in ranked if s.tier in STRONG_TIERS]
-    fresh = [s for s in ranked if s.tier != _NOT_A_FIT and s.job_id in new_job_ids]
+    fresh = [s for s in ranked if s.tier in _NEW_TIERS and s.job_id in new_job_ids]
     return {"strong_fit": strong[:limit], "new_this_week": fresh[:limit]}
 
 
