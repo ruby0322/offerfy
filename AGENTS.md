@@ -69,8 +69,21 @@ smoke (§5)
 ```
 
 Verified end to end 2026-11-13 deploying slice 3 (migration `032_applications`
-plus new routers plus a rebuilt dashboard). `docs/deploy.md` step 4 still reads
-web-then-API and should be amended to match.
+plus new routers plus a rebuilt dashboard).
+
+**The exception, and it is real: consent-bearing text.** If the release changes
+user-facing text that the API also *records* something about, API-first is
+actively wrong. A policy version stamped by the backend while the frontend still
+serves the previous text is a **false** record — the row claims consent to text
+the user never saw — which is worse than the stale record web-first would give.
+Ordering cannot fix that case, only choose which way the window is wrong, so
+collapse the window instead: HUP and restart back to back with no verification
+step between them, and smoke after. A release that adds routes *and* changes
+consent-bearing text wants a backward-compatible API or two deploys.
+
+`docs/deploy.md` carries the same rule and the same exception as of 2026-11-13
+(its *Which half goes first* section); the two agree. If you change one, change
+the other — deploy.md is gitignored, so only this file's version is reviewable.
 
 Rollback is a directory swap plus a restart:
 
