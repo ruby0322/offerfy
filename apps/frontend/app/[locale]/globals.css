@@ -593,12 +593,143 @@ textarea {
   margin-top: 1.25rem;
 }
 
-.jobs-apply {
-  display: inline-block;
-  padding: 0.5rem 0.9rem;
-  background: var(--ink);
-  color: var(--paper);
+/* Every control in the posting's action row is this one shape. They were
+   three different ones -- the apply link carried its own padding and body
+   font size, the rest a Tailwind utility string with smaller text and no
+   radius -- so the row read as a pile of unrelated things. Fixed height
+   rather than padding alone, because a link and a button do not agree on
+   line-height. */
+.jobs-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 40px;
+  padding: 0 0.95rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--sheet, var(--paper));
+  color: var(--ink);
+  font-size: 0.9rem;
   text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.jobs-action:hover:not(:disabled) {
+  border-color: var(--ink);
+  background: var(--hover);
+}
+
+.jobs-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.jobs-action.is-primary {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+
+.jobs-action.is-primary:hover {
+  background: color-mix(in srgb, var(--ink) 88%, var(--paper));
+  border-color: var(--ink);
+}
+
+.jobs-action .jobs-action-caret {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.jobs-action.is-primary .jobs-action-caret {
+  color: var(--paper);
+  opacity: 0.7;
+}
+
+/* The master picker hanging off "Tailor for this role". */
+.jobs-tailor {
+  position: relative;
+  display: inline-flex;
+}
+
+.jobs-tailor-menu {
+  display: none;
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  min-width: 15rem;
+  max-width: calc(100vw - 2.5rem);
+  padding: 0.55rem;
+  background: var(--sheet, var(--paper));
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 12%);
+}
+
+.jobs-tailor[data-open="1"] .jobs-tailor-menu {
+  display: block;
+}
+
+.jobs-tailor-menu h3 {
+  margin: 0.15rem 0.35rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--clay);
+}
+
+.jobs-tailor-opt {
+  display: block;
+  width: 100%;
+  padding: 0.4rem 0.45rem;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.88rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.jobs-tailor-opt:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.jobs-tailor-opt:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.jobs-tailor-when {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+/* The kicker sits on the title's line rather than above it: as a block it
+   read as a stray dot with a gap under it. */
+.jobs-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.jobs-head .blog-kicker {
+  margin-bottom: 0;
+  flex: 0 0 6px;
+}
+
+/* On the posting page the kicker leads the meta line instead, so it cannot
+   be a flex child -- the row is prose with "·" separators, and a flex gap
+   would push every one of them apart. */
+.blog-meta .blog-kicker {
+  display: inline-block;
+  margin: 0 0.45rem 0 0;
+  vertical-align: 0.05em;
 }
 
 .jobs-attribution {

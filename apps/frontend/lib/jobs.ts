@@ -168,17 +168,28 @@ export function jobQueryString(query: JobQuery): string {
   return text ? `?${text}` : "";
 }
 
+const EMPTY_LIST: JobList = { items: [], next_cursor: null, total: 0 };
+
+/** Same reasoning as fetchJobPulse: a 200 is not a promise about the body. */
+function asJobList(raw: Partial<JobList> | null): JobList {
+  if (!raw || !Array.isArray(raw.items)) return EMPTY_LIST;
+  return {
+    items: raw.items,
+    next_cursor: typeof raw.next_cursor === "string" ? raw.next_cursor : null,
+    total: typeof raw.total === "number" ? raw.total : raw.items.length,
+  };
+}
+
 export async function fetchJobList(query: JobQuery): Promise<JobList> {
   const qs = jobListParams(query).toString();
-  const data = await backendJson<JobList>(`/v1/jobs?${qs}`);
-  return data ?? { items: [], next_cursor: null, total: 0 };
+  return asJobList(await backendJson<Partial<JobList>>(`/v1/jobs?${qs}`));
 }
 
 export async function fetchJobListPage(query: JobQuery, cursor: string): Promise<JobList> {
   const qs = jobListParams(query, { cursor }).toString();
   const res = await fetch(`/api/v1/jobs?${qs}`, { cache: "no-store" });
-  if (!res.ok) return { items: [], next_cursor: null, total: 0 };
-  return (await res.json()) as JobList;
+  if (!res.ok) return EMPTY_LIST;
+  return asJobList((await res.json()) as Partial<JobList>);
 }
 
 // NOTE: /v1/jobs/featured (and the spotlight scoring behind it) no longer
@@ -188,18 +199,54 @@ export async function fetchJobListPage(query: JobQuery, cursor: string): Promise
 // retire them or give the spotlight a home again is a product call, not a
 // side effect of this redesign.
 
+/** Shape-checked, for the reason fetchJobPulse spells out. */
+function facetList(value: unknown): JobFacetOption[] {
+  return Array.isArray(value) ? (value as JobFacetOption[]) : [];
+}
+
 export async function fetchJobFacets(query: JobQuery = {}): Promise<JobFacetOptions | null> {
   const params = jobListParams(query);
   params.delete("limit");
   const qs = params.toString();
-  return backendJson<JobFacetOptions>(`/v1/jobs/facets${qs ? `?${qs}` : ""}`);
+  const raw = await backendJson<Partial<JobFacetOptions>>(
+    `/v1/jobs/facets${qs ? `?${qs}` : ""}`,
+  );
+  if (!raw) return null;
+  return {
+    countries: facetList(raw.countries),
+    regions: facetList(raw.regions),
+    seniorities: facetList(raw.seniorities),
+    functions: facetList(raw.functions),
+    companies: facetList(raw.companies),
+    employer_total: typeof raw.employer_total === "number" ? raw.employer_total : 0,
+  };
 }
 
+/**
+ * The live board's data, or null when there is nothing trustworthy to show.
+ *
+ * Shape-checked rather than cast. `backendJson` only promises that the
+ * response was 200 and parsed as JSON, and JobPulseBoard reads
+ * `pulse.newest.length` directly — so a 200 carrying anything but a pulse
+ * (a proxy's own JSON, a future field rename, a route that starts matching
+ * a different handler) took the whole /jobs page down with a 500 rather
+ * than hiding one section. Found by a stub whose path matching was too
+ * loose, which is the same accident an API change would be.
+ */
 export async function fetchJobPulse(query: JobQuery = {}): Promise<JobPulse | null> {
   const params = jobListParams(query);
   params.delete("limit");
   const qs = params.toString();
-  return backendJson<JobPulse>(`/v1/jobs/pulse${qs ? `?${qs}` : ""}`);
+  const raw = await backendJson<Partial<JobPulse>>(`/v1/jobs/pulse${qs ? `?${qs}` : ""}`);
+  if (!raw || typeof raw.active_total !== "number") return null;
+  return {
+    active_total: raw.active_total,
+    new_24h: typeof raw.new_24h === "number" ? raw.new_24h : 0,
+    employer_count: typeof raw.employer_count === "number" ? raw.employer_count : 0,
+    refreshed_at: typeof raw.refreshed_at === "string" ? raw.refreshed_at : null,
+    newest: Array.isArray(raw.newest) ? raw.newest : [],
+    top_employers: Array.isArray(raw.top_employers) ? raw.top_employers : [],
+  };
 }
 
 /**
@@ -208,8 +255,8 @@ export async function fetchJobPulse(query: JobQuery = {}): Promise<JobPulse | nu
  */
 export async function fetchJobCount(query: JobQuery): Promise<number | undefined> {
   const qs = jobListParams(query, { limit: 1 }).toString();
-  const data = await backendJson<JobList>(`/v1/jobs?${qs}`);
-  return data?.total;
+  const data = await backendJson<Partial<JobList>>(`/v1/jobs?${qs}`);
+  return typeof data?.total === "number" ? data.total : undefined;
 }
 
 /** Cities for one country, from the server (board pages render these). */
@@ -230,8 +277,8 @@ export async function fetchJobCities(country: string): Promise<JobFacetOption[]>
     cache: "no-store",
   });
   if (!res.ok) return [];
-  const data = (await res.json()) as JobCityOptions;
-  return data.items ?? [];
+  const data = (await res.json()) as Partial<JobCityOptions>;
+  return Array.isArray(data.items) ? data.items : [];
 }
 
 export async function fetchJob(id: string): Promise<JobDetail | null> {

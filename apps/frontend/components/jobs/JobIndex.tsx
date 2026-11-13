@@ -34,8 +34,10 @@ export default async function JobIndex({
 
   return (
     <div className="jobs-index mx-auto max-w-[72rem] px-5">
-      <div className="blog-kicker" aria-hidden="true" />
-      <h1 className="font-display">{t("title")}</h1>
+      <div className="jobs-head">
+        <div className="blog-kicker" aria-hidden="true" />
+        <h1 className="font-display">{t("title")}</h1>
+      </div>
       <p className="jobs-lead">{t("lead")}</p>
 
       {pulse ? <JobPulseBoard pulse={pulse} /> : null}

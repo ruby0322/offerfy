@@ -227,7 +227,11 @@
     "countryPh": "Philippines",
     "countryTh": "Thailand",
     "countryVn": "Vietnam",
-    "countryId": "Indonesia"
+    "countryId": "Indonesia",
+    "tailorFrom": "Which resume to tailor",
+    "tailorUntitled": "Untitled resume",
+    "tailorOneMaster": "Tailor for this role",
+    "tailorUpdated": "updated {date}"
   },
   "landing": {
     "hero": {

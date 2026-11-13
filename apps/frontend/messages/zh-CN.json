@@ -230,7 +230,11 @@
     "countryPh": "菲律宾",
     "countryTh": "泰国",
     "countryVn": "越南",
-    "countryId": "印尼"
+    "countryId": "印尼",
+    "tailorFrom": "要定制哪一份简历",
+    "tailorUntitled": "未命名简历",
+    "tailorOneMaster": "为这个职位定制",
+    "tailorUpdated": "{date} 更新"
   },
   "landing": {
     "hero": {
