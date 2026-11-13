@@ -10,7 +10,10 @@ from tests.test_applications_service import _job
 from tests.test_match_sweep import _posting
 from tests.test_talent_api import LIST, _bearer, _candidate, _key
 
-TOP_LEVEL = {"preference", "match_count", "applications", "resume_health", "employer_views"}
+TOP_LEVEL = {
+    "preference", "match_count", "applications", "resume_health", "employer_views",
+    "digest",
+}
 HEALTH_KEYS = {
     "has_master", "published", "facts_state", "matching_revision_current", "needs_rebuild",
 }
@@ -98,12 +101,35 @@ def _writes(db_session, call):
 def test_a_get_writes_nothing(client, db_session):
     # Pins "the transient seed stays transient" and "a visit spends no
     # credits" (a facts rebuild or a metered call would have to write).
+    #
+    # One exception, named: with a digest present, the GET stamps that digest's
+    # opened_at (the build's eligibility gate reads it). Nothing else may be
+    # written; test_marking_opened_is_the_only_write_a_dashboard_GET_makes in
+    # test_dashboard_digest.py pins that exception's exact shape. This test
+    # stays strict for everyone without a digest, and for everyone whose
+    # digest is already opened.
     user = _signed_in(client, db_session)
     res, writes = _writes(db_session, lambda: client.get("/v1/dashboard"))
     assert res.status_code == 200
     assert writes == []
     db_session.expire_all()
     assert db_session.query(JobPreference).filter_by(user_id=user.id).count() == 0
+
+    from datetime import datetime, timezone
+
+    from app.models import Digest
+
+    now = datetime.now(timezone.utc)
+    db_session.add(
+        Digest(
+            user_id=user.id, period_start=now, built_at=now, model="m",
+            input_hash="h" * 64, status="empty", candidate_count=0, opened_at=now,
+        )
+    )
+    db_session.commit()
+    res, writes = _writes(db_session, lambda: client.get("/v1/dashboard"))
+    assert res.status_code == 200 and res.json()["digest"] is not None
+    assert writes == []
 
 
 def test_a_populated_person_gets_their_own_non_default_numbers(client, db_session):
