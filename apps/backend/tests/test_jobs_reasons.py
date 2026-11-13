@@ -16,6 +16,7 @@ from app.services.jobs.reasons import (
     GAP_CHARS,
     REASON_CHARS,
     ProseItem,
+    check,
     validate,
     write_reasons,
 )
@@ -89,7 +90,7 @@ def test_a_reason_citing_a_real_employer_survives():
     assert dropped == [] and len(kept) == 1
 
 
-def test_a_reason_must_also_cite_the_posting():
+def test_a_reason_with_no_posting_cite_declared_is_uncited():
     item = _item(posting=())
     assert validate([item], facts=FACTS, scored_ids={"a"})[1] == [("a", "uncited")]
 
@@ -125,6 +126,59 @@ def test_fewer_than_five_is_allowed_and_so_is_none():
 def test_a_repeated_job_id_keeps_the_first():
     kept, dropped = validate([_item("a"), _item("a")], facts=FACTS, scored_ids={"a"})
     assert len(kept) == 1 and dropped == [("a", "duplicate")]
+
+
+def test_one_off_resume_cite_among_valid_ones_rejects_the_item():
+    # "Rust" must not be discarded quietly while "Python" vouches for the sentence.
+    item = _item(reason="Your Python and Rust experience fits.", resume=("Python", "Rust"))
+    kept, dropped = validate([item], facts=FACTS, scored_ids={"a"})
+    assert kept == [] and dropped == [("a", "uncited")]
+
+
+def test_a_name_in_the_sentence_that_was_never_declared_is_rejected():
+    item = _item(reason="Your Python and Rust experience fits.", resume=("Python",))
+    kept, dropped = validate([item], facts=FACTS, scored_ids={"a"})
+    assert kept == [] and dropped == [("a", "undeclared")]
+
+
+def test_the_undeclared_scan_leaves_ordinary_sentences_alone():
+    ok = [
+        _item(reason="Your Python work at Acme fits their Postgres stack.",
+              resume=("Python", "Acme", "Postgres"), posting=("Initech",)),
+        _item(reason="Strong backend experience, and Python is what they use.",
+              resume=("Python",)),
+        _item(reason="Your six years of Python match a senior role at Initech.",
+              resume=("Python",), posting=("Initech",)),
+    ]
+    for item in ok:
+        assert validate([item], facts=FACTS, scored_ids={"a"})[1] == [], item.reason
+
+
+def test_a_posting_cite_must_correspond_to_the_posting_when_it_is_given():
+    item = _item(posting=("Kubernetes",))
+    assert check([item], facts=FACTS, scored_ids={"a"},
+                 postings={"a": "Requirements Python"}).dropped == [("a", "uncited")]
+    assert check([_item()], facts=FACTS, scored_ids={"a"},
+                 postings={"a": "Requirements Python services"}).dropped == []
+
+
+def test_a_valid_retry_is_not_shadowed_by_an_earlier_bad_copy():
+    bad = _item("a", reason="Your Rust work fits.", resume=("Rust",))
+    kept, dropped = validate([bad, _item("a")], facts=FACTS, scored_ids={"a"})
+    assert [p.job_id for p in kept] == ["a"] and dropped == [("a", "uncited")]
+
+
+def test_no_more_than_five_prose_records_are_kept():
+    ids = {str(n) for n in range(8)}
+    kept, dropped = validate([_item(i) for i in sorted(ids)], facts=FACTS, scored_ids=ids)
+    assert len(kept) == 5 and [why for _, why in dropped] == ["over_cap"] * 3
+
+
+def test_a_rejected_gap_is_traced_but_not_a_dropped_record():
+    fake = _item("a", gap="You have no Postgres experience.", gap_missing="Postgres")
+    checked = check([fake, _item("b")], facts=FACTS, scored_ids={"a", "b"})
+    assert checked.gaps_rejected == ["a"] and checked.dropped == []
+    assert [p.gap for p in checked.kept] == [None, None]
 
 
 # --- the provider call -------------------------------------------------------

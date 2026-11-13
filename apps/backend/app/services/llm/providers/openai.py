@@ -72,7 +72,7 @@ def responses_url(base: str) -> str:
     return base + "/v1/responses"
 
 
-def _output_text(data: dict, output: list) -> str:
+def output_text(data: dict, output: list) -> str:
     """The answer text, from the convenience field or by walking the blocks.
 
     `output_text` is what the API provides and what is used when present; the
@@ -99,6 +99,9 @@ def _output_text(data: dict, output: list) -> str:
             ):
                 parts.append(block["text"])
     return "".join(parts)
+
+
+_output_text = output_text  # the name existing callers import
 
 
 def _citation_sources(output: list) -> list[dict[str, str]]:
@@ -343,7 +346,7 @@ class OpenAIProvider:
         yield {
             "kind": ROUND,
             "result": RoundResult(
-                text=_output_text(data, output),
+                text=output_text(data, output),
                 calls=calls,
                 raw=output,
                 usage=_usage_counts(data),

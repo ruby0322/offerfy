@@ -37,6 +37,16 @@ Length is clamped, never rejected (the discipline of `resume_facts.clamp_payload
 truncating loses a clause, rejecting loses the sentence. Cites are checked
 against the clamped text, because that is what the person reads.
 
+Two honest limits. The cite check trusts what the model declares, so a
+sentence that names something it did not declare is only caught by a
+conservative scan for name-like ASCII tokens (capitalised mid-sentence, inner
+capital, digit, + or #); a LOWERCASE technology the model neither declares nor
+capitalises ("kubernetes") is a known hole, as is any non-ASCII claim. The scan
+errs towards dropping a sentence. Second, `validate` can only check a posting
+cite against the posting when `check` is given the posting text (write_reasons
+does); at most MAX_ITEMS prose records are kept, but WHICH postings are sent is
+the caller's cap (Task 5), not this module's.
+
 Fewer than five is allowed and so is none: the honest empty state is only
 honest if the model is permitted to produce it.
 
@@ -56,8 +66,8 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from app.config import get_settings
-from app.services.jobs.score import Scored, _facts_text, _Failed, _requirements
-from app.services.llm import _output_text, _responses_url
+from app.services.jobs.score import ScoreFailed, Scored, facts_text, requirements
+from app.services.llm.providers.openai import output_text, responses_url
 from app.services.metering import metered, system_guard
 from app.services.resume_facts import PROFILE_FALLBACK_MODEL, PROFILE_TIMEOUT, cut, usage_of
 
@@ -84,6 +94,9 @@ PROMPT = (
     "the posting, and you must list each cite exactly as written in "
     "resume_cites and posting_cites; each resume cite must also appear in the "
     "reason's own words. "
+    "Completeness is required: every skill, employer, institution or technology "
+    "named in the reason must appear in resume_cites, and the posting's company "
+    "and title, if named, in posting_cites; a name you did not list is rejected. "
     "gap is the single most important thing the posting asks for that the "
     "resume does not show, and it is null when there is none; when it is not "
     "null, put the missing thing, as the posting words it, in gap_missing and "
@@ -121,6 +134,9 @@ class Prose:
 class ProseRun:
     prose: list[Prose] = field(default_factory=list)
     dropped: list[tuple[str, str]] = field(default_factory=list)
+    # Job ids whose gap was suppressed (manufactured or unverifiable). Not in
+    # `dropped`, which means "whole record removed"; the reason survived.
+    gaps_rejected: list[str] = field(default_factory=list)
     error: str | None = None
     usage: dict[str, Any] = field(default_factory=dict)
     model: str = ""
@@ -184,6 +200,106 @@ def _on_resume(facts: Any, cite: str) -> bool:
     return f"|{token}|" in skills.casefold() or _mentions(search, token)
 
 
+@dataclass
+class Checked:
+    kept: list[Prose] = field(default_factory=list)
+    dropped: list[tuple[str, str]] = field(default_factory=list)
+    gaps_rejected: list[str] = field(default_factory=list)
+
+
+# An ASCII token of 3+ characters that looks like a name or a technology:
+# capitalised (but not merely sentence-initial), or carrying an inner capital,
+# a digit, or + / #.  Lowercase technologies ("kubernetes") are NOT caught --
+# a known limitation, see the module docstring.
+_TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9+#]{2,}")
+
+
+def _undeclared_names(reason: str, allowed: list[str], facts: Any) -> list[str]:
+    """Name-like tokens in the sentence that the resume, the declared cites
+    and the posting cites all fail to account for."""
+    found = []
+    for match in _TOKEN.finditer(reason):
+        token = match.group(0)
+        start = match.start()
+        before = reason[:start].rstrip()
+        sentence_initial = not before or before[-1] in ".!?"
+        looks_named = (
+            (token[0].isupper() and not sentence_initial)
+            or any(c.isupper() for c in token[1:])
+            or any(c.isdigit() or c in "+#" for c in token)
+        )
+        if not looks_named:
+            continue
+        if _on_resume(facts, token) or any(_mentions(c, token) for c in allowed):
+            continue
+        found.append(token)
+    return found
+
+
+def check(
+    items: list[ProseItem],
+    *,
+    facts: Any,
+    scored_ids: set[str],
+    postings: dict[str, str] | None = None,
+) -> Checked:
+    """`validate` plus the ids whose gap was suppressed.
+
+    `postings` maps job_id to the posting text the model was shown. When given,
+    a posting cite must be found in it (correspondence); without it the
+    posting half only checks that something was declared (presence).
+
+    The cap (MAX_ITEMS) is enforced here: the prompt asks for at most five, but
+    a prompt is not a bound. The caller still owns WHICH postings are sent.
+    """
+    out = Checked()
+    seen: set[str] = set()
+    for item in items:
+        job_id = item.job_id
+        if job_id not in scored_ids:
+            out.dropped.append((job_id, "unknown_job"))
+            continue
+        if job_id in seen:
+            out.dropped.append((job_id, "duplicate"))
+            continue
+        reason = cut(item.reason, REASON_CHARS)
+        if not reason:
+            out.dropped.append((job_id, "empty"))
+            continue
+        declared = [c for c in item.resume_cites if c.strip()]
+        # EVERY declared cite must be on the resume. Filtering to the valid
+        # ones and vouching with any of them would let "Python and Rust" ship
+        # on Python's credit while Rust is silently discarded.
+        if not declared or not all(_on_resume(facts, c) for c in declared):
+            out.dropped.append((job_id, "uncited"))
+            continue
+        # A cite only counts if the sentence says it, else it is decoration.
+        if not any(_mentions(reason, c) for c in declared):
+            out.dropped.append((job_id, "uncited"))
+            continue
+        posting_cites = [c for c in item.posting_cites if len(c.strip()) >= MIN_CITE_CHARS]
+        if postings is not None:
+            text = postings.get(job_id, "")
+            posting_cites = [c for c in posting_cites if _mentions(text, c)]
+        if not posting_cites:
+            out.dropped.append((job_id, "uncited"))
+            continue
+        # Completeness is asked of the model in the prompt; this is the cheap
+        # check that it kept the promise for name-like tokens.
+        if _undeclared_names(reason, declared + posting_cites, facts):
+            out.dropped.append((job_id, "undeclared"))
+            continue
+        seen.add(job_id)
+        if len(out.kept) >= MAX_ITEMS:
+            out.dropped.append((job_id, "over_cap"))
+            continue
+        gap = _checked_gap(item, facts)
+        if gap is None and (item.gap or "").strip():
+            out.gaps_rejected.append(job_id)
+        out.kept.append(Prose(job_id=job_id, reason=reason, gap=gap))
+    return out
+
+
 def validate(
     items: list[ProseItem], *, facts: Any, scored_ids: set[str]
 ) -> tuple[list[Prose], list[tuple[str, str]]]:
@@ -192,31 +308,8 @@ def validate(
     Pure. Returns (kept, dropped) where dropped is (job_id, why). A dropped
     record is dropped from the PROSE list only -- see the module docstring.
     """
-    kept: list[Prose] = []
-    dropped: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    for item in items:
-        job_id = item.job_id
-        if job_id not in scored_ids:
-            dropped.append((job_id, "unknown_job"))
-            continue
-        if job_id in seen:
-            dropped.append((job_id, "duplicate"))
-            continue
-        seen.add(job_id)
-        reason = cut(item.reason, REASON_CHARS)
-        if not reason:
-            dropped.append((job_id, "empty"))
-            continue
-        resume_cites = [c for c in item.resume_cites if _on_resume(facts, c)]
-        # A cite only counts if the sentence says it, else it is decoration.
-        vouched = any(_mentions(reason, c) for c in resume_cites)
-        has_posting_cite = any(len(c.strip()) >= MIN_CITE_CHARS for c in item.posting_cites)
-        if not (vouched and has_posting_cite):
-            dropped.append((job_id, "uncited"))
-            continue
-        kept.append(Prose(job_id=job_id, reason=reason, gap=_checked_gap(item, facts)))
-    return kept, dropped
+    checked = check(items, facts=facts, scored_ids=scored_ids)
+    return checked.kept, checked.dropped
 
 
 def _checked_gap(item: ProseItem, facts: Any) -> str | None:
@@ -256,13 +349,13 @@ def _posting_block(scored: Scored, job: Any) -> str:
             f"Tier: {scored.tier}",
             f"Probabilities: {comps}",
             "Requirements:",
-            _requirements(getattr(job, "description_text", "")),
+            requirements(getattr(job, "description_text", "")),
         ]
     )
 
 
-def _request_body(model: str, facts_text: str, blocks: list[str]) -> dict[str, Any]:
-    parts = [PROMPT, "", "RESUME FACTS:", facts_text, "", f"POSTINGS (at most {MAX_ITEMS} items):"]
+def _request_body(model: str, resume_text: str, blocks: list[str]) -> dict[str, Any]:
+    parts = [PROMPT, "", "RESUME FACTS:", resume_text, "", f"POSTINGS (at most {MAX_ITEMS} items):"]
     parts += ["\n---\n".join(blocks)]
     return {
         "model": model,
@@ -333,15 +426,14 @@ async def write_reasons(db, *, user, facts, scored: list[Scored], jobs: list[Any
         run.error = "llm_not_configured"
         return run
     try:
-        facts_text = _facts_text(facts)
-    except _Failed as exc:
+        resume_text = facts_text(facts)
+    except ScoreFailed as exc:
         run.error = str(exc)
         return run
 
-    body = _request_body(
-        REASON_MODEL, facts_text, [_posting_block(s, by_id[s.job_id]) for s in survivors]
-    )
-    url = _responses_url(settings.openai_base_url or "https://api.openai.com/v1")
+    posting_texts = {s.job_id: _posting_block(s, by_id[s.job_id]) for s in survivors}
+    body = _request_body(REASON_MODEL, resume_text, list(posting_texts.values()))
+    url = responses_url(settings.openai_base_url or "https://api.openai.com/v1")
     headers = {
         "Authorization": f"Bearer {settings.openai_api_key}",
         "Content-Type": "application/json",
@@ -365,7 +457,7 @@ async def write_reasons(db, *, user, facts, scored: list[Scored], jobs: list[Any
     run.usage = usage
 
     output = data.get("output") if isinstance(data.get("output"), list) else []
-    text = _output_text(data, output)
+    text = output_text(data, output)
     if not text.strip():
         run.error = "no_output"
         return run
@@ -379,7 +471,13 @@ async def write_reasons(db, *, user, facts, scored: list[Scored], jobs: list[Any
         )
         run.error = "invalid_payload"
         return run
-    run.prose, run.dropped = validate(
-        batch.items, facts=facts, scored_ids={s.job_id for s in survivors}
+    checked = check(
+        batch.items,
+        facts=facts,
+        scored_ids={s.job_id for s in survivors},
+        postings={s.job_id: posting_texts[s.job_id] for s in survivors},
+    )
+    run.prose, run.dropped, run.gaps_rejected = (
+        checked.kept, checked.dropped, checked.gaps_rejected,
     )
     return run

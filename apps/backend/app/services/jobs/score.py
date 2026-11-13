@@ -115,7 +115,7 @@ class ScoreRun:
     model: str = ""
 
 
-class _Failed(Exception):
+class ScoreFailed(Exception):
     """A provider fault for one pair. Carries the message for `ScoreRun.error`
     and whatever usage the response reported: a call that failed to parse or
     came back 4xx/5xx may still have been billed, and must still be recorded."""
@@ -125,13 +125,13 @@ class _Failed(Exception):
         self.usage = usage or {}
 
 
-def _facts_text(facts: Any) -> str:
+def facts_text(facts: Any) -> str:
     try:
         data = json.loads(facts.facts_json)
     except (AttributeError, TypeError, ValueError):
-        raise _Failed("Resume facts could not be read") from None
+        raise ScoreFailed("Resume facts could not be read") from None
     if not isinstance(data, dict):
-        raise _Failed("Resume facts could not be read")
+        raise ScoreFailed("Resume facts could not be read")
     lines: list[str] = []
     if data.get("headline"):
         lines.append(f"Headline: {data['headline']}")
@@ -150,7 +150,7 @@ def _facts_text(facts: Any) -> str:
     return "\n".join(lines)
 
 
-def _requirements(description: str | None) -> str:
+def requirements(description: str | None) -> str:
     text = (description or "").strip()
     match = _REQUIREMENTS_HEADING.search(text)
     if match:
@@ -165,7 +165,7 @@ def _posting_text(job: Any) -> str:
             f"Company: {job.company}",
             f"Location: {job.location or 'not stated'}",
             "Requirements:",
-            _requirements(getattr(job, "description_text", "")),
+            requirements(getattr(job, "description_text", "")),
         ]
     )
 
@@ -198,7 +198,7 @@ def _probability(value: Any) -> float | None:
 
 
 def _parse(job_id: str, data: Any) -> Scored | str:
-    """A Scored, or the string "refused". Raises _Failed on a malformed answer."""
+    """A Scored, or the string "refused". Raises ScoreFailed on a malformed answer."""
     answers = {
         str(item.get("name")): item
         for item in (data.get("answers") if isinstance(data, dict) else None) or []
@@ -211,23 +211,23 @@ def _parse(job_id: str, data: Any) -> Scored | str:
     fit = answers.get(FIT_RUBRIC)
     levels = fit.get("probabilities") if fit else None
     if not isinstance(levels, list) or not levels:
-        raise _Failed("Decisions returned no probabilities for the fit rubric")
+        raise ScoreFailed("Decisions returned no probabilities for the fit rubric")
     by_label = {
         level.get("label"): _probability(level.get("probability"))
         for level in levels
         if isinstance(level, dict)
     }
     if set(by_label) != set(TIER_WEIGHTS) or None in by_label.values():
-        raise _Failed("Decisions returned unreadable probabilities for the fit rubric")
+        raise ScoreFailed("Decisions returned unreadable probabilities for the fit rubric")
     components: dict[str, float] = {}
     for name in PREDICATES:
         value = _probability((answers.get(name) or {}).get("probability"))
         if value is None:
-            raise _Failed(f"Decisions returned no probability for {name}")
+            raise ScoreFailed(f"Decisions returned no probability for {name}")
         components[name] = value
     total = sum(by_label.values())
     if total <= 0:
-        raise _Failed("Decisions returned empty probabilities for the fit rubric")
+        raise ScoreFailed("Decisions returned empty probabilities for the fit rubric")
     tier = max(TIER_WEIGHTS, key=lambda label: by_label[label])
     fit_score = sum(TIER_WEIGHTS[label] * p for label, p in by_label.items()) / total
     return Scored(job_id=job_id, tier=tier, fit_score=round(fit_score, 4), components=components)
@@ -238,7 +238,7 @@ async def _score_pair(
 ) -> tuple[Scored | str, Any]:
     """One billable Decisions call. Returns (Scored | "refused", usage dict).
 
-    Usage is read before the answer is, so every `_Failed` raised after a
+    Usage is read before the answer is, so every `ScoreFailed` raised after a
     response arrived carries it.
     """
     try:
@@ -249,18 +249,18 @@ async def _score_pair(
             data = None
     except httpx.HTTPError as exc:
         logger.warning("decisions match transport failed: %s", exc.__class__.__name__)
-        raise _Failed("Decisions request failed") from None
+        raise ScoreFailed("Decisions request failed") from None
     usage = data.get("usage") if isinstance(data, dict) else None
     usage = usage if isinstance(usage, dict) else {}
     if resp.status_code >= 400:
         detail = _error_detail(resp)
         logger.warning("decisions match failed status=%s detail=%s", resp.status_code, detail)
-        raise _Failed(detail, usage)
+        raise ScoreFailed(detail, usage)
     if data is None:
-        raise _Failed("Decisions returned no JSON", usage)
+        raise ScoreFailed("Decisions returned no JSON", usage)
     try:
         return _parse(str(job.id), data), usage
-    except _Failed as exc:
+    except ScoreFailed as exc:
         exc.usage = usage
         raise
 
@@ -291,8 +291,8 @@ async def score_candidates(db, *, user, facts, jobs, concurrency: int = 4) -> Sc
         candidates.append(job)
 
     try:
-        facts_text = _facts_text(facts)
-    except _Failed as exc:
+        resume_text = facts_text(facts)
+    except ScoreFailed as exc:
         run.error = str(exc)
         return run
 
@@ -323,9 +323,9 @@ async def score_candidates(db, *, user, facts, jobs, concurrency: int = 4) -> Sc
                     try:
                         outcome, usage = await _score_pair(
                             client, url=url, headers=headers, model=model,
-                            facts_text=facts_text, job=job,
+                            facts_text=resume_text, job=job,
                         )
-                    except _Failed as exc:
+                    except ScoreFailed as exc:
                         failure.append(str(exc))
                         outcome, usage = None, exc.usage
                         # A failed call may still have been billed.
