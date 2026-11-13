@@ -18,6 +18,24 @@ A refusal is its own answer type, not a low probability (the same rule as
 been judged. A refused pair is therefore dropped and listed in `refused`; it
 is never given a score. Likewise an answer with no readable probabilities is
 a provider fault, not a zero.
+
+How `fit_score` is made, and why the endpoint's own `score` is ignored. The
+`fit` rubric returns a probability for each of its four levels. The tier is the
+most probable level. `fit_score` is the expectation of TIER_WEIGHTS over those
+probabilities, normalised by their sum:
+
+    fit_score = sum(weight[level] * p[level]) / sum(p[level])
+
+with weight 1 for Strong fit, 2/3 for Good fit, 1/3 for Worth a look and 0 for
+Not a fit.
+
+The `score` field the endpoint also returns for the rubric is DELIBERATELY NOT
+READ. The layout rubrics list their low level first (Airy, Flat), so that field
+is plausibly a position counted up from the first level, whereas `fit` lists
+Strong fit first: reading it risks a silent inversion, a number that looks
+reasonable and means the opposite. This score is displayed to users beside its
+tier, so it must not rest on a field whose direction nobody has verified. Do
+not "simplify" the expectation into `answer["score"]`.
 """
 
 from __future__ import annotations
