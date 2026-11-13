@@ -344,3 +344,12 @@ silently stopped, or a host that went down, produces no event at all — that is
 by the `overdue` flag on the admin page, which needs someone to look. Closing it properly
 needs an off-host dead-man's-switch. Also note there is still **no analytics and no Search
 Console** on the site, so "is Google crawling the job pages" remains unanswerable here.
+
+### The weekly digest timer
+
+`offerfy-digest.timer` runs `app.jobs.build_digests` **Mondays 05:00 Asia/Taipei**
+(`Persistent=true`, 10 min jitter), clear of the ingest slots. Same shape as ingest: a
+systemd **user** unit in `~/.config/systemd/user/`, no sudo, `OnFailure=` writes to
+`journalctl --user -p err`. The unit files are **not in git** — their full contents are in
+`docs/deploy.md` ("Weekly job digest timer"). It spends real money, so it is installed but
+**not enabled**; enabling it is the human's last deploy step (see deploy.md).
