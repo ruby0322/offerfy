@@ -134,27 +134,39 @@ well" both at zero occurrences; Contact's "apply or match on your behalf"
 replaced; zh-TW About's 履歷與職缺配對 gone; guest dashboards 200 in all three
 locales; `/llms.txt` still carrying the earlier correction.
 
-### The backups, and one that is a trap
+### The backups, and the one that was a trap
 
 Two sessions had authorization to run this same deploy and both started. The
-announcement caught it with nothing worse than a stray directory, but that
-directory is dangerous:
+announcement caught it — the one that stood down said "starting now" *before*
+acting, by which time the other had already built — and the only damage was a
+stray directory.
+
+Rollbacks remaining, newest first and newest correct again:
 
 | Directory | BUILD_ID | What it is |
 |---|---|---|
-| `.next.bak-20261113-141731` | `fxq-gtX2MspoHjFRT-qGm` | rollback for the slice 3 deploy |
-| `.next.bak-20261113-144033` | `0nD3r-0xdL2q6x6RLFSVX` | **rollback for this deploy** |
-| `.next.bak-20261113-144055` | `Ayezh8Buy22Zrcfuhl0Je` | **NOT a rollback** — taken 4s *after* the new build was written, so it holds the new build |
+| `.next.bak-20261113-144033` | `0nD3r-0xdL2q6x6RLFSVX` | **the build before this deploy** |
+| `.next.bak-20261113-141731` | `fxq-gtX2MspoHjFRT-qGm` | the one before that |
 
-The newest `.bak` is the one someone reaches for under pressure, and here it
-would roll *forward* into the build you were undoing. It has a
-`NOT-A-ROLLBACK.txt` inside it saying so; nobody has deleted it, because
-`.next.bak-*` removal is the user's call and that covers a stray one too.
-**Read `BUILD_ID` before restoring — "newest" is not "what was live".**
+**The worked example, now deleted.** `.next.bak-20261113-144055` held
+`Ayezh8Buy22Zrcfuhl0Je` — the *new* build — because it was taken four seconds
+after that build wrote its `BUILD_ID`. So for about an hour the newest `.bak`
+was not a restore point at all: restoring from it would have rolled *forward*
+into the build you were undoing, and the newest backup is exactly what someone
+reaches for mid-incident. It carried a `NOT-A-ROLLBACK.txt` until the user had
+it removed.
 
-Three directories, 183M total (they hardlink-share), volume at 77% with 122G
-free. Nine older ones were deleted earlier today on the user's instruction,
-reclaiming 4.4G.
+**The rule it leaves behind: read `BUILD_ID` out of a `.bak` before restoring
+from it. "Newest" is not "what was live".** Deleting it was safe and was checked
+rather than assumed — it shared inodes with `.next`, so `rm -rf` dropped
+directory entries only; afterwards `.next` still had its 1568 files, its
+`routes-manifest.json` and its `:8001` rewrite, and `offerfy-web` showed the
+same MainPID 62400 and `NRestarts` 52, i.e. no respawn. The reclaim was near
+zero — hardlinks. Disk was never the reason to remove it; the misleading name
+was.
+
+Nine much older backups were deleted earlier the same day on the user's
+instruction, reclaiming 4.4G. Volume at 77% with 122G free.
 
 ## What shipped in slice 3
 
