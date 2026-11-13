@@ -32,7 +32,11 @@ type State =
 
 type Props = {
   digest: Digest;
-  /** Shown instead when there is nothing to list; the card alone decides that. */
+  /**
+   * Shown instead when there is nothing to list; the card alone decides that.
+   * Defaults to nothing, which suits a standalone card, but a slot that must
+   * not go blank has to pass one: omitting it leaves an empty digest as a gap.
+   */
   fallback?: ReactNode;
 };
 

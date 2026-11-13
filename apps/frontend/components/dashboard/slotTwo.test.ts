@@ -62,6 +62,16 @@ test("slot 2 falls back to the match count when both tracks are empty", () => {
   assert.ok(!html.includes('data-testid="dashboard-digest"'), html);
 });
 
+// status and items can disagree (status records what the scoring run did, the
+// card's rule is what there is to show); only the items decide.
+test("a non-empty status with no items still falls back to the match count", () => {
+  for (const status of ["full", "degraded"] as const) {
+    const html = slot(digest([], status));
+    assert.ok(html.includes('data-testid="dashboard-matches"'), html);
+    assert.ok(!html.includes('data-testid="dashboard-digest"'), html);
+  }
+});
+
 // Review Focus 5: the common case for a thin market, not an edge case
 test("a degraded digest with items still shows the digest, not the fallback", () => {
   const html = slot(
