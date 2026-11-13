@@ -41,7 +41,12 @@ from app.models import (
     User,
 )
 from app.services import usage
-from app.services.jobs.digest import ITEMS_PER_TRACK, STATUSES
+from app.services.jobs.digest import (
+    ITEMS_PER_TRACK,
+    STATUSES,
+    TRACKS,
+    UNRANKED_TRACK,
+)
 from app.services.jobs.reasons import Prose, ProseRun
 from app.services.jobs.score import ScoreRun, Scored
 from app.services.jobs.store import freshness_cutoff
@@ -484,6 +489,11 @@ async def test_decisions_absent_writes_a_degraded_digest(db_session, monkeypatch
     # The items are still there, in the one order the prefilter can defend.
     assert [i.job_id for i in built.items] == [j.id for j in reversed(jobs)][:ITEMS_PER_TRACK]
     assert [i.rank for i in built.items] == [1, 2, 3, 4, 5]
+    # Under a track of its own, never one of the two that make a claim: these
+    # postings were first seen weeks ago, so "new_this_week" would be false of
+    # them, and nothing judged them, so "strong_fit" would be worse.
+    assert {i.track for i in built.items} == {UNRANKED_TRACK}
+    assert UNRANKED_TRACK not in TRACKS
     for item in built.items:
         assert item.tier is None and item.fit_score is None
         assert item.reason is None and item.gap is None
@@ -516,6 +526,48 @@ async def test_an_empty_prefilter_writes_status_empty(db_session, monkeypatch):
     assert built.status == "empty" and built.candidate_count == 0
     assert built.items == []
     assert seams.trace == []
+
+
+async def test_an_empty_prefilter_does_not_pay_to_rebuild_stale_facts(
+    db_session, monkeypatch
+):
+    """The rebuild is a provider call; the candidate set is free SQL.
+
+    A person with nothing matching their filters would otherwise buy a facts
+    rebuild to produce `status="empty"`, and that spend comes out of the
+    global ceiling that decides who else gets a digest at all this week.
+    """
+    seams = Seams(monkeypatch)
+    user = _ready(db_session)
+    _posting(db_session, function="design")  # matches nothing they asked for
+    monkeypatch.setattr(build_digests, "facts_are_stale", lambda db, user, facts: True)
+
+    async def fake_build(db, user):
+        seams.trace.append("facts")
+        return build_digests.FactsBuildResult()
+
+    monkeypatch.setattr(build_digests, "build_facts", fake_build)
+    built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    assert built is not None and built.status == "empty"
+    assert seams.trace == []
+
+
+async def test_no_facts_and_no_candidates_costs_nothing_to_discover(
+    db_session, monkeypatch
+):
+    """Still no digest -- the spec's fifth row -- but nothing billed to learn it."""
+    seams = Seams(monkeypatch)
+    user = _user(db_session)
+    _pref(db_session, user)
+    _posting(db_session, function="design")
+
+    async def fake_build(db, user):
+        seams.trace.append("facts")
+        return build_digests.FactsBuildResult()
+
+    monkeypatch.setattr(build_digests, "build_facts", fake_build)
+    assert await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW) is None
+    assert seams.trace == [] and db_session.query(Digest).count() == 0
 
 
 async def test_nothing_qualifying_is_also_empty(db_session, monkeypatch):
@@ -861,6 +913,12 @@ def test_main_builds_only_the_named_user(db_session, monkeypatch):
     assert main(["--user-id", mine.id, "--period-start", PERIOD_ARG]) == 0
     db_session.expire_all()
     assert {u for (u,) in db_session.query(Digest.user_id)} == {"u-cli-mine"}
+
+
+def test_main_reports_an_unparseable_period_start(db_session, monkeypatch):
+    """A message and a 1, like every other failure this CLI has."""
+    Seams(monkeypatch)
+    assert main(["--period-start", "not-a-date"]) == 1
 
 
 def test_main_reports_an_unknown_user_id(db_session, monkeypatch):

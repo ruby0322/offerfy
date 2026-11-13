@@ -21,7 +21,10 @@ be read, tested and bypassed (`--all-users`) on its own. `paused` is not part
 of the bypass: the person asked for this to stop.
 
 **Where the money stops.** `settings.global_weekly_ceiling_uusd` is checked
-ONCE before each user is started, and never again inside one. That is the whole
+ONCE before each user is started by `build_all`, and never again inside one.
+A single-user run (`--user-id`) is deliberately exempt: a person asked for that
+one build, at a keyboard, and the ceiling exists to bound the unattended
+schedule rather than to refuse a human an answer. That is the whole
 mechanism behind "finish the user in flight, then stop": a user who has started
 always completes, so no digest can be half-scored, and the job never 429s
 itself. Users not reached are listed by id in `BuildReport.skipped_over_ceiling`.
@@ -67,7 +70,12 @@ from app.db import get_engine, get_session_factory
 from app.jobs.match_sweep import prefilter_query
 from app.models import Digest, DigestItem, Job, JobPreference, User
 from app.services import usage
-from app.services.jobs.digest import ITEMS_PER_TRACK, TRACKS, classify
+from app.services.jobs.digest import (
+    ITEMS_PER_TRACK,
+    TRACKS,
+    UNRANKED_TRACK,
+    classify,
+)
 from app.services.jobs.reasons import write_reasons
 from app.services.jobs.score import score_candidates
 from app.services.metering import metered, system_guard, window_totals
@@ -139,8 +147,9 @@ def is_eligible(db: Session, *, user: User, now: datetime | None = None) -> bool
     `now` places the week: only digests from BEFORE the current spend window
     count, so the digest being built (or rebuilt) is never evidence about
     itself -- nobody can have opened a digest that was written a second ago.
-    A backfill of an older week should therefore pass a `now` inside that week,
-    or `require_eligible=False`.
+    A backfill of an older week should therefore pass a `now` inside that week
+    -- or bypass this predicate entirely, which `build_for_user` and
+    `build_all` expose as `require_eligible=False` and `main` as `--all-users`.
     """
     pref = saved_preference(db, user)
     if pref is None or pref.activity == "paused":
@@ -234,15 +243,30 @@ def _input_hash(*, facts, period_start: datetime, jobs: list[Job], model: str) -
 # --------------------------------------------------------------------------
 
 
-async def _facts_for_scoring(db: Session, user: User):
+async def _facts_for_scoring(db: Session, user: User, *, judging: bool):
     """Fresh facts for this person, rebuilding first if they are stale.
 
     Returns None when there is nothing to score against. `system_guard`, not
     `preflight`: see the module docstring.
+
+    `judging` is False when the prefilter returned nothing, and then the
+    rebuild is SKIPPED even if the facts are stale. The facts are the person's
+    own state and keeping them fresh is worth something on its own -- that was
+    the original argument for rebuilding here unconditionally -- but it loses
+    to this one: the candidate set is free SQL, the rebuild is a provider call,
+    and its cost comes out of the global ceiling that decides who else gets a
+    digest at all this week. Spending someone else's digest on refreshing facts
+    that nothing was going to be judged against is not a trade worth making.
+    Their own refresh button and the nightly sweep both still rebuild.
     """
     facts = facts_for_user(db, user)
-    if facts is not None and not facts_are_stale(db, user, facts):
+    if facts is not None and (not judging or not facts_are_stale(db, user, facts)):
         return facts
+    if not judging:
+        # No facts and nothing to judge: no digest, and nothing billed to find
+        # that out. (Facts that cannot be built are the spec's fifth failure
+        # row; with an empty prefilter we never have to ask.)
+        return None
 
     guard = system_guard(
         user=user,
@@ -292,14 +316,16 @@ async def build_for_user(
     if require_eligible and not is_eligible(db, user=user, now=now):
         return None
 
-    facts = await _facts_for_scoring(db, user)
+    cap = CANDIDATE_CAP if candidate_cap is None else candidate_cap
+    limit = ITEMS_PER_TRACK if items_per_track is None else items_per_track
+
+    # The candidate set first, because it is free and the facts rebuild is not.
+    pool = candidates(db, pref, cap=cap)
+    facts = await _facts_for_scoring(db, user, judging=bool(pool))
     if facts is None:
         return None
 
-    cap = CANDIDATE_CAP if candidate_cap is None else candidate_cap
-    limit = ITEMS_PER_TRACK if items_per_track is None else items_per_track
     try:
-        pool = candidates(db, pref, cap=cap)
         tracks, model, status = await _judge(
             db, user=user, facts=facts, pool=pool,
             period_start=period_start, limit=limit,
@@ -337,7 +363,7 @@ async def _judge(db, *, user, facts, pool, period_start, limit):
         # spec forbids, so the judgement columns stay NULL and the card says
         # the digest is degraded.
         logger.warning("digest degraded: user=%s %s", user.id, run.error)
-        return {"strong_fit": [], "new_this_week": list(pool[:limit])}, run.model, "degraded"
+        return {UNRANKED_TRACK: list(pool[:limit])}, run.model, "degraded"
 
     tracks = classify(
         run.scored,
@@ -409,7 +435,7 @@ def _write(db, *, user, period_start, facts, pool, model, status, tracks) -> Dig
     db.add(digest)
     db.flush()
 
-    for track in TRACKS:
+    for track in (*TRACKS, UNRANKED_TRACK):
         for rank, entry in enumerate(tracks.get(track) or [], start=1):
             db.add(_item(digest, track=track, rank=rank, entry=entry))
     db.flush()
@@ -418,11 +444,12 @@ def _write(db, *, user, period_start, facts, pool, model, status, tracks) -> Dig
 
 def _item(digest: Digest, *, track: str, rank: int, entry) -> DigestItem:
     if isinstance(entry, Job):
-        # The degraded path. `new_this_week` rather than `strong_fit` because
-        # both track names are claims and only one of them is survivable here:
-        # recency is what the prefilter order gives us, while `strong_fit`
-        # would assert a judgement nothing made. The card renders the degraded
-        # notice instead of the track labels (see the spec's Surfaces).
+        # The degraded path, under UNRANKED_TRACK. Both real track names are
+        # claims -- `strong_fit` asserts a judgement nothing made, and
+        # `new_this_week` is simply false for a posting first seen a month ago
+        # -- so neither may carry a row the model never saw. The card still
+        # branches on `status`, but the column no longer depends on it: no
+        # future `WHERE track = 'new_this_week'` can read a claim out of this.
         return DigestItem(digest_id=digest.id, job_id=entry.id, rank=rank, track=track)
     scored, prose = entry
     return DigestItem(
@@ -572,11 +599,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     now = datetime.now(timezone.utc)
-    period_start = _period(args.period_start, now)
-
     get_engine()
     session = get_session_factory()()
     try:
+        # Inside the try: an unparseable --period-start is a user error like
+        # any other here, and owes the same one-line message rather than a
+        # traceback.
+        period_start = _period(args.period_start, now)
         if args.user_id:
             user = session.get(User, args.user_id)
             if user is None:

@@ -35,6 +35,17 @@ from app.services.jobs.score import Scored
 
 STATUSES = ("full", "degraded", "empty")
 TRACKS = ("strong_fit", "new_this_week")
+
+# The track a DEGRADED digest's items carry, and the only one `classify` never
+# produces: it exists so that a row nothing judged cannot be filed under a name
+# that judges it. Both real tracks are claims -- `strong_fit` asserts a tier
+# the model never returned, and `new_this_week` is simply false for a posting
+# first seen a month ago -- and a degraded digest is the prefilter's order and
+# nothing more. Not in TRACKS, which is the vocabulary of the two tracks a
+# reader displays; a consumer selecting on either of those can therefore never
+# read a claim out of a degraded row, whether or not it remembered to check
+# `status` first.
+UNRANKED_TRACK = "unranked"
 STRONG_TIERS = ("Strong fit", "Good fit")
 ITEMS_PER_TRACK = 5
 

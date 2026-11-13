@@ -57,18 +57,16 @@ def _resume(db_session, *, user=None, guest=None):
 def _own_spend_guard(user=None, guest=None, purpose="chat", now=None):
     """A Guard that bills this PERSON, without enforcing.
 
-    Not `system_guard`: that one bills subject kind 'system' on purpose, so
-    background work never spends the person's allowance. These tests simulate
-    the person's own spend through the real `Meter`, so they need the
-    user/guest subjects `preflight` would have produced -- without preflight's
-    429, which is usually the very thing they are setting up.
+    `deferred_guard`, the real constructor for exactly this shape: the
+    person's own work, billed to them, not enforced. Not `system_guard`, which
+    bills subject kind 'system' so background work never spends their
+    allowance, and not a hand-built `Guard`, which would make expressible the
+    thing metering.py's docstring says is not.
     """
-    from app.services.metering import Guard, _subjects_for
+    from app.services.metering import deferred_guard
 
-    return Guard(
-        subjects=_subjects_for(user, guest),
-        purpose=purpose,
-        window_start=usage.window_start(now),
+    return deferred_guard(
+        user=user, guest=guest, purpose=purpose, reason="test fixture", now=now
     )
 
 

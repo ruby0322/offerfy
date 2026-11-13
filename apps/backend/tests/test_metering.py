@@ -19,14 +19,7 @@ import pytest
 from app.config import get_settings
 from app.models import GuestSession, LlmCall, UsageCounter, User
 from app.services import usage
-from app.services.metering import (
-    Guard,
-    Meter,
-    _subjects_for,
-    deferred_guard,
-    preflight,
-    system_guard,
-)
+from app.services.metering import Meter, deferred_guard, preflight, system_guard
 
 APP = Path(__file__).resolve().parents[1] / "app"
 
@@ -162,17 +155,18 @@ def _event(**kwargs):
 
 
 def _own_spend_guard(user=None, guest=None, purpose="chat", now=None):
-    """A Guard that bills this PERSON, without enforcing.
+    """A Guard that bills this PERSON, without enforcing: `deferred_guard`.
 
-    `system_guard` deliberately bills subject kind 'system' so background work
-    never spends the person's allowance, which makes it the wrong shim for a
-    test that is simulating the person's own spend. This builds the subjects
-    `preflight` would have, without preflight's 429.
+    `system_guard` is the wrong shim for a test simulating the person's own
+    spend -- it deliberately bills subject kind 'system'. Constructing a
+    `Guard()` here by hand would be worse: this module's docstring says
+    reaching `metered()` without going through a constructor is not
+    expressible, and the file that defends that invariant must not be the one
+    making it expressible. `deferred_guard` gives the identical subject list;
+    the only difference is `exempt_reason`, which `Meter` never reads.
     """
-    return Guard(
-        subjects=_subjects_for(user, guest),
-        purpose=purpose,
-        window_start=usage.window_start(now),
+    return deferred_guard(
+        user=user, guest=guest, purpose=purpose, reason="test fixture", now=now
     )
 
 
@@ -239,7 +233,8 @@ def test_spend_lands_in_the_window_it_happened_in(client, db_session):
 
 def test_system_guard_demands_a_reason():
     with pytest.raises(ValueError):
-        system_guard(purpose="profile", reason="  ")
+        system_guard(user=User(id="u-x", google_sub="s", email="x@x.test"),
+                     purpose="profile", reason="  ")
 
 
 def test_system_guard_does_not_enforce(client, db_session, monkeypatch):

@@ -82,9 +82,7 @@ class Guard:
         return self.exempt_reason is None
 
 
-def _system_subjects_for(
-    user: User | None, guest: GuestSession | None
-) -> tuple[tuple[str, str], ...]:
+def _system_subjects_for(user: User) -> tuple[tuple[str, str], ...]:
     """Who a SYSTEM guard bills: subject kind 'system', keyed by the person.
 
     The kind is what matters. `balance` reads kind='user' for `used_uusd`, so
@@ -98,12 +96,20 @@ def _system_subjects_for(
     analysis -- "this digest cost 1,800 uUSD and here is whose it was" is still
     answerable, it just is not charged to them.
 
+    A `User` and nothing else, deliberately. There is no guest form: platform
+    work for a guest is not a thing this product does -- a guest has no
+    standing weekly job run for them -- and the parameter would be how it
+    became one by accident. It would also be quietly wrong, because
+    `usage.reconcile` folds a system counter onto `("user", subject_id)`: a
+    system row carrying a guest's id would be compared against a user that
+    does not exist and report a gap for that window forever, which is the
+    "alarm nobody can read" failure the fold exists to prevent.
+
     Deliberately a separate function rather than a flag on `_subjects_for`: see
     the module docstring on why this file has no booleans that turn behaviour
     off.
     """
-    subject = user.id if user is not None else (guest.id if guest is not None else "")
-    return (("system", subject),)
+    return (("system", user.id),)
 
 
 def _subjects_for(
@@ -144,8 +150,7 @@ def preflight(
 
 def system_guard(
     *,
-    user: User | None = None,
-    guest: GuestSession | None = None,
+    user: User,
     purpose: str,
     reason: str,
     now: datetime | None = None,
@@ -166,6 +171,7 @@ def system_guard(
     answer for platform work. Conflating them is how an import stopped
     counting toward the guest pool ceiling for one commit.
 
+    `user` is required and there is no guest form: see `_system_subjects_for`.
     `reason` is required and free text so that an exemption is a named thing a
     reviewer sees, rather than an omission nobody notices.
 
@@ -178,7 +184,7 @@ def system_guard(
     if not (reason or "").strip():
         raise ValueError("system_guard needs a written reason")
     return Guard(
-        subjects=_system_subjects_for(user, guest),
+        subjects=_system_subjects_for(user),
         purpose=purpose,
         window_start=usage.window_start(now),
         exempt_reason=reason.strip(),
