@@ -464,6 +464,42 @@ def test_cities_endpoint_folds_spellings_and_drops_site_codes(client, db_session
     ]
 
 
+def test_cities_endpoint_folds_scripts_as_well_as_spellings(client, db_session):
+    """Taiwan's picker was empty of every CJK-spelled posting.
+
+    The fold's length floor counted characters, so "台北" was dropped as if
+    it were an airport code. These four postings are one city and must come
+    back as one row with a count of four -- the Bangalore/Bengaluru case in
+    a second script.
+    """
+    ids = []
+    for index, location in enumerate(
+        ["Taipei, Taiwan", "台北", "臺北市", "Taipei City, Taiwan", "竹科"]
+    ):
+        ids.append(_add_job(db_session, source_id=f"tw:{index}", location=location).id)
+    enrich_jobs(db_session, job_ids=ids)
+    db_session.commit()
+    body = client.get("/v1/jobs/cities", params={"country": "TW"}).json()
+    assert body["items"] == [
+        {"value": "Taipei", "count": 4},
+        {"value": "Hsinchu", "count": 1},
+    ]
+
+
+def test_city_filter_matches_a_cjk_spelling(client, db_session):
+    """?city=Taipei has to find the postings an employer wrote as 台北."""
+    ids = []
+    for index, location in enumerate(["Taipei, Taiwan", "台北", "新竹市"]):
+        ids.append(_add_job(db_session, source_id=f"tw:{index}", location=location, title=f"T{index}").id)
+    enrich_jobs(db_session, job_ids=ids)
+    db_session.commit()
+    body = client.get("/v1/jobs", params={"city": "Taipei"}).json()
+    assert sorted(row["title"] for row in body["items"]) == ["T0", "T1"]
+    # And the Hsinchu posting is reachable under its own Latin name, not
+    # swept into Taipei.
+    assert client.get("/v1/jobs", params={"city": "Hsinchu"}).json()["total"] == 1
+
+
 def test_cities_endpoint_rejects_an_unknown_country(client):
     assert client.get("/v1/jobs/cities", params={"country": "ZZ"}).status_code == 422
 

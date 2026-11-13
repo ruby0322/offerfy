@@ -6,6 +6,7 @@ evidence and folding it would throw information away. It does mean the raw
 column is not a vocabulary:
 
     Bengaluru 38 / Bangalore 35          one city, two spellings, split count
+    台北 / Taipei                        one city, two scripts, split count
     Fab 10N/X, MSB, SGP, sg              Micron site codes and bare ISO codes
     "Bengaluru; Gurugram; Mumbai"        three cities in one row
     "Singapore (Hybrid)"                 a work arrangement glued on
@@ -40,9 +41,35 @@ _PARENTHETICAL = re.compile(r"\s*\([^)]*\)\s*$")
 # Multi-city rows: Workday and SmartRecruiters both emit these.
 _SPLIT = re.compile(r"\s*[;|]\s*|\s+/\s+")
 
-# Shorter than this and it is an airport or ISO code ("SGP", "sg", "TPE"),
-# not a city a person would recognise in a list.
-_MIN_CHARS = 4
+# Shorter than this and a Latin-script segment is an airport or ISO code
+# ("SGP", "sg", "TPE"), not a city a person would recognise in a list.
+_MIN_ASCII_CHARS = 4
+
+# The same floor measured in CHARACTERS deleted every CJK-spelled city in
+# the catalogue: a Chinese city name is two characters and says everything
+# -- 台北, 上海, 高雄, 深圳. Taiwan and China are a large share of this
+# catalogue, so that was not a corner case, and the symptom was the quiet
+# kind: the posting stayed reachable by country and search, so nobody saw a
+# city go missing from the picker.
+#
+# One character is still never a city name, so the floor moves rather than
+# disappearing. CJK has no short-code idiom to confuse it with -- the site
+# codes and airport codes in this data are all Latin ("MSB", "SGP", "Fab
+# 10N/X") -- which is why two scripts can take two floors without either
+# losing its guard.
+_MIN_WIDE_CHARS = 2
+
+
+def _too_short(name: str) -> bool:
+    """Below the floor for the script `name` is written in.
+
+    `isascii()` rather than a Unicode-block test on purpose: the question
+    is only ever "could this be a Latin abbreviation", and an accented
+    Latin name ("São Paulo", "Bogotá", "Zürich") is far longer than either
+    floor, so which side it falls on cannot change an answer.
+    """
+    floor = _MIN_ASCII_CHARS if name.isascii() else _MIN_WIDE_CHARS
+    return len(name) < floor
 
 
 def _display(value: str) -> str:
@@ -91,7 +118,7 @@ def canonical_cities(raw: str | None, taxonomy: Taxonomy | None = None) -> list[
             continue
         if folded in config.location_region_name_segments:
             continue
-        if len(name) < _MIN_CHARS:
+        if _too_short(name):
             continue
         shown = _display(name)
         if shown not in out:

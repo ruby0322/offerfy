@@ -159,3 +159,90 @@ def test_a_home_nation_is_not_a_city():
     """"England" is a country-ish answer to "which city", not a city."""
     assert canonical_cities("England") == []
     assert canonical_cities("Scotland") == []
+
+
+# --- CJK-spelled cities ----------------------------------------------------
+# `_MIN_ASCII_CHARS` counted CHARACTERS, and a Chinese city name is two of
+# them, so every CJK-spelled city in the catalogue folded to nothing and was
+# invisible in the picker. Taiwan and China are a large share of this
+# catalogue, so this was not a corner case. No backfill: the fold runs at
+# read time over a GROUP BY, so the next request is already right.
+
+
+def test_a_cjk_city_name_is_not_too_short_to_be_a_city():
+    """Two characters is a whole city name, not an airport code."""
+    assert canonical_cities("台北") == ["Taipei"]
+    assert canonical_cities("上海") == ["Shanghai"]
+    assert canonical_cities("高雄") == ["Kaohsiung"]
+
+
+def test_a_cjk_spelling_folds_onto_the_same_city_as_the_latin_one():
+    """The whole point: one city, one picker row, counts added together.
+
+    Letting the CJK spelling through as its own entry would have split
+    Taipei into "Taipei" and "台北" -- the Bangalore/Bengaluru bug again, in
+    a different script. The alias map is checked before the length floor,
+    so this is also what makes the two-character names reachable at all.
+    """
+    assert canonical_cities("臺北") == ["Taipei"]
+    assert canonical_cities("台北市") == ["Taipei"]
+    assert canonical_cities("新竹市") == ["Hsinchu"]
+    assert canonical_cities("新竹") == ["Hsinchu"]
+    assert canonical_cities("臺中") == ["Taichung"]
+    assert canonical_cities("深圳") == ["Shenzhen"]
+    assert fold_city_counts([("Taipei", 40), ("台北", 12), ("臺北", 3)]) == [
+        ("Taipei", 55)
+    ]
+
+
+def test_the_science_park_folds_onto_its_city():
+    """竹科 is the Hsinchu Science Park -- a site inside Hsinchu, not a rival
+    to it. It is a location_countries needle, so without an alias the fix
+    would have added it to the picker as its own city."""
+    assert canonical_cities("竹科") == ["Hsinchu"]
+
+
+def test_a_chinese_work_arrangement_is_still_not_a_city():
+    """The placeholder list was ASCII-only.
+
+    "居家辦公" and "在家工作" are four characters, so they already cleared the
+    old floor; "遠端" and "遠距" are two and would have started clearing it
+    with this change. All four are work arrangements, not places.
+    """
+    for arrangement in ["遠端", "遠距", "居家辦公", "在家工作"]:
+        assert canonical_cities(arrangement) == [], arrangement
+
+
+def test_the_ascii_floor_did_not_move():
+    """The reason the floor exists at all is unchanged for Latin script."""
+    for code in ["sg", "SGP", "GB", "TPE", "MSB", "RA3"]:
+        assert canonical_cities(code) == [], code
+
+
+def test_a_single_character_is_never_a_city():
+    """The floor moved for CJK; it did not disappear."""
+    assert canonical_cities("台") == []
+    assert canonical_cities("X") == []
+
+
+def test_a_cjk_city_is_reachable_by_its_latin_name():
+    """`?city=Taipei` has to find the postings stored as 台北.
+
+    stored_values_for resolves the filter through the fold rather than
+    through SQL, so this follows from the alias -- but it is the behaviour a
+    reader actually sees, so it is pinned here and not left implied.
+    """
+    stored = ["Taipei", "台北", "臺北市", "Hsinchu"]
+    assert stored_values_for("Taipei", stored) == ["Taipei", "台北", "臺北市"]
+    assert stored_values_for("Hsinchu", stored) == ["Hsinchu"]
+
+
+def test_an_unlisted_cjk_name_shows_itself_rather_than_vanishing():
+    """No CJK needle exists for Japan or Korea in this taxonomy.
+
+    If a board starts posting 東京, the right outcome is a picker row that
+    reads 東京 -- findable, with a count of its own -- not a silently
+    deleted city. Adding an alias later merges it onto "Tokyo"; that is the
+    documented remedy and it needs no backfill.
+    """
+    assert canonical_cities("東京") == ["東京"]

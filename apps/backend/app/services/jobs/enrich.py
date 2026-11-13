@@ -338,7 +338,7 @@ def _is_bare_two_letter_code(segment: str) -> bool:
     two-letter segment from the city candidates needs no such ruling: there
     is no city in this catalogue with a two-letter ASCII name, so nothing
     real is thrown away. `cities.canonical_cities` already hid the damage
-    from the picker (its `_MIN_CHARS = 4` drops "GB"), which is why the
+    from the picker (its `_MIN_ASCII_CHARS = 4` drops "GB"), which is why the
     symptom was always a *missing* city and never a wrong one.
 
     ASCII-only on purpose: "台北" and "香港" are two characters and are

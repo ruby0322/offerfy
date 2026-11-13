@@ -828,7 +828,35 @@
     "greater london": "London",
     "munchen": "Munich",
     "koln": "Cologne",
-    "sao paulo": "S\u00e3o Paulo"
+    "sao paulo": "São Paulo",
+    "台北": "Taipei",
+    "臺北": "Taipei",
+    "台北市": "Taipei",
+    "臺北市": "Taipei",
+    "新北": "New Taipei",
+    "新北市": "New Taipei",
+    "新竹": "Hsinchu",
+    "新竹市": "Hsinchu",
+    "新竹縣": "Hsinchu",
+    "竹科": "Hsinchu",
+    "台中": "Taichung",
+    "臺中": "Taichung",
+    "台中市": "Taichung",
+    "臺中市": "Taichung",
+    "台南": "Tainan",
+    "臺南": "Tainan",
+    "台南市": "Tainan",
+    "臺南市": "Tainan",
+    "高雄": "Kaohsiung",
+    "高雄市": "Kaohsiung",
+    "桃園": "Taoyuan",
+    "桃園市": "Taoyuan",
+    "上海": "Shanghai",
+    "上海市": "Shanghai",
+    "深圳": "Shenzhen",
+    "深圳市": "Shenzhen",
+    "北京": "Beijing",
+    "北京市": "Beijing"
   },
   "_city_placeholder": "Segments that reach JobFacets.city but name no city: a work arrangement, an internal site code, or a bare country/ISO code an ATS put in the city position. cities.py drops a segment whose folded form is one of these, or that carries a digit or a slash (Micron's \"Fab 10N/X\"). NOTE what reaches cities.py is ONE segment, not a whole location string: enrich.location_facets has already split on \",\" and \"-\" and kept the first usable piece, so \"Boise, ID - Main Site\" is stored as \"Boise\" and never needs dropping. Dropping only hides a value from the picker -- the posting stays reachable by country.",
   "city_placeholder_needles": [
@@ -864,6 +892,10 @@
     "nationwide",
     "england",
     "scotland",
-    "wales"
+    "wales",
+    "遠端",
+    "遠距",
+    "居家辦公",
+    "在家工作"
   ]
 }
