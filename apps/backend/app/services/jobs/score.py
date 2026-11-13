@@ -50,6 +50,8 @@ from typing import Any
 import httpx
 
 from app.config import get_settings
+from app.db import get_session_factory
+from app.services.chat_messages import persist_usage
 from app.services.layout import (
     DEFAULT_DECISIONS_MODEL,
     VISION_TIMEOUT,
@@ -60,6 +62,38 @@ from app.services.layout import (
 from app.services.metering import metered, system_guard
 
 logger = logging.getLogger(__name__)
+
+
+def record_round(db, *, meter: Any, user: Any, facts: Any, event: dict[str, Any]) -> None:
+    """Both halves of one billed round: the counter AND the telemetry row.
+
+    Two writes with two durabilities, the pair the chat router has always
+    written. Moving the counter without writing the row is what makes
+    `app.services.usage.reconcile` report a gap on the admin overview for that
+    window forever -- and a gap that is always there is an alarm nobody can
+    read. Both digest purposes went out missing the second half; this is it.
+
+    On a session of its own, for the reason `metering.Meter.record` gives: the
+    caller here is a scheduled build that keeps ONE transaction per user, and
+    telemetry that committed the caller's session would settle a digest it has
+    not finished writing. Telemetry may be lost; the work may not.
+
+    `resume_id` is the resume these matches were judged against, which is the
+    only resume the digest has an opinion about.
+    """
+    meter.record(event)
+    session = get_session_factory()()
+    try:
+        persist_usage(
+            session,
+            getattr(facts, "source_resume_id", None),
+            event,
+            str(event.get("purpose") or ""),
+            user=user,
+            guest=None,
+        )
+    finally:
+        session.close()
 
 FIT_RUBRIC = "fit"
 PREDICATES = ("requirements_met", "seniority_fit", "location_fit", "direction_fit")
@@ -341,8 +375,12 @@ async def score_candidates(db, *, user, facts, jobs, concurrency: int = 4) -> Sc
                         # Input tokens are the whole bill on this endpoint: no
                         # output charge and no cache line, the shape turn.py
                         # emits for purpose="vision".
-                        meter.record(
-                            {
+                        record_round(
+                            db,
+                            meter=meter,
+                            user=user,
+                            facts=facts,
+                            event={
                                 "kind": "usage",
                                 "purpose": "match",
                                 "model": model,
@@ -352,7 +390,7 @@ async def score_candidates(db, *, user, facts, jobs, concurrency: int = 4) -> Sc
                                 "cache_write_tokens": None,
                                 "output_tokens": None,
                                 "reasoning_tokens": None,
-                            }
+                            },
                         )
                     if outcome is not None:
                         results[str(job.id)] = outcome

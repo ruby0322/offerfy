@@ -23,6 +23,7 @@ from app.services.metering import (
     Guard,
     Meter,
     _subjects_for,
+    deferred_guard,
     preflight,
     system_guard,
 )
@@ -58,7 +59,7 @@ EXPECTED_CALL_SITES = {
     ("services/profile.py", "extract_facts"),     # inside build_profile; its callers wrap
     ("services/resume_facts.py", "extract_facts"),  # inside build_facts; its caller wraps
     ("routers/preferences.py", "build_facts"),    # resume-facts refresh
-    ("services/import_runner.py", "aiter_chat_edit"),  # one turn, system_guard
+    ("services/import_runner.py", "aiter_chat_edit"),  # one turn, deferred_guard
     ("routers/talent_me.py", "build_profile"),    # pointer change + refresh
     ("jobs/refresh_profiles.py", "build_profile"),  # nightly, system_guard
     ("services/llm/turn.py", "read_layout_report"),  # inside aiter_chat_edit
@@ -365,6 +366,46 @@ def test_enforcement_for_real_callers_is_unchanged(client, db_session, monkeypat
     )
     with pytest.raises(Exception):
         preflight(db_session, user=user, guest=None, purpose="chat")
+
+
+def test_deferred_guard_bills_the_person_without_enforcing(client, db_session, monkeypatch):
+    """The third door: their work, their bill, no 429.
+
+    `preflight` would refuse an import halfway through with nobody watching;
+    `system_guard` would take the cost off their allowance for work they asked
+    for. This is the corner where the two axes disagree.
+    """
+    monkeypatch.setenv("USAGE_LIMITS_ENABLED", "true")
+    get_settings.cache_clear()
+    user = _user(db_session, sub="sub-deferred")
+    tier = usage.TIERS[usage.REGISTERED]
+    guard = deferred_guard(user=user, purpose="chat", reason="import they asked for")
+    assert guard.subjects == (("user", user.id),)
+    assert guard.enforced is False and guard.exempt_reason == "import they asked for"
+
+    Meter(guard).record(_event(input_tokens=tier.credits * usage.CREDIT_UUSD))
+    # Billed to them, counted as their turn, and now out of credits -- all the
+    # things system_guard deliberately does not do.
+    assert usage.balance(db_session, user, None).exhausted
+    assert usage.balance(db_session, user, None).turns_used == 1
+    # But it never refused itself on the way.
+    assert deferred_guard(
+        user=user, purpose="chat", reason="still allowed to run"
+    ).enforced is False
+
+
+def test_deferred_guard_bills_a_guest_against_the_network_key_too():
+    """Same two subjects `preflight` produces: the pool ceiling needs both."""
+    guest = GuestSession(id="g-1", key_hash="q" * 64)
+    guard = deferred_guard(
+        guest=guest, purpose="chat", reason="import", network_key="cafe"
+    )
+    assert guard.subjects == (("guest", "g-1"), ("network", "cafe"))
+
+
+def test_deferred_guard_demands_a_reason():
+    with pytest.raises(ValueError):
+        deferred_guard(purpose="chat", reason="   ")
 
 
 def test_reconciliation_still_sees_background_spend(client, db_session):

@@ -505,7 +505,16 @@ class JobIngestRun(Base):
 # a resume_contents snapshot is derived state built by its own model call, and
 # it happens once per drift rather than once per switch, so its cost needs to
 # be visible as its own line rather than folded into another purpose.
-LLM_CALL_PURPOSES = ("chat", "repair", "vision", "profile", "import", "extract")
+# 'match' and 'digest' are the weekly digest's two calls -- the /v1/decisions
+# scoring pass and the prose pass. They are here because their counters are
+# not: usage_counters moved for both from the day they shipped while llm_calls
+# could not admit them, so app.services.usage.reconcile saw a counter with no
+# telemetry behind it and reported a gap on the admin overview for that window
+# forever. A gap that is always there is an alarm nobody can read, which is
+# the one thing the reconciliation must not become.
+LLM_CALL_PURPOSES = (
+    "chat", "repair", "vision", "profile", "import", "extract", "match", "digest",
+)
 
 
 class LlmCall(Base):
@@ -521,7 +530,8 @@ class LlmCall(Base):
     __tablename__ = "llm_calls"
     __table_args__ = (
         CheckConstraint(
-            "purpose IN ('chat', 'repair', 'vision', 'profile', 'import', 'extract')",
+            "purpose IN ('chat', 'repair', 'vision', 'profile', 'import', "
+            "'extract', 'match', 'digest')",
             name="llm_call_purpose_values",
         ),
         # Not an XOR: a row whose subject has been erased has neither, the same

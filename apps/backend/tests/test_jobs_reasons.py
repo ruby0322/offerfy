@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.models import User
+from app.models import LlmCall, User
 from app.services.jobs import reasons as reasons_mod
 from app.services.jobs.reasons import (
     GAP_CHARS,
@@ -551,6 +551,28 @@ async def test_one_call_per_digest_not_one_per_item(openai_enabled, monkeypatch,
     assert stub.calls[0]["body"]["text"]["format"]["strict"] is True
     assert [e["purpose"] for e in recorded] == ["digest"]
     assert run.usage["input_tokens"] == 900
+
+
+async def test_a_billed_call_writes_its_telemetry_row_too(
+    openai_enabled, monkeypatch, db_session
+):
+    """The counter and the LlmCall row are a pair, not a choice.
+
+    `usage.reconcile` compares them per subject per window, so a purpose that
+    moves one without the other shows up as a gap on the admin overview that
+    no action can clear. `purpose="digest"` is in models.LLM_CALL_PURPOSES for
+    exactly this.
+    """
+    _install(monkeypatch, StubClient(_payload(_wire("a"))))
+    user = _user(db_session)
+    run = await write_reasons(db_session, user=user, facts=FACTS,
+                              scored=[_scored("a")], jobs=[_job("a")])
+    assert run.error is None
+    rows = db_session.query(LlmCall).all()
+    assert [(r.purpose, r.user_id, r.input_tokens) for r in rows] == [
+        ("digest", user.id, 900)
+    ]
+    assert rows[0].cost_uusd > 0
 
 
 async def test_the_weak_component_is_handed_to_the_model(openai_enabled, monkeypatch, db_session):

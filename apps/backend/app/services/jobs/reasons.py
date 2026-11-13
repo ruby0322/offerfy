@@ -126,7 +126,13 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from app.config import get_settings
-from app.services.jobs.score import ScoreFailed, Scored, facts_text, requirements
+from app.services.jobs.score import (
+    ScoreFailed,
+    Scored,
+    facts_text,
+    record_round,
+    requirements,
+)
 from app.services.llm.providers.openai import output_text, responses_url
 from app.services.metering import metered, system_guard
 from app.services.resume_facts import PROFILE_FALLBACK_MODEL, PROFILE_TIMEOUT, cut, usage_of
@@ -800,11 +806,16 @@ async def _write_call(*, url: str, headers: dict, body: dict) -> tuple[dict, dic
     return data, usage
 
 
-def _record(meter: Any, model: str, usage: dict) -> None:
+def _record(db, meter: Any, model: str, usage: dict, *, user=None, facts=None) -> None:
+    """The counter and the telemetry row, through score.record_round."""
     if not any(v is not None for v in usage.values()):
         return
-    meter.record(
-        {
+    record_round(
+        db,
+        meter=meter,
+        user=user,
+        facts=facts,
+        event={
             "kind": "usage",
             "purpose": "digest",
             "model": model,
@@ -814,7 +825,7 @@ def _record(meter: Any, model: str, usage: dict) -> None:
             "cache_write_tokens": None,
             "output_tokens": usage.get("output_tokens"),
             "reasoning_tokens": None,
-        }
+        },
     )
 
 
@@ -853,12 +864,12 @@ async def write_reasons(db, *, user, facts, scored: list[Scored], jobs: list[Any
             data, usage = await _write_call(url=url, headers=headers, body=body)
         except _CallFailed as exc:
             # A failed call may still have been billed.
-            _record(meter, REASON_MODEL, exc.usage)
+            _record(db, meter, REASON_MODEL, exc.usage, user=user, facts=facts)
             run.usage, run.error = exc.usage, str(exc)
             return run
         # Recorded before the answer is read: a response that bills and then
         # fails to parse must not vanish from the ledger.
-        _record(meter, REASON_MODEL, usage)
+        _record(db, meter, REASON_MODEL, usage, user=user, facts=facts)
     run.usage = usage
 
     output = data.get("output") if isinstance(data.get("output"), list) else []

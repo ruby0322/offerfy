@@ -34,6 +34,7 @@ from app.models import (
     Job,
     JobFacets,
     JobPreference,
+    LlmCall,
     Resume,
     ResumeFacts,
     UsageCounter,
@@ -818,6 +819,33 @@ async def test_the_build_never_consumes_the_users_edit_allowance(
     assert usage.window_totals(
         db_session, window_start=usage.window_start(NOW)
     ) == system.uusd
+
+
+async def test_a_build_leaves_no_reconciliation_gap(
+    db_session, monkeypatch, openai_enabled
+):
+    """Both halves of every billed round, or the admin overview grows an alarm
+    nobody can read.
+
+    `usage.reconcile` compares the counters against the LlmCall rows per
+    subject per window. Both digest purposes moved the counter from the day
+    they shipped while `llm_calls.purpose` could not admit them, so every
+    window a digest ran in reported a gap that no action could clear. The
+    telemetry row is written beside the counter now (score.record_round), and
+    the vocabulary admits the purposes (models.LLM_CALL_PURPOSES).
+    """
+    scoring = StubClient(status_code=200, payload=_decisions_payload())
+    monkeypatch.setattr("app.services.jobs.score.httpx.AsyncClient", scoring)
+
+    user = _ready(db_session, uid="u-recon")
+    _posting(db_session, first_seen=PERIOD + timedelta(hours=1))
+    built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    assert built is not None and scoring.calls == 1
+
+    rows = db_session.query(LlmCall).all()
+    assert [r.purpose for r in rows] == ["match"]
+    assert rows[0].user_id == user.id and rows[0].input_tokens == 50_000
+    assert usage.reconcile(db_session, window_start=usage.window_start(NOW)) == []
 
 
 # --------------------------------------------------------------------------

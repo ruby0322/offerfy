@@ -15,8 +15,17 @@ happens per round inside the generator. Everywhere else the two lines sit
 together and read as one thing.
 
 Holding a `Guard` is evidence the check passed -- it is the only thing `metered`
-accepts, and the only ways to get one are `preflight` (which enforces) or
-`system_guard` (which does not, and demands a written reason).
+accepts, and there are exactly three ways to get one. They answer two
+independent questions, which is why there are three functions and no booleans:
+
+                     | enforces (may 429) | whose allowance it spends
+    preflight        | yes                | the caller's
+    deferred_guard   | no                 | the caller's
+    system_guard     | no                 | nobody's (kind 'system')
+
+The question that picks between the two unenforced ones is **did this person
+ask for this work?** They uploaded a file, so an import is `deferred_guard`;
+the platform decided to build them a digest, so that is `system_guard`.
 
 **What this shape gives up.** A new caller can skip the wrap entirely, exactly
 as app/jobs/refresh_profiles.py did before this module existed, and the failure
@@ -141,29 +150,74 @@ def system_guard(
     reason: str,
     now: datetime | None = None,
 ) -> Guard:
-    """Record without enforcing. For work no HTTP caller is waiting on.
+    """Work the PLATFORM decided to do: no enforcement, billed to nobody's
+    allowance (subject kind 'system', keyed by the person it ran for).
 
-    The nightly profile refresh needs this: it spends real money on a user's
-    behalf and must not 429 itself. `reason` is required and free text so that
-    an exemption is a named thing a reviewer sees, rather than an omission
-    nobody notices.
+    **Did this person ask for this work? If no, this is your guard.** The
+    weekly digest and the nightly profile refresh are the cases: the platform
+    decided to spend, so it must not 429 itself and must not quietly take
+    resume edits from someone for a recommendation they never requested. If
+    the answer is yes -- they uploaded a file, they pressed a button -- use
+    `deferred_guard` instead, which bills them.
 
-    Two things, not one. It does not enforce, AND it bills subject kind
-    'system' rather than 'user' (see `_system_subjects_for`): work no HTTP
-    caller is waiting on is the platform's cost, not the person's. Not
-    enforcing while still spending their allowance would be the worse of both
-    -- the job never refuses itself, and the person silently loses edits to a
-    weekly digest they never asked for.
+    That question is the whole reason there are two functions. The axes are
+    independent: enforcement asks "may this 429 the caller", attribution asks
+    "whose allowance does this spend", and they only happen to have the same
+    answer for platform work. Conflating them is how an import stopped
+    counting toward the guest pool ceiling for one commit.
 
-    Deliberately NOT an `enforce=False` flag on `preflight`. A boolean that
-    turns the limit off is indistinguishable at a glance from forgetting to
-    call it at all, which is the exact failure this module exists to make
+    `reason` is required and free text so that an exemption is a named thing a
+    reviewer sees, rather than an omission nobody notices.
+
+    Deliberately NOT an `enforce=False` flag on `preflight`, and the split from
+    `deferred_guard` is deliberately not a `bill_user=` flag either. A boolean
+    that turns the limit off is indistinguishable at a glance from forgetting
+    to call it at all, which is the exact failure this module exists to make
     visible.
     """
     if not (reason or "").strip():
         raise ValueError("system_guard needs a written reason")
     return Guard(
         subjects=_system_subjects_for(user, guest),
+        purpose=purpose,
+        window_start=usage.window_start(now),
+        exempt_reason=reason.strip(),
+    )
+
+
+def deferred_guard(
+    *,
+    user: User | None = None,
+    guest: GuestSession | None = None,
+    purpose: str,
+    reason: str,
+    network_key: str | None = None,
+    now: datetime | None = None,
+) -> Guard:
+    """THIS PERSON'S work, running with nobody on the other end of a socket:
+    no enforcement, billed to them exactly as an enforced call would be.
+
+    **Did this person ask for this work? If yes, and no HTTP caller is holding
+    a response open for it, this is your guard.** The resume import is the
+    case: they uploaded the file and asked for it to be converted, so the cost
+    is theirs and the turn is theirs -- but the work outlives the request that
+    started it, and refusing mid-run would only mean the import 429s itself
+    with nothing watching. If the platform decided to spend on its own
+    initiative, use `system_guard`, which bills kind 'system'.
+
+    Enforcement and attribution are two axes. This is the corner where they
+    disagree, and it is not a rare one: a guest's import must keep counting
+    against the ("guest", "network") pool, which is the wall that stops a
+    cleared cookie minting a fresh allowance. Billing it to 'system' turns
+    that wall off.
+
+    `reason` is required, for the same purpose as `system_guard`'s: an
+    unenforced spend should be a named thing a reviewer sees.
+    """
+    if not (reason or "").strip():
+        raise ValueError("deferred_guard needs a written reason")
+    return Guard(
+        subjects=_subjects_for(user, guest, network_key=network_key),
         purpose=purpose,
         window_start=usage.window_start(now),
         exempt_reason=reason.strip(),

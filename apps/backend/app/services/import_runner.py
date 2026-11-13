@@ -46,16 +46,22 @@ Event translation, one round at a time:
   mechanism that works across two uvicorn workers, where the old runner's
   task is in the other process and cannot be cancelled from here.
 
-**Why this wraps `aiter_chat_edit` in `system_guard`.** The import spends
+**Why this wraps `aiter_chat_edit` in `deferred_guard`.** The import spends
 real provider tokens exactly like a chat turn does, and
 `tests/test_metering.py::test_billable_call_sites_are_wrapped` is the
 inventory that catches a new billable call site that forgot to be metered --
 the exact failure mode `app/jobs/refresh_profiles.py` had before that module
 existed. `preflight()` is the wrong half of the seam here: nobody is holding
 an HTTP response open waiting on this turn, so refusing would only mean an
-import 429s itself with nothing watching. `system_guard()` is the other
+import 429s itself with nothing watching. `deferred_guard()` is the other
 half, built for precisely that shape of caller, and demands a written
 reason instead of a silent exemption.
+
+NOT `system_guard`, which is the third door: that one bills subject kind
+'system' because the platform decided to spend. Here the person asked --
+they uploaded the file -- so the cost is theirs, the turn is theirs, and a
+guest's import keeps counting against the guest pool ceiling, which is the
+wall that stops a cleared cookie minting a fresh allowance.
 """
 
 from __future__ import annotations
@@ -86,7 +92,7 @@ from app.services.import_run import (
 from app.services.import_tools import import_tool_handlers, import_tool_specs
 from app.services.llm import aiter_chat_edit
 from app.services.llm.prompts import EDIT_TOOL
-from app.services.metering import metered, system_guard
+from app.services.metering import deferred_guard, metered
 from app.services.revisions import set_draft_source
 from app.services.s3 import get_object
 
@@ -189,11 +195,11 @@ def _owner_guard(user: User | None, guest: GuestSession | None):
     up as a telemetry one. The visible-cost requirement is satisfied by the
     `LlmCall` row, which is what the admin by-purpose breakdown reads.
     """
-    return system_guard(
+    return deferred_guard(
         user=user,
         guest=guest,
         purpose="chat",
-        reason="server-initiated resume import; no HTTP caller to refuse",
+        reason="resume import the person asked for; no HTTP caller to refuse",
     )
 
 
