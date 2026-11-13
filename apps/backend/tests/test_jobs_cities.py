@@ -141,3 +141,21 @@ def test_no_alias_key_contains_a_comma():
 
     offenders = [key for key in default_taxonomy().city_aliases if "," in key]
     assert offenders == [], offenders
+
+
+def test_work_arrangements_the_live_catalogue_actually_emits():
+    """Seen in the picker on deploy day, in the UK and Taiwan lists.
+
+    "Office Based" and "Home based" are how several boards fill the city
+    position when there is no city. They are dropped at read time, so the
+    fix needs no re-derivation -- which is the point of folding here rather
+    than in enrich.
+    """
+    for raw in ["Office Based", "Home based", "Home-Based", "Field Based", "Virtual"]:
+        assert canonical_cities(raw) == [], raw
+
+
+def test_a_home_nation_is_not_a_city():
+    """"England" is a country-ish answer to "which city", not a city."""
+    assert canonical_cities("England") == []
+    assert canonical_cities("Scotland") == []
