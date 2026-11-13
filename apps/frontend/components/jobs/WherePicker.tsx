@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { currentTimeZone } from "@/lib/geo";
+import { useHoverMenu } from "@/lib/use-hover-menu";
 import { useIsClient } from "@/lib/use-is-client";
 import { fetchJobCities, type JobFacetOption } from "@/lib/jobs";
 
@@ -43,14 +44,13 @@ export default function WherePicker({
   detected,
 }: Props) {
   const t = useTranslations("jobs");
-  const [open, setOpen] = useState(false);
+  const { open, box, hover, toggle, close } = useHoverMenu<HTMLSpanElement>();
   // One cache entry, keyed by the country it was fetched for. Keeping the
   // key in the state rather than in a second variable is what lets "still
   // loading" be derived during render instead of set from inside the effect.
   const [loaded, setLoaded] = useState<{ country: string; items: JobFacetOption[] } | null>(
     null,
   );
-  const box = useRef<HTMLSpanElement>(null);
   const isClient = useIsClient();
   const zone = isClient ? currentTimeZone() : null;
   const cities = loaded && loaded.country === country ? loaded.items : null;
@@ -66,22 +66,6 @@ export default function WherePicker({
     };
   }, [open, country, loaded]);
 
-  useEffect(() => {
-    if (!open) return;
-    function onDown(event: MouseEvent) {
-      if (!box.current?.contains(event.target as Node)) setOpen(false);
-    }
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
   const caption = country
     ? city
       ? `${countryLabel(country)} · ${city}`
@@ -93,15 +77,14 @@ export default function WherePicker({
       className="jobs-where"
       data-open={open ? "1" : "0"}
       ref={box}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
+      {...hover}
     >
       <button
         type="button"
         className="jobs-where-btn"
         aria-expanded={open}
         aria-haspopup="menu"
-        onClick={() => setOpen((current) => !current)}
+        onClick={toggle}
       >
         {PIN}
         <span className="jobs-where-cap">{caption}</span>
@@ -118,7 +101,7 @@ export default function WherePicker({
             <Link
               className="jobs-where-swap"
               href={hrefFor({ country: null, city: null })}
-              onClick={() => setOpen(false)}
+              onClick={close}
             >
               {t("whereNotRight")}
             </Link>
@@ -133,7 +116,7 @@ export default function WherePicker({
               href={hrefFor({ country: option.value, city: null })}
               className={`jobs-opt${option.value === country ? " is-on" : ""}`}
               role="menuitem"
-              onClick={() => setOpen(false)}
+              onClick={close}
             >
               <span>{countryLabel(option.value)}</span>
               <span className="jobs-opt-n">{option.count.toLocaleString()}</span>
@@ -163,7 +146,7 @@ export default function WherePicker({
                       city: option.value === city ? null : option.value,
                     })}
                     className={`jobs-pill${option.value === city ? " is-on" : ""}`}
-                    onClick={() => setOpen(false)}
+                    onClick={close}
                   >
                     {option.value}
                     <span className="jobs-opt-n">{option.count.toLocaleString()}</span>
@@ -175,7 +158,7 @@ export default function WherePicker({
         ) : null}
 
         <div className="jobs-where-foot">
-          <Link href={hrefFor({ country: null, city: null })} onClick={() => setOpen(false)}>
+          <Link href={hrefFor({ country: null, city: null })} onClick={close}>
             {t("whereAnywhere")}
           </Link>
         </div>

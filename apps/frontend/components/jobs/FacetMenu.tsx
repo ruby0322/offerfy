@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "@/i18n/navigation";
+import { useHoverMenu } from "@/lib/use-hover-menu";
 
 export type FacetOption = {
   value: string;
@@ -58,25 +59,8 @@ export default function FacetMenu({
   footer,
   heading,
 }: Props) {
-  const [open, setOpen] = useState(false);
+  const { open, box, hover, toggle, close } = useHoverMenu<HTMLSpanElement>();
   const [find, setFind] = useState("");
-  const box = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDown(event: MouseEvent) {
-      if (!box.current?.contains(event.target as Node)) setOpen(false);
-    }
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
 
   const needle = find.trim().toLowerCase();
   const shown = needle
@@ -88,8 +72,7 @@ export default function FacetMenu({
       className="jobs-facet"
       data-open={open ? "1" : "0"}
       ref={box}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
+      {...hover}
     >
       {/* Set and unset are different controls, not one button with two
           meanings: when a facet is set the × has to clear it in one click,
@@ -101,7 +84,7 @@ export default function FacetMenu({
           className="jobs-facet-btn"
           aria-expanded={open}
           aria-haspopup="menu"
-          onClick={() => setOpen((current) => !current)}
+          onClick={toggle}
         >
           {selected ?? label}
           {selected ? null : (
@@ -132,7 +115,7 @@ export default function FacetMenu({
           href={clearHref}
           className={`jobs-opt${value ? "" : " is-on"}`}
           role="menuitem"
-          onClick={() => setOpen(false)}
+          onClick={close}
         >
           {anyLabel}
         </Link>
@@ -143,7 +126,7 @@ export default function FacetMenu({
               href={hrefFor(option.value)}
               className={`jobs-opt${option.value === value ? " is-on" : ""}`}
               role="menuitem"
-              onClick={() => setOpen(false)}
+              onClick={close}
             >
               <span>{option.label}</span>
               {typeof option.count === "number" ? (

@@ -3369,6 +3369,22 @@ summary.jobs-pulse-head:hover .jobs-pulse-caret {
   display: block;
 }
 
+/* The 0.4rem of air between a pill and its panel belongs to neither of them,
+   so while the cursor is crossing it the facet is not hovered and the menu
+   would close under the pointer on its way in. This covers that strip with
+   something that IS inside the facet. The grace period in
+   lib/use-hover-menu.ts handles the rest (a diagonal exit, a slow hand); this
+   handles the common case without even starting that timer. */
+.jobs-menu::before,
+.jobs-where-panel::before {
+  content: "";
+  position: absolute;
+  top: -0.45rem;
+  left: 0;
+  right: 0;
+  height: 0.45rem;
+}
+
 .jobs-menu.is-wide {
   min-width: 24rem;
 }
