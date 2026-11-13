@@ -17,7 +17,8 @@ from app.deps import SESSION_COOKIE, _sign
 from app.models import ChatMessage, GuestSession, LlmCall, Resume, User
 from app.routers.chat import _history
 from app.services import templates, usage
-from app.services.metering import Meter, system_guard
+from app.services.metering import Meter
+from tests.test_usage import _own_spend_guard
 from app.services.resume_content import ExtractResult, store_content
 from app.services.role_card import build_role_card
 from app.services.templates import mentioned_template, reset_template_index_cache
@@ -192,7 +193,7 @@ def test_switch_applies_from_a_fresh_snapshot_even_when_quota_is_exhausted(
     monkeypatch.setattr("app.routers.resumes.extract_content", _never_called)
 
     tier = usage.TIERS[usage.REGISTERED]
-    Meter(system_guard(user=user, purpose="chat", reason="test")).record(
+    Meter(_own_spend_guard(user=user)).record(
         {
             "model": "gpt-5.6-terra",
             "purpose": "chat",

@@ -178,10 +178,14 @@ def candidates(db: Session, pref: JobPreference, *, cap: int) -> list[Job]:
     high-scoring postings first would cap the fresh ones out of the set
     entirely.
 
-    The spec's per-user soft score (spotlight's recency half-life and company
-    spread, per user instead of globally) is NOT implemented. Recency is the
-    half of it that a weekly digest actually depends on; the diversity loop is
-    a later refinement over the same seam.
+    KNOWN UNIMPLEMENTED SPEC LINE, not the intended design: the spec calls for
+    a per-user soft score here (spotlight's recency half-life and
+    max_per_company spread, per user instead of globally) before the top ~30.
+    Freshest-30 is a stand-in for it. Deferred deliberately -- it is a ranking
+    refinement rather than a correctness or safety question, and the market
+    this audience sees is thin enough (about 15 eligible postings for the
+    preference we sampled) that spread over a 30-candidate cap rarely binds.
+    It has no task; whoever picks it up attaches it here.
     """
     return (
         prefilter_query(db, pref)

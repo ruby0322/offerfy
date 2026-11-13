@@ -85,8 +85,11 @@ class AdminOverview(BaseModel):
 class AdminUsageSubject(BaseModel):
     """One subject's spend inside the current window.
 
-    `subject_kind` is 'user', 'guest' or 'network'. `email` is set only for
-    users -- a guest has none, which is the point of a guest.
+    `subject_kind` is 'user', 'guest', 'network' or 'system'. A 'system' row
+    is background work (the profile refresh, the weekly digest) carrying the
+    person's id but charged to nobody's allowance -- see
+    models.UsageCounter. `email` is set only for users -- a guest has none,
+    which is the point of a guest.
     """
 
     subject_kind: str

@@ -17,9 +17,15 @@ from pathlib import Path
 import pytest
 
 from app.config import get_settings
-from app.models import GuestSession, UsageCounter, User
+from app.models import GuestSession, LlmCall, UsageCounter, User
 from app.services import usage
-from app.services.metering import Meter, preflight, system_guard
+from app.services.metering import (
+    Guard,
+    Meter,
+    _subjects_for,
+    preflight,
+    system_guard,
+)
 
 APP = Path(__file__).resolve().parents[1] / "app"
 
@@ -154,9 +160,24 @@ def _event(**kwargs):
     return {**base, **kwargs}
 
 
+def _own_spend_guard(user=None, guest=None, purpose="chat", now=None):
+    """A Guard that bills this PERSON, without enforcing.
+
+    `system_guard` deliberately bills subject kind 'system' so background work
+    never spends the person's allowance, which makes it the wrong shim for a
+    test that is simulating the person's own spend. This builds the subjects
+    `preflight` would have, without preflight's 429.
+    """
+    return Guard(
+        subjects=_subjects_for(user, guest),
+        purpose=purpose,
+        window_start=usage.window_start(now),
+    )
+
+
 def test_record_increments_the_counter_atomically(client, db_session):
     user = _user(db_session)
-    guard = system_guard(user=user, purpose="chat", reason="test")
+    guard = _own_spend_guard(user=user)
     meter = Meter(guard)
     meter.record(_event())
     meter.record(_event(round_index=1))
@@ -176,7 +197,7 @@ def test_record_increments_the_counter_atomically(client, db_session):
 
 def test_an_unmeasured_round_is_counted_and_flagged(client, db_session):
     user = _user(db_session)
-    meter = Meter(system_guard(user=user, purpose="chat", reason="test"))
+    meter = Meter(_own_spend_guard(user=user))
     meter.record(_event(input_tokens=None))
     uusd, _turns, unmeasured = usage.counter_totals(
         db_session, kind="user", subject_id=user.id, window_start=usage.window_start()
@@ -206,7 +227,7 @@ def test_a_guest_is_billed_against_its_network_key_too(client, db_session):
 def test_spend_lands_in_the_window_it_happened_in(client, db_session):
     user = _user(db_session)
     last_week = usage.window_start() - timedelta(days=1)
-    Meter(system_guard(user=user, purpose="chat", reason="test", now=last_week)).record(
+    Meter(_own_spend_guard(user=user, now=last_week)).record(
         _event()
     )
     assert usage.counter_totals(
@@ -226,7 +247,7 @@ def test_system_guard_does_not_enforce(client, db_session, monkeypatch):
     get_settings.cache_clear()
     user = _user(db_session)
     tier = usage.TIERS[usage.REGISTERED]
-    Meter(system_guard(user=user, purpose="chat", reason="test")).record(
+    Meter(_own_spend_guard(user=user)).record(
         _event(input_tokens=tier.credits * usage.CREDIT_UUSD)
     )
     assert usage.balance(db_session, user, None).exhausted
@@ -238,12 +259,141 @@ def test_system_guard_does_not_enforce(client, db_session, monkeypatch):
     assert guard.exempt_reason == "nightly refresh"
 
 
+def _system_meter(user, purpose="profile"):
+    """A meter for background work. `profile` is the nightly refresh's purpose
+    and the one the digest's facts rebuild uses -- and, unlike `match` and
+    `digest`, one `llm_calls.purpose` admits (see models.LlmCall)."""
+    return Meter(
+        system_guard(user=user, purpose=purpose, reason="background work, no HTTP caller")
+    )
+
+
+def test_system_spend_is_billed_to_the_system_with_the_persons_id(client, db_session):
+    """Subject KIND moves, subject ID does not.
+
+    The kind is what decides whose allowance it is. The id is what keeps the
+    cost attributable -- "this digest cost 20,000 uUSD and here is whose it
+    was" stays answerable, it is just not charged to them.
+    """
+    user = _user(db_session, sub="sub-sys-subject")
+    _system_meter(user).record(_event(purpose="profile"))
+    start = usage.window_start()
+    assert usage.counter_totals(
+        db_session, kind="system", subject_id=user.id, window_start=start
+    ) == (20_000, 0, 0)
+    assert usage.counter_totals(
+        db_session, kind="user", subject_id=user.id, window_start=start
+    ) == (0, 0, 0)
+
+
+def test_system_spend_does_not_move_the_persons_balance(client, db_session, monkeypatch):
+    """Property 2: a digest build costs the person nothing they can feel.
+
+    Every number the editor shows them -- credits used, credits left, "about N
+    edits left" -- is identical either side of real background spend. This is
+    the defect the subject kind exists to fix: `balance()` reads kind='user',
+    so billing background work there quietly took resume edits away from
+    someone for work they never asked for.
+    """
+    monkeypatch.setenv("USAGE_LIMITS_ENABLED", "true")
+    get_settings.cache_clear()
+    user = _user(db_session, sub="sub-sys-balance")
+    before = usage.balance(db_session, user, None)
+    edits_before = usage.approx_edits_left(db_session, user, None, before)
+
+    for _ in range(5):
+        _system_meter(user).record(_event(purpose="profile", input_tokens=200_000))
+
+    after = usage.balance(db_session, user, None)
+    assert (after.used_uusd, after.remaining_uusd) == (
+        before.used_uusd, before.remaining_uusd
+    )
+    assert after.turns_used == before.turns_used
+    assert usage.approx_edits_left(db_session, user, None, after) == edits_before
+    # And they are still allowed to edit, which is the point.
+    assert usage.enforce_usage(db_session, user, None, purpose="chat") is not None
+
+
+def test_system_spend_still_trips_the_global_ceiling(client, db_session, monkeypatch):
+    """Property 1: taken off the person's bill, not off the books.
+
+    `window_totals` sums every subject kind, so the ceiling that stops the
+    instance spending the month's budget in a day sees background work exactly
+    as it did before. Here it is the ONLY spend there is, and it still bites.
+    """
+    monkeypatch.setenv("USAGE_LIMITS_ENABLED", "true")
+    monkeypatch.setenv("GLOBAL_WEEKLY_CEILING_UUSD", "30000")
+    get_settings.cache_clear()
+    spender = _user(db_session, sub="sub-sys-ceiling")
+    _system_meter(spender).record(_event(purpose="profile"))
+    _system_meter(spender).record(_event(purpose="profile"))
+
+    start = usage.window_start()
+    assert usage.window_totals(db_session, window_start=start) == 40_000
+    # Somebody else's HTTP turn, refused by the ceiling the digest filled.
+    other = _user(db_session, sub="sub-sys-bystander")
+    with pytest.raises(Exception) as caught:
+        usage.enforce_usage(db_session, other, None, purpose="chat")
+    assert caught.value.detail["limit"] == "global_ceiling"
+
+
+def test_enforcement_for_real_callers_is_unchanged(client, db_session, monkeypatch):
+    """Property 3: only the system half moved.
+
+    `preflight` still bills the person, still counts their turns and still
+    refuses them when they are out -- a guest is still billed twice, against
+    the cookie session and the network key. Nothing about the enforced path
+    reads or writes the new kind.
+    """
+    monkeypatch.setenv("USAGE_LIMITS_ENABLED", "true")
+    get_settings.cache_clear()
+    user = _user(db_session, sub="sub-enforced-unchanged")
+    Meter(preflight(db_session, user=user, guest=None, purpose="chat")).record(_event())
+    start = usage.window_start()
+    assert usage.counter_totals(
+        db_session, kind="user", subject_id=user.id, window_start=start
+    ) == (20_000, 1, 0)
+    assert usage.balance(db_session, user, None).used_uusd == 20_000
+    assert db_session.query(UsageCounter).filter(
+        UsageCounter.subject_kind == "system"
+    ).count() == 0
+
+    # And the refusal still arrives when the allowance is gone.
+    tier = usage.TIERS[usage.REGISTERED]
+    Meter(_own_spend_guard(user=user)).record(
+        _event(input_tokens=tier.credits * usage.CREDIT_UUSD)
+    )
+    with pytest.raises(Exception):
+        preflight(db_session, user=user, guest=None, purpose="chat")
+
+
+def test_reconciliation_still_sees_background_spend(client, db_session):
+    """A 'system' counter is folded onto its person for the gap report.
+
+    The counters and the LlmCall rows are compared per subject, and the rows a
+    background call writes carry the person's id like any other. Comparing the
+    kinds separately would invent a gap on both at once, and a gap that is
+    always there is an alarm nobody can read.
+    """
+    user = _user(db_session, sub="sub-sys-reconcile")
+    _system_meter(user).record(_event(purpose="profile"))
+    db_session.add(
+        LlmCall(
+            user_id=user.id, purpose="profile", model="gpt-5.6-terra", round_index=0,
+            input_tokens=10_000, cached_tokens=0, output_tokens=0,
+            cost_uusd=20_000,
+        )
+    )
+    db_session.commit()
+    assert usage.reconcile(db_session, window_start=usage.window_start()) == []
+
+
 def test_a_failed_increment_does_not_raise(client, db_session, monkeypatch):
     """The tokens are already spent, so failing the response would lose the
     person's work *and* the money. Unbilled, logged, and caught by the
     LlmCall reconciliation instead."""
     user = _user(db_session)
-    meter = Meter(system_guard(user=user, purpose="chat", reason="test"))
+    meter = Meter(_own_spend_guard(user=user))
     monkeypatch.setattr(
         "app.services.metering._upsert",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db down")),
@@ -257,7 +407,7 @@ def test_a_failed_increment_does_not_raise(client, db_session, monkeypatch):
 def test_reconcile_spots_a_counter_with_no_telemetry_behind_it(client, db_session):
     """A gap is how a missed wrap surfaces when a grep cannot see it."""
     user = _user(db_session)
-    Meter(system_guard(user=user, purpose="chat", reason="test")).record(_event())
+    Meter(_own_spend_guard(user=user)).record(_event())
     gaps = usage.reconcile(db_session, window_start=usage.window_start())
     # The counter moved but no LlmCall row was written, so they disagree.
     assert gaps == [("user", user.id, 20_000, 0)]

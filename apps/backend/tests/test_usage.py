@@ -54,6 +54,24 @@ def _resume(db_session, *, user=None, guest=None):
     return resume
 
 
+def _own_spend_guard(user=None, guest=None, purpose="chat", now=None):
+    """A Guard that bills this PERSON, without enforcing.
+
+    Not `system_guard`: that one bills subject kind 'system' on purpose, so
+    background work never spends the person's allowance. These tests simulate
+    the person's own spend through the real `Meter`, so they need the
+    user/guest subjects `preflight` would have produced -- without preflight's
+    429, which is usually the very thing they are setting up.
+    """
+    from app.services.metering import Guard, _subjects_for
+
+    return Guard(
+        subjects=_subjects_for(user, guest),
+        purpose=purpose,
+        window_start=usage.window_start(now),
+    )
+
+
 def _spend(
     db_session,
     *,
@@ -79,9 +97,7 @@ def _spend(
     telemetry and counter are two writes with two durabilities -- and the
     reconciliation tests need both sides.
     """
-    guard = system_guard(
-        user=user, guest=guest, purpose=purpose, reason="test fixture", now=when
-    )
+    guard = _own_spend_guard(user=user, guest=guest, purpose=purpose, now=when)
     meter = Meter(guard)
     for _ in range(turns):
         db_session.add(

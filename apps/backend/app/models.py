@@ -651,6 +651,12 @@ class UsageCounter(Base):
     that stops a cookie reset from minting a fresh allowance -- have no table
     to point at.
 
+    'system' is a fourth kind, added in 034: work no HTTP caller is waiting on
+    (the nightly profile refresh, the weekly digest) billed with the person's
+    id but NOT against their allowance, because they did not ask for it. Only
+    metering.system_guard writes it; `balance` reads kind='user' and so never
+    sees it, while `window_totals` sums every kind and so always does.
+
     Weekly only. The hourly burst guard still counts LlmCall rows: a per-week
     counter cannot answer "turns in the last hour", and burst is an abuse guard
     rather than an allowance, so best-effort is the right durability for it.
@@ -660,7 +666,7 @@ class UsageCounter(Base):
     __tablename__ = "usage_counters"
     __table_args__ = (
         CheckConstraint(
-            "subject_kind IN ('user', 'guest', 'network')",
+            "subject_kind IN ('user', 'guest', 'network', 'system')",
             name="usage_counter_subject_kinds",
         ),
         CheckConstraint(

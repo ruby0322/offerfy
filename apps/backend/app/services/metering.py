@@ -73,6 +73,30 @@ class Guard:
         return self.exempt_reason is None
 
 
+def _system_subjects_for(
+    user: User | None, guest: GuestSession | None
+) -> tuple[tuple[str, str], ...]:
+    """Who a SYSTEM guard bills: subject kind 'system', keyed by the person.
+
+    The kind is what matters. `balance` reads kind='user' for `used_uusd`, so
+    billing background work to that kind spends the person's weekly credits on
+    work they never asked for -- a nightly profile refresh or a weekly digest
+    quietly costing them resume edits. Recording under 'system' takes it off
+    their allowance while leaving it fully visible: `window_totals` sums every
+    kind, so the global ceiling still sees every micro-dollar.
+
+    The subject id stays the person's, so per-user attribution survives for
+    analysis -- "this digest cost 1,800 uUSD and here is whose it was" is still
+    answerable, it just is not charged to them.
+
+    Deliberately a separate function rather than a flag on `_subjects_for`: see
+    the module docstring on why this file has no booleans that turn behaviour
+    off.
+    """
+    subject = user.id if user is not None else (guest.id if guest is not None else "")
+    return (("system", subject),)
+
+
 def _subjects_for(
     user: User | None, guest: GuestSession | None, *, network_key: str | None = None
 ) -> tuple[tuple[str, str], ...]:
@@ -124,6 +148,13 @@ def system_guard(
     an exemption is a named thing a reviewer sees, rather than an omission
     nobody notices.
 
+    Two things, not one. It does not enforce, AND it bills subject kind
+    'system' rather than 'user' (see `_system_subjects_for`): work no HTTP
+    caller is waiting on is the platform's cost, not the person's. Not
+    enforcing while still spending their allowance would be the worse of both
+    -- the job never refuses itself, and the person silently loses edits to a
+    weekly digest they never asked for.
+
     Deliberately NOT an `enforce=False` flag on `preflight`. A boolean that
     turns the limit off is indistinguishable at a glance from forgetting to
     call it at all, which is the exact failure this module exists to make
@@ -132,7 +163,7 @@ def system_guard(
     if not (reason or "").strip():
         raise ValueError("system_guard needs a written reason")
     return Guard(
-        subjects=_subjects_for(user, guest),
+        subjects=_system_subjects_for(user, guest),
         purpose=purpose,
         window_start=usage.window_start(now),
         exempt_reason=reason.strip(),

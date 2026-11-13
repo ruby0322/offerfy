@@ -735,8 +735,30 @@ class StubClient:
         return False
 
     async def post(self, url, headers=None, json=None):
+        if "/decisions" not in url:
+            # The prose endpoint. Not what this stub is standing in for.
+            return StubResponse({"error": {"message": "nope"}}, 500)
         self.calls += 1
         return StubResponse(self.payload, self.status_code)
+
+
+LEVELS = ["Strong fit", "Good fit", "Worth a look", "Not a fit"]
+
+
+def _decisions_payload():
+    """One recorded /v1/decisions answer, in the shape score.py parses."""
+    return {
+        "answers": [
+            {"name": "fit", "type": "score", "score": 0.9, "probabilities": [
+                {"label": label, "probability": 0.7 if label == "Strong fit" else 0.1}
+                for label in LEVELS
+            ]},
+            *[{"name": name, "type": "predicate", "probability": 0.8}
+              for name in ("requirements_met", "seniority_fit", "location_fit",
+                           "direction_fit")],
+        ],
+        "usage": {"input_tokens": 50_000},
+    }
 
 
 async def test_the_build_never_consumes_the_users_edit_allowance(
@@ -744,43 +766,58 @@ async def test_the_build_never_consumes_the_users_edit_allowance(
 ):
     """system_guard, not preflight, on every paid call the build makes.
 
-    Two halves. The build must not *ask* the person's allowance for permission:
-    `enforce_usage` is the only thing that reads it to refuse, and it is the
-    one function a `preflight` anywhere in this path would reach -- so it is
-    replaced with a landmine. And the build must not *spend* the allowance the
-    editor counts: `turns` is the "AI edits" limit, and a digest is not an
-    edit.
+    Three things, which are one promise: a digest is not something they asked
+    for, so it must not cost them one.
 
-    What this does not claim: the cost still lands on the person's uusd counter
-    (`score.py`'s and `reasons.py`'s guards both bill `user=`), which the
-    weekly credit limit also reads. That is the settled shape of
-    `system_guard`, recorded here so the next reader knows the promise is about
-    the edit allowance and the refusal, not about the ledger.
+    1. It must not *ask* their allowance for permission. `enforce_usage` is the
+       only thing that reads it to refuse, and the one function a `preflight`
+       anywhere in this path would reach -- so it is replaced with a landmine.
+    2. It must not *spend* it. Real provider spend goes through the real
+       scoring path here (50k input tokens, priced by the real meter), and
+       every number the editor shows them is identical either side of it.
+    3. It must still be on the books. The money lands under subject kind
+       'system' with their id, which is what `window_totals` -- and so the
+       global ceiling -- sums.
     """
     def landmine(*a, **kw):
         raise AssertionError("the build must not enforce the person's allowance")
 
     monkeypatch.setattr(usage, "enforce_usage", landmine)
-    stub = StubClient()
-    monkeypatch.setattr("app.services.jobs.score.httpx.AsyncClient", stub)
+    monkeypatch.setenv("USAGE_LIMITS_ENABLED", "true")
+    get_settings.cache_clear()
+    # One stub for both calls, routed by URL: `score.httpx` and
+    # `reasons.httpx` are the same module object, so patching one patches the
+    # other. The prose half answers 500, so this stays one real billed call
+    # and the digest is still complete enough to prove the point.
+    scoring = StubClient(status_code=200, payload=_decisions_payload())
+    monkeypatch.setattr("app.services.jobs.score.httpx.AsyncClient", scoring)
 
     user = _ready(db_session, uid="u-meter")
-    _posting(db_session)
-    # Already out of credits. A build that deferred to the allowance would
-    # produce nothing here; this one owes them a digest either way.
-    db_session.add(UsageCounter(
-        subject_kind="user", subject_id=user.id,
-        window_start=usage.window_start(NOW),
-        uusd=9_000_000, turns=0, unmeasured=0,
-    ))
-    db_session.commit()
+    _posting(db_session, first_seen=PERIOD + timedelta(hours=1))
+    before = usage.balance(db_session, user, None)
+    edits_before = usage.approx_edits_left(db_session, user, None, before)
 
     built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
-    assert stub.calls == 1 and built is not None and built.status == "degraded"
-    row = db_session.query(UsageCounter).filter(
+    assert scoring.calls == 1 and built is not None and built.status == "full"
+
+    # 1 + 2: nothing the person can feel has moved.
+    after = usage.balance(db_session, user, None)
+    assert (after.used_uusd, after.remaining_uusd, after.turns_used) == (
+        before.used_uusd, before.remaining_uusd, before.turns_used
+    )
+    assert usage.approx_edits_left(db_session, user, None, after) == edits_before
+    assert db_session.query(UsageCounter).filter(
         UsageCounter.subject_kind == "user", UsageCounter.subject_id == user.id
+    ).count() == 0
+
+    # 3: and it is on the books, attributed to them, where the ceiling reads it.
+    system = db_session.query(UsageCounter).filter(
+        UsageCounter.subject_kind == "system", UsageCounter.subject_id == user.id
     ).one()
-    assert row.turns == 0
+    assert system.uusd > 0 and system.turns == 0
+    assert usage.window_totals(
+        db_session, window_start=usage.window_start(NOW)
+    ) == system.uusd
 
 
 # --------------------------------------------------------------------------

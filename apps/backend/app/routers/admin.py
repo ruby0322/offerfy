@@ -1105,6 +1105,10 @@ def _tier_of_subject(db: Session, kind: str, subject_id: str) -> str:
     is read live from the consent ledger through services.usage, the same way
     enforcement reads it, so this view cannot disagree with what they were
     actually limited by.
+
+    A 'system' counter belongs to no tier at all -- it is background work that
+    is deliberately charged to nobody's allowance -- and falls through to the
+    uncapped guest tier here, for DISPLAY only. Nothing enforces against it.
     """
     if kind != "user":
         return usage_service.GUEST
