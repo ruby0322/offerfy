@@ -34,12 +34,60 @@ jobs.
 has a fourth stale line at **:150** — "Matching, ranking, and apply tracking are
 not included" — missed in the first two counts. So: 9 locale strings (three
 keys × three locales) plus 4 lines in `agent-markdown.ts`. The landing session
-has committed all thirteen as `52d9f17` on `claude/truthful-marketing-copy`,
-based on `8973d2d`, **not pushed**, awaiting the user's own instruction. I
-verified the commit exists, is a descendant of `8973d2d`, and has no remote ref.
-It took `jobs.metaDescription` too, so nothing in that set is left to me.
+has committed all thirteen on `claude/truthful-marketing-copy`, **not pushed**,
+awaiting the user's own instruction; it has rebased onto `main` twice as this
+file moved, so take the branch tip rather than a sha from here. It took
+`jobs.metaDescription` too, so nothing in that set is left to me.
 
-## Open item for the user: the Terms of Service paragraph
+Its first rewrite of `agent-markdown.ts:105` replaced a false denial with a
+differently-worded false denial — "ranks or **scores** resumes against jobs",
+which the editor's own prompt contradicts. Caught on a second read of the diff
+rather than of the sha, and now removed entirely rather than reworded, so the
+line is true under either ruling below. Every surviving negative in that file is
+scoped to **postings**, never to resumes: that is the test that separates what
+the catalog does from what the editor does.
+
+## Open item for the user: what do we call the fit read?
+
+**Thirteen places, three locales, and live user-facing UI — not one legal
+sentence.** Does not block the deploy. Owned by the user, not by either agent
+session. Widened 2026-11-13 after the landing session went looking for the word
+rather than checking only the two keys already named; I verified every one.
+
+The user has said Offerfy does not *score*. The product says it does, in
+thirteen places:
+
+| Key | Surface | What it says |
+|---|---|---|
+| `editor.tailorKickstartPrompt` ×3 | prompt text | "score how well the current resume fits this role" |
+| `editor.tailorKickstartContextUnknown` ×3 | prompt text | "Score the resume as it stands" |
+| `editor.familyNewTailorHint` ×3 | **user-facing UI** | "A copy aimed at one job, scored against that role" |
+| `editor.tailorDialogHint` ×3 | **user-facing UI** | "AI scores the resume against the role and suggests what to improve" |
+| `legal.terms.sections[1].paragraphs[3]` | Terms, EN only | "score how well it fits a job description you paste in" |
+
+zh-TW and zh-CN use 評分 / 评分 in all four editor keys, so there is **no
+EN-only divergence here** — the Chinese is equally explicit. Only Terms is an
+EN outlier (zh says 評估契合度 / 评估契合程度, "assess fit").
+
+**There is already a live inconsistency about this.** `landing.loop.aimBody`
+describes the tailor feature with no scoring claim at all — "A copy aimed at
+that one job… every chat turn edits against the posting's own words" — while
+`editor.familyNewTailorHint` describes the same feature as "scored against that
+role". The landing page and the editor disagree about what the feature does,
+on production, right now. That is an argument for ruling sooner.
+
+What the feature actually does, for whoever rules: the model is asked for a
+prose read of fit — what matches, what is missing, an overall impression. No
+number is produced, nothing is stored, and no posting is ranked against another.
+"Assess fit" is the accurate description; "score" overclaims in English and in
+both Chinese variants.
+
+Note the two axes are separable. *Nothing ranks or recommends postings* is true
+and should stay said everywhere. *The editor reads how well a resume fits a JD
+you paste* is true and is what the word "score" is reaching for. Keeping the
+first and renaming the second is the shape of a fix.
+
+## The same clause, in Terms
 
 **Not fixed, not assigned, and it does not block the deploy — but it should not
 quietly survive it.** `legal.terms.sections[1].paragraphs[3]`, all three
