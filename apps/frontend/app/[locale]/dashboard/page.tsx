@@ -20,7 +20,7 @@ import {
 import { COUNTRY_KEYS, FUNCTION_KEYS, SENIORITY_KEYS } from "@/components/jobs/JobSearchForm";
 import ApplicationList from "@/components/dashboard/ApplicationList";
 import EmployerViews from "@/components/dashboard/EmployerViews";
-import MatchCountCard from "@/components/dashboard/MatchCountCard";
+import SlotTwo from "@/components/dashboard/SlotTwo";
 import ResumeHealthCard from "@/components/dashboard/ResumeHealthCard";
 import { fetchDashboard, type Dashboard } from "@/lib/dashboard";
 import { preferenceSummary } from "@/lib/jobs";
@@ -271,7 +271,7 @@ export default function DashboardPage() {
 
         {dash ? (
           <div className="mb-10 grid gap-6">
-            <MatchCountCard count={dash.match_count} hasPreference={summary !== ""} />
+            <SlotTwo digest={dash.digest} matchCount={dash.match_count} hasPreference={summary !== ""} />
             <ApplicationList initial={dash.applications} />
             <ResumeHealthCard
               health={dash.resume_health}
