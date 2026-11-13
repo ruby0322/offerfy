@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import { Link, useRouter } from "@/i18n/navigation";
 import { ApiError, createTailor, getMe, listResumes } from "@/lib/api";
@@ -13,6 +13,9 @@ const TRACK_KEYS = {
   new_this_week: "digestTrackNewThisWeek",
 } as const;
 
+// Keys are the backend's English tier strings: STRONG_TIERS / _NEW_TIERS in
+// apps/backend/app/services/jobs/digest.py (lines 49 and 54). Rename them there
+// and add the new string here; an unmapped tier renders raw.
 const TIER_KEYS = {
   "Strong fit": "digestTierStrongFit",
   "Good fit": "digestTierGoodFit",
@@ -27,9 +30,13 @@ type State =
   | { kind: "unknown" }
   | { kind: "ready"; masterId: string | null };
 
-type Props = { digest: Digest };
+type Props = {
+  digest: Digest;
+  /** Shown instead when there is nothing to list; the card alone decides that. */
+  fallback?: ReactNode;
+};
 
-export default function DigestCard({ digest }: Props) {
+export default function DigestCard({ digest, fallback = null }: Props) {
   const t = useTranslations("dashboard");
   const tJobs = useTranslations("jobs");
   const router = useRouter();
@@ -63,8 +70,9 @@ export default function DigestCard({ digest }: Props) {
     };
   }, [hasItems]);
 
-  // Nothing to show is nothing rendered: the page needs only a null check.
-  if (!hasItems) return null;
+  // Nothing to show is the fallback (nothing, by default). This is the only
+  // place that decides a digest is empty; the page never re-derives it.
+  if (!hasItems) return <>{fallback}</>;
 
   async function tailor(item: DigestItem) {
     if (state.kind !== "ready" || !state.masterId) return;
@@ -103,7 +111,8 @@ export default function DigestCard({ digest }: Props) {
       <button
         type="button"
         className={ACTION}
-        disabled={state.kind !== "ready" || busyId === item.job_id}
+        // A posting can close between the build and the read.
+        disabled={state.kind !== "ready" || busyId === item.job_id || !item.job_is_active}
         onClick={() => tailor(item)}
       >
         {t("digestTailor")}
@@ -132,9 +141,9 @@ export default function DigestCard({ digest }: Props) {
               ) : null}
             </p>
           ) : null}
-          {item.reason ? <p className="mt-1 text-sm">{item.reason}</p> : null}
+          {item.reason ? <p className="mt-1 break-words text-sm">{item.reason}</p> : null}
           {item.gap ? (
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="mt-1 break-words text-sm text-muted-foreground">
               <span className="font-semibold">{t("digestGapLabel")}</span> {item.gap}
             </p>
           ) : null}
