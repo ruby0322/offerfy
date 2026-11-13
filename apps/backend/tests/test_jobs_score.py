@@ -210,13 +210,20 @@ async def test_a_provider_4xx_sets_error_and_scores_nothing(openai_enabled, monk
 
 
 async def test_no_key_is_an_error_not_a_crash(monkeypatch, db_session):
-    monkeypatch.setenv("OPENAI_API_KEY", "")
     from app.config import get_settings
 
+    monkeypatch.setenv("OPENAI_API_KEY", "")
     get_settings.cache_clear()
-    stub = _install(monkeypatch, StubDecisions(lambda body: _answers()))
-    run = await score_candidates(db_session, user=_user(db_session), facts=_facts(), jobs=[_job("a")])
-    assert run.error and run.scored == [] and stub.calls == []
+    try:
+        stub = _install(monkeypatch, StubDecisions(lambda body: _answers()))
+        run = await score_candidates(
+            db_session, user=_user(db_session), facts=_facts(), jobs=[_job("a")]
+        )
+        assert run.error and run.scored == [] and stub.calls == []
+    finally:
+        # Do not let a settings object with an empty key outlive this test.
+        monkeypatch.undo()
+        get_settings.cache_clear()
 
 
 async def test_usage_records_input_tokens_only(openai_enabled, monkeypatch, db_session):
@@ -282,3 +289,50 @@ async def test_concurrency_is_bounded(openai_enabled, monkeypatch, db_session):
     )
     assert len(run.scored) == 10
     assert stub.peak == 3
+
+
+def _recording(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    recorded = []
+    real = score_mod.metered
+
+    @asynccontextmanager
+    async def spy(guard):
+        async with real(guard) as meter:
+            original = meter.record
+            meter.record = lambda event: (recorded.append(event), original(event))[1]
+            yield meter
+
+    monkeypatch.setattr(score_mod, "metered", spy)
+    return recorded
+
+
+async def test_a_billed_call_that_fails_to_parse_is_still_recorded(
+    openai_enabled, monkeypatch, db_session
+):
+    recorded = _recording(monkeypatch)
+    payload = _answers()
+    del payload["answers"][0]["probabilities"]
+    _install(monkeypatch, StubDecisions(lambda body: payload))
+    run = await score_candidates(db_session, user=_user(db_session), facts=_facts(), jobs=[_job("a")])
+    assert run.error and run.scored == []
+    assert [e["input_tokens"] for e in recorded] == [1200]
+    assert run.usage["input_tokens"] == 1200
+
+
+async def test_a_billed_5xx_is_recorded_and_an_unbilled_one_is_not(
+    openai_enabled, monkeypatch, db_session
+):
+    recorded = _recording(monkeypatch)
+    user = _user(db_session)
+    _install(monkeypatch, StubDecisions(
+        lambda body: {"error": {"message": "overloaded"}, "usage": {"input_tokens": 700}},
+        status_code=503))
+    run = await score_candidates(db_session, user=user, facts=_facts(), jobs=[_job("a")])
+    assert run.error == "overloaded" and [e["input_tokens"] for e in recorded] == [700]
+
+    recorded.clear()
+    _install(monkeypatch, StubDecisions(lambda body: {"error": {"message": "nope"}}, status_code=404))
+    await score_candidates(db_session, user=user, facts=_facts(), jobs=[_job("a")])
+    assert recorded == []

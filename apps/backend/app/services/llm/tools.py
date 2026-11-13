@@ -15,6 +15,7 @@ goes through the same translation.
 
 from __future__ import annotations
 
+from app.services.layout import LAYOUT_RUBRICS
 from app.services.llm.prompts import (
     ATS_TOOL,
     EDIT_TOOL,
@@ -86,7 +87,7 @@ TOOLS = [
                     "type": "array",
                     "items": {
                         "type": "string",
-                        "enum": ["density", "hierarchy"],
+                        "enum": list(LAYOUT_RUBRICS),
                     },
                     "description": (
                         "Graded visual verdicts about the rendered pages, 0 to "

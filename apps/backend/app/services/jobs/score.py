@@ -34,7 +34,6 @@ import httpx
 from app.config import get_settings
 from app.services.layout import (
     DEFAULT_DECISIONS_MODEL,
-    SCORE_RUBRICS,
     VISION_TIMEOUT,
     _error_detail,
     _score_questions,
@@ -57,10 +56,8 @@ _PREDICATE_INSTRUCTIONS = {
     ),
 }
 
-# Display tier -> weight in the 0..1 fit score. The score is the expectation of
-# these over the rubric's own probabilities, so it is calibrated by the
-# endpoint rather than invented here, and it does not depend on which end of
-# the rubric the endpoint's built-in `score` field counts from.
+# Display tier -> weight in the 0..1 fit score; see the module docstring for
+# the formula and for why the endpoint's own `score` field is not used.
 TIER_WEIGHTS = {
     "Strong fit": 1.0,
     "Good fit": 2 / 3,
@@ -101,7 +98,13 @@ class ScoreRun:
 
 
 class _Failed(Exception):
-    """A provider fault for one pair. Carries the message for `ScoreRun.error`."""
+    """A provider fault for one pair. Carries the message for `ScoreRun.error`
+    and whatever usage the response reported: a call that failed to parse or
+    came back 4xx/5xx may still have been billed, and must still be recorded."""
+
+    def __init__(self, message: str, usage: dict | None = None):
+        super().__init__(message)
+        self.usage = usage or {}
 
 
 def _facts_text(facts: Any) -> str:
@@ -215,21 +218,33 @@ def _parse(job_id: str, data: Any) -> Scored | str:
 async def _score_pair(
     client: httpx.AsyncClient, *, url: str, headers: dict, model: str, facts_text: str, job: Any
 ) -> tuple[Scored | str, Any]:
-    """One billable Decisions call. Returns (Scored | "refused", usage dict)."""
+    """One billable Decisions call. Returns (Scored | "refused", usage dict).
+
+    Usage is read before the answer is, so every `_Failed` raised after a
+    response arrived carries it.
+    """
     try:
         resp = await client.post(url, headers=headers, json=_body(model, facts_text, job))
-        if resp.status_code >= 400:
-            detail = _error_detail(resp)
-            logger.warning("decisions match failed status=%s detail=%s", resp.status_code, detail)
-            raise _Failed(detail)
-        data = resp.json()
+        try:
+            data = resp.json()
+        except ValueError:
+            data = None
     except httpx.HTTPError as exc:
         logger.warning("decisions match transport failed: %s", exc.__class__.__name__)
         raise _Failed("Decisions request failed") from None
-    except ValueError:
-        raise _Failed("Decisions returned no JSON") from None
     usage = data.get("usage") if isinstance(data, dict) else None
-    return _parse(str(job.id), data), usage if isinstance(usage, dict) else {}
+    usage = usage if isinstance(usage, dict) else {}
+    if resp.status_code >= 400:
+        detail = _error_detail(resp)
+        logger.warning("decisions match failed status=%s detail=%s", resp.status_code, detail)
+        raise _Failed(detail, usage)
+    if data is None:
+        raise _Failed("Decisions returned no JSON", usage)
+    try:
+        return _parse(str(job.id), data), usage
+    except _Failed as exc:
+        exc.usage = usage
+        raise
 
 
 async def score_candidates(db, *, user, facts, jobs, concurrency: int = 4) -> ScoreRun:
@@ -242,7 +257,6 @@ async def score_candidates(db, *, user, facts, jobs, concurrency: int = 4) -> Sc
     settings = get_settings()
     model = (settings.openai_decisions_model or DEFAULT_DECISIONS_MODEL).strip()
     run = ScoreRun(model=model)
-    assert FIT_RUBRIC in SCORE_RUBRICS
     if not (settings.openai_api_key or "").strip():
         run.error = "llm_not_configured"
         return run
@@ -295,29 +309,35 @@ async def score_candidates(db, *, user, facts, jobs, concurrency: int = 4) -> Sc
                         )
                     except _Failed as exc:
                         failure.append(str(exc))
-                        return
+                        outcome, usage = None, exc.usage
+                        # A failed call may still have been billed.
+                        billed = bool(usage)
+                    else:
+                        billed = True
                     tokens = usage.get("input_tokens")
                     tokens = tokens if isinstance(tokens, int) and not isinstance(tokens, bool) else None
                     if tokens is not None:
                         input_tokens += tokens
                         measured = True
-                    # Input tokens are the whole bill on this endpoint: no
-                    # output charge and no cache line, the shape turn.py emits
-                    # for purpose="vision".
-                    meter.record(
-                        {
-                            "kind": "usage",
-                            "purpose": "match",
-                            "model": model,
-                            "round_index": index,
-                            "input_tokens": tokens,
-                            "cached_tokens": None,
-                            "cache_write_tokens": None,
-                            "output_tokens": None,
-                            "reasoning_tokens": None,
-                        }
-                    )
-                    results[str(job.id)] = outcome
+                    if billed:
+                        # Input tokens are the whole bill on this endpoint: no
+                        # output charge and no cache line, the shape turn.py
+                        # emits for purpose="vision".
+                        meter.record(
+                            {
+                                "kind": "usage",
+                                "purpose": "match",
+                                "model": model,
+                                "round_index": index,
+                                "input_tokens": tokens,
+                                "cached_tokens": None,
+                                "cache_write_tokens": None,
+                                "output_tokens": None,
+                                "reasoning_tokens": None,
+                            }
+                        )
+                    if outcome is not None:
+                        results[str(job.id)] = outcome
 
             await asyncio.gather(*(one(i, job) for i, job in enumerate(candidates)))
 
