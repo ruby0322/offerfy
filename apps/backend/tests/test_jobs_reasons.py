@@ -273,16 +273,118 @@ def test_a_name_where_a_sentence_starts_is_still_an_invented_claim():
 
 
 def test_the_stopword_list_leaves_ordinary_sentence_openers_alone():
+    # Sentences a reviewer wrote that earlier rounds dropped over their first
+    # word ("Based", "Fully") -- not over anything they claim.
     ok = [
-        (_item(reason="Six years of Python match this role.", posting=("Python",)), _posting()),
-        (_item(reason="Remote work suits your Python background.", posting=("Python",)),
-         _posting(location="Remote")),
-        (_item(reason="Strong Python work, and the posting asks for exactly that.",
+        (_item(reason="Based in Berlin, you already work in Python, which Initech uses.",
+               posting=("Initech",)), _posting(company="Initech", location="Berlin")),
+        (_item(reason="Fully remote Python work in Europe matches your location.",
+               posting=("Python",)), _posting(location="Remote, Europe")),
+        (_item(reason="Based on your Python work, this is a good match.",
                posting=("Python",)), _posting()),
+        (_item(reason="Join Initech to use your Python skills.", posting=("Initech",)),
+         _posting(company="Initech")),
+        (_item(reason="Both your CV and the posting name Python.", posting=("Python",)),
+         _posting()),
     ]
     for item, postings in ok:
         assert check([item], facts=FACTS, scored_ids={"a"},
                      postings=postings).dropped == [], item.reason
+
+
+def test_a_reason_may_not_narrate_the_person_s_history():
+    # No capitalised token in any of these, so no name scan could reach them:
+    # the shape is what gives them away.
+    for reason in (
+        "You managed 40 engineers, and your Python fits.",
+        "Your Python fits and you have 12 years of it.",
+        "Your Python fits; you saved $5M.",
+        "Your Python fits; you cut latency by 90%.",
+        "Your Python work fits and you worked there too.",
+        "Since 2019 you have built Python services.",
+    ):
+        item = _item(reason=reason, posting=("Python",))
+        assert check([item], facts=FACTS, scored_ids={"a"}, postings=_posting()).dropped == [
+            ("a", "narrated")
+        ], reason
+    # Present-tense matching is what a reason is FOR, and is left alone.
+    for reason in (
+        "Python, which this role centres on, is on your resume.",
+        "Your Python work fits their stack.",
+        "Python is the language you use daily, and this role centres on it.",
+    ):
+        item = _item(reason=reason, posting=("Python",))
+        assert check([item], facts=FACTS, scored_ids={"a"},
+                     postings=_posting()).dropped == [], reason
+
+
+def test_a_negated_possession_is_the_right_way_to_write_a_gap():
+    # The absence rule rejected these, which was backwards.
+    postings = _posting(requirements="Python and Kubernetes")
+    for gap in (
+        "You have not worked with Kubernetes.",
+        "The posting wants Kubernetes; you have no listed Kubernetes work.",
+        "Kubernetes is required, but you haven't listed it.",
+    ):
+        item = _item(gap=gap, gap_missing="Kubernetes", posting=("Python",))
+        checked = check([item], facts=FACTS, scored_ids={"a"}, postings=postings)
+        assert checked.kept[0].gap == gap and checked.gaps_rejected == [], gap
+    # The positive form is still rejected.
+    claim = _item(gap="You have Kubernetes experience.", gap_missing="Kubernetes",
+                  posting=("Python",))
+    assert check([claim], facts=FACTS, scored_ids={"a"}, postings=postings).kept[0].gap is None
+
+
+def test_an_absence_needs_no_absence_verb_to_be_one():
+    postings = _posting(requirements="Python and Kubernetes")
+    for gap in (
+        "The team uses Kubernetes, but your resume has none.",
+        "Your resume has nothing on Kubernetes.",
+        "The job needs three years of Kubernetes; your resume shows fewer.",
+    ):
+        item = _item(gap=gap, gap_missing="Kubernetes", posting=("Python",))
+        assert check([item], facts=FACTS, scored_ids={"a"},
+                     postings=postings).kept[0].gap == gap, gap
+
+
+def test_a_gap_may_not_assert_possession_in_any_of_its_shapes():
+    postings = _posting(requirements="Python and Docker")
+    for gap in (
+        "Docker is missing; you did Docker at Acme.",
+        "Docker is missing, though you deployed Docker at Acme.",
+        "Docker is missing, but you were Docker lead at Acme.",
+        "Docker is missing, though you're a Docker expert.",
+        "Docker is missing, but you'd shipped Docker.",
+        "Docker is missing, but your production Docker experience is strong.",
+        "Docker is missing, but your Docker expertise is strong.",
+        "Docker is missing, but your Docker skills are strong.",
+        # Relative clauses that used to walk through the who/that carve-out.
+        "Docker is missing, but you are the one that has shipped Docker.",
+        "Docker is missing, though you, who have shipped Docker, applied.",
+    ):
+        item = _item(gap=gap, gap_missing="Docker", posting=("Python",))
+        checked = check([item], facts=FACTS, scored_ids={"a"}, postings=postings)
+        assert checked.kept[0].gap is None and checked.gaps_rejected == ["a"], gap
+    # A clause about the posting's ideal candidate is about nobody in
+    # particular, and naming the absence of the person's own work is the point.
+    for gap in (
+        "They want someone who has shipped Docker; your resume shows none.",
+        "Your Docker work is missing.",
+    ):
+        item = _item(gap=gap, gap_missing="Docker", posting=("Python",))
+        assert check([item], facts=FACTS, scored_ids={"a"},
+                     postings=postings).kept[0].gap == gap, gap
+
+
+def test_two_letter_technology_names_are_not_invisible():
+    # Go, JS and C# are languages; R and C are the one-character cases.
+    for tech in ("Go", "JS", "C#", "R"):
+        postings = _posting(requirements=f"Python and {tech}")
+        item = _item(reason=f"Your Python work fits, and your {tech} work too.",
+                     posting=("Python",))
+        assert check([item], facts=FACTS, scored_ids={"a"}, postings=postings).dropped == [
+            ("a", "undeclared")
+        ], tech
 
 
 def test_a_gap_may_not_assert_that_the_person_has_the_thing():

@@ -23,8 +23,9 @@ the prompt carries all four component probabilities for exactly that.
 
 Two different things are called an "item" here, and the difference is the
 point. `validate` DROPS A `Prose` RECORD: a reason citing experience the resume
-does not have comes back in `dropped` as (job_id, "uncited") and no `Prose` is
-returned for it. It does NOT return a `Prose` with an empty-string reason. The
+does not have comes back in `dropped` as (job_id, "uncited") -- or
+"undeclared" for an unaccounted-for name, or "narrated" for a history claim --
+and no `Prose` is returned for it. It does NOT return a `Prose` with an empty-string reason. The
 digest item, built later from a `Scored` plus an OPTIONAL `Prose`, keeps its
 tier and score and simply has no sentence. Do not "fix" this into blank
 reasons: the caller would then have to filter them out again, and a blank
@@ -37,19 +38,38 @@ Length is clamped, never rejected (the discipline of `resume_facts.clamp_payload
 truncating loses a clause, rejecting loses the sentence. Cites are checked
 against the clamped text, because that is what the person reads.
 
-Two honest limits. The cite check trusts what the model declares, so a
-sentence that names something it did not declare is only caught by a
-conservative scan for name-like ASCII tokens (capitalised, inner capital,
-digit, + or #); a LOWERCASE technology the model neither declares nor
-capitalises ("kubernetes") is a known hole, as is any non-ASCII claim. Position
-excuses nothing: a capitalised token is excused only by being one of a short
-list of function words and sentence-openers (`_STOPWORDS`), because "Terraform
-and Python work fits this role." puts the invented claim first. The scan
-errs towards dropping a sentence. Second, `validate` can only check a posting
-cite against the posting when `check` is given the posting's field values
-(write_reasons does, values only -- a cite of "Requirements" must not match a
-label); at most MAX_ITEMS prose records are kept, but WHICH postings are sent is
-the caller's cap (Task 5), not this module's.
+WHAT IS GUARANTEED AND WHAT IS NOT. Read this before trusting the output,
+because the two kinds of check here are not the same kind of promise.
+
+EXACT, decided by comparing strings and nothing else:
+  * every declared resume cite is present in the resume facts, and at least
+    one of them appears in the sentence it vouches for;
+  * every declared posting cite corresponds to a value of THIS posting --
+    whenever `check` is given the posting's field values, which `write_reasons`
+    always is (values only: a cite of "Requirements" must not match a label);
+  * `gap_missing` is named, at most GAP_MISSING_CHARS long, absent from the
+    resume, and actually mentioned in the gap;
+  * at most MAX_ITEMS records are kept, and duplicates and unknown job ids go.
+  WHICH postings are sent is the caller's cap (Task 5), not this module's.
+
+BEST EFFORT, two heuristics over free prose, neither of them a guarantee:
+  * the NAME SCAN (`_undeclared_names`) looks for name-like ASCII tokens the
+    model did not declare -- capitalised, inner capital, digit, + or #, two
+    characters or more, plus "R" and "C". Position excuses nothing; only
+    `_STOPWORDS` membership does. A LOWERCASE technology the model neither
+    declares nor capitalises ("you led terraform migrations") is invisible to
+    it, as is any non-ASCII name, and a word in `_STOPWORDS` is exempt even if
+    a company is called that.
+  * the CLAIM SHAPE check (`_claims_history` for a reason,
+    `_asserts_possession` for a gap) looks for a second-person subject with a
+    past-tense or perfect verb, or beside a quantity. It is what catches the
+    claims that name nothing at all -- "You managed 40 engineers.", "You saved
+    $5M." -- which no name scan could ever see. It knows a fixed verb list and
+    a three-word window, so an unusual construction ("you Docker-ized Acme")
+    walks through it.
+Together they stop the sentences a model actually writes; a determined
+adversary is not the threat model, and neither heuristic should be described
+to anyone as a guarantee that the prose is true.
 
 The scan is split by field. In a `reason`, name-like tokens from the posting's
 company and location are exempt (a city or an employer is not a claim about
@@ -70,13 +90,22 @@ The gap IS also scanned for any other name-like token (exempting gap_missing,
 and the company and location as mentions), and must contain an absence or
 demand marker (`_ABSENCE`), since "You have shipped Kubernetes in prod." names
 only the gap token. A marker alone proves nothing, though -- a demand verb
-says nothing about the person -- so a gap asserting POSSESSION (`_POSSESSION`:
-"you have", "you led", "your X experience", a subject-elided perfect) is
-rejected whatever marker it also carries. What stays uncatchable: a gap that
-frames the gap_missing token ITSELF as something the person has done in words
-`_POSSESSION` does not cover ("Missing docker; you led docker swarm" where the
-lowercase token is legitimately exempt). Token scanning cannot see that; the
-prompt is the only defence.
+says nothing about the person -- so a gap asserting POSSESSION is rejected
+whatever marker it also carries. NEGATION is the exception and it matters:
+"You have not worked with Kubernetes." is the correct way to write a gap, and
+an earlier round rejected it, so a negator between the subject and the verb
+lets the sentence through.
+
+The two fields are held to different standards on purpose. A reason may say
+what the posting wants and which of the person's declared, on-resume items
+match it, in the present tense ("you already work in Python"); it may not
+narrate their history, tenure or achievements, because "Since 2019 you have
+built Python services at Acme" is unverifiable even when Python and Acme are
+both on the resume -- the year never is. A gap must not describe what the
+person does at all, in any tense. What stays uncatchable: a gap that frames
+the gap_missing token ITSELF as something the person has done in words the
+verb list does not cover ("Missing docker; you led docker swarm" -- the
+lowercase token is legitimately exempt there). The prompt is the only defence.
 
 Fewer than five is allowed and so is none: the honest empty state is only
 honest if the model is permitted to produce it.
@@ -129,6 +158,13 @@ PROMPT = (
     "the posting, and you must list each cite exactly as written in "
     "resume_cites and posting_cites; each resume cite must also appear in the "
     "reason's own words. "
+    "Write the reason in the PRESENT TENSE, about what the posting asks for and "
+    "which of the resume's own items match it. Never narrate the person's "
+    "history: do not write what they did, where they worked, how long they have "
+    "done it, how many people they led, or what they achieved. \"Python, which "
+    "this role centres on, is on your resume\" is right; \"you have six years of "
+    "Python\" and \"you led a team of 40\" are rejected even when the resume "
+    "names Python, because the years and the headcount are claims of their own. "
     "Completeness is required: every skill, employer, institution or technology "
     "named in the reason must appear in resume_cites. Refer to the posting by its "
     "company or location, or just say \"this role\": do not name technology "
@@ -278,18 +314,27 @@ class Checked:
     gaps_rejected: list[str] = field(default_factory=list)
 
 
-# An ASCII token of 3+ characters that looks like a name or a technology:
-# capitalised, or carrying an inner capital, a digit, or + / #.  Lowercase
-# technologies ("kubernetes") are NOT caught -- a known limitation, see the
-# module docstring.
-_TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9+#]{2,}")
+# An ASCII token that looks like a name or a technology: capitalised, or
+# carrying an inner capital, a digit, or + / #. Two characters is the minimum,
+# because "Go", "JS" and "C#" are languages; "R" and "C" are the one-character
+# cases worth naming, and a bare "I" or "A" is not. Lowercase technologies
+# ("kubernetes") are NOT caught -- a known limitation, see the module docstring.
+_TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9+#]+|(?<![A-Za-z0-9])[RC](?![A-Za-z0-9])")
 
 # Capitalisation is not excused by POSITION: "Terraform and Python work fits"
 # and "Your Python work fits. Terraform shipped in prod." both put an invented
-# claim where a sentence begins. Only these words are excused, and only by
-# being themselves: the common sentence-openers and function words no employer
-# or technology is called. The list is deliberately short -- an ambiguous token
-# costs one dropped sentence, an exempted one ships an invented claim.
+# claim where a sentence begins. A capitalised token is excused only by being
+# one of these words: function words, sentence-openers, and the vocabulary of
+# describing a posting and a match. No employer or technology is plausibly
+# called any of them.
+#
+# The list is long on purpose, and that is a change of strategy. While it was
+# the ONLY thing standing between an invented claim and the person's inbox it
+# had to stay short, and it ate ordinary prose ("Based in Berlin, you already
+# work in Python" was dropped over "Based"). The construction that actually
+# carries an invented history -- a second-person subject with a past-tense verb
+# -- is now caught by `_claims_history`, which does not care which word opens
+# the sentence, so the opener list can be generous without reopening route 2.
 _STOPWORDS = frozenset(
     """
     you your yours the this that these those they them their there here his
@@ -308,6 +353,29 @@ _STOPWORDS = frozenset(
     one two three four five six seven eight nine ten eleven twelve
     strong good great direct close ready able senior junior
     remote onsite hybrid backend frontend
+    based since fully join looking combining building leading located hiring
+    seeking offers requires excellent solid perfect ideal relevant proven
+    extensive deep recent previous previously currently current plus fit
+    match matching suits overall especially ideally probably very really
+    first multiple various someone company mid lead staff principal entry
+    candidates applicants familiarity knowledge proficiency expertise
+    am an as at be by do he if in is it me my no of on or so to up us we vs
+    cv cvs
+    requirements responsibilities duties tasks skills tools technologies
+    languages frameworks platforms systems services products projects
+    engineers developers managers leaders analysts scientists designers
+    people employer employers companies city office location region country
+    position job opening opportunity vacancy listing description title level
+    seniority intern graduate anyone everyone nobody
+    now today soon often usually typically mainly primarily partly partially
+    entirely wholly highly quite rather pretty truly simply merely basically
+    essentially effectively ultimately finally second third next last
+    numerous others rest whole entire half double triple single sole major
+    minor primary secondary full early late high low past present above below
+    recently formerly presently roughly approximately like unlike via per
+    once using considering hands significant substantial demonstrated expect
+    aligned pairing overlap perhaps maybe generally broadly directly notably
+    particularly
     """.split()
 )
 
@@ -347,8 +415,12 @@ def _undeclared_names(
     found = []
     for match in _TOKEN.finditer(text):
         token = match.group(0)
+        # A stopword is excused however it is written: "CV" and "IT" are the
+        # two-letter all-caps cases that the inner-capital rule would flag.
+        if token.casefold() in _STOPWORDS:
+            continue
         looks_named = (
-            (token[0].isupper() and token.casefold() not in _STOPWORDS)
+            token[0].isupper()
             or any(c.isupper() for c in token[1:])
             or any(c.isdigit() or c in "+#" for c in token)
         )
@@ -427,6 +499,11 @@ def check(
         if _undeclared_names(reason, declared, facts, exempt=exempt):
             out.dropped.append((job_id, "undeclared"))
             continue
+        # Shape, not vocabulary: a narrated history names nothing the scan
+        # above can see ("You managed 40 engineers.").
+        if _claims_history(reason):
+            out.dropped.append((job_id, "narrated"))
+            continue
         seen.add(job_id)
         if len(out.kept) >= MAX_ITEMS:
             out.dropped.append((job_id, "over_cap"))
@@ -454,39 +531,165 @@ def validate(
 # that has none is describing the person, which is the claim this module exists
 # to stop. ASCII words are matched whole; the CJK ones as substrings.
 _ABSENCE = re.compile(
-    r"(?<![a-z])(?:not|no|never|missing|without|lack\w*|new|absent|unfamiliar|"
-    r"wants?|requires?|needs?|expects?|seeks?|asks?)(?![a-z])|n't|沒有|缺|未|無|不",
+    r"(?<![a-z])(?:not|no|none|nothing|never|missing|without|lack\w*|fewer|new|"
+    r"absent|unfamiliar|wants?|requires?|needs?|expects?|seeks?|asks?)(?![a-z])"
+    r"|n't|沒有|缺|未|無|不",
     re.IGNORECASE,
 )
 
 
-# A gap names an ABSENCE. A marker is not enough to prove that, because a
-# demand verb ("the posting wants X") says nothing about the person: "You need
-# Kubernetes experience and have shipped it in prod." carries a marker and a
-# history claim at once. So possession is rejected outright, whatever marker
-# the sentence also contains. The cost is a gap phrased as a negated
-# possession ("You have not shipped Kubernetes") -- rejected too, and the
-# reason survives either way; the prompt asks for absence wording.
-_HAS_VERBS = (
-    r"led|lead|leads|shipped|ship|ships|built|build|builds|drove|drive|drives|"
-    r"driven|ran|run|runs|managed|manage|manages|owned|own|owns|delivered|"
-    r"deliver|delivers|designed|design|designs|developed|develop|develops|"
-    r"wrote|write|writes|worked|work|works|used|use|uses|brought|bring|brings|"
-    r"know|knew|knows|scaled|scale|scales|maintained|maintain|maintains"
+# --- claims about the person -------------------------------------------------
+#
+# The name scan asks WHICH WORDS a sentence uses. This asks WHAT SHAPE it is,
+# which is the only way to see a claim that names nothing: "You managed 40
+# engineers.", "You have 12 years of it.", "You saved $5M." carry no
+# capitalised token at all, so no stopword list could ever reach them.
+#
+# The shape is a second-person subject followed, within a few words, by a
+# past-tense or perfect verb, or by a quantity. A NEGATOR in between cancels
+# it: "you have not worked with Kubernetes" is the correct form for a gap, and
+# an earlier round rejected it, which was backwards.
+
+# How far after the subject a verb still counts ("you have already shipped").
+_CLAIM_LOOKAHEAD = 3
+# Quantities only count right beside the subject ("you managed 40", "you: 12").
+_QUANTITY_LOOKAHEAD = 2
+
+# A word, a quantity, or a money/percentage figure. "node.js" and "mid-level"
+# hold together; a sentence-final "." does not join the word before it, or
+# "something you run." would not be the verb "run".
+_WORD = re.compile(
+    r"\$\d[\d.,]*|\d[\d.,]*%?|[A-Za-z][A-Za-z'+#]*(?:[.\-][A-Za-z0-9'+#]+)*"
 )
-_POSSESSION = re.compile(
-    # "you've", "you have/had/has", "you led", "you already shipped", ...
-    r"(?<![a-z])you\s*(?:'|’)\s*ve(?![a-z])"
-    rf"|(?<![a-z])you\s+(?:already\s+|also\s+)?(?:have|had|has|{_HAS_VERBS})(?![a-z])"
-    # a subject-elided perfect: "...and have shipped it in prod". A relative
-    # clause about the posting's ideal candidate ("someone who has shipped
-    # Kubernetes") is about nobody in particular, so it is left alone.
-    rf"|(?<![a-z])(?<!who )(?<!they )(?<!that )(?:have|has|had|having)"
-    rf"\s+(?:already\s+|also\s+)?(?:{_HAS_VERBS})(?![a-z])"
-    # "your Kubernetes experience"
-    r"|(?<![a-z])your\s+[A-Za-z0-9+#.-]+\s+(?:experience|background|history)(?![a-z])",
+_SUBJECTS = frozenset({"you", "you've", "you'd", "you're", "you'll"})
+_NEGATORS = frozenset(
+    """
+    not no never neither nor nothing none without hardly rarely barely
+    lack lacks lacking few fewer little yet unlikely
+    """.split()
+)
+# Before a bare "has/have shipped", these say the clause is about somebody
+# else -- the posting's ideal candidate, not this person.
+_ELIDED_GUARDS = frozenset(
+    """
+    who whom whoever that they we someone anyone everyone nobody person people
+    candidate candidates applicant applicants engineer engineers one
+    """.split()
+)
+_PERFECT = frozenset({"have", "has", "had", "having"})
+# An auxiliary carries its negator AFTER it ("you have not worked"), so finding
+# one is not yet a claim: the next word decides.
+_AUXILIARIES = _PERFECT | {"been", "being", "was", "were", "are", "is", "do", "does", "did"}
+
+# Past tense, perfect, and the present-tense verbs of HAVING. Narrating any of
+# these about the person is a claim about their history, in a reason or a gap.
+_PAST_CLAIM_VERBS = frozenset(
+    """
+    have has had been was were
+    led shipped built ran drove driven managed mentored saved cut hold holds
+    held worked used wrote written deployed delivered designed developed owned
+    scaled maintained launched founded created migrated architected grew
+    taught earned won achieved improved reduced increased automated refactored
+    oversaw supervised spearheaded implemented integrated knew did done
+    """.split()
+)
+# A gap has no business describing what the person DOES either: a gap names an
+# absence, so the present tense is a claim there even though a reason may use
+# it ("you already work in Python" is a fair reason, not a fair gap).
+_PRESENT_CLAIM_VERBS = frozenset(
+    """
+    are is lead leads ship ships build builds drive drives run runs manage
+    manages own owns deliver delivers design designs develop develops write
+    writes work works use uses bring brings know knows scale scales maintain
+    maintains deploy deploys do does mentor mentors hold
+    """.split()
+)
+_GAP_CLAIM_VERBS = _PAST_CLAIM_VERBS | _PRESENT_CLAIM_VERBS
+
+# "your Docker experience", "your production Docker expertise". Up to two words
+# in between, which is why "your resume shows no Kubernetes experience" (four,
+# and negated) is not caught by it.
+_ATTRIBUTED_NOUN = re.compile(
+    r"(?<![a-z])your\s+((?:[A-Za-z0-9+#.-]+\s+){1,2})"
+    r"(?:experience|background|history|expertise|proficiency|skills)(?![a-z])",
     re.IGNORECASE,
 )
+
+
+def _claim_words(text: str) -> list[str]:
+    return [w.replace("’", "'").casefold() for w in _WORD.findall(text)]
+
+
+def _negates(word: str) -> bool:
+    return word in _NEGATORS or "n't" in word
+
+
+def _is_quantity(word: str) -> bool:
+    return word[0].isdigit() or word[0] == "$" or word.endswith("%")
+
+
+def _claim_at(words: list[str], i: int, verbs: frozenset[str], quantities: bool) -> bool:
+    """Does the subject at `words[i]` carry a positive claim after it?"""
+    # "you've"/"you'd" ARE the auxiliary; "you're" is the copula.
+    contracted = {"you've": "have", "you'd": "had", "you're": "are"}.get(words[i])
+    window = ([contracted] if contracted else []) + words[i + 1 :]
+    for distance, word in enumerate(window[:_CLAIM_LOOKAHEAD]):
+        if _negates(word):
+            return False
+        if word in verbs:
+            following = window[distance + 1] if distance + 1 < len(window) else ""
+            if word in _AUXILIARIES and following and _negates(following):
+                return False
+            return True
+        if quantities and distance < _QUANTITY_LOOKAHEAD and _is_quantity(word):
+            return True
+    return False
+
+
+def _asserts_about_person(text: str, verbs: frozenset[str], *, elided: bool) -> bool:
+    words = _claim_words(text)
+    subject_seen = False
+    for i, word in enumerate(words):
+        if word in _SUBJECTS:
+            subject_seen = True
+            if _claim_at(words, i, verbs, quantities=True):
+                return True
+        elif elided and subject_seen and word in _PERFECT:
+            # "You need Kubernetes experience and have shipped it in prod."
+            # Only after the person has been made the subject, or "Initech has
+            # shipped Docker" would read as a claim about them.
+            if i and words[i - 1] in _ELIDED_GUARDS:
+                continue
+            if _claim_at(words, i, verbs, quantities=False):
+                return True
+    return False
+
+
+def _claims_history(reason: str) -> bool:
+    """Does the reason narrate the person's history, tenure or achievements?
+
+    A reason may say what the posting wants and which of the person's declared,
+    on-resume items match it, in the present tense. It may not say what they
+    did: "you worked at Initech", "you have 12 years", "you saved $5M" are
+    unverifiable even when every name in them is on the resume, and the year or
+    the headcount is never on the resume at all.
+    """
+    return _asserts_about_person(reason, _PAST_CLAIM_VERBS, elided=False)
+
+
+def _asserts_possession(gap: str) -> bool:
+    """Does the gap assert that the person HAS something?
+
+    A gap's job is to name an absence, so possession is always wrong there --
+    whatever absence or demand marker the sentence also carries, since a demand
+    verb ("the posting wants X") says nothing about the person.
+    """
+    if _asserts_about_person(gap, _GAP_CLAIM_VERBS, elided=True):
+        return True
+    for match in _ATTRIBUTED_NOUN.finditer(gap):
+        if not any(_negates(w) for w in _claim_words(match.group(1))):
+            return True
+    return False
 
 
 def _checked_gap(item: ProseItem, facts: Any, exempt: str = "") -> str | None:
@@ -507,7 +710,7 @@ def _checked_gap(item: ProseItem, facts: Any, exempt: str = "") -> str | None:
     if not _ABSENCE.search(gap):
         return None
     # A gap must never assert that the person HAS something.
-    if _POSSESSION.search(gap):
+    if _asserts_possession(gap):
         return None
     # Nothing else name-like may appear: "...you led Terraform migrations".
     # gap_missing is exempt wherever it stands -- naming the requirement the
