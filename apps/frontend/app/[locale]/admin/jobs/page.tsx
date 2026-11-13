@@ -1,5 +1,6 @@
 "use client";
 
+import IngestFlow from "@/components/admin/IngestFlow";
 import {
   formatAgeHours,
   formatDuration,
@@ -7,7 +8,12 @@ import {
   isBadVerdict,
   latestFailingBoards,
 } from "@/lib/admin-ingest";
-import { adminJobsIngest, type AdminIngestOverview } from "@/lib/api";
+import {
+  adminJobsIngest,
+  adminJobsIngestPass,
+  type AdminIngestOverview,
+  type AdminIngestRun,
+} from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
@@ -21,12 +27,25 @@ export default function AdminJobsIngestPage() {
   const t = useTranslations("admin");
   const [data, setData] = useState<AdminIngestOverview | null>(null);
   const [error, setError] = useState(false);
+  // The flow diagram is per pass, so one has to be chosen. The newest is the
+  // question anyone opening this page is actually asking.
+  const [runId, setRunId] = useState<string | null>(null);
+  // Keyed by the pass it belongs to rather than cleared on every change: a
+  // synchronous setState inside the effect below is a cascading render, and
+  // comparing run ids gives the same "loading" state for free. `items: null`
+  // is the request having failed for that pass.
+  const [loaded, setLoaded] = useState<{
+    runId: string;
+    items: AdminIngestRun[] | null;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     adminJobsIngest()
       .then((next) => {
-        if (!cancelled) setData(next);
+        if (cancelled) return;
+        setData(next);
+        setRunId(next.passes[0]?.run_id ?? null);
       })
       .catch(() => {
         if (!cancelled) setError(true);
@@ -36,10 +55,28 @@ export default function AdminJobsIngestPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (runId === null) return;
+    let cancelled = false;
+    adminJobsIngestPass(runId)
+      .then((next) => {
+        if (!cancelled) setLoaded({ runId, items: next.items });
+      })
+      .catch(() => {
+        if (!cancelled) setLoaded({ runId, items: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [runId]);
+
   if (error) return <p className="text-sm text-destructive">{t("error")}</p>;
   if (!data) return <p className="text-sm text-muted-foreground">{t("loading")}</p>;
 
   const { health, passes } = data;
+  const forThisPass = loaded?.runId === runId ? loaded : null;
+  const rows = forThisPass?.items ?? null;
+  const rowsError = forThisPass !== null && forThisPass.items === null;
   const verdict = ingestVerdict(health);
   const bad = isBadVerdict(verdict);
   const failing = latestFailingBoards(passes);
@@ -90,6 +127,38 @@ export default function AdminJobsIngestPage() {
         </p>
       </section>
 
+      {passes.length > 0 ? (
+        <section className="space-y-4">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">{t("flowTitle")}</h2>
+              <p className="mt-1 text-sm text-muted-foreground">{t("flowHint")}</p>
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground">{t("flowPass")}</span>
+              <select
+                className="rounded-md border border-border bg-sheet px-2 py-1 text-sm"
+                value={runId ?? ""}
+                onChange={(event) => setRunId(event.target.value)}
+              >
+                {passes.map((row) => (
+                  <option key={row.run_id} value={row.run_id}>
+                    {`${stamp(row.started_at)} · ${t(`ingestStatus_${row.status}`)}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {rowsError ? (
+            <p className="text-sm text-destructive">{t("error")}</p>
+          ) : rows === null ? (
+            <p className="text-sm text-muted-foreground">{t("loading")}</p>
+          ) : (
+            <IngestFlow rows={rows} />
+          )}
+        </section>
+      ) : null}
+
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">{t("ingestPasses")}</h2>
         <p className="text-sm text-muted-foreground">{t("ingestPassesHint")}</p>
@@ -113,8 +182,24 @@ export default function AdminJobsIngestPage() {
               </thead>
               <tbody>
                 {passes.map((row) => (
-                  <tr key={row.run_id} className="border-b border-border/70">
-                    <td className="py-2">{stamp(row.started_at)}</td>
+                  <tr
+                    key={row.run_id}
+                    className={cn(
+                      "border-b border-border/70",
+                      row.run_id === runId && "bg-hover",
+                    )}
+                  >
+                    <td className="py-2">
+                      <button
+                        type="button"
+                        onClick={() => setRunId(row.run_id)}
+                        aria-pressed={row.run_id === runId}
+                        className="underline-offset-4 hover:underline"
+                        title={t("flowSelectPass")}
+                      >
+                        {stamp(row.started_at)}
+                      </button>
+                    </td>
                     <td className="py-2">{formatDuration(row.duration_seconds)}</td>
                     <td className="py-2">{row.sources_ok}</td>
                     <td className={cn("py-2", row.sources_failed > 0 && "text-destructive")}>

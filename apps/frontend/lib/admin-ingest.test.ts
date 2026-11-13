@@ -28,6 +28,7 @@ const pass = (over: Partial<AdminIngestPass> = {}): AdminIngestPass => ({
   duration_seconds: 120,
   sources_ok: 55,
   sources_failed: 0,
+  fetched: 12040,
   upserted: 10831,
   expired: 0,
   status: "ok",
