@@ -60,6 +60,10 @@ EXPECTED_CALL_SITES = {
     ("routers/resumes.py", "extract_content"),    # deterministic template switch
     ("services/jobs/score.py", "_score_pair"),    # inside score_candidates, system_guard(purpose="match")
     ("services/jobs/reasons.py", "_write_call"),  # inside write_reasons, system_guard(purpose="digest")
+    # The weekly digest rebuilds stale facts before it scores against them, so
+    # the build is a third spender -- system_guard(purpose="profile"), the same
+    # purpose and the same wrap as the two callers above it in this list.
+    ("jobs/build_digests.py", "build_facts"),
 }
 
 

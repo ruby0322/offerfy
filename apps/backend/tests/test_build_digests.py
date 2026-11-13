@@ -1,0 +1,817 @@
+"""The scheduled digest build: who it runs for, what it writes, where it stops.
+
+No test reaches a live provider. The two provider seams the build consumes --
+`score_candidates` and `write_reasons` -- are monkeypatched on the build module
+itself, which is also the point: they are the only two places this job spends
+money, and a test that had to stub httpx to reach them would be testing the
+wrong module. The two tests that do exercise the real scoring path stub
+`httpx.AsyncClient` the way `test_jobs_score.py` does.
+
+The clock is passed in everywhere (`now=`), never read: eligibility reads the
+week boundary and the ceiling reads the spend window, and a test that let those
+drift onto the wall clock would pass on a Sunday and fail on a Monday.
+"""
+
+import itertools
+import json
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from app.config import get_settings
+from app.jobs import build_digests
+from app.jobs.build_digests import (
+    CANDIDATE_CAP,
+    BuildReport,
+    build_all,
+    build_for_user,
+    is_eligible,
+    main,
+)
+from app.models import (
+    Digest,
+    DigestItem,
+    Job,
+    JobFacets,
+    JobPreference,
+    Resume,
+    ResumeFacts,
+    UsageCounter,
+    User,
+)
+from app.services import usage
+from app.services.jobs.digest import ITEMS_PER_TRACK, STATUSES
+from app.services.jobs.reasons import Prose, ProseRun
+from app.services.jobs.score import ScoreRun, Scored
+from app.services.jobs.store import freshness_cutoff
+from app.services.resume_facts import bundle, input_hash
+from app.services.revisions import pin_current_draft, set_draft_source
+
+pytestmark = pytest.mark.anyio
+
+_seq = itertools.count()
+
+# A Monday, so period_start is a real window_start and NOW sits inside the week
+# being built -- the arrangement the build documents for a backfill.
+PERIOD = datetime(2026, 11, 9, 16, 0, tzinfo=timezone.utc)
+NOW = PERIOD + timedelta(days=2)
+PERIOD_ARG = PERIOD.isoformat()
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+# --------------------------------------------------------------------------
+# fixtures of the world
+# --------------------------------------------------------------------------
+
+
+def _user(db, uid=None):
+    n = next(_seq)
+    user = User(google_sub=f"sub-digest-{n}", email=f"d{n}@x.test", locale="en")
+    if uid is not None:
+        user.id = uid
+    db.add(user)
+    db.commit()
+    return user
+
+
+def _pref(db, user, *, activity="actively_looking", functions="|backend|",
+          locations="|tw|"):
+    row = JobPreference(
+        user_id=user.id, target_functions=functions, target_locations=locations,
+        target_seniority="mid", remote_required=None, activity=activity,
+    )
+    db.add(row)
+    db.commit()
+    return row
+
+
+def _facts(db, user):
+    """A published master resume and the fresh ResumeFacts row built from it.
+
+    Fresh by construction rather than by assertion: the row's input_hash is
+    computed with the same `bundle` + `input_hash` pair `facts_are_stale`
+    reads, so the staleness answer here is the production one.
+    """
+    resume = Resume(
+        title="Master", typst_source="= CV\nBackend engineer", source="create",
+        locale="en", user_id=user.id, kind="master",
+    )
+    db.add(resume)
+    db.flush()
+    set_draft_source(db, resume, "= CV\nBackend engineer")
+    pin_current_draft(db, resume)
+    db.commit()
+    found = bundle(db, user, fall_back=True)
+    row = ResumeFacts(
+        user_id=user.id, source_resume_id=found[0].id, source_revision_id=found[1],
+        input_hash=input_hash(found[1], found[2], found[3]),
+        facts_json=json.dumps({"headline": "Backend engineer", "roles": [], "locations": []}),
+        model="gpt-6-luna",
+    )
+    db.add(row)
+    db.commit()
+    return row
+
+
+def _posting(db, *, first_seen=None, function="backend", seniority="mid", country="TW"):
+    n = next(_seq)
+    job = Job(
+        source="greenhouse", source_id=f"dg-{n}", company="Acme", title=f"Engineer {n}",
+        apply_url="https://x/a", source_url="https://x/s",
+        description_text="Requirements\n- Python",
+        first_seen_at=first_seen or (freshness_cutoff() + timedelta(days=1)),
+        last_seen_at=freshness_cutoff() + timedelta(days=3),
+        is_active=True,
+    )
+    db.add(job)
+    db.flush()
+    db.add(JobFacets(job_id=job.id, country=country, seniority=seniority,
+                     function=function, description_hash=f"h{n}"))
+    db.commit()
+    return job
+
+
+def _prior(db, user, *, period, opened=False):
+    row = Digest(
+        user_id=user.id, period_start=period, built_at=period, model="gpt-6-luna",
+        input_hash="a" * 64, status="full", candidate_count=3,
+        opened_at=period + timedelta(hours=1) if opened else None,
+    )
+    db.add(row)
+    db.commit()
+    return row
+
+
+def _ready(db, uid=None):
+    """A user who is eligible, has a preference, fresh facts and one match."""
+    user = _user(db, uid)
+    _pref(db, user)
+    _facts(db, user)
+    return user
+
+
+# --------------------------------------------------------------------------
+# the two provider seams, stubbed
+# --------------------------------------------------------------------------
+
+
+COMPONENTS = {
+    "requirements_met": 0.81, "seniority_fit": 0.72,
+    "location_fit": 0.63, "direction_fit": 0.54,
+}
+
+
+def _scored(job_id, tier="Strong fit", fit=0.9):
+    return Scored(job_id=job_id, tier=tier, fit_score=fit, components=dict(COMPONENTS))
+
+
+class Seams:
+    """Records what the build asked of the two paid calls, in order."""
+
+    def __init__(self, monkeypatch, *, score_error=None, prose_error=None,
+                 prose_raises=None, on_score=None, tier="Strong fit"):
+        self.trace: list[str] = []
+        self.scored_jobs: list[list[str]] = []
+        self.prose_jobs: list[list[str]] = []
+        self.facts_seen: list[object] = []
+
+        async def fake_score(db, *, user, facts, jobs, concurrency=4):
+            self.trace.append(f"score:{user.id}")
+            self.scored_jobs.append([j.id for j in jobs])
+            self.facts_seen.append(facts)
+            if on_score is not None:
+                on_score(db, user, jobs)
+            run = ScoreRun(model="gpt-6-luna")
+            if score_error is not None:
+                run.error = score_error
+                return run
+            run.scored = [_scored(j.id, tier) for j in jobs]
+            run.usage = {"input_tokens": 1200}
+            return run
+
+        async def fake_prose(db, *, user, facts, scored, jobs):
+            self.trace.append(f"prose:{user.id}")
+            self.prose_jobs.append([s.job_id for s in scored])
+            if prose_raises is not None:
+                raise prose_raises
+            run = ProseRun(model="gpt-6-luna")
+            if prose_error is not None:
+                run.error = prose_error
+                return run
+            run.prose = [
+                Prose(job_id=s.job_id, reason=f"Reason for {s.job_id}.", gap=None)
+                for s in scored
+            ]
+            return run
+
+        monkeypatch.setattr(build_digests, "score_candidates", fake_score)
+        monkeypatch.setattr(build_digests, "write_reasons", fake_prose)
+
+
+def _ceiling(monkeypatch, uusd):
+    monkeypatch.setenv("GLOBAL_WEEKLY_CEILING_UUSD", str(uusd))
+    get_settings.cache_clear()
+
+
+def _spend(db, *, uusd, window=None, commit=True):
+    """Put real money in the window the ceiling reads."""
+    db.add(UsageCounter(
+        subject_kind="user", subject_id=f"spender-{next(_seq)}",
+        window_start=window or usage.window_start(NOW),
+        uusd=uusd, turns=0, unmeasured=0,
+    ))
+    # flush, not commit, when this stands in for a mid-user provider bill: the
+    # real meter commits on its own session, and committing the build's one
+    # here would settle a transaction the build has not finished.
+    db.commit() if commit else db.flush()
+
+
+# --------------------------------------------------------------------------
+# eligibility
+# --------------------------------------------------------------------------
+
+
+async def test_no_preference_row_means_no_digest(db_session, monkeypatch):
+    seams = Seams(monkeypatch)
+    user = _user(db_session)
+    _facts(db_session, user)
+    _posting(db_session)
+    assert await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW) is None
+    assert db_session.query(Digest).count() == 0
+    # Nothing was scored: a person with no stated preference costs nothing.
+    assert seams.trace == []
+
+
+async def test_a_paused_preference_is_skipped(db_session, monkeypatch):
+    seams = Seams(monkeypatch)
+    user = _user(db_session)
+    _pref(db_session, user, activity="paused")
+    _facts(db_session, user)
+    _posting(db_session)
+    assert is_eligible(db_session, user=user, now=NOW) is False
+    assert await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW) is None
+    assert db_session.query(Digest).count() == 0 and seams.trace == []
+
+
+async def test_a_first_time_user_is_always_built_for_once(db_session, monkeypatch):
+    Seams(monkeypatch)
+    user = _ready(db_session)
+    _posting(db_session)
+    assert is_eligible(db_session, user=user, now=NOW) is True
+    first = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    assert first is not None and first.status == "full"
+
+    # Once. The digest they were given and never opened is their whole history
+    # next week, so the second week is where the engagement rule bites.
+    later = PERIOD + timedelta(days=7)
+    assert is_eligible(db_session, user=user, now=later + timedelta(days=2)) is False
+    assert await build_for_user(
+        db_session, user=user, period_start=later, now=later + timedelta(days=2)
+    ) is None
+    assert db_session.query(Digest).count() == 1
+
+
+async def test_a_user_who_opened_neither_of_their_last_two_is_skipped(db_session, monkeypatch):
+    seams = Seams(monkeypatch)
+    user = _ready(db_session)
+    _posting(db_session)
+    # Opened three weeks ago, ignored twice since: the window is the last two,
+    # so an older open does not keep someone alive forever.
+    _prior(db_session, user, period=PERIOD - timedelta(days=21), opened=True)
+    _prior(db_session, user, period=PERIOD - timedelta(days=14))
+    _prior(db_session, user, period=PERIOD - timedelta(days=7))
+    assert is_eligible(db_session, user=user, now=NOW) is False
+    assert await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW) is None
+    assert seams.trace == []
+
+
+async def test_a_user_who_opened_one_of_the_last_two_is_built_for(db_session, monkeypatch):
+    Seams(monkeypatch)
+    user = _ready(db_session)
+    _posting(db_session)
+    _prior(db_session, user, period=PERIOD - timedelta(days=14), opened=True)
+    _prior(db_session, user, period=PERIOD - timedelta(days=7))
+    assert is_eligible(db_session, user=user, now=NOW) is True
+    assert await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW) is not None
+
+
+async def test_all_users_bypasses_the_audience_gate(db_session, monkeypatch):
+    """The gate is a parameter, so redirecting it is a call-site change."""
+    Seams(monkeypatch)
+    user = _ready(db_session)
+    _posting(db_session)
+    _prior(db_session, user, period=PERIOD - timedelta(days=14))
+    _prior(db_session, user, period=PERIOD - timedelta(days=7))
+    assert await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW) is None
+    built = await build_for_user(
+        db_session, user=user, period_start=PERIOD, now=NOW, require_eligible=False
+    )
+    assert built is not None
+    # Paused is not an audience question, and --all-users does not revive it:
+    # the person asked for the mail to stop.
+    other = _ready(db_session)
+    db_session.query(JobPreference).filter(
+        JobPreference.user_id == other.id
+    ).one().activity = "paused"
+    db_session.commit()
+    assert await build_for_user(
+        db_session, user=other, period_start=PERIOD, now=NOW, require_eligible=False
+    ) is None
+
+
+# --------------------------------------------------------------------------
+# facts
+# --------------------------------------------------------------------------
+
+
+async def test_stale_facts_are_rebuilt_before_scoring_not_after(db_session, monkeypatch):
+    """Order, and which object reached the scorer.
+
+    Scoring first and refreshing after would produce a digest judged on text
+    the person has since changed -- which reads as a bug in the score, not in
+    the schedule.
+    """
+    seams = Seams(monkeypatch)
+    user = _ready(db_session)
+    _posting(db_session)
+    rebuilt = ResumeFacts(
+        user_id=user.id, source_resume_id=db_session.query(Resume).first().id,
+        source_revision_id="rev2", input_hash="n" * 64,
+        facts_json=json.dumps({"roles": [], "locations": []}), model="gpt-6-luna",
+    )
+
+    monkeypatch.setattr(build_digests, "facts_are_stale", lambda db, user, facts: True)
+
+    async def fake_build(db, user):
+        seams.trace.append(f"facts:{user.id}")
+        return build_digests.FactsBuildResult(
+            facts=rebuilt, model="gpt-6-luna", usage={"input_tokens": 900},
+            resume_id="r2",
+        )
+
+    monkeypatch.setattr(build_digests, "build_facts", fake_build)
+
+    assert await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    assert seams.trace == [f"facts:{user.id}", f"score:{user.id}", f"prose:{user.id}"]
+    assert seams.facts_seen == [rebuilt]
+
+
+async def test_unbuildable_resume_facts_means_no_digest(db_session, monkeypatch):
+    """The fifth row of the spec's failure table.
+
+    No ResumeFacts row and nothing to build one from: the real `build_facts`
+    runs, fails, and the build stops. A digest built on absent facts would be
+    scored against nothing, and the dashboard's resume-health card already has
+    the reason.
+    """
+    seams = Seams(monkeypatch)
+    user = _user(db_session)
+    _pref(db_session, user)
+    _posting(db_session)
+    assert await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW) is None
+    assert db_session.query(Digest).count() == 0
+    assert seams.trace == []
+
+
+async def test_a_failed_rebuild_of_stale_facts_means_no_digest(db_session, monkeypatch):
+    """Same ruling when the facts exist but could not be refreshed.
+
+    Deliberately not "score against the stale ones": the whole point of
+    rebuilding first is that the person's resume has moved, and judging them
+    against text they have replaced is the failure the order exists to stop.
+    """
+    seams = Seams(monkeypatch)
+    user = _ready(db_session)
+    _posting(db_session)
+    monkeypatch.setattr(build_digests, "facts_are_stale", lambda db, user, facts: True)
+
+    async def fake_build(db, user):
+        seams.trace.append("facts")
+        return build_digests.FactsBuildResult(error="llm_not_configured")
+
+    monkeypatch.setattr(build_digests, "build_facts", fake_build)
+    assert await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW) is None
+    assert seams.trace == ["facts"]
+    assert db_session.query(Digest).count() == 0
+
+
+# --------------------------------------------------------------------------
+# what gets written
+# --------------------------------------------------------------------------
+
+
+async def test_the_candidate_set_is_capped_and_ordered_by_recency(db_session, monkeypatch):
+    seams = Seams(monkeypatch)
+    user = _ready(db_session)
+    base = freshness_cutoff() + timedelta(days=1)
+    jobs = [_posting(db_session, first_seen=base + timedelta(minutes=i))
+            for i in range(CANDIDATE_CAP + 3)]
+    await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    asked = seams.scored_jobs[0]
+    assert len(asked) == CANDIDATE_CAP
+    # Freshest first, and the three oldest never cost anything.
+    assert asked == [j.id for j in reversed(jobs)][:CANDIDATE_CAP]
+
+
+async def test_new_this_week_comes_from_first_seen_at_in_the_period(db_session, monkeypatch):
+    Seams(monkeypatch, tier="Worth a look")
+    user = _ready(db_session)
+    fresh = _posting(db_session, first_seen=PERIOD + timedelta(hours=3))
+    _posting(db_session, first_seen=PERIOD - timedelta(days=3))
+    built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    # "Worth a look" is in new_this_week and out of strong_fit, so the only
+    # items are the ones the period admitted.
+    assert {(i.track, i.job_id) for i in built.items} == {("new_this_week", fresh.id)}
+
+
+async def test_items_carry_the_tier_score_components_and_prose(db_session, monkeypatch):
+    Seams(monkeypatch)
+    user = _ready(db_session)
+    job = _posting(db_session, first_seen=PERIOD + timedelta(hours=1))
+    built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    assert built.status == "full" and built.candidate_count == 1
+    assert built.model == "gpt-6-luna" and len(built.input_hash) == 64
+    # One posting, both tracks: a fresh strong fit is legitimately in each.
+    assert sorted(i.track for i in built.items) == ["new_this_week", "strong_fit"]
+    for item in built.items:
+        assert item.job_id == job.id and item.rank == 1
+        assert item.tier == "Strong fit" and item.fit_score == 0.9
+        assert item.reason == f"Reason for {job.id}."
+        assert item.gap is None
+        assert item.requirements_met == COMPONENTS["requirements_met"]
+        assert item.seniority_fit == COMPONENTS["seniority_fit"]
+        assert item.location_fit == COMPONENTS["location_fit"]
+        assert item.direction_fit == COMPONENTS["direction_fit"]
+
+
+async def test_prose_is_only_bought_for_the_items_that_will_be_shown(db_session, monkeypatch):
+    seams = Seams(monkeypatch)
+    user = _ready(db_session)
+    for _ in range(ITEMS_PER_TRACK + 4):
+        _posting(db_session, first_seen=PERIOD - timedelta(days=2))
+    built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    assert len(built.items) == ITEMS_PER_TRACK
+    # Nine scored, five shown, five written about: the prose call is priced per
+    # posting it carries.
+    assert len(seams.scored_jobs[0]) == ITEMS_PER_TRACK + 4
+    assert len(seams.prose_jobs[0]) == ITEMS_PER_TRACK
+
+
+async def test_the_digest_size_is_a_parameter(db_session, monkeypatch):
+    Seams(monkeypatch)
+    user = _ready(db_session)
+    for _ in range(4):
+        _posting(db_session, first_seen=PERIOD - timedelta(days=2))
+    built = await build_for_user(
+        db_session, user=user, period_start=PERIOD, now=NOW, items_per_track=2
+    )
+    assert len(built.items) == 2
+
+
+async def test_decisions_absent_writes_a_degraded_digest(db_session, monkeypatch):
+    """Row one of the failure table: prefilter order, and no invented judgement."""
+    seams = Seams(monkeypatch, score_error="llm_not_configured")
+    user = _ready(db_session)
+    base = freshness_cutoff() + timedelta(days=1)
+    jobs = [_posting(db_session, first_seen=base + timedelta(minutes=i)) for i in range(7)]
+    built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    assert built.status == "degraded" and built.candidate_count == 7
+    # The items are still there, in the one order the prefilter can defend.
+    assert [i.job_id for i in built.items] == [j.id for j in reversed(jobs)][:ITEMS_PER_TRACK]
+    assert [i.rank for i in built.items] == [1, 2, 3, 4, 5]
+    for item in built.items:
+        assert item.tier is None and item.fit_score is None
+        assert item.reason is None and item.gap is None
+        assert item.requirements_met is None and item.seniority_fit is None
+        assert item.location_fit is None and item.direction_fit is None
+    # No tiers means nothing to write prose about, and prose is not free.
+    assert seams.trace == [f"score:{user.id}"]
+
+
+async def test_a_prose_failure_keeps_tiers_and_scores(db_session, monkeypatch):
+    """Row three: the ranking is real, so the digest is not degraded -- just bare."""
+    Seams(monkeypatch, prose_error="no_output")
+    user = _ready(db_session)
+    _posting(db_session, first_seen=PERIOD - timedelta(days=2))
+    built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    assert built.status == "full" and len(built.items) == 1
+    item = built.items[0]
+    assert item.tier == "Strong fit" and item.fit_score == 0.9
+    assert item.requirements_met == COMPONENTS["requirements_met"]
+    assert item.reason is None and item.gap is None
+
+
+async def test_an_empty_prefilter_writes_status_empty(db_session, monkeypatch):
+    """Row four. Nothing matched, so nothing was scored and nothing was paid for."""
+    seams = Seams(monkeypatch)
+    user = _ready(db_session)
+    _posting(db_session, function="design")
+    built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    assert built is not None
+    assert built.status == "empty" and built.candidate_count == 0
+    assert built.items == []
+    assert seams.trace == []
+
+
+async def test_nothing_qualifying_is_also_empty(db_session, monkeypatch):
+    Seams(monkeypatch, tier="Not a fit")
+    user = _ready(db_session)
+    _posting(db_session, first_seen=PERIOD + timedelta(hours=1))
+    built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    assert built.status == "empty" and built.candidate_count == 1 and built.items == []
+
+
+async def test_every_status_the_build_writes_is_in_the_vocabulary(db_session, monkeypatch):
+    """The vocabulary lives in digest.py, with its one writer -- which is here."""
+    Seams(monkeypatch)
+    user = _ready(db_session)
+    _posting(db_session, first_seen=PERIOD + timedelta(hours=1))
+    full = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    Seams(monkeypatch, score_error="llm_not_configured")
+    other = _ready(db_session)
+    degraded = await build_for_user(db_session, user=other, period_start=PERIOD, now=NOW)
+    empty = await build_for_user(
+        db_session, user=_ready(db_session), period_start=PERIOD, now=NOW,
+        candidate_cap=0,
+    )
+    assert {full.status, degraded.status, empty.status} == set(STATUSES)
+
+
+async def test_a_digest_is_never_partially_written(db_session, monkeypatch):
+    """One transaction per user.
+
+    The failure is injected after scoring has succeeded, which is exactly where
+    an implementation that inserted the digest row and then filled it in would
+    leave a header with no items -- a digest that renders as "we found nothing
+    for you" when in fact the build crashed.
+    """
+    Seams(monkeypatch, prose_raises=RuntimeError("provider exploded"))
+    user = _ready(db_session)
+    _posting(db_session, first_seen=PERIOD + timedelta(hours=1))
+    with pytest.raises(RuntimeError):
+        await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    db_session.rollback()
+    assert db_session.query(Digest).count() == 0
+    assert db_session.query(DigestItem).count() == 0
+
+
+async def test_rebuilding_the_same_period_does_not_duplicate(db_session, monkeypatch):
+    Seams(monkeypatch)
+    user = _ready(db_session)
+    _posting(db_session, first_seen=PERIOD + timedelta(hours=1))
+    first = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    first_id = first.id
+    second = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    assert second is not None
+    assert db_session.query(Digest).count() == 1
+    assert db_session.query(DigestItem).count() == 2
+    # Replaced, not appended to: the week has one digest and it is the new one.
+    assert db_session.query(DigestItem).filter(
+        DigestItem.digest_id == first_id
+    ).count() in (0, 2)
+
+
+# --------------------------------------------------------------------------
+# the ceiling
+# --------------------------------------------------------------------------
+
+
+async def test_the_ceiling_finishes_the_user_in_flight_then_stops(db_session, monkeypatch):
+    """Checked once before each user, never mid-user.
+
+    That is what makes "finish the user in flight, then stop" fall out instead
+    of needing a mechanism: once a user is started they always complete, so no
+    digest can be half-scored.
+    """
+    _ceiling(monkeypatch, 1_000_000)
+    # Ids, not creation order: the run walks users in a defined order and the
+    # test has to know who was in flight when the money ran out.
+    _ready(db_session, uid="u-aaa")
+    second = _ready(db_session, uid="u-bbb")
+    third = _ready(db_session, uid="u-ccc")
+    _posting(db_session, first_seen=PERIOD + timedelta(hours=1))
+
+    def spend_it_all(db, user, jobs):
+        # What the real scoring pass does to the ledger, mid-user.
+        _spend(db, uusd=2_000_000, commit=False)
+
+    seams = Seams(monkeypatch, on_score=spend_it_all)
+    report = await build_all(db_session, period_start=PERIOD, now=NOW)
+
+    assert report.built == ["u-aaa"]
+    assert report.skipped_over_ceiling == ["u-bbb", "u-ccc"]
+    # The user in flight finished: scored, written about, and written down.
+    assert seams.trace == ["score:u-aaa", "prose:u-aaa"]
+    digests = db_session.query(Digest).all()
+    assert len(digests) == 1 and digests[0].user_id == "u-aaa"
+    built = digests[0]
+    assert built.status == "full" and built.candidate_count == 1
+    assert len(built.items) == 2
+    assert all(i.tier and i.fit_score and i.reason for i in built.items)
+    # Nobody is half-scored: the only rows that exist belong to the one digest.
+    assert db_session.query(DigestItem).count() == 2
+    assert {u for (u,) in db_session.query(Digest.user_id)} == {"u-aaa"}
+    assert second.id not in report.built and third.id not in report.built
+
+
+async def test_a_ceiling_already_reached_builds_for_nobody(db_session, monkeypatch):
+    _ceiling(monkeypatch, 1_000_000)
+    seams = Seams(monkeypatch)
+    user = _ready(db_session, uid="u-zzz")
+    _posting(db_session)
+    _spend(db_session, uusd=1_000_000)
+    report = await build_all(db_session, period_start=PERIOD, now=NOW)
+    assert report.built == [] and report.skipped_over_ceiling == ["u-zzz"]
+    assert seams.trace == [] and db_session.query(Digest).count() == 0
+
+
+async def test_a_zero_ceiling_is_disabled_not_a_stop(db_session, monkeypatch):
+    _ceiling(monkeypatch, 0)
+    Seams(monkeypatch)
+    user = _ready(db_session, uid="u-yyy")
+    _posting(db_session)
+    _spend(db_session, uusd=9_000_000_000)
+    report = await build_all(db_session, period_start=PERIOD, now=NOW)
+    assert report.built == ["u-yyy"] and report.skipped_over_ceiling == []
+
+
+async def test_the_ceiling_reads_the_spend_window_not_all_time(db_session, monkeypatch):
+    _ceiling(monkeypatch, 1_000_000)
+    Seams(monkeypatch)
+    _ready(db_session, uid="u-win")
+    _posting(db_session)
+    # Last week's money is last week's problem.
+    _spend(db_session, uusd=5_000_000,
+           window=usage.window_start(NOW) - timedelta(days=7))
+    report = await build_all(db_session, period_start=PERIOD, now=NOW)
+    assert report.built == ["u-win"]
+
+
+# --------------------------------------------------------------------------
+# the report
+# --------------------------------------------------------------------------
+
+
+async def test_build_all_sorts_every_user_into_the_report(db_session, monkeypatch):
+    Seams(monkeypatch)
+    built = _ready(db_session, uid="u-built")
+    no_pref = _user(db_session, "u-nopref")
+    _facts(db_session, no_pref)
+    paused = _ready(db_session, uid="u-paused")
+    db_session.query(JobPreference).filter(
+        JobPreference.user_id == paused.id
+    ).one().activity = "paused"
+    churned = _ready(db_session, uid="u-churn")
+    _prior(db_session, churned, period=PERIOD - timedelta(days=14))
+    _prior(db_session, churned, period=PERIOD - timedelta(days=7))
+    db_session.commit()
+    _posting(db_session, first_seen=PERIOD + timedelta(hours=1))
+
+    report = await build_all(db_session, period_start=PERIOD, now=NOW)
+    assert isinstance(report, BuildReport)
+    assert report.built == ["u-built"]
+    assert report.skipped_no_preference == ["u-nopref"]
+    assert sorted(report.skipped_not_engaged) == ["u-churn", "u-paused"]
+    assert report.skipped_over_ceiling == []
+    assert report.degraded == []
+
+
+async def test_a_degraded_build_is_reported_as_degraded(db_session, monkeypatch):
+    Seams(monkeypatch, score_error="llm_not_configured")
+    _ready(db_session, uid="u-deg")
+    _posting(db_session)
+    report = await build_all(db_session, period_start=PERIOD, now=NOW)
+    assert report.built == ["u-deg"] and report.degraded == ["u-deg"]
+
+
+async def test_one_users_failure_does_not_stop_the_run(db_session, monkeypatch):
+    """A crash is per-user, like refresh_profiles: everyone else still gets built."""
+    boom = {"u-fail"}
+
+    def maybe_explode(db, user, jobs):
+        if user.id in boom:
+            raise RuntimeError("provider exploded")
+
+    Seams(monkeypatch, on_score=maybe_explode)
+    _ready(db_session, uid="u-fail")
+    _ready(db_session, uid="u-ok")
+    _posting(db_session, first_seen=PERIOD + timedelta(hours=1))
+    report = await build_all(db_session, period_start=PERIOD, now=NOW)
+    assert report.built == ["u-ok"]
+    assert {u for (u,) in db_session.query(Digest.user_id)} == {"u-ok"}
+
+
+# --------------------------------------------------------------------------
+# metering
+# --------------------------------------------------------------------------
+
+
+class StubResponse:
+    def __init__(self, payload, status_code):
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+class StubClient:
+    def __init__(self, status_code=500, payload=None):
+        self.status_code = status_code
+        self.payload = payload or {"error": {"message": "nope"}}
+        self.calls = 0
+
+    def __call__(self, *a, **kw):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def post(self, url, headers=None, json=None):
+        self.calls += 1
+        return StubResponse(self.payload, self.status_code)
+
+
+async def test_the_build_never_consumes_the_users_edit_allowance(
+    db_session, monkeypatch, openai_enabled
+):
+    """system_guard, not preflight, on every paid call the build makes.
+
+    Two halves. The build must not *ask* the person's allowance for permission:
+    `enforce_usage` is the only thing that reads it to refuse, and it is the
+    one function a `preflight` anywhere in this path would reach -- so it is
+    replaced with a landmine. And the build must not *spend* the allowance the
+    editor counts: `turns` is the "AI edits" limit, and a digest is not an
+    edit.
+
+    What this does not claim: the cost still lands on the person's uusd counter
+    (`score.py`'s and `reasons.py`'s guards both bill `user=`), which the
+    weekly credit limit also reads. That is the settled shape of
+    `system_guard`, recorded here so the next reader knows the promise is about
+    the edit allowance and the refusal, not about the ledger.
+    """
+    def landmine(*a, **kw):
+        raise AssertionError("the build must not enforce the person's allowance")
+
+    monkeypatch.setattr(usage, "enforce_usage", landmine)
+    stub = StubClient()
+    monkeypatch.setattr("app.services.jobs.score.httpx.AsyncClient", stub)
+
+    user = _ready(db_session, uid="u-meter")
+    _posting(db_session)
+    # Already out of credits. A build that deferred to the allowance would
+    # produce nothing here; this one owes them a digest either way.
+    db_session.add(UsageCounter(
+        subject_kind="user", subject_id=user.id,
+        window_start=usage.window_start(NOW),
+        uusd=9_000_000, turns=0, unmeasured=0,
+    ))
+    db_session.commit()
+
+    built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    assert stub.calls == 1 and built is not None and built.status == "degraded"
+    row = db_session.query(UsageCounter).filter(
+        UsageCounter.subject_kind == "user", UsageCounter.subject_id == user.id
+    ).one()
+    assert row.turns == 0
+
+
+# --------------------------------------------------------------------------
+# the CLI
+# --------------------------------------------------------------------------
+
+
+def test_main_builds_only_the_named_user(db_session, monkeypatch):
+    Seams(monkeypatch)
+    mine = _ready(db_session, uid="u-cli-mine")
+    _ready(db_session, uid="u-cli-other")
+    _posting(db_session, first_seen=PERIOD + timedelta(hours=1))
+    assert main(["--user-id", mine.id, "--period-start", PERIOD_ARG]) == 0
+    db_session.expire_all()
+    assert {u for (u,) in db_session.query(Digest.user_id)} == {"u-cli-mine"}
+
+
+def test_main_reports_an_unknown_user_id(db_session, monkeypatch):
+    Seams(monkeypatch)
+    assert main(["--user-id", "nobody"]) == 1
+
+
+def test_main_all_users_bypasses_the_gate(db_session, monkeypatch):
+    Seams(monkeypatch)
+    user = _ready(db_session, uid="u-cli-churn")
+    _prior(db_session, user, period=PERIOD - timedelta(days=14))
+    _prior(db_session, user, period=PERIOD - timedelta(days=7))
+    _posting(db_session, first_seen=PERIOD + timedelta(hours=1))
+    assert main(["--period-start", PERIOD_ARG]) == 0
+    db_session.expire_all()
+    assert db_session.query(Digest).filter(Digest.period_start == PERIOD).count() == 0
+    assert main(["--period-start", PERIOD_ARG, "--all-users"]) == 0
+    db_session.expire_all()
+    assert db_session.query(Digest).filter(Digest.period_start == PERIOD).count() == 1
