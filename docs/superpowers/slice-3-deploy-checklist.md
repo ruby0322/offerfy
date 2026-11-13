@@ -49,8 +49,10 @@ the catalog does from what the editor does.
 
 ## Open item for the user: what do we call the fit read?
 
-**Thirteen places, three locales, and live user-facing UI — not one legal
-sentence.** Does not block the deploy. Owned by the user, not by either agent
+**Fourteen places, three locales, and live user-facing UI — not one legal
+sentence.** (Thirteen until 2026-11-13, when a grep for the word rather than a
+re-count of the known list turned up `about.paragraphs[1]` as well. Both
+sessions had counted from each other's lists; neither had swept page body text.) Does not block the deploy. Owned by the user, not by either agent
 session. Widened 2026-11-13 after the landing session went looking for the word
 rather than checking only the two keys already named; I verified every one.
 
@@ -64,6 +66,7 @@ thirteen places:
 | `editor.familyNewTailorHint` ×3 | **user-facing UI** | "A copy aimed at one job, scored against that role" |
 | `editor.tailorDialogHint` ×3 | **user-facing UI** | "AI scores the resume against the role and suggests what to improve" |
 | `legal.terms.sections[1].paragraphs[3]` | Terms, EN only | "score how well it fits a job description you paste in" |
+| `about.paragraphs[1]` | About body, EN only | "have the model score the fit and suggest changes" |
 
 zh-TW and zh-CN use 評分 / 评分 in all four editor keys, so there is **no
 EN-only divergence here** — the Chinese is equally explicit. Only Terms is an
@@ -96,6 +99,26 @@ Note the two axes are separable. *Nothing ranks or recommends postings* is true
 and should stay said everywhere. *The editor reads how well a resume fits a JD
 you paste* is true and is what the word "score" is reaching for. Keeping the
 first and renaming the second is the shape of a fix.
+
+## Also open: two stale denials the copy fix did not cover
+
+The 2026-11-13 copy fix swept the three meta descriptions and
+`lib/agent-markdown.ts`. Nobody swept **page body text or Terms**, so two
+denials are still live on production:
+
+1. `legal.terms.sections[1].paragraphs[3]`, all three locales — "...submit
+   applications, **or track them**". False since slice 3 shipped; this is the
+   one below.
+2. `about.paragraphs[1]`, all three locales — "**We do not match your resume to
+   jobs** — there is no ranking and no recommendation — and we do not submit
+   applications for you." The em-dash gloss is exactly true and is the honest
+   part. The lead clause collides with a shipped feature the settings page calls
+   "Open to matching" and an endpoint called `/v1/me/matches/count`, which is
+   the same collision the metaDescriptions had. zh-CN is the most defensible of
+   the three: it says 自动匹配, "*automatic* matching".
+
+Neither blocks anything. Both are the same question as the section above —
+one word doing two jobs — and are best ruled on together.
 
 ## The same clause, in Terms
 
