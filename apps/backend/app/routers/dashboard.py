@@ -10,6 +10,7 @@ counts as engaged and the digest stops being built for everyone.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends
@@ -34,6 +35,8 @@ from app.services.jobs import applications as pipeline_service
 from app.services.jobs import digest as digest_service
 from app.services.jobs.preferences import current_or_seeded
 from app.services.resume_health import health
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -74,7 +77,24 @@ def get_dashboard(
     digest = digest_service.latest_for_user(db, user=user)
     if digest is not None:
         # The one write a dashboard GET makes; idempotent after the first.
-        digest = digest_service.mark_opened(db, digest=digest)
+        # "Opened" means the dashboard loaded, not that the digest was seen: a
+        # prefetch, a collapsed card, an empty or degraded digest all count. It
+        # is an engagement proxy (the build gate only needs the person to have
+        # come back), not a read receipt.
+        digest_id = digest.id
+        try:
+            digest = digest_service.mark_opened(db, digest=digest)
+        except Exception:
+            # A bookkeeping stamp must not take down the page. But a lost stamp
+            # silently erodes the build's eligibility gate, so say so loudly.
+            logger.exception(
+                "dashboard: digest %s could not be marked opened for user %s; "
+                "serving the dashboard anyway (eligibility may degrade)",
+                digest_id,
+                user.id,
+            )
+            db.rollback()
+            digest = digest_service.latest_for_user(db, user=user)
     return DashboardOut(
         preference=preference_out(db, user, pref),
         match_count=count_matches(db, pref),

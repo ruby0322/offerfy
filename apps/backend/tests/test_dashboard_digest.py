@@ -244,3 +244,34 @@ def test_digests_are_unreachable_from_the_employer_path(client, db_session):
         assert "ZZSENTINEL" not in res.text
         assert "digest" not in res.text.lower()
         assert job.id not in res.text and job.apply_url not in res.text
+
+
+def test_a_failed_stamp_does_not_take_the_dashboard_down(
+    client, db_session, monkeypatch, caplog
+):
+    from sqlalchemy.orm import Session
+
+    user = _signed_in(client, db_session)
+    digest = _digest(db_session, user)
+    _item(db_session, digest, _job(db_session, "x"))
+    real_commit = Session.commit
+    calls = []
+
+    def flaky(self):
+        calls.append(1)
+        if len(calls) == 1:  # the commit inside mark_opened
+            raise RuntimeError("db went away")
+        return real_commit(self)
+
+    monkeypatch.setattr(Session, "commit", flaky)
+    with caplog.at_level("ERROR"):
+        res = client.get("/v1/dashboard")
+    assert res.status_code == 200
+    assert len(res.json()["digest"]["items"]) == 1
+    # Findable: says what failed and names the digest.
+    assert any(
+        "could not be marked opened" in r.getMessage() and digest.id in r.getMessage()
+        for r in caplog.records
+    )
+    monkeypatch.undo()
+    assert _stored_opened_at(db_session, digest) is None
