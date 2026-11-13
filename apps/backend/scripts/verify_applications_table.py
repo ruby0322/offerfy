@@ -6,8 +6,10 @@ could read the live database, so the schema check below rests on a single
 party's word — and "both agents agree" is not verification when only one of
 them could look. This script exists so a human can confirm it independently.
 
-It reads and never writes: no INSERT, UPDATE, DELETE or DDL, and it opens the
-connection in a read-only transaction so the database itself would refuse one.
+It reads and never writes: every statement is a SELECT or a catalog lookup, and
+the connection is opened with `postgresql_readonly=True` so the database itself
+would refuse a write on it. Must be run from `apps/backend`, which is where it
+finds the app package:
 
     cd /home/ruby0322/offerfy/apps/backend
     .venv/bin/python scripts/verify_applications_table.py
@@ -52,7 +54,16 @@ EXPECTED_REVISION = "032_applications"
 
 def main() -> int:
     sys.path.insert(0, ".")
-    from app.config import get_settings  # noqa: PLC0415 — needs sys.path first
+    try:
+        from app.config import get_settings  # noqa: PLC0415 — needs sys.path first
+    except ModuleNotFoundError:
+        print(
+            "Cannot import the app package. Run this from apps/backend:\n"
+            "  cd /home/ruby0322/offerfy/apps/backend\n"
+            "  .venv/bin/python scripts/verify_applications_table.py",
+            file=sys.stderr,
+        )
+        return 1
 
     url = get_settings().database_url
     engine = create_engine(url)
@@ -75,11 +86,15 @@ def main() -> int:
         check(f"alembic_version = {EXPECTED_REVISION}", revision == EXPECTED_REVISION, f"found {revision!r}")
 
         print("\ntable and columns")
-        names = inspect(engine).get_table_names()
+        # inspect(conn), not inspect(engine): the engine form checks out a
+        # separate pooled connection that never got postgresql_readonly=True,
+        # which would put these two checks outside the guarantee above.
+        insp = inspect(conn)
+        names = insp.get_table_names()
         check("table 'applications' exists", "applications" in names)
         if "applications" not in names:
             return 1
-        found_columns = {c["name"] for c in inspect(engine).get_columns("applications")}
+        found_columns = {c["name"] for c in insp.get_columns("applications")}
         check("all 11 expected columns present", EXPECTED_COLUMNS <= found_columns,
               f"missing {sorted(EXPECTED_COLUMNS - found_columns)}" if EXPECTED_COLUMNS - found_columns else "")
         extra = found_columns - EXPECTED_COLUMNS
