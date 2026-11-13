@@ -34,6 +34,7 @@ BILLABLE = (
     "read_layout_report",
     "extract_content",
     "_score_pair",
+    "_write_call",
 )
 
 # The (module, function) pairs that exist today, each inside a `metered()`
@@ -58,6 +59,7 @@ EXPECTED_CALL_SITES = {
     ("services/layout.py", "vision_report"),      # inside read_layout_report
     ("routers/resumes.py", "extract_content"),    # deterministic template switch
     ("services/jobs/score.py", "_score_pair"),    # inside score_candidates, system_guard(purpose="match")
+    ("services/jobs/reasons.py", "_write_call"),  # inside write_reasons, system_guard(purpose="digest")
 }
 
 
