@@ -252,6 +252,81 @@ def test_a_gap_may_not_smuggle_in_a_second_invented_claim():
     assert check([fine], facts=FACTS, scored_ids={"a"}, postings=postings).kept[0].gap
 
 
+def test_a_name_where_a_sentence_starts_is_still_an_invented_claim():
+    # Position excuses nothing: only a stopword excuses a capitalised token.
+    postings = _posting(requirements="Python and Terraform")
+    first = _item(reason="Terraform and Python work fits this role.", posting=("Python",))
+    assert check([first], facts=FACTS, scored_ids={"a"}, postings=postings).dropped == [
+        ("a", "undeclared")
+    ]
+    second = _item(reason="Your Python work fits. Terraform shipped in prod.",
+                   posting=("Python",))
+    assert check([second], facts=FACTS, scored_ids={"a"}, postings=postings).dropped == [
+        ("a", "undeclared")
+    ]
+    # ...and the same in a gap, where only gap_missing is excused.
+    in_gap = _item(gap="Docker is missing. Kubernetes led by you.", gap_missing="Docker",
+                   posting=("Python",))
+    checked = check([in_gap], facts=FACTS, scored_ids={"a"},
+                    postings=_posting(requirements="Python and Docker"))
+    assert checked.kept[0].gap is None and checked.gaps_rejected == ["a"]
+
+
+def test_the_stopword_list_leaves_ordinary_sentence_openers_alone():
+    ok = [
+        (_item(reason="Six years of Python match this role.", posting=("Python",)), _posting()),
+        (_item(reason="Remote work suits your Python background.", posting=("Python",)),
+         _posting(location="Remote")),
+        (_item(reason="Strong Python work, and the posting asks for exactly that.",
+               posting=("Python",)), _posting()),
+    ]
+    for item, postings in ok:
+        assert check([item], facts=FACTS, scored_ids={"a"},
+                     postings=postings).dropped == [], item.reason
+
+
+def test_a_gap_may_not_assert_that_the_person_has_the_thing():
+    # An absence marker is not proof of absence: a demand verb says nothing
+    # about the person, so possession is rejected whatever marker it carries.
+    postings = _posting(requirements="Python and Kubernetes")
+    for gap in (
+        "You need Kubernetes experience and have shipped it in prod.",
+        "You have Kubernetes experience, which the posting wants.",
+    ):
+        item = _item(gap=gap, gap_missing="Kubernetes", posting=("Python",))
+        checked = check([item], facts=FACTS, scored_ids={"a"}, postings=postings)
+        assert checked.kept[0].gap is None and checked.gaps_rejected == ["a"], gap
+    # Absence wording and the posting's demand both still stand.
+    fine = _item(gap="Docker experience is missing from your resume.", gap_missing="Docker",
+                 posting=("Python",))
+    assert check([fine], facts=FACTS, scored_ids={"a"},
+                 postings=_posting(requirements="Python and Docker")).kept[0].gap
+    demand = _item(gap="The posting wants Kubernetes.", gap_missing="Kubernetes",
+                   posting=("Python",))
+    assert check([demand], facts=FACTS, scored_ids={"a"}, postings=postings).kept[0].gap
+
+
+def test_gap_missing_names_one_requirement_not_a_phrase():
+    # An unbounded gap_missing exempts every name inside it from the scan.
+    phrase = "Kubernetes production deployments at Google Scale"
+    item = _item(gap=f"No {phrase}", gap_missing=phrase, posting=("Python",))
+    checked = check([item], facts=FACTS, scored_ids={"a"},
+                    postings=_posting(requirements="Python and Kubernetes"))
+    assert checked.kept[0].gap is None and checked.gaps_rejected == ["a"]
+
+
+def test_a_company_named_after_a_technology_is_exempt_only_as_a_mention():
+    # Docker, Snowflake and Terraform are all employers.
+    postings = _posting(company="Terraform", requirements="Python")
+    attributed = _item(reason="Your Python and Terraform work fits this role.",
+                       posting=("Python",))
+    assert check([attributed], facts=FACTS, scored_ids={"a"}, postings=postings).dropped == [
+        ("a", "undeclared")
+    ]
+    mentioned = _item(reason="Your Python work fits Terraform.", posting=("Python",))
+    assert check([mentioned], facts=FACTS, scored_ids={"a"}, postings=postings).dropped == []
+
+
 def test_a_posting_cite_matching_only_a_label_does_not_correspond():
     postings = _posting(location="Taipei")
     for cite in ("Requirements", "Location", "Title", "Company"):

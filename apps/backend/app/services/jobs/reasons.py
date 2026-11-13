@@ -39,9 +39,12 @@ against the clamped text, because that is what the person reads.
 
 Two honest limits. The cite check trusts what the model declares, so a
 sentence that names something it did not declare is only caught by a
-conservative scan for name-like ASCII tokens (capitalised mid-sentence, inner
-capital, digit, + or #); a LOWERCASE technology the model neither declares nor
-capitalises ("kubernetes") is a known hole, as is any non-ASCII claim. The scan
+conservative scan for name-like ASCII tokens (capitalised, inner capital,
+digit, + or #); a LOWERCASE technology the model neither declares nor
+capitalises ("kubernetes") is a known hole, as is any non-ASCII claim. Position
+excuses nothing: a capitalised token is excused only by being one of a short
+list of function words and sentence-openers (`_STOPWORDS`), because "Terraform
+and Python work fits this role." puts the invented claim first. The scan
 errs towards dropping a sentence. Second, `validate` can only check a posting
 cite against the posting when `check` is given the posting's field values
 (write_reasons does, values only -- a cite of "Requirements" must not match a
@@ -53,17 +56,27 @@ company and location are exempt (a city or an employer is not a claim about
 the person) but tokens from its TITLE and REQUIREMENTS are not (titles carry
 technology names; a posting cite never exempts anything): a requirement
 mirrored back as the person's experience is the likeliest invented claim, so it
-must be declared and on the resume. In the `gap`, the gap_missing token is allowed -- naming a requirement the
-person lacks is what that field is for. It is held to `gap_missing` (named,
-absent from the resume, in the gap).
+must be declared and on the resume. That company/location exemption covers a
+MENTION, not an ATTRIBUTION: Docker, Snowflake and Terraform are all
+employers, so an exempt token loses its exemption when a possessive stands
+immediately before it or "experience"/"work" immediately after. "...fits
+Terraform." is the employer; "Your Terraform work..." is a history. In the
+`gap`, the gap_missing token is allowed wherever it stands -- naming a
+requirement the person lacks is what that field is for. It is held to
+`gap_missing` (named, at most GAP_MISSING_CHARS long, absent from the resume,
+in the gap); an unbounded gap_missing would exempt a whole phrase.
 
 The gap IS also scanned for any other name-like token (exempting gap_missing,
-the company and the location), and must contain an absence or demand marker
-(`_ABSENCE`), since "You have shipped Kubernetes in prod." names only the gap
-token. What stays uncatchable: a gap that frames the gap_missing token ITSELF
-as something the person has done while still containing a marker ("You led
-Docker migrations, which the posting requires"). Token scanning cannot see
-that; the prompt is the only defence.
+and the company and location as mentions), and must contain an absence or
+demand marker (`_ABSENCE`), since "You have shipped Kubernetes in prod." names
+only the gap token. A marker alone proves nothing, though -- a demand verb
+says nothing about the person -- so a gap asserting POSSESSION (`_POSSESSION`:
+"you have", "you led", "your X experience", a subject-elided perfect) is
+rejected whatever marker it also carries. What stays uncatchable: a gap that
+frames the gap_missing token ITSELF as something the person has done in words
+`_POSSESSION` does not cover ("Missing docker; you led docker swarm" where the
+lowercase token is legitimately exempt). Token scanning cannot see that; the
+prompt is the only defence.
 
 Fewer than five is allowed and so is none: the honest empty state is only
 honest if the model is permitted to produce it.
@@ -99,6 +112,10 @@ REASON_CHARS = 240
 GAP_CHARS = 160
 MAX_ITEMS = 5
 MIN_CITE_CHARS = 2
+# gap_missing names ONE requirement, not a sentence. Unbounded, it exempts
+# every name inside itself from the scan ("Kubernetes production deployments at
+# Google Scale"), so it is capped and a longer one rejects the gap.
+GAP_MISSING_CHARS = 40
 
 PROMPT = (
     "You write the one-line reasons a person sees beside job postings that "
@@ -230,7 +247,9 @@ class PostingText:
     """The field VALUES of one posting, as shown to the model -- no labels.
 
     Kept apart because the scan treats them differently. Company and location
-    are not claims about the person, so a name found there is exempt. The title
+    are not claims about the person, so a name found there is exempt where it
+    is MENTIONED -- but not where it is attributed to the person, since an
+    employer may be called Terraform. The title
     is NOT: it routinely contains technology names ("Senior Terraform
     Engineer"), so a title word in a `reason` must be declared and on the
     resume. Requirements likewise: a requirement mirrored back as the person's
@@ -260,29 +279,88 @@ class Checked:
 
 
 # An ASCII token of 3+ characters that looks like a name or a technology:
-# capitalised (but not merely sentence-initial), or carrying an inner capital,
-# a digit, or + / #.  Lowercase technologies ("kubernetes") are NOT caught --
-# a known limitation, see the module docstring.
+# capitalised, or carrying an inner capital, a digit, or + / #.  Lowercase
+# technologies ("kubernetes") are NOT caught -- a known limitation, see the
+# module docstring.
 _TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9+#]{2,}")
 
+# Capitalisation is not excused by POSITION: "Terraform and Python work fits"
+# and "Your Python work fits. Terraform shipped in prod." both put an invented
+# claim where a sentence begins. Only these words are excused, and only by
+# being themselves: the common sentence-openers and function words no employer
+# or technology is called. The list is deliberately short -- an ambiguous token
+# costs one dropped sentence, an exempted one ships an invented claim.
+_STOPWORDS = frozenset(
+    """
+    you your yours the this that these those they them their there here his
+    her hers its our ours and but for nor not with without from into onto over
+    under after before while when where what which who whom whose why how
+    because although though however also both each every all any some most
+    many much few more less least other another such same than then still yet
+    about across along around between during through upon within against among
+    has have had was were are been being can could shall should will would
+    may might must does did doing having given despite besides beyond
+    nothing none neither either missing lacks lacking never new absent
+    unfamiliar seems looks matches fits experience background work working
+    role roles team teams years year posting resume
+    only just enough plenty several nearly almost mostly largely likely
+    clearly exactly fewer little
+    one two three four five six seven eight nine ten eleven twelve
+    strong good great direct close ready able senior junior
+    remote onsite hybrid backend frontend
+    """.split()
+)
 
-def _undeclared_names(reason: str, allowed: list[str], facts: Any) -> list[str]:
+# A possessive immediately before, or "experience"/"work" immediately after,
+# turns a MENTION into an ATTRIBUTION. See `_undeclared_names`.
+_POSSESSIVES = frozenset({"your", "my", "his", "her", "their", "its", "our"})
+_ATTRIBUTIVE_NOUNS = frozenset({"experience", "work"})
+_WORD_BEFORE = re.compile(r"([A-Za-z']+)\s*$")
+_WORD_AFTER = re.compile(r"^\s*([A-Za-z']+)")
+
+
+def _attributed(text: str, start: int, end: int) -> bool:
+    """Is the token at [start:end) framed as the PERSON's, not the posting's?
+
+    A company or a city named after a technology (Docker, MongoDB, Snowflake,
+    Terraform are all employers) would otherwise launder the claim: "Your
+    Python and Terraform work fits Terraform." The mention at the end is the
+    employer; "Your ... Terraform work" is a claim about a history.
+    """
+    before = _WORD_BEFORE.search(text[:start])
+    if before and before.group(1).casefold() in _POSSESSIVES:
+        return True
+    after = _WORD_AFTER.match(text[end:])
+    return bool(after and after.group(1).casefold() in _ATTRIBUTIVE_NOUNS)
+
+
+def _undeclared_names(
+    text: str, allowed: list[str], facts: Any, exempt: str = ""
+) -> list[str]:
     """Name-like tokens in the sentence that the resume, the declared cites
-    and the posting cites all fail to account for."""
+    and the posting cites all fail to account for.
+
+    `allowed` exempts a token wherever it stands (it is on the resume or
+    declared). `exempt` -- the posting's company and location -- exempts it
+    only as a mention: an attributed one is still a claim about the person.
+    """
     found = []
-    for match in _TOKEN.finditer(reason):
+    for match in _TOKEN.finditer(text):
         token = match.group(0)
-        start = match.start()
-        before = reason[:start].rstrip()
-        sentence_initial = not before or before[-1] in ".!?"
         looks_named = (
-            (token[0].isupper() and not sentence_initial)
+            (token[0].isupper() and token.casefold() not in _STOPWORDS)
             or any(c.isupper() for c in token[1:])
             or any(c.isdigit() or c in "+#" for c in token)
         )
         if not looks_named:
             continue
         if _on_resume(facts, token) or any(_mentions(c, token) for c in allowed):
+            continue
+        if (
+            exempt
+            and _mentions(exempt, token)
+            and not _attributed(text, match.start(), match.end())
+        ):
             continue
         found.append(token)
     return found
@@ -299,8 +377,9 @@ def check(
 
     `postings` maps job_id to the posting's field values. When given, a posting
     cite must be found in them (correspondence) and name-like tokens from the
-    posting's company and location are exempt from the undeclared scan (title
-    and requirements are not). Posting cites prove the sentence is about THIS
+    posting's company and location are exempt from the undeclared scan where
+    they are mentioned rather than attributed to the person (title and
+    requirements are never exempt). Posting cites prove the sentence is about THIS
     posting; they never exempt a token, since that is a different question from
     whether a word is a claim about the person. Without it the posting half only checks that
     something was declared (presence) and nothing is exempt.
@@ -345,7 +424,7 @@ def check(
             continue
         # Completeness is asked of the model in the prompt; this is the cheap
         # check that it kept the promise for name-like tokens.
-        if _undeclared_names(reason, declared + [exempt], facts):
+        if _undeclared_names(reason, declared, facts, exempt=exempt):
             out.dropped.append((job_id, "undeclared"))
             continue
         seen.add(job_id)
@@ -381,10 +460,43 @@ _ABSENCE = re.compile(
 )
 
 
+# A gap names an ABSENCE. A marker is not enough to prove that, because a
+# demand verb ("the posting wants X") says nothing about the person: "You need
+# Kubernetes experience and have shipped it in prod." carries a marker and a
+# history claim at once. So possession is rejected outright, whatever marker
+# the sentence also contains. The cost is a gap phrased as a negated
+# possession ("You have not shipped Kubernetes") -- rejected too, and the
+# reason survives either way; the prompt asks for absence wording.
+_HAS_VERBS = (
+    r"led|lead|leads|shipped|ship|ships|built|build|builds|drove|drive|drives|"
+    r"driven|ran|run|runs|managed|manage|manages|owned|own|owns|delivered|"
+    r"deliver|delivers|designed|design|designs|developed|develop|develops|"
+    r"wrote|write|writes|worked|work|works|used|use|uses|brought|bring|brings|"
+    r"know|knew|knows|scaled|scale|scales|maintained|maintain|maintains"
+)
+_POSSESSION = re.compile(
+    # "you've", "you have/had/has", "you led", "you already shipped", ...
+    r"(?<![a-z])you\s*(?:'|’)\s*ve(?![a-z])"
+    rf"|(?<![a-z])you\s+(?:already\s+|also\s+)?(?:have|had|has|{_HAS_VERBS})(?![a-z])"
+    # a subject-elided perfect: "...and have shipped it in prod". A relative
+    # clause about the posting's ideal candidate ("someone who has shipped
+    # Kubernetes") is about nobody in particular, so it is left alone.
+    rf"|(?<![a-z])(?<!who )(?<!they )(?<!that )(?:have|has|had|having)"
+    rf"\s+(?:already\s+|also\s+)?(?:{_HAS_VERBS})(?![a-z])"
+    # "your Kubernetes experience"
+    r"|(?<![a-z])your\s+[A-Za-z0-9+#.-]+\s+(?:experience|background|history)(?![a-z])",
+    re.IGNORECASE,
+)
+
+
 def _checked_gap(item: ProseItem, facts: Any, exempt: str = "") -> str | None:
     gap = cut(item.gap, GAP_CHARS)
     missing = (item.gap_missing or "").strip()
     if not gap or not missing:
+        return None
+    # One requirement, not a phrase: a long gap_missing exempts every name
+    # inside it from the scan below.
+    if len(missing) > GAP_MISSING_CHARS:
         return None
     # The gap says the person lacks `missing`; if the resume has it, that is
     # a manufactured claim about their history.
@@ -394,8 +506,14 @@ def _checked_gap(item: ProseItem, facts: Any, exempt: str = "") -> str | None:
         return None
     if not _ABSENCE.search(gap):
         return None
+    # A gap must never assert that the person HAS something.
+    if _POSSESSION.search(gap):
+        return None
     # Nothing else name-like may appear: "...you led Terraform migrations".
-    if _undeclared_names(gap, [missing, exempt], facts):
+    # gap_missing is exempt wherever it stands -- naming the requirement the
+    # person lacks is the field's purpose -- while the company and the location
+    # are exempt only as mentions.
+    if _undeclared_names(gap, [missing], facts, exempt=exempt):
         return None
     return gap
 
