@@ -101,9 +101,6 @@ def output_text(data: dict, output: list) -> str:
     return "".join(parts)
 
 
-_output_text = output_text  # the name existing callers import
-
-
 def _citation_sources(output: list) -> list[dict[str, str]]:
     """URLs the model cited, for a search whose own `sources` came back empty.
 

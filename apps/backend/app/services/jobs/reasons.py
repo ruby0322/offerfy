@@ -43,9 +43,18 @@ conservative scan for name-like ASCII tokens (capitalised mid-sentence, inner
 capital, digit, + or #); a LOWERCASE technology the model neither declares nor
 capitalises ("kubernetes") is a known hole, as is any non-ASCII claim. The scan
 errs towards dropping a sentence. Second, `validate` can only check a posting
-cite against the posting when `check` is given the posting text (write_reasons
-does); at most MAX_ITEMS prose records are kept, but WHICH postings are sent is
+cite against the posting when `check` is given the posting's field values
+(write_reasons does, values only -- a cite of "Requirements" must not match a
+label); at most MAX_ITEMS prose records are kept, but WHICH postings are sent is
 the caller's cap (Task 5), not this module's.
+
+The scan is split by field. In a `reason`, name-like tokens from the posting's
+company, title and location are exempt (a city or an employer is not a claim
+about the person) but tokens from its REQUIREMENTS are not: a requirement
+mirrored back as the person's experience is the likeliest invented claim, so it
+must be declared and on the resume. The `gap` is not scanned for requirement
+tokens -- naming a requirement the person lacks is what that field is for; it
+is held to `gap_missing` instead (named, absent from the resume, in the gap).
 
 Fewer than five is allowed and so is none: the honest empty state is only
 honest if the model is permitted to produce it.
@@ -95,8 +104,10 @@ PROMPT = (
     "resume_cites and posting_cites; each resume cite must also appear in the "
     "reason's own words. "
     "Completeness is required: every skill, employer, institution or technology "
-    "named in the reason must appear in resume_cites, and the posting's company "
-    "and title, if named, in posting_cites; a name you did not list is rejected. "
+    "named in the reason must appear in resume_cites, and the posting's company, "
+    "title or location may be named freely. A skill or requirement the person "
+    "does not have never goes in the reason: say it in gap and gap_missing. "
+    "A name you did not list is rejected. "
     "gap is the single most important thing the posting asks for that the "
     "resume does not show, and it is null when there is none; when it is not "
     "null, put the missing thing, as the posting words it, in gap_missing and "
@@ -200,6 +211,32 @@ def _on_resume(facts: Any, cite: str) -> bool:
     return f"|{token}|" in skills.casefold() or _mentions(search, token)
 
 
+@dataclass(frozen=True)
+class PostingText:
+    """The field VALUES of one posting, as shown to the model -- no labels.
+
+    Kept apart because the scan treats them differently. Company, title and
+    location are not claims about the person, so a name found there is exempt.
+    Requirements are: a requirement mirrored back as the person's experience is
+    the most likely invented claim, so in a `reason` a requirement must be
+    declared and on the resume like any other skill. In a `gap` a requirement
+    is exactly what the field is for.
+    """
+
+    company: str
+    title: str
+    location: str
+    requirements: str
+
+    @property
+    def header(self) -> str:
+        return "\n".join([self.company, self.title, self.location])
+
+    @property
+    def everything(self) -> str:
+        return "\n".join([self.header, self.requirements])
+
+
 @dataclass
 class Checked:
     kept: list[Prose] = field(default_factory=list)
@@ -241,13 +278,15 @@ def check(
     *,
     facts: Any,
     scored_ids: set[str],
-    postings: dict[str, str] | None = None,
+    postings: dict[str, PostingText] | None = None,
 ) -> Checked:
     """`validate` plus the ids whose gap was suppressed.
 
-    `postings` maps job_id to the posting text the model was shown. When given,
-    a posting cite must be found in it (correspondence); without it the
-    posting half only checks that something was declared (presence).
+    `postings` maps job_id to the posting's field values. When given, a posting
+    cite must be found in them (correspondence) and name-like tokens from the
+    posting's company, title and location are exempt from the undeclared scan
+    (requirements are not). Without it the posting half only checks that
+    something was declared (presence) and nothing is exempt.
 
     The cap (MAX_ITEMS) is enforced here: the prompt asks for at most five, but
     a prompt is not a bound. The caller still owns WHICH postings are sent.
@@ -278,15 +317,17 @@ def check(
             out.dropped.append((job_id, "uncited"))
             continue
         posting_cites = [c for c in item.posting_cites if len(c.strip()) >= MIN_CITE_CHARS]
+        header = ""
         if postings is not None:
-            text = postings.get(job_id, "")
-            posting_cites = [c for c in posting_cites if _mentions(text, c)]
+            posting = postings.get(job_id)
+            posting_cites = [c for c in posting_cites if posting and _mentions(posting.everything, c)]
+            header = posting.header if posting else ""
         if not posting_cites:
             out.dropped.append((job_id, "uncited"))
             continue
         # Completeness is asked of the model in the prompt; this is the cheap
         # check that it kept the promise for name-like tokens.
-        if _undeclared_names(reason, declared + posting_cites, facts):
+        if _undeclared_names(reason, declared + posting_cites + [header], facts):
             out.dropped.append((job_id, "undeclared"))
             continue
         seen.add(job_id)
@@ -338,18 +379,27 @@ class _CallFailed(Exception):
         self.usage = usage or {}
 
 
-def _posting_block(scored: Scored, job: Any) -> str:
+def _posting_text(job: Any) -> PostingText:
+    return PostingText(
+        company=str(job.company),
+        title=str(job.title),
+        location=str(job.location or ""),
+        requirements=requirements(getattr(job, "description_text", "")),
+    )
+
+
+def _posting_block(scored: Scored, posting: PostingText) -> str:
     comps = ", ".join(f"{k}={v:.2f}" for k, v in scored.components.items())
     return "\n".join(
         [
             f"job_id: {scored.job_id}",
-            f"Title: {job.title}",
-            f"Company: {job.company}",
-            f"Location: {job.location or 'not stated'}",
+            f"Title: {posting.title}",
+            f"Company: {posting.company}",
+            f"Location: {posting.location or 'not stated'}",
             f"Tier: {scored.tier}",
             f"Probabilities: {comps}",
             "Requirements:",
-            requirements(getattr(job, "description_text", "")),
+            posting.requirements,
         ]
     )
 
@@ -431,8 +481,9 @@ async def write_reasons(db, *, user, facts, scored: list[Scored], jobs: list[Any
         run.error = str(exc)
         return run
 
-    posting_texts = {s.job_id: _posting_block(s, by_id[s.job_id]) for s in survivors}
-    body = _request_body(REASON_MODEL, resume_text, list(posting_texts.values()))
+    posting_texts = {s.job_id: _posting_text(by_id[s.job_id]) for s in survivors}
+    blocks = [_posting_block(s, posting_texts[s.job_id]) for s in survivors]
+    body = _request_body(REASON_MODEL, resume_text, blocks)
     url = responses_url(settings.openai_base_url or "https://api.openai.com/v1")
     headers = {
         "Authorization": f"Bearer {settings.openai_api_key}",
@@ -475,7 +526,7 @@ async def write_reasons(db, *, user, facts, scored: list[Scored], jobs: list[Any
         batch.items,
         facts=facts,
         scored_ids={s.job_id for s in survivors},
-        postings={s.job_id: posting_texts[s.job_id] for s in survivors},
+        postings=posting_texts,
     )
     run.prose, run.dropped, run.gaps_rejected = (
         checked.kept, checked.dropped, checked.gaps_rejected,

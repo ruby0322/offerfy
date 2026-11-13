@@ -713,7 +713,7 @@ def test_the_reasoning_item_is_skipped_for_the_message(
     """Reasoning models put a reasoning item before the message.
 
     Production returned an empty one, but a populated one must not be mistaken
-    for the answer -- which is why this uses llm._output_text rather than a
+    for the answer -- which is why this uses output_text rather than a
     second copy of that logic.
     """
     envelope = {

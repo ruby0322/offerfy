@@ -42,7 +42,7 @@ from sqlalchemy.orm import Session
 from app import models
 from app.config import get_settings
 from app.models import GuestSession, LlmCall, Resume, User
-from app.services.llm import _output_text, _responses_url
+from app.services.llm.providers.openai import output_text, responses_url
 from app.services.llm.prompts import EXTRACT_PROMPT
 from app.services.llm.providers import openai as openai_provider
 from app.services.model_catalog import spec_or_passthrough
@@ -420,7 +420,7 @@ async def extract_content(source: str) -> ExtractResult:
         # the wrong provider's id to this endpoint.
         return ExtractResult(error="llm_not_configured", source_chars=len(source))
     model = spec.id
-    url = _responses_url(settings.openai_base_url or "https://api.openai.com/v1")
+    url = responses_url(settings.openai_base_url or "https://api.openai.com/v1")
     headers = {
         "Authorization": f"Bearer {settings.openai_api_key}",
         "Content-Type": "application/json",
@@ -453,7 +453,7 @@ async def extract_content(source: str) -> ExtractResult:
         return result
     result.usage = _usage_of(data)
     output = data.get("output") if isinstance(data.get("output"), list) else []
-    text = _output_text(data, output)
+    text = output_text(data, output)
     if not text.strip():
         logger.warning(
             "content extraction returned no text status=%s", data.get("status")

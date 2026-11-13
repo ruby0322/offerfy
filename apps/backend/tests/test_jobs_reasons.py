@@ -15,6 +15,7 @@ from app.services.jobs import reasons as reasons_mod
 from app.services.jobs.reasons import (
     GAP_CHARS,
     REASON_CHARS,
+    PostingText,
     ProseItem,
     check,
     validate,
@@ -157,9 +158,65 @@ def test_the_undeclared_scan_leaves_ordinary_sentences_alone():
 def test_a_posting_cite_must_correspond_to_the_posting_when_it_is_given():
     item = _item(posting=("Kubernetes",))
     assert check([item], facts=FACTS, scored_ids={"a"},
-                 postings={"a": "Requirements Python"}).dropped == [("a", "uncited")]
+                 postings=_posting(requirements="Python")).dropped == [("a", "uncited")]
     assert check([_item()], facts=FACTS, scored_ids={"a"},
-                 postings={"a": "Requirements Python services"}).dropped == []
+                 postings=_posting(requirements="Python services")).dropped == []
+
+
+def _posting(company="Initech", title="Engineer", location="", requirements="Python"):
+    return {"a": PostingText(company=company, title=title, location=location,
+                             requirements=requirements)}
+
+
+def test_names_from_company_title_and_location_are_not_claims_about_the_person():
+    cases = [
+        ("Your Python work fits the role in Taipei.", _posting(location="Taipei, Taiwan")),
+        ("Your Python work fits the Remote role.", _posting(location="Remote")),
+        ("Your Python work matches the Backend requirements with AWS.",
+         _posting(title="Backend Engineer (AWS)")),
+    ]
+    for reason, postings in cases:
+        item = _item(reason=reason, resume=("Python",), posting=("Python",))
+        checked = check([item], facts=FACTS, scored_ids={"a"}, postings=postings)
+        assert checked.dropped == [], reason
+
+
+def test_a_requirement_mirrored_as_experience_is_still_rejected():
+    # Docker is in the posting's requirements, not on the resume, not declared.
+    item = _item(reason="Your Python and Docker experience fits.", resume=("Python",), posting=("Python",))
+    postings = _posting(requirements="Python and Docker")
+    assert check([item], facts=FACTS, scored_ids={"a"}, postings=postings).dropped == [
+        ("a", "undeclared")
+    ]
+    # ...and a requirement sitting only in the requirements cannot ride in as "location".
+    item = _item(reason="Your Python work matches the AWS requirements.", resume=("Python",), posting=("Python",))
+    postings = _posting(requirements="Python and AWS")
+    assert check([item], facts=FACTS, scored_ids={"a"}, postings=postings).dropped == [
+        ("a", "undeclared")
+    ]
+
+
+def test_disclaiming_a_requirement_belongs_in_the_gap_not_the_reason():
+    postings = _posting(requirements="Python and Docker")
+    as_reason = _item(reason="Your Python work fits their Docker setup, though Docker is new.",
+                    posting=("Python",))
+    assert check([as_reason], facts=FACTS, scored_ids={"a"}, postings=postings).dropped == [
+        ("a", "undeclared")
+    ]
+    as_gap = _item(reason="Your Python work fits their stack.",
+                   gap="Docker is new for you.", gap_missing="Docker", posting=("Python",))
+    checked = check([as_gap], facts=FACTS, scored_ids={"a"}, postings=postings)
+    assert checked.dropped == [] and checked.gaps_rejected == []
+    assert checked.kept[0].gap == "Docker is new for you."
+
+
+def test_a_posting_cite_matching_only_a_label_does_not_correspond():
+    postings = _posting(location="Taipei")
+    for cite in ("Requirements", "Location", "Title", "Company"):
+        item = _item(posting=(cite,))
+        assert check([item], facts=FACTS, scored_ids={"a"}, postings=postings).dropped == [
+            ("a", "uncited")
+        ], cite
 
 
 def test_a_valid_retry_is_not_shadowed_by_an_earlier_bad_copy():
