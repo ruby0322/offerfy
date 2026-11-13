@@ -46,7 +46,7 @@
   },
   "about": {
     "metaTitle": "About · Offerfy",
-    "metaDescription": "Offerfy carries open technical roles from 88 employer boards and lets you fork a resume for one posting. No matching, no auto-apply; you apply on the source site.",
+    "metaDescription": "Offerfy carries open technical roles from 88 employer boards and lets you fork a resume for one posting, then track it. No auto-apply; you apply on the source site.",
     "title": "About",
     "paragraphs": [
       "Offerfy is a web resume editor at https://offerfy.cc. You keep a Typst source file in the browser. Chat can edit that same file. The PDF preview updates from the compile. This is not a generate-and-download product. You can start without creating an account.",
@@ -66,7 +66,7 @@
   },
   "blog": {
     "metaTitle": "Blog · Offerfy",
-    "metaDescription": "Notes and guides from Offerfy. The resume editor, tailored versions, and a public job catalog are shipping; job matching and auto-apply are not.",
+    "metaDescription": "Notes and guides from Offerfy. The resume editor, tailored versions, a public job catalog and application tracking are shipping; auto-apply is not.",
     "title": "Blog",
     "empty": "Nothing published yet.",
     "guide": "Guide",
@@ -76,7 +76,7 @@
   },
   "jobs": {
     "metaTitle": "Jobs · Offerfy",
-    "metaDescription": "Public job catalog from official employer career boards: Greenhouse, Lever, Ashby, SmartRecruiters and Workday. Apply on the source site. No matching, no apply tracking.",
+    "metaDescription": "Public job catalog from official employer career boards: Greenhouse, Lever, Ashby, SmartRecruiters and Workday. Save a posting and track it; apply on the source site.",
     "title": "Jobs",
     "lead": "Listings from official employer ATS boards: Greenhouse, Lever, Ashby, SmartRecruiters and Workday. Offerfy does not run 104 or LinkedIn. Apply on the original posting.",
     "emptyFiltered": "No jobs match these filters.",

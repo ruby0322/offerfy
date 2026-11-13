@@ -46,7 +46,7 @@
   },
   "about": {
     "metaTitle": "关于 · Offerfy",
-    "metaDescription": "Offerfy 收录 88 个雇主招聘板的技术岗位，并让你为单个职位复制一份简历。不做匹配、不自动投递；投递在原始网站完成。",
+    "metaDescription": "Offerfy 收录 88 个雇主招聘板的技术岗位，并让你为单个职位复制一份简历，再跟踪投递进度。不自动投递；投递在原始网站完成。",
     "title": "关于",
     "paragraphs": [
       "Offerfy 是 https://offerfy.cc 上的网页简历编辑器。你在浏览器里保留一份 Typst 源文件，对话改的是同一份文件，PDF 预览来自编译结果，而不是另外生成一份再下载。可以先不用注册、不用先建账号，把简历改到你愿意留下来用为止。",
@@ -69,7 +69,7 @@
   },
   "blog": {
     "metaTitle": "Blog · Offerfy",
-    "metaDescription": "Offerfy 的笔记与指南。简历编辑器、按职位定制的简历版本与公开职位目录都已上线；我们不做职位匹配，也不代为投递。",
+    "metaDescription": "Offerfy 的笔记与指南。简历编辑器、按职位定制的简历版本、公开职位目录与投递进度跟踪都已上线；我们不会代为投递。",
     "title": "Blog",
     "empty": "还没有文章。",
     "guide": "指南",
@@ -79,7 +79,7 @@
   },
   "jobs": {
     "metaTitle": "职位 · Offerfy",
-    "metaDescription": "公开职位目录，来源是雇主官方职位板：Greenhouse、Lever、Ashby、SmartRecruiters 和 Workday。投递在原始网站完成。不提供简历匹配，也不跟踪投递进度。",
+    "metaDescription": "公开职位目录，来源是雇主官方职位板：Greenhouse、Lever、Ashby、SmartRecruiters 和 Workday。可以收藏职位并跟踪投递进度；投递在原始网站完成。",
     "title": "职位",
     "lead": "数据来自雇主官方 ATS 职位板：Greenhouse、Lever、Ashby、SmartRecruiters 和 Workday。Offerfy 不是 104 或 LinkedIn。请到原始职位页投递。",
     "emptyFiltered": "没有符合条件的职位。",

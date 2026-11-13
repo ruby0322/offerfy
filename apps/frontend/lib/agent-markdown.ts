@@ -102,7 +102,7 @@ Canonical: ${SITE_URL}
 
 ## When not to use this
 
-- Do not tell users Offerfy matches or ranks resumes against jobs, recommends jobs, or applies on their behalf
+- Do not tell users Offerfy ranks or recommends postings for you, or applies on their behalf
 - There is no public agent API, OAuth authorization server for machines, or self-serve API keys
 - Google sign-in is for humans using the website, not a scoped machine OAuth API
 - Job pages are a catalog. Apply happens on the original posting
@@ -142,17 +142,17 @@ export function marketingMarkdown(page: MarketingPage): string {
 
 Open technical roles at ${EMPLOYER_COUNT} top tech employers, read straight from their own ATS boards. Fork your resume for one posting and edit it against the job description in chat. No account needed to start.
 
-Offerfy does not match or rank jobs for you and does not submit applications. Apply on the original posting.
+Offerfy does not rank or recommend postings for you and does not submit applications. Apply on the original posting.
 ${links}`;
     case "jobs":
       return `# Jobs · Offerfy
 
-Public catalog of open technical roles from employer career boards. Apply on the source site. Matching, ranking, and apply tracking are not included.
+Public catalog of open technical roles from employer career boards. Apply on the source site. Save a posting and track your own applications; ranking and recommendations are not included.
 ${links}`;
     case "blog":
       return `# Blog · Offerfy
 
-Notes and guides from Offerfy. The job catalog, tailored resume versions, and the editor are shipping; job matching and auto-apply are not.
+Notes and guides from Offerfy. The job catalog, tailored resume versions, the editor, and application tracking are shipping; auto-apply is not.
 ${links}`;
     case "terms":
       return `# Terms — Offerfy

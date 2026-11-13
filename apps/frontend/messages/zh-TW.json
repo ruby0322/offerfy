@@ -46,7 +46,7 @@
   },
   "about": {
     "metaTitle": "關於 · Offerfy",
-    "metaDescription": "Offerfy 收錄 88 個雇主徵才板的技術職缺，並讓你為單一職缺複製一份履歷。不做配對、不自動投遞；投遞在原始網站完成。",
+    "metaDescription": "Offerfy 收錄 88 個雇主徵才板的技術職缺，並讓你為單一職缺複製一份履歷，再追蹤投遞進度。不自動投遞；投遞在原始網站完成。",
     "title": "關於",
     "paragraphs": [
       "Offerfy 是 https://offerfy.cc 上的網頁履歷編輯器。你在瀏覽器裡保留一份 Typst 原始檔，對話改的是同一份檔，PDF 預覽來自編譯結果，而不是另外產生一份再下載。可以先不用註冊、不用先建帳號，把履歷改到你願意留下來用為止。",
@@ -69,7 +69,7 @@
   },
   "blog": {
     "metaTitle": "Blog · Offerfy",
-    "metaDescription": "Offerfy 的筆記與指南。履歷編輯器、依職缺客製的履歷版本與公開職缺目錄都已上線；我們不做職缺配對，也不代為投遞。",
+    "metaDescription": "Offerfy 的筆記與指南。履歷編輯器、依職缺客製的履歷版本、公開職缺目錄與投遞進度追蹤都已上線；我們不會代為投遞。",
     "title": "Blog",
     "empty": "還沒有文章。",
     "guide": "指南",
@@ -79,7 +79,7 @@
   },
   "jobs": {
     "metaTitle": "職缺 · Offerfy",
-    "metaDescription": "公開職缺目錄，來源是雇主官方職缺板：Greenhouse、Lever、Ashby、SmartRecruiters 與 Workday。投遞在原始網站完成。不提供履歷配對，也不追蹤投遞進度。",
+    "metaDescription": "公開職缺目錄，來源是雇主官方職缺板：Greenhouse、Lever、Ashby、SmartRecruiters 與 Workday。可以收藏職缺並追蹤投遞進度；投遞在原始網站完成。",
     "title": "職缺",
     "lead": "資料來自雇主官方 ATS 職缺板：Greenhouse、Lever、Ashby、SmartRecruiters 與 Workday。Offerfy 不是 104 或 LinkedIn。請到原始職缺頁投遞。",
     "emptyFiltered": "沒有符合條件的職缺。",
