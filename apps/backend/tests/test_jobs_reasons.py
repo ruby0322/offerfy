@@ -118,7 +118,7 @@ def test_a_long_reason_is_clamped_not_rejected():
     assert dropped == [] and len(kept[0].reason) <= REASON_CHARS and len(kept[0].gap) <= GAP_CHARS
 
 
-def test_fewer_than_five_is_allowed_and_so_is_none():
+def test_fewer_than_were_sent_is_allowed_and_so_is_none():
     assert validate([], facts=FACTS, scored_ids={"a", "b"}) == ([], [])
     kept, _ = validate([_item("a")], facts=FACTS, scored_ids={"a", "b"})
     assert len(kept) == 1
@@ -444,10 +444,25 @@ def test_a_valid_retry_is_not_shadowed_by_an_earlier_bad_copy():
     assert [p.job_id for p in kept] == ["a"] and dropped == [("a", "uncited")]
 
 
-def test_no_more_than_five_prose_records_are_kept():
-    ids = {str(n) for n in range(8)}
+def test_ten_postings_in_yield_ten_reasons_out():
+    # Pinned the literal five before: two digest tracks send up to ten.
+    ids = {str(n) for n in range(10)}
     kept, dropped = validate([_item(i) for i in sorted(ids)], facts=FACTS, scored_ids=ids)
-    assert len(kept) == 5 and [why for _, why in dropped] == ["over_cap"] * 3
+    assert len(kept) == 10 and dropped == []
+
+
+def test_the_model_cannot_return_more_than_it_was_given():
+    ids = {"a", "b"}
+    items = [_item("a"), _item("b"), _item("c"), _item("a")]
+    kept, dropped = validate(items, facts=FACTS, scored_ids=ids)
+    assert [p.job_id for p in kept] == ["a", "b"]
+    assert [why for _, why in dropped] == ["unknown_job", "duplicate"]
+
+
+def test_an_explicit_max_items_still_drops_the_rest_as_over_cap():
+    ids = {str(n) for n in range(4)}
+    checked = check([_item(i) for i in sorted(ids)], facts=FACTS, scored_ids=ids, max_items=3)
+    assert len(checked.kept) == 3 and [why for _, why in checked.dropped] == ["over_cap"]
 
 
 def test_a_rejected_gap_is_traced_but_not_a_dropped_record():
@@ -655,3 +670,15 @@ async def test_without_a_key_nothing_is_called(monkeypatch, db_session):
         assert run.error == "llm_not_configured" and stub.calls == []
     finally:
         get_settings.cache_clear()
+
+
+async def test_ten_postings_sent_ten_reasons_written_and_the_prompt_says_ten(
+    openai_enabled, monkeypatch, db_session
+):
+    ids = [str(n) for n in range(10)]
+    stub = _install(monkeypatch, StubClient(_payload(*[_wire(i) for i in ids])))
+    run = await write_reasons(db_session, user=_user(db_session), facts=FACTS,
+                              scored=[_scored(i) for i in ids], jobs=[_job(i) for i in ids])
+    assert len(run.prose) == 10 and run.dropped == []
+    sent = stub.calls[0]["body"]["input"][0]["content"]
+    assert "at most 10 items" in sent and "at most 5" not in sent

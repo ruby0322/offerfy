@@ -49,8 +49,10 @@ EXACT, decided by comparing strings and nothing else:
     always is (values only: a cite of "Requirements" must not match a label);
   * `gap_missing` is named, at most GAP_MISSING_CHARS long, absent from the
     resume, and actually mentioned in the gap;
-  * at most MAX_ITEMS records are kept, and duplicates and unknown job ids go.
-  WHICH postings are sent is the caller's cap (Task 5), not this module's.
+  * no more records are kept than the caller sent (`max_items`, default the
+    number of postings sent), and duplicates and unknown job ids go. WHICH
+    postings are sent is the caller's choice, not this module's; a fixed cap
+    here silently bared every row past it when the digest sent two tracks.
 
 BEST EFFORT, two heuristics over free prose, neither of them a guarantee:
   * the NAME SCAN (`_undeclared_names`) looks for name-like ASCII tokens the
@@ -107,7 +109,7 @@ the gap_missing token ITSELF as something the person has done in words the
 verb list does not cover ("Missing docker; you led docker swarm" -- the
 lowercase token is legitimately exempt there). The prompt is the only defence.
 
-Fewer than five is allowed and so is none: the honest empty state is only
+Fewer than were sent is allowed and so is none: the honest empty state is only
 honest if the model is permitted to produce it.
 
 One provider call per digest, over the survivors only. A provider fault sets
@@ -145,7 +147,6 @@ REASON_MODEL = PROFILE_FALLBACK_MODEL
 
 REASON_CHARS = 240
 GAP_CHARS = 160
-MAX_ITEMS = 5
 MIN_CITE_CHARS = 2
 # gap_missing names ONE requirement, not a sentence. Unbounded, it exempts
 # every name inside itself from the scan ("Kubernetes production deployments at
@@ -158,7 +159,7 @@ PROMPT = (
     "dimensions (requirements_met, seniority_fit, location_fit, direction_fit); "
     "a low one beside high ones says where the gap is, so write about that "
     "dimension and not a generic one. "
-    "You may return fewer than five items, and you may return none: return "
+    "You may return fewer items than you were given, and you may return none: return "
     "only the postings you can write an honest reason for. "
     "Every reason must cite something from the resume facts AND something from "
     "the posting, and you must list each cite exactly as written in "
@@ -450,6 +451,7 @@ def check(
     facts: Any,
     scored_ids: set[str],
     postings: dict[str, PostingText] | None = None,
+    max_items: int | None = None,
 ) -> Checked:
     """`validate` plus the ids whose gap was suppressed.
 
@@ -462,10 +464,14 @@ def check(
     whether a word is a claim about the person. Without it the posting half only checks that
     something was declared (presence) and nothing is exempt.
 
-    The cap (MAX_ITEMS) is enforced here: the prompt asks for at most five, but
-    a prompt is not a bound. The caller still owns WHICH postings are sent.
+    `max_items` bounds the output by the input: it defaults to the number of
+    scored ids, so the model cannot return more than it was given (a prompt is
+    not a bound), without imposing a number of its own. A caller passing a
+    smaller number gets `over_cap` for the rest. The caller owns WHICH postings
+    are sent.
     """
     out = Checked()
+    limit = len(scored_ids) if max_items is None else max_items
     seen: set[str] = set()
     for item in items:
         job_id = item.job_id
@@ -511,7 +517,7 @@ def check(
             out.dropped.append((job_id, "narrated"))
             continue
         seen.add(job_id)
-        if len(out.kept) >= MAX_ITEMS:
+        if len(out.kept) >= limit:
             out.dropped.append((job_id, "over_cap"))
             continue
         gap = _checked_gap(item, facts, exempt)
@@ -764,8 +770,10 @@ def _posting_block(scored: Scored, posting: PostingText) -> str:
     )
 
 
-def _request_body(model: str, resume_text: str, blocks: list[str]) -> dict[str, Any]:
-    parts = [PROMPT, "", "RESUME FACTS:", resume_text, "", f"POSTINGS (at most {MAX_ITEMS} items):"]
+def _request_body(
+    model: str, resume_text: str, blocks: list[str], max_items: int
+) -> dict[str, Any]:
+    parts = [PROMPT, "", "RESUME FACTS:", resume_text, "", f"POSTINGS (at most {max_items} items):"]
     parts += ["\n---\n".join(blocks)]
     return {
         "model": model,
@@ -828,8 +836,14 @@ def _record(meter: Any, model: str, usage: dict, *, user=None, facts=None) -> No
     )
 
 
-async def write_reasons(db, *, user, facts, scored: list[Scored], jobs: list[Any]) -> ProseRun:
-    """One call for the whole digest. Never raises on a provider fault."""
+async def write_reasons(
+    db, *, user, facts, scored: list[Scored], jobs: list[Any], max_items: int | None = None
+) -> ProseRun:
+    """One call for the whole digest. Never raises on a provider fault.
+
+    `max_items` defaults to the number of postings actually sent, and is the
+    number the prompt states: the model is never told five while handed ten.
+    """
     run = ProseRun(model=REASON_MODEL)
     by_id = {str(getattr(j, "id", "")): j for j in jobs}
     survivors = [s for s in scored if s.job_id in by_id]
@@ -847,7 +861,8 @@ async def write_reasons(db, *, user, facts, scored: list[Scored], jobs: list[Any
 
     posting_texts = {s.job_id: _posting_text(by_id[s.job_id]) for s in survivors}
     blocks = [_posting_block(s, posting_texts[s.job_id]) for s in survivors]
-    body = _request_body(REASON_MODEL, resume_text, blocks)
+    limit = len(survivors) if max_items is None else max_items
+    body = _request_body(REASON_MODEL, resume_text, blocks, limit)
     url = responses_url(settings.openai_base_url or "https://api.openai.com/v1")
     headers = {
         "Authorization": f"Bearer {settings.openai_api_key}",
@@ -891,6 +906,7 @@ async def write_reasons(db, *, user, facts, scored: list[Scored], jobs: list[Any
         facts=facts,
         scored_ids={s.job_id for s in survivors},
         postings=posting_texts,
+        max_items=limit,
     )
     run.prose, run.dropped, run.gaps_rejected = (
         checked.kept, checked.dropped, checked.gaps_rejected,
