@@ -121,13 +121,40 @@ agent session should invent unasked), and add a length comparison to that test,
 which is about four lines. **Adding the test first would turn the suite red on a
 real pre-existing gap**, so the copy should land first or the two together.
 
-## Disk, before you add an eleventh backup
+## Deployed 2026-11-13 14:41
 
-Ten `.next.bak-*` directories under `apps/frontend`, ~4.5G, on a volume at 78%
-(118G free). AGENTS.md §3 says to delete old ones once a deploy sticks. They are
-rollback paths, so I have not touched any. The current live build is
-`fxq-gtX2MspoHjFRT-qGm`; the two most recent backups are worth keeping and the
-rest are from 2026-11-05 to 11-09.
+All of the above is live. `main` `c0fc9f9`, BUILD_ID **`Ayezh8Buy22Zrcfuhl0Je`**,
+`offerfy-web` MainPID **62400**. Frontend-only: no alembic step (`current`
+already equalled head) and no API reload, so the ordering rule did not bite.
+Downtime ~4s again, which is the second measurement contradicting §4's ~40s.
+
+Verified live, by fetching the pages rather than trusting the build: the About
+denial gone and "assess the fit" serving; Terms' "or track them" and "score how
+well" both at zero occurrences; Contact's "apply or match on your behalf"
+replaced; zh-TW About's 履歷與職缺配對 gone; guest dashboards 200 in all three
+locales; `/llms.txt` still carrying the earlier correction.
+
+### The backups, and one that is a trap
+
+Two sessions had authorization to run this same deploy and both started. The
+announcement caught it with nothing worse than a stray directory, but that
+directory is dangerous:
+
+| Directory | BUILD_ID | What it is |
+|---|---|---|
+| `.next.bak-20261113-141731` | `fxq-gtX2MspoHjFRT-qGm` | rollback for the slice 3 deploy |
+| `.next.bak-20261113-144033` | `0nD3r-0xdL2q6x6RLFSVX` | **rollback for this deploy** |
+| `.next.bak-20261113-144055` | `Ayezh8Buy22Zrcfuhl0Je` | **NOT a rollback** — taken 4s *after* the new build was written, so it holds the new build |
+
+The newest `.bak` is the one someone reaches for under pressure, and here it
+would roll *forward* into the build you were undoing. It has a
+`NOT-A-ROLLBACK.txt` inside it saying so; nobody has deleted it, because
+`.next.bak-*` removal is the user's call and that covers a stray one too.
+**Read `BUILD_ID` before restoring — "newest" is not "what was live".**
+
+Three directories, 183M total (they hardlink-share), volume at 77% with 122G
+free. Nine older ones were deleted earlier today on the user's instruction,
+reclaiming 4.4G.
 
 ## What shipped in slice 3
 
