@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import EmployerLogo from "@/components/jobs/EmployerLogo";
 import { JobTime, RefreshedAt } from "@/components/jobs/Timestamps";
+import { PulseCard, PulseCards } from "@/components/jobs/PulseCards";
 import type { JobPulse } from "@/lib/jobs";
 
 /** The one tag the pulse strip's messages use. */
@@ -37,14 +38,13 @@ type Props = {
  * +0 in the last 24h" is a worse way to say that than the empty state below
  * it already does.
  *
- * The two lists are `<details>`, closed by default: between them they own
- * most of the first screen, and someone who came to search wants them out of
- * the way. Closed, a card is its heading and its employers' marks — the
- * glanceable half of a row, and the half that says whether the list is worth
- * opening — so the titles are traded for a strip of logos rather than for a
- * bare heading. Native disclosure rather than React state on purpose: this is a
- * server component, the summary is a real button to a screen reader without
- * being told so, and the whole thing works before (and without) JavaScript.
+ * The two lists collapse, and start collapsed: between them they own most of
+ * the first screen, and someone who came to search wants them out of the way.
+ * Closed, a card is its heading and its employers' marks — the glanceable
+ * half of a row, and the half that says whether the list is worth opening —
+ * so the titles are traded for a strip of logos rather than for a bare
+ * heading. They open as a pair, since they are one glance in two halves; the
+ * `<details>` survive that — see components/jobs/PulseCards.tsx.
  * "See all new" sits in a foot row rather than the summary, because a link
  * inside a `<summary>` toggles the card on its way out.
  */
@@ -80,17 +80,21 @@ export default async function JobPulseBoard({
 
       {boards ? (
       <div className="jobs-pulse-boards">
+        <PulseCards>
         {pulse.newest.length > 0 ? (
-          <details className="jobs-pulse-card">
-            <summary className="jobs-pulse-head">
-              <h2>{t("justPosted")}</h2>
-              <span className="jobs-pulse-marks">
-                {marksOf(pulse.newest.map((job) => job.company)).map(mark)}
-              </span>
-              <span className="jobs-pulse-caret" aria-hidden="true">
-                ▾
-              </span>
-            </summary>
+          <PulseCard
+            head={
+              <>
+                <h2>{t("justPosted")}</h2>
+                <span className="jobs-pulse-marks">
+                  {marksOf(pulse.newest.map((job) => job.company)).map(mark)}
+                </span>
+                <span className="jobs-pulse-caret" aria-hidden="true">
+                  ▾
+                </span>
+              </>
+            }
+          >
             {pulse.newest.map((job) => (
               <Link key={job.id} href={`/jobs/${job.id}`} className="jobs-pulse-row">
                 <EmployerLogo company={job.company} size="sm" />
@@ -107,20 +111,23 @@ export default async function JobPulseBoard({
             <div className="jobs-pulse-foot">
               <Link href={newHref}>{t("seeAllNew")}</Link>
             </div>
-          </details>
+          </PulseCard>
         ) : null}
 
         {pulse.top_employers.length > 0 ? (
-          <details className="jobs-pulse-card">
-            <summary className="jobs-pulse-head">
-              <h2>{t("hiringHardest")}</h2>
-              <span className="jobs-pulse-marks">
-                {marksOf(pulse.top_employers.map((employer) => employer.company)).map(mark)}
-              </span>
-              <span className="jobs-pulse-caret" aria-hidden="true">
-                ▾
-              </span>
-            </summary>
+          <PulseCard
+            head={
+              <>
+                <h2>{t("hiringHardest")}</h2>
+                <span className="jobs-pulse-marks">
+                  {marksOf(pulse.top_employers.map((employer) => employer.company)).map(mark)}
+                </span>
+                <span className="jobs-pulse-caret" aria-hidden="true">
+                  ▾
+                </span>
+              </>
+            }
+          >
             {pulse.top_employers.map((employer) => (
               <Link
                 key={employer.company}
@@ -141,8 +148,9 @@ export default async function JobPulseBoard({
                 ) : null}
               </Link>
             ))}
-          </details>
+          </PulseCard>
         ) : null}
+        </PulseCards>
       </div>
       ) : null}
     </section>

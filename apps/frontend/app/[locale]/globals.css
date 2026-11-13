@@ -2820,6 +2820,11 @@ textarea {
   grid-template-columns: 1fr 1fr;
   gap: 0.9rem;
   margin-top: 0.9rem;
+  /* Each card is as tall as what is inside it. A grid item stretches to its
+     row by default, so opening one card grew the closed one to match it --
+     a tall empty box with a heading at the top, reading as a card that had
+     been opened and found to have nothing in it. */
+  align-items: start;
 }
 
 /* A grid item's default `min-width: auto` is the min-content of its rows,
