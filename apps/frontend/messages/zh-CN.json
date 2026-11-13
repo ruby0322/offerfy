@@ -283,7 +283,17 @@
     "rebuilding": "重建中…",
     "employerViewsEmpty": "目前还没有雇主看过你的资料。",
     "employerViewsCount": "{count, plural, other {# 位雇主看过你的资料}}",
-    "employerViewsLast": "最近一次：{date}"
+    "employerViewsLast": "最近一次：{date}",
+    "digestHeading": "本周精选",
+    "digestTrackStrongFit": "最适合你的职位",
+    "digestTrackNewThisWeek": "本周新职位",
+    "digestDegraded": "本周无法按你的简历为这些职位排序，因此以未排序的方式呈现。",
+    "digestTierStrongFit": "高度匹配",
+    "digestTierGoodFit": "比较匹配",
+    "digestTierWorthALook": "值得一看",
+    "digestScore": "分数 {score}",
+    "digestGapLabel": "差距",
+    "digestTailor": "定制简历"
   },
   "account": {
     "title": "你是谁",

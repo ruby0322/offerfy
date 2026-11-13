@@ -280,7 +280,17 @@
     "rebuilding": "Rebuilding…",
     "employerViewsEmpty": "No employer has seen your details yet.",
     "employerViewsCount": "{count, plural, one {# employer has seen your details} other {# employers have seen your details}}",
-    "employerViewsLast": "Most recently {date}"
+    "employerViewsLast": "Most recently {date}",
+    "digestHeading": "This week's picks",
+    "digestTrackStrongFit": "Strongest fits for you",
+    "digestTrackNewThisWeek": "New this week",
+    "digestDegraded": "We couldn't rank these postings against your resume this week, so they are shown unranked.",
+    "digestTierStrongFit": "Strong fit",
+    "digestTierGoodFit": "Good fit",
+    "digestTierWorthALook": "Worth a look",
+    "digestScore": "Score {score}",
+    "digestGapLabel": "Gap",
+    "digestTailor": "Tailor it"
   },
   "account": {
     "title": "Who you are",

@@ -283,7 +283,17 @@
     "rebuilding": "重建中…",
     "employerViewsEmpty": "目前還沒有雇主看過你的資料。",
     "employerViewsCount": "{count, plural, other {# 位雇主看過你的資料}}",
-    "employerViewsLast": "最近一次：{date}"
+    "employerViewsLast": "最近一次：{date}",
+    "digestHeading": "本週精選",
+    "digestTrackStrongFit": "最適合你的職缺",
+    "digestTrackNewThisWeek": "本週新職缺",
+    "digestDegraded": "本週無法依你的履歷為這些職缺排序，因此以未排序的方式呈現。",
+    "digestTierStrongFit": "高度契合",
+    "digestTierGoodFit": "相當契合",
+    "digestTierWorthALook": "值得一看",
+    "digestScore": "分數 {score}",
+    "digestGapLabel": "落差",
+    "digestTailor": "客製履歷"
   },
   "account": {
     "title": "你是誰",
