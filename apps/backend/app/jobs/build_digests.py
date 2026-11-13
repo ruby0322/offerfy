@@ -60,7 +60,7 @@ import hashlib
 import logging
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -98,6 +98,14 @@ CANDIDATE_CAP = 30
 # The digest the engagement rule reads: how many weeks of being ignored it
 # takes. Two, from the spec.
 ENGAGEMENT_WINDOW = 2
+
+# Every track `_write` knows how to persist: the two a reader displays, plus
+# the degraded one. A producer key outside this set is a bug, not a track.
+_WRITE_TRACKS = (*TRACKS, UNRANKED_TRACK)
+
+# How far back `new_this_week` reaches from `period_start`. A week, because the
+# heading says a week; see `_new_job_ids` for why it looks backward.
+NEW_WINDOW = timedelta(days=7)
 
 # Ordering sentinel for a person who has never had a digest: they go first.
 _NEVER = datetime(1970, 1, 1)
@@ -205,7 +213,26 @@ def candidates(db: Session, pref: JobPreference, *, cap: int) -> list[Job]:
 
 
 def _new_job_ids(db: Session, jobs: list[Job], *, period_start: datetime) -> set[str]:
-    """Which candidates first appeared inside the period.
+    """Which candidates first appeared in the week this digest closes.
+
+    **The window is the seven days BEFORE `period_start`, not after it**, and
+    that is the whole point. `period_start` is Monday 00:00 Taipei; the timer
+    fires Monday 05:00 (ops/systemd/offerfy-digest.timer), so a window opening
+    at `period_start` is five hours old at build time and the ingest has made
+    exactly one pass inside it. The digest is frozen once written, so a posting
+    that appears on Tuesday never joins the track. "New this week" would then
+    head about 3% of the week's new postings -- and would read as a thin market
+    rather than as a bug, which is how it would have survived launch.
+
+    Looking BACK a week instead means the track says what its heading says: the
+    postings that arrived since the last digest. The upper bound is deliberately
+    open, so anything ingested in the hours between `period_start` and the run
+    is included rather than held for next week.
+
+    Not fixed by moving `period_start` back instead: `is_eligible` filters on
+    `Digest.period_start < window_start(now)`, so a digest dated a week earlier
+    would become evidence about whether it had been opened -- it would count
+    itself as last week's ignored digest.
 
     Asked in SQL rather than by comparing `job.first_seen_at` in Python: SQLite
     hands those columns back naive and Postgres hands them back aware, and
@@ -215,7 +242,8 @@ def _new_job_ids(db: Session, jobs: list[Job], *, period_start: datetime) -> set
         return set()
     rows = db.execute(
         select(Job.id).where(
-            Job.id.in_([j.id for j in jobs]), Job.first_seen_at >= period_start
+            Job.id.in_([j.id for j in jobs]),
+            Job.first_seen_at >= period_start - NEW_WINDOW,
         )
     ).all()
     return {job_id for (job_id,) in rows}
@@ -307,25 +335,32 @@ async def build_for_user(
     have no facts to be judged against. Raises nothing of its own: a provider
     fault is an answer (`degraded`), while a real exception propagates AFTER
     the transaction is rolled back, so a failure leaves no digest row at all.
-    """
-    pref = saved_preference(db, user)
-    if pref is None:
-        return None
-    if pref.activity == "paused":
-        return None
-    if require_eligible and not is_eligible(db, user=user, now=now):
-        return None
 
+    The try covers EVERY statement that touches the session, not just the
+    writes. `build_facts` documents that a database failure while writing still
+    propagates, and `candidates` is a query like any other -- a fault in either
+    used to leave the session needing a rollback nobody performed, so the next
+    person in `build_all`'s loop died on `PendingRollbackError` before their
+    first query. One user's database fault then cost everyone else that week,
+    which is the exact opposite of what the per-user catch is for.
+    """
     cap = CANDIDATE_CAP if candidate_cap is None else candidate_cap
     limit = ITEMS_PER_TRACK if items_per_track is None else items_per_track
-
-    # The candidate set first, because it is free and the facts rebuild is not.
-    pool = candidates(db, pref, cap=cap)
-    facts = await _facts_for_scoring(db, user, judging=bool(pool))
-    if facts is None:
-        return None
-
     try:
+        pref = saved_preference(db, user)
+        if pref is None:
+            return None
+        if pref.activity == "paused":
+            return None
+        if require_eligible and not is_eligible(db, user=user, now=now):
+            return None
+
+        # The candidate set first: it is free, and the facts rebuild is not.
+        pool = candidates(db, pref, cap=cap)
+        facts = await _facts_for_scoring(db, user, judging=bool(pool))
+        if facts is None:
+            return None
+
         tracks, model, status = await _judge(
             db, user=user, facts=facts, pool=pool,
             period_start=period_start, limit=limit,
@@ -435,7 +470,12 @@ def _write(db, *, user, period_start, facts, pool, model, status, tracks) -> Dig
     db.add(digest)
     db.flush()
 
-    for track in (*TRACKS, UNRANKED_TRACK):
+    unknown = sorted(set(tracks) - set(_WRITE_TRACKS))
+    if unknown:
+        # Dropping it would write the digest short with nothing to show that
+        # it had: a track nobody persists is a bug in its producer.
+        raise ValueError(f"unknown digest track(s): {unknown}")
+    for track in _WRITE_TRACKS:
         for rank, entry in enumerate(tracks.get(track) or [], start=1):
             db.add(_item(digest, track=track, rank=rank, entry=entry))
     db.flush()
@@ -550,11 +590,17 @@ async def build_all(
             )
         except Exception:
             # Per-user, like refresh_profiles: one person's crash must not cost
-            # everyone else their week. The transaction is already rolled back,
-            # so nothing of theirs was written. BuildReport has no `failed`
-            # list by design -- the exception is the log's business, and a run
-            # where this fires for everyone shows up as an empty `built`.
+            # everyone else their week. BuildReport has no `failed` list by
+            # design -- the exception is the log's business, and a run where
+            # this fires for everyone shows up as an empty `built`.
+            #
+            # The rollback is belt and braces: `build_for_user` already rolls
+            # back before it raises, and the loop's own queries below (
+            # `saved_preference`, `is_eligible`) run outside that try, so a
+            # session left needing one would kill the whole run on the NEXT
+            # person rather than this one.
             logger.exception("digest build failed: user=%s", user.id)
+            db.rollback()
             continue
         if digest is None:
             # Preference and audience were settled above, so the only reason
@@ -590,7 +636,14 @@ def main(argv: list[str] | None = None) -> int:
         "--period-start",
         help="ISO date or datetime; defaults to this week's window start",
     )
-    parser.add_argument("--user-id", help="Build for one person only")
+    parser.add_argument(
+        "--user-id",
+        help=(
+            "Build for one person only. NOTE: a single-user run ignores the "
+            "global weekly spend ceiling -- it is for a person who asked for "
+            "this one build, and it will spend after the schedule has stopped"
+        ),
+    )
     parser.add_argument(
         "--all-users",
         action="store_true",

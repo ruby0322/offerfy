@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.models import LlmCall, User
+from app.services import usage
 from app.services.jobs import reasons as reasons_mod
 from app.services.jobs.reasons import (
     GAP_CHARS,
@@ -631,6 +632,29 @@ async def test_a_billed_call_that_fails_to_parse_is_still_recorded(
                               scored=[_scored("a")], jobs=[_job("a")])
     assert run.error == "invalid_payload" and run.prose == []
     assert [e["input_tokens"] for e in recorded] == [777]
+
+
+async def test_a_success_with_no_usage_block_is_still_billed_and_flagged(
+    openai_enabled, monkeypatch, db_session
+):
+    """A 200 was paid for whether or not the body said what it cost.
+
+    OPENAI_BASE_URL may be a proxy that strips usage. Returning early on that
+    recorded neither the cost nor the fact that we were guessing, so the prose
+    half of a digest was free in the ledger while the scoring half reported it
+    (`score.py` records on `billed` with `tokens=None`). `unmeasured` is the
+    meter saying it is guessing, and it has to move here.
+    """
+    _install(monkeypatch, StubClient({"output_text": json.dumps({"items": []})}))
+    user = _user(db_session)
+    run = await write_reasons(db_session, user=user, facts=FACTS,
+                              scored=[_scored("a")], jobs=[_job("a")])
+    assert run.error is None
+    uusd, _turns, unmeasured = usage.counter_totals(
+        db_session, kind="system", subject_id=user.id,
+        window_start=usage.window_start(),
+    )
+    assert unmeasured == 1 and uusd == usage.FALLBACK_ROUND_UUSD > 0
 
 
 async def test_a_billed_5xx_is_recorded_and_an_unbilled_one_is_not(

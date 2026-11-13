@@ -62,6 +62,9 @@ _seq = itertools.count()
 PERIOD = datetime(2026, 11, 9, 16, 0, tzinfo=timezone.utc)
 NOW = PERIOD + timedelta(days=2)
 PERIOD_ARG = PERIOD.isoformat()
+# Older than `new_this_week` reaches back (NEW_WINDOW, seven days before
+# PERIOD), so a posting first seen then can only arrive through strong_fit.
+BEFORE_WINDOW = PERIOD - timedelta(days=10)
 
 
 @pytest.fixture
@@ -423,15 +426,44 @@ async def test_the_candidate_set_is_capped_and_ordered_by_recency(db_session, mo
     assert asked == [j.id for j in reversed(jobs)][:CANDIDATE_CAP]
 
 
-async def test_new_this_week_comes_from_first_seen_at_in_the_period(db_session, monkeypatch):
+async def test_new_this_week_comes_from_first_seen_at_in_the_window(db_session, monkeypatch):
     Seams(monkeypatch, tier="Worth a look")
     user = _ready(db_session)
     fresh = _posting(db_session, first_seen=PERIOD + timedelta(hours=3))
-    _posting(db_session, first_seen=PERIOD - timedelta(days=3))
+    _posting(db_session, first_seen=BEFORE_WINDOW)
     built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
     # "Worth a look" is in new_this_week and out of strong_fit, so the only
-    # items are the ones the period admitted.
+    # items are the ones the window admitted.
     assert {(i.track, i.job_id) for i in built.items} == {("new_this_week", fresh.id)}
+
+
+async def test_new_this_week_covers_a_week_at_production_timing(
+    db_session, monkeypatch
+):
+    """The timer fires Monday 05:00; period_start is Monday 00:00.
+
+    So at build time the period is five hours old and the ingest has made one
+    pass inside it. A window opening at `period_start` would head roughly 3% of
+    the week's new postings with "New this week" -- and the digest is frozen
+    once written, so Tuesday's postings never join it. The window therefore
+    looks BACK a week from `period_start`, with no upper bound, so the track
+    means what its heading says and still picks up whatever arrived in the
+    hours before the run.
+    """
+    Seams(monkeypatch, tier="Worth a look")
+    user = _ready(db_session)
+    run_at = PERIOD + timedelta(hours=5)  # what the timer actually produces
+    wednesday = _posting(db_session, first_seen=PERIOD - timedelta(days=5))
+    friday = _posting(db_session, first_seen=PERIOD - timedelta(days=3))
+    since_midnight = _posting(db_session, first_seen=PERIOD + timedelta(hours=2))
+    last_month = _posting(db_session, first_seen=PERIOD - timedelta(days=30))
+
+    built = await build_for_user(
+        db_session, user=user, period_start=PERIOD, now=run_at
+    )
+    fresh = {i.job_id for i in built.items if i.track == "new_this_week"}
+    assert fresh == {wednesday.id, friday.id, since_midnight.id}
+    assert last_month.id not in fresh
 
 
 async def test_items_carry_the_tier_score_components_and_prose(db_session, monkeypatch):
@@ -458,7 +490,7 @@ async def test_prose_is_only_bought_for_the_items_that_will_be_shown(db_session,
     seams = Seams(monkeypatch)
     user = _ready(db_session)
     for _ in range(ITEMS_PER_TRACK + 4):
-        _posting(db_session, first_seen=PERIOD - timedelta(days=2))
+        _posting(db_session, first_seen=BEFORE_WINDOW)
     built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
     assert len(built.items) == ITEMS_PER_TRACK
     # Nine scored, five shown, five written about: the prose call is priced per
@@ -471,7 +503,7 @@ async def test_the_digest_size_is_a_parameter(db_session, monkeypatch):
     Seams(monkeypatch)
     user = _ready(db_session)
     for _ in range(4):
-        _posting(db_session, first_seen=PERIOD - timedelta(days=2))
+        _posting(db_session, first_seen=BEFORE_WINDOW)
     built = await build_for_user(
         db_session, user=user, period_start=PERIOD, now=NOW, items_per_track=2
     )
@@ -507,7 +539,7 @@ async def test_a_prose_failure_keeps_tiers_and_scores(db_session, monkeypatch):
     """Row three: the ranking is real, so the digest is not degraded -- just bare."""
     Seams(monkeypatch, prose_error="no_output")
     user = _ready(db_session)
-    _posting(db_session, first_seen=PERIOD - timedelta(days=2))
+    _posting(db_session, first_seen=BEFORE_WINDOW)
     built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
     assert built.status == "full" and len(built.items) == 1
     item = built.items[0]
@@ -622,10 +654,12 @@ async def test_rebuilding_the_same_period_does_not_duplicate(db_session, monkeyp
     assert second is not None
     assert db_session.query(Digest).count() == 1
     assert db_session.query(DigestItem).count() == 2
-    # Replaced, not appended to: the week has one digest and it is the new one.
+    # Replaced, not appended to: the first digest and its items are gone, and
+    # the two items that exist hang off the second one.
     assert db_session.query(DigestItem).filter(
         DigestItem.digest_id == first_id
-    ).count() in (0, 2)
+    ).count() == 0
+    assert second.id != first_id
 
 
 # --------------------------------------------------------------------------
@@ -756,6 +790,44 @@ async def test_one_users_failure_does_not_stop_the_run(db_session, monkeypatch):
     report = await build_all(db_session, period_start=PERIOD, now=NOW)
     assert report.built == ["u-ok"]
     assert {u for (u,) in db_session.query(Digest.user_id)} == {"u-ok"}
+
+
+async def test_a_database_fault_before_scoring_does_not_cost_everyone_else(
+    db_session, monkeypatch
+):
+    """The per-user catch has to cover the per-user reads and the facts rebuild.
+
+    `build_facts` documents that a database failure while writing still
+    propagates, and it runs before the digest's own writes. A fault there used
+    to leave the session needing a rollback nobody performed -- so the NEXT
+    person in the loop died on `PendingRollbackError` before their first query,
+    the exception escaped `build_all` entirely and `main` exited 1. One
+    person's database fault cost everyone else their week, which is the exact
+    opposite of what the per-user catch is for.
+
+    The fault is a real one, not a raised sentinel: a failed flush, which is
+    what actually leaves a Session refusing every later statement.
+    """
+    Seams(monkeypatch)
+    # No facts, so the rebuild runs for this one and not for the other.
+    broken = _user(db_session, "u-db-fault")
+    _pref(db_session, broken)
+    _ready(db_session, uid="u-db-ok")
+    _posting(db_session, first_seen=PERIOD + timedelta(hours=1))
+
+    async def fault(db, user):
+        db.add(Digest(
+            user_id="nobody-at-all", period_start=PERIOD, built_at=PERIOD,
+            model="m", input_hash="z" * 64, status="full", candidate_count=0,
+        ))
+        db.flush()  # IntegrityError: the Session now refuses everything
+        return build_digests.FactsBuildResult()
+
+    monkeypatch.setattr(build_digests, "build_facts", fault)
+
+    report = await build_all(db_session, period_start=PERIOD, now=NOW)
+    assert report.built == ["u-db-ok"]
+    assert {u for (u,) in db_session.query(Digest.user_id)} == {"u-db-ok"}
 
 
 # --------------------------------------------------------------------------

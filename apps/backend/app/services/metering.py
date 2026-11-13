@@ -213,9 +213,15 @@ def deferred_guard(
 
     Enforcement and attribution are two axes. This is the corner where they
     disagree, and it is not a rare one: a guest's import must keep counting
-    against the ("guest", "network") pool, which is the wall that stops a
-    cleared cookie minting a fresh allowance. Billing it to 'system' turns
-    that wall off.
+    against the guest pool ceiling, which is summed over the kinds
+    ("guest", "network") and is what bounds what guests cost in a week.
+    Billing it to 'system' takes it out of that sum.
+
+    The 'network' half of that pool is not reached today: `network_key` is
+    accepted here and by `preflight`, and NO call site in the tree passes one,
+    so the coarse per-network counter that would stop a cleared cookie minting
+    a fresh allowance does not currently exist. Said plainly because the
+    alternative is a docstring describing a protection nobody built.
 
     `reason` is required, for the same purpose as `system_guard`'s: an
     unenforced spend should be a named thing a reviewer sees.

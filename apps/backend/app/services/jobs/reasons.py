@@ -814,9 +814,32 @@ async def _write_call(*, url: str, headers: dict, body: dict) -> tuple[dict, dic
     return data, usage
 
 
-def _record(meter: Any, model: str, usage: dict, *, user=None, facts=None) -> None:
-    """The counter and the telemetry row, through score.record_round."""
-    if not any(v is not None for v in usage.values()):
+def _reported(usage: dict) -> bool:
+    """Whether the response said anything about what it billed.
+
+    `score.py`'s `billed = bool(usage)` in this module's dict shape: `usage_of`
+    always returns the full set of keys, so an absent usage block arrives as
+    all-None rather than as an empty dict.
+    """
+    return any(v is not None for v in usage.values())
+
+
+def _record(
+    meter: Any, model: str, usage: dict, *, billed: bool, user=None, facts=None
+) -> None:
+    """The counter and the telemetry row, through score.record_round.
+
+    `billed`, not "did the response mention usage", because those differ in the
+    case that matters: a 200 was paid for whether or not the body carried a
+    usage block, and an unmeasured-but-billed round must still move
+    `unmeasured` -- which is the meter saying it is guessing, exactly where it
+    is least sure. Returning early on an all-None usage recorded neither the
+    cost nor the guess, so a proxy that strips usage made the prose half of a
+    digest free in the ledger while the scoring half (score.py, which records
+    on `billed` with `tokens=None`) reported it. Two halves of one digest kept
+    the books two ways; this is scoring's rule.
+    """
+    if not billed:
         return
     record_round(
         meter=meter,
@@ -878,12 +901,16 @@ async def write_reasons(
             data, usage = await _write_call(url=url, headers=headers, body=body)
         except _CallFailed as exc:
             # A failed call may still have been billed.
-            _record(meter, REASON_MODEL, exc.usage, user=user, facts=facts)
+            # A failure was paid for only if the response said so.
+            _record(
+                meter, REASON_MODEL, exc.usage,
+                billed=_reported(exc.usage), user=user, facts=facts,
+            )
             run.usage, run.error = exc.usage, str(exc)
             return run
         # Recorded before the answer is read: a response that bills and then
         # fails to parse must not vanish from the ledger.
-        _record(meter, REASON_MODEL, usage, user=user, facts=facts)
+        _record(meter, REASON_MODEL, usage, billed=True, user=user, facts=facts)
     run.usage = usage
 
     output = data.get("output") if isinstance(data.get("output"), list) else []

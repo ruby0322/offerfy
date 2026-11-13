@@ -4,8 +4,12 @@
 #
 # This job SPENDS MONEY (LLM scoring on users' behalf) against the production
 # database. Do not enable the timer casually; see docs/deploy.md.
+#
+# It SENDS NOTHING. Offerfy emails nobody: the job writes a `digests` row per
+# person and the dashboard reads it. There is no mail queue to check when this
+# fails, and no message in flight to chase -- see app/jobs/build_digests.py.
 [Unit]
-Description=Offerfy weekly job digest (score and send)
+Description=Offerfy weekly job digest (score and write)
 Documentation=file:///home/ruby0322/offerfy/docs/deploy.md
 
 # No After=/Requires= on postgres: a user manager cannot order itself against

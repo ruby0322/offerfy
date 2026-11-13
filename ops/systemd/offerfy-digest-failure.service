@@ -8,4 +8,8 @@ Documentation=file:///home/ruby0322/offerfy/docs/deploy.md
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/systemd-cat -p err -t offerfy-digest /bin/sh -c 'echo "weekly digest FAILED; some users may not have received this week digest. Check: journalctl --user -u offerfy-digest.service -n 50"'
+# Nothing was sent, because nothing is ever sent: the digest is a row the
+# dashboard reads. The failure means some people have no digest row for this
+# week and will see the fallback card instead -- there is no mail queue to
+# inspect and no message to re-send.
+ExecStart=/usr/bin/systemd-cat -p err -t offerfy-digest /bin/sh -c 'echo "weekly digest build FAILED; some users may have no digest row for this week (nothing is emailed; the dashboard reads the row). Check: journalctl --user -u offerfy-digest.service -n 50"'
