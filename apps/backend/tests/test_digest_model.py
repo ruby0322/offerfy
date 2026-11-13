@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import delete, text
+from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
 
 from app.models import Digest, DigestItem, Job, User
@@ -49,13 +49,6 @@ def _digest(db_session, user, period=PERIOD, status="full"):
     db_session.add(digest)
     db_session.commit()
     return digest
-
-
-def _enforce_foreign_keys(db_session):
-    # conftest leaves SQLite's FK enforcement off, and ON DELETE only bites
-    # with it on. Turn it on for this test's connection only.
-    db_session.commit()
-    db_session.execute(text("PRAGMA foreign_keys=ON"))
 
 
 def test_digest_round_trips(db_session):
@@ -161,7 +154,7 @@ def test_deleting_the_digest_removes_its_items(db_session):
     d = _digest(db_session, u)
     digest_id = d.id
     db_session.add(DigestItem(digest_id=digest_id, job_id=j.id, rank=1, track="strong_fit"))
-    _enforce_foreign_keys(db_session)
+    db_session.commit()
     db_session.execute(delete(Digest).where(Digest.id == digest_id))
     db_session.commit()
     assert db_session.query(DigestItem).count() == 0
@@ -172,7 +165,7 @@ def test_deleting_the_user_removes_the_digest(db_session):
     j = _job(db_session, "j-user")
     d = _digest(db_session, u)
     db_session.add(DigestItem(digest_id=d.id, job_id=j.id, rank=1, track="strong_fit"))
-    _enforce_foreign_keys(db_session)
+    db_session.commit()
     db_session.execute(delete(User).where(User.id == u.id))
     db_session.commit()
     assert db_session.query(Digest).count() == 0
@@ -197,3 +190,17 @@ def test_tier_and_score_are_nullable_for_a_degraded_digest(db_session):
     assert item.location_fit is None
     assert item.direction_fit is None
     assert d.opened_at is None
+
+
+def test_deleting_the_job_removes_its_digest_items(db_session):
+    # digest_items.job_id CASCADE: ingest retires postings constantly, and an
+    # item for a vanished posting has nothing to show.
+    u = _user(db_session, "sub-digest-job")
+    j = _job(db_session, "j-job")
+    d = _digest(db_session, u)
+    db_session.add(DigestItem(digest_id=d.id, job_id=j.id, rank=1, track="strong_fit"))
+    db_session.commit()
+    db_session.execute(delete(Job).where(Job.id == j.id))
+    db_session.commit()
+    assert db_session.query(DigestItem).count() == 0
+    assert db_session.query(Digest).count() == 1

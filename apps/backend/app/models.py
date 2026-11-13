@@ -1216,10 +1216,10 @@ class Digest(Base):
 
     One row per (user, period_start), enforced by the unique constraint, so a
     rebuild for the same week finds the existing row rather than adding a
-    second. A digest is frozen once written: nothing here has an onupdate,
-    and the page reads back exactly what was built. built_at, model and
-    input_hash record how it was made; candidate_count is how many postings
-    were scored to produce it. opened_at is stamped the first time the person
+    second. A digest is frozen once written, apart from opened_at: nothing here
+    has an onupdate, and the page reads back exactly what was built. built_at,
+    model and input_hash record how it was made; candidate_count is how many
+    postings were scored to produce it. opened_at is stamped the first time the person
     views it.
 
     status ("full", "degraded", "empty") has no CHECK constraint, matching

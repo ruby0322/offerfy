@@ -4,7 +4,7 @@ The weekly digest, stored. digests is one row per (person, week);
 digest_items is the postings in it, each with the score and prose it was
 shown with. See app.models.Digest and app.models.DigestItem.
 
-All four foreign keys are ondelete="CASCADE": a digest is personal data
+All three foreign keys are ondelete="CASCADE": a digest is personal data
 erased with the account, an item is meaningless without its digest, and an
 item is meaningless once its posting is gone.
 
