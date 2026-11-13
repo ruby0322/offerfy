@@ -19,8 +19,8 @@ digested" would make a strong match vanish merely because the person was busy.
 `classify` is pure: no database, no clock, no I/O. The vocabularies in
 STATUSES and TRACKS live here, not in CHECK constraints (see models.Digest).
 
-Digest and DigestItem declare no relationships, so "items with their Job" is
-`items_for`, one explicit join, rather than an eager-load option.
+`Digest.items` and `DigestItem.job` are view-only relationships;
+`latest_for_user` eager-loads both.
 """
 
 from __future__ import annotations
@@ -28,9 +28,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from app.models import Digest, DigestItem, Job
+from app.models import Digest, DigestItem
 from app.services.jobs.score import Scored
 
 STATUSES = ("full", "degraded", "empty")
@@ -55,24 +55,17 @@ def classify(
 
 
 def latest_for_user(db: Session, *, user) -> Digest | None:
-    """The user's most recent digest by period_start, or None."""
+    """The user's most recent digest by period_start, or None.
+
+    Items (ordered by track, rank) and their Jobs are eager-loaded.
+    """
     return db.scalars(
         select(Digest)
+        .options(selectinload(Digest.items).joinedload(DigestItem.job))
         .where(Digest.user_id == user.id)
         .order_by(Digest.period_start.desc())
         .limit(1)
     ).first()
-
-
-def items_for(db: Session, *, digest: Digest) -> list[tuple[DigestItem, Job]]:
-    """The digest's items paired with their Job, ordered by track then rank."""
-    rows = db.execute(
-        select(DigestItem, Job)
-        .join(Job, Job.id == DigestItem.job_id)
-        .where(DigestItem.digest_id == digest.id)
-        .order_by(DigestItem.track, DigestItem.rank)
-    ).all()
-    return [(item, job) for item, job in rows]
 
 
 def mark_opened(db: Session, *, digest: Digest) -> Digest:

@@ -123,7 +123,7 @@ def test_latest_for_user_ignores_another_users_digest(db_session):
     assert dg.latest_for_user(db_session, user=make_user(db_session, "u3")) is None
 
 
-def test_items_for_pairs_each_item_with_its_job_in_track_order(db_session):
+def test_latest_for_user_eager_loads_items_and_jobs_in_order(db_session):
     user = make_user(db_session, "u1")
     d = make_digest(db_session, user, T0)
     jobs = []
@@ -138,8 +138,9 @@ def test_items_for_pairs_each_item_with_its_job_in_track_order(db_session):
     for rank, job in enumerate(reversed(jobs)):
         db_session.add(DigestItem(digest_id=d.id, job_id=job.id, rank=rank, track="strong_fit"))
     db_session.commit()
-    pairs = dg.items_for(db_session, digest=d)
-    assert [(i.rank, j.title) for i, j in pairs] == [(0, "T1"), (1, "T0")]
+    got = dg.latest_for_user(db_session, user=user)
+    db_session.expunge_all()  # any lazy load from here would raise
+    assert [(i.rank, i.job.title) for i in got.items] == [(0, "T1"), (1, "T0")]
 
 
 def test_mark_opened_stamps_once_and_is_idempotent(db_session):

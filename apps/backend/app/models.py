@@ -1253,6 +1253,15 @@ class Digest(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Read-only convenience, ordered here so no call site restates it. No
+    # schema effect (no migration); digest_items.digest_id above is the whole
+    # relationship in SQL.
+    items: Mapped[list["DigestItem"]] = relationship(
+        viewonly=True,
+        lazy="select",
+        order_by="(DigestItem.track, DigestItem.rank)",
+    )
+
 
 class DigestItem(Base):
     """One posting in one digest, with the score and prose it was shown with.
@@ -1299,6 +1308,10 @@ class DigestItem(Base):
     seniority_fit: Mapped[float | None] = mapped_column(Float, nullable=True)
     location_fit: Mapped[float | None] = mapped_column(Float, nullable=True)
     direction_fit: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Read-only convenience. No schema effect; the job_id foreign key above is
+    # the whole relationship in SQL.
+    job: Mapped["Job"] = relationship(viewonly=True, lazy="select")
 
 
 class ResumeContent(Base):
