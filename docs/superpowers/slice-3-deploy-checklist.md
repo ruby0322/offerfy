@@ -78,6 +78,25 @@ fixed a real defect rather than only a style one: the same toggle was called
 「開放配對」 in settings, usage, pricing, admin and Terms but 「開放媒合」 in
 `settings.matchingTitle`, so one UI control had two names.
 
+**A cost the unification carried, and the follow-up.** 媒合 means job-placement
+brokering, which is exactly right for the consent-gated employer introduction
+and overclaims the preference prefilter — a filter over a public catalog. After
+the unification the zh-TW dashboard said 符合的職缺 on the count card and 媒合
+on the resume-health card: two words on one screen, with the health card on the
+brokering one. A zh reader was told that publishing their resume enables the
+thing the toggle gates, when `legal.privacy.sections[4].paragraphs[2]` states
+the opposite — the facts extraction is explicitly independent of 開放媒合
+consent and is kept "for your own job matching".
+
+Diagnosis worth recording, because the obvious reading is wrong: **en and zh-CN
+both use one word for both senses** — "matching" across the count card, the
+health card and the toggle; 匹配 likewise — and the privacy policy disambiguates
+in prose rather than by vocabulary. So splitting the word per concept would have
+made zh-TW diverge from the other two. The defect was narrower: zh-TW alone had
+two words inside one card. Fixed by moving the three `dashboard.health*` strings
+onto 符合, that locale's own count-card word. The 32 other 媒合 are the
+introduction sense and are correct; 開放媒合 keeps its single name.
+
 Terms was edited in the narrowest possible way — the false clause removed and
 "score" changed, nothing else rewritten. Worth a human read even so, since it is
 the one file here where wording carries legal weight.
