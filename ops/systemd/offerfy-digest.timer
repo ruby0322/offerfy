@@ -1,0 +1,21 @@
+# systemd **user** unit — see offerfy-digest.service for why.
+[Unit]
+Description=Build and send the Offerfy weekly job digests every Monday morning
+Documentation=file:///home/ruby0322/offerfy/docs/deploy.md
+
+[Timer]
+# Monday 05:00 Taipei. The ingest runs at 00/06/12/18:10 (+ up to 10min), so
+# 05:00 reads a catalogue that settled about five hours earlier and is clear of
+# the 06:10 pass.
+OnCalendar=Mon *-*-* 05:00:00 Asia/Taipei
+
+# A host that was down at 05:00 still sends on boot rather than skipping a week.
+Persistent=true
+
+RandomizedDelaySec=10min
+AccuracySec=1min
+
+Unit=offerfy-digest.service
+
+[Install]
+WantedBy=timers.target
