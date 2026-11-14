@@ -13,9 +13,6 @@ from tests.test_talent_api import LIST, _bearer, _candidate, _key
 TOP_LEVEL = {
     "preference", "match_count", "applications", "resume_health", "employer_views",
     "digest",
-    # Present but empty until its producer lands on another branch; see the
-    # note on DashboardOut.matches in schemas_jobs.py.
-    "matches",
 }
 HEALTH_KEYS = {
     "has_master", "published", "facts_state", "matching_revision_current", "needs_rebuild",
