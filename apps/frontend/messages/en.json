@@ -14,6 +14,7 @@
     "account": "Account",
     "blog": "Blog",
     "jobs": "Jobs",
+    "employers": "Employers",
     "pricing": "Pricing",
     "usageEdits": "{used} of {limit} AI edits this week",
     "usageCredits": "{used} of {limit} credits this week",
@@ -155,6 +156,20 @@
     "closed": "This posting is no longer listed as open.",
     "apply": "Apply on {source}",
     "attribution": "Original posting:",
+    "employersTitle": "Employers",
+    "employersLead": "Every company hiring on Offerfy right now, and what they have open.",
+    "employersCount": "{count, plural, one {# employer hiring} other {# employers hiring}}",
+    "employersAll": "All employers",
+    "employerMetaTitle": "Jobs at {company}",
+    "employerMetaDescription": "Every role {company} has open on Offerfy, straight from their own ATS board.",
+    "employerLead": "{count, plural, one {# open role on Offerfy} other {# open roles on Offerfy}}",
+    "employerStatOpen": "Open roles",
+    "employerStatNew": "New this week",
+    "employerStatRemote": "Remote-flagged",
+    "employerStatTracked": "Tracked since",
+    "employerWhere": "Where they hire",
+    "employerWhat": "What they hire for",
+    "employerSources": "Listings from {sources}",
     "save": "Save",
     "saved": "Saved",
     "unsave": "Remove from saved",
@@ -245,7 +260,8 @@
     "companies": {
       "title": "Open roles at the companies you’re targeting",
       "note": "{count} employers, read directly from Greenhouse, Lever, Ashby, SmartRecruiters and Workday. No LinkedIn or 104 scraping, no reposts, no ghost jobs from an aggregator.",
-      "chipLabel": "Open roles at {company}"
+      "chipLabel": "Open roles at {company}",
+      "allEmployers": "Browse every employer"
     },
     "loop": {
       "title": "The loop you run for every application",

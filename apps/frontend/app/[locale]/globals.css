@@ -3107,6 +3107,110 @@ summary.jobs-pulse-head:hover .jobs-pulse-caret {
   margin-top: 1.4rem;
 }
 
+/* --- Employer pages ------------------------------------------------------
+   The header an employer gets that a curated board does not: a mark, the
+   name as the h1, and four counts. Everything below it (pills, filter bar,
+   rows) reuses the board's own classes, because it IS a board -- one whose
+   locked axis happens to be the company. */
+
+.jobs-employer-head {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin-top: 0.6rem;
+}
+
+.jobs-employer-head h1 {
+  margin: 0;
+}
+
+.jobs-employer-head .jobs-lead {
+  margin-top: 0.25rem;
+}
+
+.jobs-employer-head .job-logo {
+  width: 48px;
+  height: 48px;
+  flex: none;
+}
+
+.jobs-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.6rem;
+  margin: 1.4rem 0 0;
+}
+
+.jobs-stat {
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--sheet, var(--paper));
+}
+
+.jobs-stat dt {
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.jobs-stat dd {
+  margin: 0.25rem 0 0;
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.jobs-employer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+  list-style: none;
+  padding: 0;
+}
+
+.jobs-employer-card {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  height: 100%;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--sheet, var(--paper));
+  color: inherit;
+  text-decoration: none;
+}
+
+.jobs-employer-card:hover {
+  border-color: var(--ink);
+}
+
+.jobs-employer-card-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.jobs-employer-card-name {
+  font-size: 0.95rem;
+}
+
+.jobs-employer-card-meta {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.jobs-employer-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.2rem;
+  margin-top: 1.6rem;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
 .jobs-search {
   display: flex;
   gap: 0.6rem;
@@ -3423,6 +3527,14 @@ summary.jobs-pulse-head:hover .jobs-pulse-caret {
   padding: 0 0.45rem;
   font-size: 0.78rem;
   color: var(--muted);
+  text-decoration: none;
+}
+
+/* It is a link to the employer index now, so it has to look clickable on
+   hover -- the menu only lists the biggest employers. */
+a.jobs-menu-note:hover {
+  color: var(--ink);
+  text-decoration: underline;
 }
 
 .jobs-opt {

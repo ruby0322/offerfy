@@ -101,6 +101,58 @@ class JobPulse(BaseModel):
     top_employers: list[JobPulseEmployer]
 
 
+class JobEmployer(BaseModel):
+    company: str
+    # Derived from company, never stored -- see services.jobs.employers for
+    # why, and for why an employer whose name yields no slug is absent here
+    # rather than present with an empty one.
+    slug: str
+    open_count: int
+    new_count: int
+
+
+class JobEmployerList(BaseModel):
+    """Every employer with a live posting, biggest first.
+
+    total counts the employers this list could name, which is the same number
+    JobPulse.employer_count reports for an unfiltered board -- minus any whose
+    name makes no slug. The two are allowed to differ by exactly that, and the
+    index page says "N employers" from this one so it cannot quote a figure
+    its own list does not fill.
+    """
+
+    items: list[JobEmployer]
+    total: int
+
+
+class JobEmployerProfile(BaseModel):
+    """One employer, as much as the catalog actually knows about them.
+
+    Everything here is counted from their own postings -- there is no company
+    record behind it, no headcount, no blurb. new_count is the same
+    posted_at-based week JobPulse uses, so an employer page and the board it
+    came from cannot tell different stories about what is new.
+
+    first_seen_at is the oldest first_seen_at among their live postings, i.e.
+    when Offerfy started tracking them, not when the company was founded.
+    """
+
+    company: str
+    slug: str
+    open_count: int
+    new_count: int
+    remote_count: int
+    first_seen_at: str | None
+    last_seen_at: str | None
+    # Which ATS their postings come from. Plural because an employer can run
+    # two boards; named rather than linked, since Job stores no board URL.
+    sources: list[str]
+    cities: list[JobFacetOption]
+    countries: list[JobFacetOption]
+    functions: list[JobFacetOption]
+    seniorities: list[JobFacetOption]
+
+
 class JobSitemapItem(BaseModel):
     id: str
     last_seen_at: str
@@ -322,6 +374,9 @@ class EmployerViewsOut(BaseModel):
 class DashboardOut(BaseModel):
     preference: JobPreferenceOut
     match_count: int
+    # The first few of those matches, in the same shape /v1/jobs returns, so
+    # the dashboard can render them with the jobs page's own row.
+    matches: list[JobListItem]
     applications: list[ApplicationOut]
     resume_health: ResumeHealthOut
     employer_views: EmployerViewsOut

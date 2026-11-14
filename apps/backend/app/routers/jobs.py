@@ -14,6 +14,9 @@ from app.schemas_jobs import (
     JOB_SOURCES,
     JobCityOptions,
     JobDetail,
+    JobEmployer,
+    JobEmployerList,
+    JobEmployerProfile,
     JobFacetOption,
     JobFacetOptions,
     JobList,
@@ -24,6 +27,7 @@ from app.schemas_jobs import (
     JobSitemapPage,
 )
 from app.services.jobs.cities import fold_city_counts, stored_values_for
+from app.services.jobs.employers import employer_slug, resolve_slug, slug_index
 from app.services.jobs.enrich import (
     Taxonomy,
     default_taxonomy,
@@ -42,6 +46,9 @@ PULSE_NEWEST = 5
 PULSE_EMPLOYERS = 5
 FACET_COMPANIES = 24
 CITY_OPTIONS = 12
+# Cities named on one employer's page. Their other breakdowns come from closed
+# vocabularies and need no cap; the city fold has a long tail.
+EMPLOYER_CITIES = 8
 # What "new" means everywhere on the live board. One constant, because the
 # strip ("+733 in the last 24h"), the employer leaderboard and the ?posted_
 # within_days= filter are read side by side and must agree.
@@ -113,7 +120,7 @@ def _valid_regions(taxonomy: Taxonomy) -> set[str]:
     return set(taxonomy.location_regions.values())
 
 
-def _list_item(job: Job) -> JobListItem:
+def list_item(job: Job) -> JobListItem:
     return JobListItem(
         id=job.id,
         source=job.source,
@@ -282,7 +289,7 @@ def list_jobs(
         last = rows[limit - 1]
         next_cursor = _encode_cursor(last.posted_at, last.id)
         rows = rows[:limit]
-    return JobList(items=[_list_item(row) for row in rows], next_cursor=next_cursor, total=total)
+    return JobList(items=[list_item(row) for row in rows], next_cursor=next_cursor, total=total)
 
 
 @router.get("/v1/jobs/sitemap", response_model=JobSitemapPage)
@@ -324,7 +331,7 @@ def featured_jobs(db: Session = Depends(get_db)):
     # total must be passed explicitly: JobList.total defaults to 0, and
     # featured_jobs never pages, so leaving it unset would report 0 for a
     # non-empty list of featured rows.
-    return JobList(items=[_list_item(row) for row in rows], next_cursor=None, total=len(rows))
+    return JobList(items=[list_item(row) for row in rows], next_cursor=None, total=len(rows))
 
 
 @router.get("/v1/jobs/facets", response_model=JobFacetOptions)
@@ -547,7 +554,7 @@ def jobs_pulse(
         new_24h=int(new_24h),
         employer_count=int(employer_count),
         refreshed_at=_iso(refreshed_at),
-        newest=[_list_item(row) for row in newest],
+        newest=[list_item(row) for row in newest],
         top_employers=[
             JobPulseEmployer(
                 company=company,
@@ -559,13 +566,153 @@ def jobs_pulse(
     )
 
 
+@router.get("/v1/jobs/employers", response_model=JobEmployerList)
+def jobs_employers(db: Session = Depends(get_db)):
+    """Every employer with a live posting, biggest first.
+
+    Declared above GET /v1/jobs/{job_id} -- same ordering requirement as
+    every other literal path on this router, or "employers" is captured as a
+    job id.
+
+    Unpaginated, and meant to stay that way: this is the whole set the
+    employer index lists (~80 rows today, one per curated board), and it is
+    one grouped pass over the active catalog rather than a query per
+    employer. If the board list ever grows by an order of magnitude this
+    needs a cursor like GET /v1/jobs has.
+
+    Scoped to is_active, like the facets and the pulse: an employer whose
+    postings have all closed has nothing to show, so they drop off the index
+    and their page 404s rather than rendering an empty list.
+    """
+    now = datetime.now(timezone.utc)
+    week_cutoff = now - timedelta(days=PULSE_EMPLOYER_WINDOW_DAYS)
+    new_in_window = func.sum(
+        case((and_(Job.posted_at.isnot(None), Job.posted_at >= week_cutoff), 1), else_=0)
+    )
+    rows = (
+        db.query(Job.company, func.count(Job.id), new_in_window)
+        .filter(Job.is_active.is_(True))
+        .group_by(Job.company)
+        .all()
+    )
+    # One index built from every name in scope, so a slug two employers would
+    # both claim is dropped from both -- see services.jobs.employers.
+    by_company = {
+        company: slug
+        for slug, company in slug_index(company for company, _open, _new in rows).items()
+    }
+    items = [
+        JobEmployer(
+            company=company,
+            slug=by_company[company],
+            open_count=int(open_count or 0),
+            new_count=int(new_count or 0),
+        )
+        for company, open_count, new_count in rows
+        if company in by_company
+    ]
+    # Count first, then name, and casefolded: ties would otherwise order by
+    # whatever the database handed back, which changes between calls.
+    items.sort(key=lambda row: (-row.open_count, row.company.casefold()))
+    return JobEmployerList(items=items, total=len(items))
+
+
+@router.get("/v1/jobs/employers/{slug}", response_model=JobEmployerProfile)
+def jobs_employer(slug: str, db: Session = Depends(get_db)):
+    """One employer's profile: their counts, and the shape of their hiring.
+
+    Declared above GET /v1/jobs/{job_id}, like /v1/jobs/employers itself.
+
+    The slug is resolved against the companies currently in scope rather
+    than parsed, because the slug is derived from the stored name and the
+    derivation is lossy. An unknown or ambiguous slug is a 404 -- the page
+    has no honest content for either case.
+
+    Cities are capped because the fold can produce a long tail; the other
+    three are closed vocabularies (enrich.py), so they are returned whole
+    and the page decides how many to show.
+    """
+    companies = [
+        row[0] for row in db.query(Job.company).filter(Job.is_active.is_(True)).distinct()
+    ]
+    company = resolve_slug(slug, companies)
+    if company is None:
+        raise HTTPException(status_code=404, detail="Employer not found")
+
+    now = datetime.now(timezone.utc)
+    week_cutoff = now - timedelta(days=PULSE_EMPLOYER_WINDOW_DAYS)
+    base = _filtered_query(
+        db, q=None, source=None, remote=None, active=True, company=company
+    )
+
+    open_count = base.with_entities(func.count(Job.id)).scalar() or 0
+    new_count = (
+        base.filter(Job.posted_at.isnot(None), Job.posted_at >= week_cutoff)
+        .with_entities(func.count(Job.id))
+        .scalar()
+        or 0
+    )
+    remote_count = (
+        base.filter(Job.remote.is_(True)).with_entities(func.count(Job.id)).scalar() or 0
+    )
+    first_seen_at, last_seen_at = base.with_entities(
+        func.min(Job.first_seen_at), func.max(Job.last_seen_at)
+    ).one()
+    sources = sorted(
+        row[0] for row in base.with_entities(Job.source).distinct()
+    )
+
+    scope = base.subquery()
+
+    def _options(column_name: str) -> list[JobFacetOption]:
+        column = getattr(JobFacets, column_name)
+        rows = (
+            db.query(column, func.count())
+            .select_from(scope)
+            .join(JobFacets, JobFacets.job_id == scope.c.id)
+            .filter(column.isnot(None))
+            .group_by(column)
+            .order_by(func.count().desc(), column.asc())
+            .all()
+        )
+        return [JobFacetOption(value=value, count=count) for value, count in rows]
+
+    city_rows = (
+        db.query(JobFacets.city, func.count())
+        .select_from(scope)
+        .join(JobFacets, JobFacets.job_id == scope.c.id)
+        .filter(JobFacets.city.isnot(None))
+        .group_by(JobFacets.city)
+        .all()
+    )
+    folded = fold_city_counts([(value, count) for value, count in city_rows])
+
+    return JobEmployerProfile(
+        company=company,
+        slug=employer_slug(company),
+        open_count=int(open_count),
+        new_count=int(new_count),
+        remote_count=int(remote_count),
+        first_seen_at=_iso(first_seen_at),
+        last_seen_at=_iso(last_seen_at),
+        sources=sources,
+        cities=[
+            JobFacetOption(value=name, count=count)
+            for name, count in folded[:EMPLOYER_CITIES]
+        ],
+        countries=_options("country"),
+        functions=_options("function"),
+        seniorities=_options("seniority"),
+    )
+
+
 @router.get("/v1/jobs/{job_id}", response_model=JobDetail)
 def get_job(job_id: str, db: Session = Depends(get_db)):
     job = db.get(Job, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Not found")
     return JobDetail(
-        **_list_item(job).model_dump(),
+        **list_item(job).model_dump(),
         description_html=job.description_html,
         description_text=job.description_text,
         first_seen_at=_iso(job.first_seen_at) or "",

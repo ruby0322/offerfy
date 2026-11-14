@@ -14,6 +14,7 @@
     "account": "帳戶",
     "blog": "Blog",
     "jobs": "職缺",
+    "employers": "雇主",
     "pricing": "方案",
     "usageEdits": "本週 AI 編輯 {used} / {limit} 次",
     "usageCredits": "本週額度 {used} / {limit}",
@@ -158,6 +159,20 @@
     "closed": "這則職缺目前已不在開放清單中。",
     "apply": "到 {source} 投遞",
     "attribution": "原始職缺：",
+    "employersTitle": "雇主",
+    "employersLead": "目前在 Offerfy 上招人的公司，以及他們開了哪些職缺。",
+    "employersCount": "{count, plural, other {# 家公司正在招人}}",
+    "employersAll": "所有雇主",
+    "employerMetaTitle": "{company} 職缺",
+    "employerMetaDescription": "{company} 在 Offerfy 上的所有公開職缺，直接來自他們自己的 ATS 職缺板。",
+    "employerLead": "{count, plural, other {Offerfy 上有 # 筆職缺}}",
+    "employerStatOpen": "開放職缺",
+    "employerStatNew": "本週新增",
+    "employerStatRemote": "標示遠端",
+    "employerStatTracked": "開始追蹤",
+    "employerWhere": "在哪些城市招人",
+    "employerWhat": "招哪些職能",
+    "employerSources": "職缺來自 {sources}",
     "save": "儲存",
     "saved": "已儲存",
     "unsave": "從已儲存移除",
@@ -248,7 +263,8 @@
     "companies": {
       "title": "你正在瞄準的那些公司，現在有缺",
       "note": "{count} 家雇主，直接讀自 Greenhouse、Lever、Ashby、SmartRecruiters 與 Workday。不爬 LinkedIn 或 104，沒有轉貼，也沒有聚合網站上的幽靈職缺。",
-      "chipLabel": "{company} 的職缺"
+      "chipLabel": "{company} 的職缺",
+      "allEmployers": "看所有雇主"
     },
     "loop": {
       "title": "每投一次，你就跑一次這個循環",

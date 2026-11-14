@@ -14,6 +14,7 @@
     "account": "账户",
     "blog": "Blog",
     "jobs": "职位",
+    "employers": "雇主",
     "pricing": "方案",
     "usageEdits": "本周 AI 编辑 {used} / {limit} 次",
     "usageCredits": "本周额度 {used} / {limit}",
@@ -158,6 +159,20 @@
     "closed": "这则职位目前已不在开放清单中。",
     "apply": "到 {source} 投递",
     "attribution": "原始职位：",
+    "employersTitle": "雇主",
+    "employersLead": "目前在 Offerfy 上招人的公司，以及他们开了哪些职位。",
+    "employersCount": "{count, plural, other {# 家公司正在招人}}",
+    "employersAll": "所有雇主",
+    "employerMetaTitle": "{company} 职位",
+    "employerMetaDescription": "{company} 在 Offerfy 上的所有公开职位，直接来自他们自己的 ATS 职位板。",
+    "employerLead": "{count, plural, other {Offerfy 上有 # 个职位}}",
+    "employerStatOpen": "开放职位",
+    "employerStatNew": "本周新增",
+    "employerStatRemote": "标示远程",
+    "employerStatTracked": "开始跟踪",
+    "employerWhere": "在哪些城市招人",
+    "employerWhat": "招哪些职能",
+    "employerSources": "职位来自 {sources}",
     "save": "保存",
     "saved": "已保存",
     "unsave": "从已保存移除",
@@ -248,7 +263,8 @@
     "companies": {
       "title": "你正在瞄准的那些公司，现在有空缺",
       "note": "{count} 家雇主，直接读自 Greenhouse、Lever、Ashby、SmartRecruiters 与 Workday。不爬 LinkedIn 或 104，没有转贴，也没有聚合网站上的幽灵职位。",
-      "chipLabel": "{company} 的职位"
+      "chipLabel": "{company} 的职位",
+      "allEmployers": "看所有雇主"
     },
     "loop": {
       "title": "每投一次，你就跑一次这个循环",

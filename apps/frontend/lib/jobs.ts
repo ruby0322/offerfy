@@ -52,6 +52,35 @@ export type JobFacetOptions = {
   employer_total: number;
 };
 
+export type JobEmployer = {
+  company: string;
+  /** Derived from the company name by the backend; see services/jobs/employers.py. */
+  slug: string;
+  open_count: number;
+  new_count: number;
+};
+
+export type JobEmployerList = {
+  items: JobEmployer[];
+  total: number;
+};
+
+export type JobEmployerProfile = {
+  company: string;
+  slug: string;
+  open_count: number;
+  new_count: number;
+  remote_count: number;
+  /** When Offerfy first saw one of their postings, not when they were founded. */
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  sources: JobSource[];
+  cities: JobFacetOption[];
+  countries: JobFacetOption[];
+  functions: JobFacetOption[];
+  seniorities: JobFacetOption[];
+};
+
 export type JobCityOptions = {
   country: string;
   items: JobFacetOption[];
@@ -279,6 +308,42 @@ export async function fetchJobCities(country: string): Promise<JobFacetOption[]>
   if (!res.ok) return [];
   const data = (await res.json()) as Partial<JobCityOptions>;
   return Array.isArray(data.items) ? data.items : [];
+}
+
+/**
+ * Every employer with a live posting. Shape-checked for the reason
+ * fetchJobPulse spells out: a 200 is not a promise about the body, and the
+ * index page maps over `items` directly.
+ */
+export async function fetchJobEmployers(): Promise<JobEmployerList> {
+  const raw = await backendJson<Partial<JobEmployerList>>("/v1/jobs/employers");
+  if (!raw || !Array.isArray(raw.items)) return { items: [], total: 0 };
+  return {
+    items: raw.items,
+    total: typeof raw.total === "number" ? raw.total : raw.items.length,
+  };
+}
+
+/** One employer, or null when no live employer claims that slug (a 404). */
+export async function fetchJobEmployer(slug: string): Promise<JobEmployerProfile | null> {
+  const raw = await backendJson<Partial<JobEmployerProfile>>(
+    `/v1/jobs/employers/${encodeURIComponent(slug)}`,
+  );
+  if (!raw || typeof raw.company !== "string") return null;
+  return {
+    company: raw.company,
+    slug: typeof raw.slug === "string" ? raw.slug : slug,
+    open_count: typeof raw.open_count === "number" ? raw.open_count : 0,
+    new_count: typeof raw.new_count === "number" ? raw.new_count : 0,
+    remote_count: typeof raw.remote_count === "number" ? raw.remote_count : 0,
+    first_seen_at: typeof raw.first_seen_at === "string" ? raw.first_seen_at : null,
+    last_seen_at: typeof raw.last_seen_at === "string" ? raw.last_seen_at : null,
+    sources: Array.isArray(raw.sources) ? raw.sources : [],
+    cities: facetList(raw.cities),
+    countries: facetList(raw.countries),
+    functions: facetList(raw.functions),
+    seniorities: facetList(raw.seniorities),
+  };
 }
 
 export async function fetchJob(id: string): Promise<JobDetail | null> {

@@ -1,6 +1,7 @@
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { wallRows, type WallItem } from "@/components/landing/companies";
+import { EMPLOYERS_HREF } from "@/lib/employers";
 import { EMPLOYER_COUNT } from "@/lib/seo";
 
 const ROWS = 3;
@@ -54,6 +55,13 @@ export default function CompanyWall() {
         ))}
       </div>
       <p className="landing-section-note">{t("note", { count: EMPLOYER_COUNT })}</p>
+      {/* The wall is a sample on a loop; this is the whole list, with what
+          each employer has open right now. */}
+      <p className="landing-section-note">
+        <Link href={EMPLOYERS_HREF} className="landing-cta-link">
+          {t("allEmployers")}
+        </Link>
+      </p>
     </section>
   );
 }

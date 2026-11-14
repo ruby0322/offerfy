@@ -1,6 +1,8 @@
 import { getTranslations } from "next-intl/server";
+import { Link } from "@/i18n/navigation";
 import type { AppLocale } from "@/i18n/routing";
 import JobActions from "@/components/jobs/JobActions";
+import { employerHref } from "@/lib/employers";
 import { sourceLabel, type JobDetail } from "@/lib/jobs";
 
 type Props = {
@@ -10,6 +12,9 @@ type Props = {
 
 export default async function JobView({ locale, job }: Props) {
   const t = await getTranslations("jobs");
+  // null when the company name makes no slug, in which case the name stays
+  // plain text rather than becoming a link to a 404 -- see lib/employers.
+  const employer = employerHref(job.company);
   return (
     <article className="jobs-article mx-auto max-w-[72rem] px-5">
       {!job.is_active ? <p className="jobs-closed">{t("closed")}</p> : null}
@@ -17,7 +22,11 @@ export default async function JobView({ locale, job }: Props) {
         <span className="blog-kicker" aria-hidden="true" />
         <span>{sourceLabel(job.source, locale)}</span>
         <span aria-hidden="true"> · </span>
-        <span>{job.company}</span>
+        {employer ? (
+          <Link href={employer}>{job.company}</Link>
+        ) : (
+          <span>{job.company}</span>
+        )}
         {job.location ? (
           <>
             <span aria-hidden="true"> · </span>

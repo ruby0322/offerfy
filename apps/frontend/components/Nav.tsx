@@ -7,6 +7,7 @@ import AccountMenu from "@/components/AccountMenu";
 import BrandMark from "@/components/BrandMark";
 import LocaleSwitcher from "@/components/LocaleSwitcher";
 import ThemeSwitcher from "@/components/ThemeSwitcher";
+import { EMPLOYERS_HREF } from "@/lib/employers";
 import { getMe, type AuthUser } from "@/lib/api";
 
 type Props = {
@@ -56,6 +57,16 @@ export default function Nav({ variant }: Props) {
             <>
               <Link href="/jobs" className="inline-flex min-h-9 items-center rounded-md px-1 text-sm font-medium">
                 {t("jobs")}
+              </Link>
+              {/* Hidden below sm: four links plus the brand overflow a phone
+                  header, and the employer index is one tap away from /jobs
+                  (the employer menu's footer, and the live board's "hiring
+                  hardest" card). */}
+              <Link
+                href={EMPLOYERS_HREF}
+                className="hidden min-h-9 items-center rounded-md px-1 text-sm font-medium sm:inline-flex"
+              >
+                {t("employers")}
               </Link>
               <Link href="/blog" className="inline-flex min-h-9 items-center rounded-md px-1 text-sm font-medium">
                 {t("blog")}

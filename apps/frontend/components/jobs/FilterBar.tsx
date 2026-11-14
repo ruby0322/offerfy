@@ -13,6 +13,7 @@ import {
   SENIORITY_KEYS,
   type JobsMessageKey,
 } from "@/components/jobs/facet-labels";
+import { EMPLOYERS_HREF } from "@/lib/employers";
 import { detectCountry } from "@/lib/geo";
 import { jobFilterCount, type JobFacetOptions, type JobQuery } from "@/lib/jobs";
 
@@ -249,9 +250,11 @@ export default function FilterBar({
             findLabel={t("findEmployer")}
             footer={
               facets?.employer_total ? (
-                <span className="jobs-menu-note">
+                // A link, not a note: the menu lists the biggest employers
+                // only, and the index page is where the rest of them are.
+                <Link href={EMPLOYERS_HREF} className="jobs-menu-note">
                   {t("allEmployersCount", { count: facets.employer_total })}
-                </span>
+                </Link>
               ) : null
             }
             clearHref={hrefWith({ company: null })}

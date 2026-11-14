@@ -4,6 +4,7 @@ import { Link } from "@/i18n/navigation";
 import EmployerLogo from "@/components/jobs/EmployerLogo";
 import { JobTime, RefreshedAt } from "@/components/jobs/Timestamps";
 import { PulseCard, PulseCards } from "@/components/jobs/PulseCards";
+import { employerHref, EMPLOYERS_HREF } from "@/lib/employers";
 import type { JobPulse } from "@/lib/jobs";
 
 /** The one tag the pulse strip's messages use. */
@@ -131,7 +132,12 @@ export default async function JobPulseBoard({
             {pulse.top_employers.map((employer) => (
               <Link
                 key={employer.company}
-                href={`/jobs?company=${encodeURIComponent(employer.company)}`}
+                // Their page when the name makes a slug, the filtered
+                // catalogue when it does not -- see lib/employers.
+                href={
+                  employerHref(employer.company) ??
+                  `/jobs?company=${encodeURIComponent(employer.company)}`
+                }
                 className="jobs-pulse-row"
               >
                 <EmployerLogo company={employer.company} size="sm" />
@@ -148,6 +154,9 @@ export default async function JobPulseBoard({
                 ) : null}
               </Link>
             ))}
+            <div className="jobs-pulse-foot">
+              <Link href={EMPLOYERS_HREF}>{t("employersAll")}</Link>
+            </div>
           </PulseCard>
         ) : null}
         </PulseCards>
