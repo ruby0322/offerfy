@@ -8,7 +8,7 @@ type Props = {
 
 /**
  * The employer's mark, or two letters on Offerfy's own paper when we have no
- * mark for it (9 of 90 boards — see components/employer-marks.ts).
+ * mark for it (5 of 90 boards — see components/employer-marks.ts).
  *
  * Always aria-hidden: the company name is already in the text beside it in
  * every call site, so announcing it again would read the employer twice.
