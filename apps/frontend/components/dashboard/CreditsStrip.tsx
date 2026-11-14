@@ -63,7 +63,9 @@ export default function CreditsStrip() {
 
   const reset = new Date(usage.reset_at);
   const resetValid = !Number.isNaN(reset.getTime());
-  const top = spend?.slices[0];
+  // `?.` on slices too: this line is a nicety, and an unexpected payload
+  // shape must not take down the strip it sits in.
+  const top = spend?.slices?.[0];
   const low = left !== null && left / limit <= 0.2;
 
   return (

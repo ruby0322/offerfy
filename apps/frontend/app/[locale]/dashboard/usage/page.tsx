@@ -226,7 +226,7 @@ export default function UsagePage() {
                   </ul>
                 </>
               )}
-              {spend && spend.daily.length > 0 ? (
+              {spend && spend.daily?.length ? (
                 <div className="mt-4 border-t border-rule pt-3">
                   <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">
                     {t("whereByDay")}

@@ -374,6 +374,7 @@
     "metricNone": "—",
     "flowHeading": "Where your applications went",
     "flowTracked": "Tracked",
+    "flowReplied": "replied",
     "flowWorked": "Tailored",
     "flowSent": "Sent",
     "flowEmpty": "Save a role and this fills in.",

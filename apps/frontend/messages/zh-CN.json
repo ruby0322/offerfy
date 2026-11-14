@@ -374,6 +374,7 @@
     "metricNone": "—",
     "flowHeading": "你的投递最后去了哪里",
     "flowTracked": "追踪中",
+    "flowReplied": "已回复",
     "flowWorked": "已定制",
     "flowSent": "已投递",
     "flowEmpty": "收藏一个职位后，这里就会有内容。",

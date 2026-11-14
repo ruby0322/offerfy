@@ -65,7 +65,10 @@ export default function ProfilePage() {
     // The named list is the point of the employer-views number; a failure
     // drops the table, not the page.
     fetchDisclosures()
-      .then((rows) => !cancelled && setSeen(rows))
+      // Array.isArray, not a cast: this panel is the useful half of the
+      // employer-views number, but an unexpected shape should cost the table
+      // rather than the page.
+      .then((rows) => !cancelled && setSeen(Array.isArray(rows) ? rows : []))
       .catch(() => !cancelled && setSeen([]));
     return () => {
       cancelled = true;

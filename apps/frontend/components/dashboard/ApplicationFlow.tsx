@@ -292,7 +292,7 @@ export default function ApplicationFlow({ rows, bare = false }: Props) {
         })}
         <span className="[font-variant-numeric:tabular-nums]">
           <span className="font-semibold text-foreground">{flow.replied}</span>{" "}
-          {t("metricReplyRate")}
+          {t("flowReplied")}
         </span>
       </p>
     </Wrapper>
