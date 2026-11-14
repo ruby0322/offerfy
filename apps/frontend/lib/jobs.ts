@@ -134,8 +134,29 @@ export const JOB_QUERY_KEYS = [
   "postedWithinDays",
 ] as const satisfies readonly (keyof JobQuery)[];
 
+/** How long the landing page may quote a stale employer count, in seconds. */
+const EMPLOYER_COUNT_TTL = 3600;
+
 function backendBase(): string {
   return (process.env.BACKEND_INTERNAL_URL || "http://backend:8000").replace(/\/$/, "");
+}
+
+/**
+ * Like backendJson, but cached for `seconds` instead of no-store.
+ *
+ * For a number on a page that is otherwise static: the landing wall wants the
+ * live employer count, and fetching it per request would turn the most-visited
+ * page on the site into a dynamic one for a figure that moves a few times a
+ * day. An hour-old count beats a hardcoded one that nobody remembers to bump.
+ */
+async function backendJsonCached<T>(path: string, seconds: number): Promise<T | null> {
+  try {
+    const res = await fetch(`${backendBase()}${path}`, { next: { revalidate: seconds } });
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
 }
 
 async function backendJson<T>(path: string): Promise<T | null> {
@@ -322,6 +343,19 @@ export async function fetchJobEmployers(): Promise<JobEmployerList> {
     items: raw.items,
     total: typeof raw.total === "number" ? raw.total : raw.items.length,
   };
+}
+
+/**
+ * How many employers have something open, or null when the catalog cannot be
+ * reached. Same number GET /v1/jobs/employers reports to the index page, so a
+ * claim made next to a link to that page cannot disagree with it.
+ */
+export async function fetchJobEmployerCount(): Promise<number | null> {
+  const raw = await backendJsonCached<Partial<JobEmployerList>>(
+    "/v1/jobs/employers",
+    EMPLOYER_COUNT_TTL,
+  );
+  return typeof raw?.total === "number" ? raw.total : null;
 }
 
 /** One employer, or null when no live employer claims that slug (a 404). */

@@ -1,7 +1,8 @@
-import { useTranslations } from "next-intl";
+import { getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import { wallRows, type WallItem } from "@/components/landing/companies";
 import { EMPLOYERS_HREF } from "@/lib/employers";
+import { fetchJobEmployerCount } from "@/lib/jobs";
 import { EMPLOYER_COUNT } from "@/lib/seo";
 
 const ROWS = 3;
@@ -35,8 +36,14 @@ function Chip({ item, dup, label }: { item: WallItem; dup: boolean; label: strin
   );
 }
 
-export default function CompanyWall() {
-  const t = useTranslations("landing.companies");
+export default async function CompanyWall() {
+  const t = await getTranslations("landing.companies");
+  // The number of employers with something open, which is what the page this
+  // caption links to counts. EMPLOYER_COUNT is the fallback and means a
+  // different thing -- how many boards we ingest, which includes employers
+  // with nothing open right now -- so the two are close but not the same, and
+  // the live one is the honest answer to "how many employers are here".
+  const carried = await fetchJobEmployerCount();
   return (
     <section className="landing-section mx-auto max-w-[72rem] px-5">
       <h2 className="landing-section-title font-display">{t("title")}</h2>
@@ -59,7 +66,9 @@ export default function CompanyWall() {
           </div>
         ))}
       </div>
-      <p className="landing-section-note">{t("note", { count: EMPLOYER_COUNT })}</p>
+      <p className="landing-section-note">
+        {t("note", { count: carried ?? EMPLOYER_COUNT })}
+      </p>
       {/* The wall is a sample on a loop; this is the whole list, with what
           each employer has open right now. */}
       <p className="landing-section-note">
