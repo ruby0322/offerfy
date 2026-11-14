@@ -107,11 +107,20 @@ export default function ApplicationList({ initial }: Props) {
           <span className="flex items-center gap-2 text-sm">
             {responseChoices(app).map((c) => (
               <button
-                key={c.status}
+                // Not keyed by status: closing now has two buttons, which
+                // differ only in whether a reply was received.
+                key={c.key}
                 type="button"
                 className={ACTION}
                 disabled={busy}
-                onClick={() => run(app, () => patchApplication(app.job_id, { status: c.status }))}
+                onClick={() =>
+                  run(app, () =>
+                    patchApplication(app.job_id, {
+                      status: c.status,
+                      ...(c.replied === undefined ? {} : { replied: c.replied }),
+                    }),
+                  )
+                }
               >
                 {t(c.key)}
               </button>
@@ -129,9 +138,16 @@ export default function ApplicationList({ initial }: Props) {
 
   return (
     <section data-testid="dashboard-applications" aria-labelledby="dash-applications">
-      <h2 id="dash-applications" className="mb-3 text-lg font-semibold tracking-tight">
-        {t("headingApplications")}
-      </h2>
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h2 id="dash-applications" className="text-lg font-semibold tracking-tight">
+          {t("headingApplications")}
+        </h2>
+        {/* The metrics, the flow diagram and the filterable table all live on
+            their own page; this is the way in. */}
+        <Link href="/dashboard/applications" className="text-sm underline underline-offset-2">
+          {t("tableHeading")}
+        </Link>
+      </div>
       {groups.length === 0 ? (
         <p className="text-sm text-muted-foreground" data-testid="dashboard-applications-empty">
           {t("applicationsEmpty")}

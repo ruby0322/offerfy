@@ -46,6 +46,7 @@ def application_out(row: Application) -> ApplicationOut:
         tailor_resume_id=row.tailor_resume_id,
         applied_at=_iso(row.applied_at),
         applied_confirmed_at=_iso(row.applied_confirmed_at),
+        replied_at=_iso(row.replied_at),
         last_status_at=row.last_status_at.isoformat(),
         notes=row.notes,
     )
@@ -140,6 +141,13 @@ def patch_application(
     user: User = Depends(require_user),
 ):
     row = _owned(db, user, job_id)
+    # `replied` is only meaningful as part of a transition, and set_status is
+    # the only writer of the stamp. Without a status it would be accepted and
+    # silently dropped, so say so instead.
+    if body.replied is not None and body.status is None:
+        raise HTTPException(
+            status_code=422, detail="replied requires a status to apply it to"
+        )
     if "notes" in body.model_fields_set:
         # Written here, not in the service: notes carry no transition, and
         # last_status_at has no onupdate, so this leaves "days quiet" alone.
@@ -147,7 +155,9 @@ def patch_application(
         # only one; with no status, commit here.
         row.notes = body.notes
     if body.status is not None:
-        row = service.set_status(db, application=row, status=body.status)
+        row = service.set_status(
+            db, application=row, status=body.status, replied=body.replied
+        )
     else:
         db.commit()
     return application_out(row)

@@ -1214,6 +1214,23 @@ class Application(Base):
     applied_confirmed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # When the employer answered, whatever the answer was. Set once and never
+    # cleared while the row stays past `applied`.
+    #
+    # This exists because `status` alone cannot answer "did they reply?" once a
+    # row is closed: closing overwrites the status, so a rejection and a
+    # silence both end up as `closed` and are indistinguishable afterwards.
+    # Reply rate and the pipeline diagram are both computed off this column
+    # rather than off the status, which is why it is a column and not a
+    # derivation -- there is nothing left to derive it from.
+    #
+    # Written only by services.jobs.applications.set_status: implied by a move
+    # to `interviewing` (you cannot be interviewing without having heard back)
+    # and stated explicitly when closing, because "not moving forward" means
+    # both "they said no" (a reply) and "nobody ever answered" (not one).
+    replied_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     last_status_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

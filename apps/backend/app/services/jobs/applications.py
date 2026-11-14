@@ -32,6 +32,11 @@ change; the column has no onupdate. An onupdate would fire on any UPDATE (a
 notes edit, a tailor re-link, the confirmation stamp) and reset the "days
 quiet" clock the dashboard shows. The trade this accepts: anything that
 changes status outside this module leaves the column stale.
+
+replied_at is written only by set_status, and is the one fact `status` cannot
+carry: closing a row overwrites the status, so afterwards a rejection and a
+silence are both `closed`. Reply rate and the pipeline diagram are computed
+off that column rather than off the status for exactly that reason.
 """
 
 from __future__ import annotations
@@ -196,10 +201,31 @@ def revert_applied(db: Session, *, application: Application) -> Application:
     return application
 
 
-def set_status(db: Session, *, application: Application, status: str) -> Application:
-    """The person moving their own row: interviewing or closed only."""
+def set_status(
+    db: Session,
+    *,
+    application: Application,
+    status: str,
+    replied: bool | None = None,
+) -> Application:
+    """The person moving their own row: interviewing or closed only.
+
+    `replied` says whether the employer ever answered, and it only carries
+    information when closing: "not moving forward" is the same sentence for a
+    rejection (they answered) and for silence (they did not), and only the
+    person knows which. Moving to `interviewing` implies a reply whatever the
+    flag says -- you cannot be interviewing without having heard back -- so
+    the flag is ignored there rather than able to contradict the status.
+
+    replied_at is stamped once and never cleared: a row that heard back and
+    then closed keeps the fact that it heard back, which is the whole reason
+    the column exists (see Application.replied_at). `None` means the caller
+    did not say, and leaves it as it was.
+    """
     if status not in SELF_REPORTED:
         raise ValueError(f"status {status!r} is not self-reported")
+    if (status == "interviewing" or replied) and application.replied_at is None:
+        application.replied_at = _utcnow()
     application.status = status
     application.last_status_at = _utcnow()
     db.commit()

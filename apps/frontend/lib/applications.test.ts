@@ -15,6 +15,7 @@ function row(job_id: string, status: string, last_status_at: string): Applicatio
     tailor_resume_id: null,
     applied_at: null,
     applied_confirmed_at: null,
+    replied_at: null,
     last_status_at,
     notes: null,
   };

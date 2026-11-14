@@ -17,6 +17,7 @@ function row(over: Partial<Application> = {}): Application {
     tailor_resume_id: null,
     applied_at: null,
     applied_confirmed_at: null,
+    replied_at: null,
     last_status_at: "2026-11-10T12:00:00Z",
     notes: null,
     ...over,
@@ -57,9 +58,34 @@ test("readyAgeDays is reported for tailored rows only", () => {
 
 test("log a response is an explicit choice, and the only writer of interviewing and closed", () => {
   const statuses = (app: Application) => responseChoices(app).map((c) => c.status);
-  assert.deepEqual(statuses(row({ status: "applied" })), ["interviewing", "closed"]);
+  assert.deepEqual(statuses(row({ status: "applied" })), [
+    "interviewing",
+    "closed",
+    "closed",
+  ]);
   assert.deepEqual(statuses(row({ status: "interviewing" })), ["closed"]);
   for (const status of ["saved", "tailored", "closed"] as const) {
     assert.deepEqual(statuses(row({ status })), []);
   }
+});
+
+test("closing an applied row asks whether anyone replied; interviewing does not", () => {
+  // The two ways to close an applied row differ only in `replied`, which is
+  // the fact the status cannot carry once the row is closed.
+  const applied = responseChoices(row({ status: "applied" }));
+  assert.deepEqual(
+    applied.map((c) => [c.key, c.status, c.replied]),
+    [
+      ["responseHeardBack", "interviewing", undefined],
+      ["responseSaidNo", "closed", true],
+      ["responseNoAnswer", "closed", false],
+    ],
+  );
+  // An interviewing row is already recorded as having heard back, so closing
+  // it says nothing about a reply rather than risking overwriting one.
+  const interviewing = responseChoices(row({ status: "interviewing" }));
+  assert.deepEqual(
+    interviewing.map((c) => [c.key, c.replied]),
+    [["responseNotMoving", undefined]],
+  );
 });

@@ -276,3 +276,59 @@ def test_patch_notes_over_2000_chars_is_422(client, db_session):
     client.post("/v1/me/applications", json={"job_id": job.id})
     assert client.patch(f"/v1/me/applications/{job.id}", json={"notes": "x" * 2001}).status_code == 422
     assert client.patch(f"/v1/me/applications/{job.id}", json={"notes": "x" * 2000}).status_code == 200
+
+
+def test_patch_reports_a_reply_and_projects_the_stamp(client, db_session):
+    user = _signed_in(client, db_session, "sub-replied")
+    job = _job(db_session, "j-replied")
+    client.post(f"/v1/me/applications/{job.id}/applied")
+
+    heard = client.patch(
+        f"/v1/me/applications/{job.id}", json={"status": "interviewing"}
+    )
+    assert heard.status_code == 200
+    assert heard.json()["replied_at"] is not None
+
+    # Closing afterwards keeps it: the status can no longer carry the fact.
+    closed = client.patch(
+        f"/v1/me/applications/{job.id}", json={"status": "closed", "replied": False}
+    )
+    assert closed.json()["status"] == "closed"
+    assert closed.json()["replied_at"] == heard.json()["replied_at"]
+
+
+def test_patch_closes_without_a_reply(client, db_session):
+    user = _signed_in(client, db_session, "sub-ghosted")
+    job = _job(db_session, "j-ghosted")
+    client.post(f"/v1/me/applications/{job.id}/applied")
+    body = client.patch(
+        f"/v1/me/applications/{job.id}", json={"status": "closed", "replied": False}
+    ).json()
+    assert body["status"] == "closed" and body["replied_at"] is None
+
+
+def test_patch_refuses_a_reply_with_no_status(client, db_session):
+    # It would be accepted and silently dropped otherwise: set_status is the
+    # only writer of the stamp, and no status means it is never called.
+    _signed_in(client, db_session, "sub-bare-reply")
+    job = _job(db_session, "j-bare-reply")
+    client.post(f"/v1/me/applications/{job.id}/applied")
+    assert (
+        client.patch(
+            f"/v1/me/applications/{job.id}", json={"replied": True}
+        ).status_code
+        == 422
+    )
+
+
+def test_patch_rejects_a_truthy_string_for_replied(client, db_session):
+    _signed_in(client, db_session, "sub-strict-reply")
+    job = _job(db_session, "j-strict-reply")
+    client.post(f"/v1/me/applications/{job.id}/applied")
+    assert (
+        client.patch(
+            f"/v1/me/applications/{job.id}",
+            json={"status": "closed", "replied": "no"},
+        ).status_code
+        == 422
+    )

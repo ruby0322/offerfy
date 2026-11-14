@@ -16,6 +16,13 @@
      flip in .dark -- and it has to stay readable under --ink either way. */
   --selection: color-mix(in srgb, var(--clay) 32%, var(--sheet));
   --success: #2f6f5e;
+  /* The state between "fine" and --destructive: something is waiting on the
+     person, and nothing is broken. An application quiet for 18 days and a
+     tailored resume never sent are both this, not errors, and red would read
+     as a failure of the app rather than a nudge. Used by the pipeline
+     metrics and by the two stall bands in the flow diagram; without it both
+     fall back to muted grey and stop being legible at a glance. */
+  --warn: #9a6b1f;
   --background: var(--paper);
   --foreground: var(--ink);
   --card: var(--sheet);
@@ -61,6 +68,8 @@
   --cta: #f3ede4;
   --cta-ink: #161411;
   --success: #7dba9a;
+  /* Lifted and desaturated for the dark sheet, the same move --success makes. */
+  --warn: #d9a85a;
   --destructive: #ef4444;
   --destructive-foreground: #161411;
   --chart-1: #c47854;
@@ -78,6 +87,7 @@
   --color-rule: var(--rule);
   --color-hover: var(--hover);
   --color-success: var(--success);
+  --color-warn: var(--warn);
   --color-accent: var(--hover);
   --color-accent-foreground: var(--ink);
   --color-background: var(--background);

@@ -370,3 +370,74 @@ def test_confirm_applied_only_confirms_a_row_at_applied(db_session):
     assert out.status == "saved" and out.applied_confirmed_at is None
     set_status(db_session, application=row, status="interviewing")
     assert confirm_applied(db_session, application=row).applied_confirmed_at is None
+
+
+# --- replied_at -----------------------------------------------------------
+#
+# The column exists because `status` cannot answer "did they ever answer?"
+# once a row is closed: closing overwrites the status, so a rejection and a
+# silence both read as `closed` afterwards. These tests pin that it is stamped
+# where a reply is certain, stated where it is not, and never lost.
+
+
+def test_interviewing_stamps_replied_at(db_session):
+    u, j = _user(db_session), _job(db_session)
+    row = mark_applied(db_session, user=u, job_id=j.id)
+    assert row.replied_at is None
+    set_status(db_session, application=row, status="interviewing")
+    assert row.replied_at is not None
+
+
+def test_interviewing_stamps_replied_at_even_when_told_otherwise(db_session):
+    # You cannot be interviewing without having heard back, so the status wins
+    # over a flag that contradicts it rather than recording a contradiction.
+    u, j = _user(db_session), _job(db_session)
+    row = mark_applied(db_session, user=u, job_id=j.id)
+    set_status(db_session, application=row, status="interviewing", replied=False)
+    assert row.replied_at is not None
+
+
+def test_closing_records_whether_anyone_replied(db_session):
+    u = _user(db_session)
+    rejected = _job(db_session, "j-rejected")
+    ghosted = _job(db_session, "j-ghosted")
+    unstated = _job(db_session, "j-unstated")
+    for job, replied in ((rejected, True), (ghosted, False), (unstated, None)):
+        row = mark_applied(db_session, user=u, job_id=job.id)
+        set_status(db_session, application=row, status="closed", replied=replied)
+    rows = {r.job_id: r for r in pipeline(db_session, user=u)}
+    # "They said no" is a reply; silence and an unanswered question are not.
+    assert rows[rejected.id].replied_at is not None
+    assert rows[ghosted.id].replied_at is None
+    assert rows[unstated.id].replied_at is None
+    assert {r.status for r in rows.values()} == {"closed"}
+
+
+def test_closing_after_a_reply_keeps_the_stamp(db_session):
+    u, j = _user(db_session), _job(db_session)
+    row = mark_applied(db_session, user=u, job_id=j.id)
+    set_status(db_session, application=row, status="interviewing")
+    stamped = row.replied_at
+    set_status(db_session, application=row, status="closed", replied=False)
+    # replied=False must not erase a reply the row already recorded; the
+    # interview happened whatever the person clicks on the way out.
+    assert row.status == "closed" and row.replied_at == stamped
+
+
+def test_replied_at_is_stamped_once(db_session):
+    u, j = _user(db_session), _job(db_session)
+    row = mark_applied(db_session, user=u, job_id=j.id)
+    old = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    row.replied_at = old
+    db_session.commit()
+    set_status(db_session, application=row, status="closed", replied=True)
+    assert row.replied_at.replace(tzinfo=timezone.utc) == old
+
+
+def test_an_applied_row_has_no_reply_recorded(db_session):
+    # Nothing short of set_status writes the stamp, so the outbound click and
+    # the confirmation both leave it alone.
+    u, j = _user(db_session), _job(db_session)
+    row = mark_applied(db_session, user=u, job_id=j.id)
+    confirm_applied(db_session, application=row)
+    assert row.replied_at is None

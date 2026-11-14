@@ -338,6 +338,13 @@ class ApplicationPatch(BaseModel):
     # Only what a person reports themselves; every other status is reached by
     # the action that implies it. The service re-checks this.
     status: Literal["interviewing", "closed"] | None = None
+    # Whether the employer ever answered. Only carries information alongside
+    # status="closed", where "not moving forward" means both "they said no"
+    # and "nobody answered"; interviewing implies a reply on its own. Strict,
+    # for ApplicationConfirm's reason: "no" must not arrive as a truthy
+    # string. Omitted means "not stated" and leaves the stamp alone, which is
+    # why this is StrictBool | None and not a defaulted bool.
+    replied: StrictBool | None = None
     notes: str | None = Field(default=None, max_length=2000)
 
 
@@ -353,6 +360,10 @@ class ApplicationOut(BaseModel):
     tailor_resume_id: str | None
     applied_at: str | None
     applied_confirmed_at: str | None
+    # Null means "no reply recorded", which on a closed row means nobody
+    # answered *or* that the row predates the column. Not a bool: the date is
+    # what makes "11 days to a first reply" computable.
+    replied_at: str | None
     last_status_at: str
     notes: str | None
 

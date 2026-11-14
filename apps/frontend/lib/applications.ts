@@ -19,12 +19,26 @@ export type Application = {
   tailor_resume_id: string | null;
   applied_at: string | null;
   applied_confirmed_at: string | null;
+  /**
+   * When the employer answered, whatever the answer was; null when none is
+   * recorded. On a closed row null means nobody answered *or* that the row
+   * predates the column, so a reply rate counts only what it can account for.
+   * The backend stamps it once and never clears it.
+   */
+  replied_at: string | null;
   last_status_at: string;
   notes: string | null;
 };
 
 export type ApplicationPatch = {
   status?: "interviewing" | "closed";
+  /**
+   * Whether the employer ever answered. Only carries information alongside
+   * `status: "closed"` — "not moving forward" covers both a rejection and
+   * silence — and the API refuses it without a status rather than accepting
+   * it and dropping it.
+   */
+  replied?: boolean;
   notes?: string;
 };
 
@@ -105,10 +119,11 @@ export async function patchApplication(
   jobId: string,
   input: ApplicationPatch,
 ): Promise<Application> {
-  // Field by field so only the two known keys reach the wire, and an omitted
-  // one stays omitted rather than becoming null.
+  // Field by field so only the known keys reach the wire, and an omitted one
+  // stays omitted rather than becoming null.
   const body: ApplicationPatch = {};
   if (input.status !== undefined) body.status = input.status;
+  if (input.replied !== undefined) body.replied = input.replied;
   if (input.notes !== undefined) body.notes = input.notes;
   return apiJson<Application>(base(jobId), {
     method: "PATCH",
