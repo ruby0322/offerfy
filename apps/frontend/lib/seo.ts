@@ -9,7 +9,7 @@ export const CONTACT_EMAIL = "james@offerfy.cc";
 // it is a factual claim in six places (metadata, Organization JSON-LD, the
 // agent markdown and the landing wall); components/landing/companies.test.ts
 // fails it against apps/backend/data/*.json when a board is added or dropped.
-export const EMPLOYER_COUNT = 88;
+export const EMPLOYER_COUNT = 90;
 export const ORG_DESCRIPTION =
   `Open roles at ${EMPLOYER_COUNT} top tech employers, straight from their own boards. ` +
   "Fork your resume for one posting and edit it against the job description in chat.";
