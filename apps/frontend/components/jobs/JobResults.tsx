@@ -2,13 +2,10 @@
 
 import { useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
-import { Link } from "@/i18n/navigation";
 import type { AppLocale } from "@/i18n/routing";
-import EmployerLogo from "@/components/jobs/EmployerLogo";
-import { JobTime } from "@/components/jobs/Timestamps";
+import JobRow from "@/components/jobs/JobRow";
 import {
   fetchJobListPage,
-  sourceLabel,
   type JobList,
   type JobListItem,
   type JobQuery,
@@ -51,23 +48,7 @@ export default function JobResults({ locale, query, initial }: Props) {
       <ul className="jobs-rows">
         {items.map((job) => (
           <li key={job.id}>
-            <Link href={`/jobs/${job.id}`} className="jobs-row">
-              <EmployerLogo company={job.company} />
-              <span className="jobs-row-grow">
-                <span className="jobs-row-title font-display">{job.title}</span>
-                <span className="jobs-row-meta">
-                  {job.company}
-                  {job.location ? ` · ${job.location}` : null}
-                  {job.remote ? ` · ${t("remote")}` : null}
-                  {` · ${sourceLabel(job.source, locale)}`}
-                </span>
-              </span>
-              {/* posted_at is absent for most of Workday, whose boards
-                  publish "Posted Yesterday" as a phrase. The row simply
-                  carries no age rather than showing when we first saw it,
-                  which is a different fact. */}
-              {job.posted_at ? <JobTime iso={job.posted_at} /> : null}
-            </Link>
+            <JobRow job={job} locale={locale} />
           </li>
         ))}
       </ul>

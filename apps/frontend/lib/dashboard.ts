@@ -1,6 +1,6 @@
 import { apiJson } from "@/lib/api";
 import type { Application } from "@/lib/applications";
-import type { FactsState, JobPreference } from "@/lib/jobs";
+import type { FactsState, JobListItem, JobPreference } from "@/lib/jobs";
 
 export type ResumeHealth = {
   has_master: boolean;
@@ -18,6 +18,8 @@ export type EmployerViews = {
 export type Dashboard = {
   preference: JobPreference;
   match_count: number;
+  /** The first few matching postings, newest first — the card shows these. */
+  matches: JobListItem[];
   applications: Application[];
   resume_health: ResumeHealth;
   employer_views: EmployerViews;

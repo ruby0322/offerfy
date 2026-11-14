@@ -271,7 +271,11 @@ export default function DashboardPage() {
 
         {dash ? (
           <div className="mb-10 grid gap-6">
-            <MatchCountCard count={dash.match_count} hasPreference={summary !== ""} />
+            <MatchCountCard
+              count={dash.match_count}
+              hasPreference={summary !== ""}
+              matches={dash.matches}
+            />
             <ApplicationList initial={dash.applications} />
             <ResumeHealthCard
               health={dash.resume_health}

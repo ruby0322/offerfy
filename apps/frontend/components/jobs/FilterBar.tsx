@@ -184,6 +184,7 @@ export default function FilterBar({
         {isLocked("function") ? null : (
           <FacetMenu
             heading={t("filterFunction")}
+            doneLabel={t("filterDone")}
             label={t("filterFunction")}
             anyLabel={t("filterAny")}
             clearLabel={t("filterFunction")}
@@ -199,6 +200,7 @@ export default function FilterBar({
         {isLocked("seniority") ? null : (
           <FacetMenu
             heading={t("filterLevel")}
+            doneLabel={t("filterDone")}
             label={t("filterLevel")}
             anyLabel={t("filterAny")}
             clearLabel={t("filterLevel")}
@@ -213,6 +215,7 @@ export default function FilterBar({
         {isLocked("postedWithinDays") ? null : (
           <FacetMenu
             heading={t("postedLabel")}
+            doneLabel={t("filterDone")}
             label={t("filterPosted")}
             anyLabel={t("postedAll")}
             clearLabel={t("filterPosted")}
@@ -227,6 +230,7 @@ export default function FilterBar({
         {isLocked("remote") ? null : (
           <FacetMenu
             heading={t("filterRemote")}
+            doneLabel={t("filterDone")}
             label={t("filterRemote")}
             anyLabel={t("remoteAll")}
             clearLabel={t("filterRemote")}
@@ -241,6 +245,7 @@ export default function FilterBar({
         {isLocked("company") ? null : (
           <FacetMenu
             heading={t("filterEmployer")}
+            doneLabel={t("filterDone")}
             label={t("filterEmployer")}
             anyLabel={t("filterAny")}
             clearLabel={t("filterEmployer")}
@@ -267,6 +272,7 @@ export default function FilterBar({
         {isLocked("region") || regions.length === 0 ? null : (
           <FacetMenu
             heading={t("regionLabel")}
+            doneLabel={t("filterDone")}
             label={t("filterMore")}
             anyLabel={t("regionAll")}
             clearLabel={t("regionLabel")}

@@ -39,9 +39,42 @@ function render(node: ReactElement): string {
 const d = en.dashboard;
 
 test("MatchCountCard with no preference says what to do next, not a count", () => {
-  const html = render(createElement(MatchCountCard, { count: 0, hasPreference: false }));
+  const html = render(
+    createElement(MatchCountCard, { count: 0, hasPreference: false, matches: [] }),
+  );
   assert.ok(html.includes(d.matchEmpty), html);
   assert.ok(html.includes(d.headingMatches), html);
+  // No preference means no matches, so no empty list furniture either.
+  assert.ok(!html.includes("jobs-rows"), html);
+});
+
+test("MatchCountCard renders a match as the jobs page's own row", () => {
+  const html = render(
+    createElement(MatchCountCard, {
+      count: 1,
+      hasPreference: true,
+      matches: [
+        {
+          id: "job-7",
+          source: "greenhouse",
+          company: "Acme",
+          title: "Backend Engineer",
+          location: "Taipei",
+          remote: null,
+          apply_url: "https://acme.example/apply",
+          source_url: "https://acme.example/job",
+          posted_at: null,
+          last_seen_at: "2026-11-14T00:00:00+00:00",
+          is_active: true,
+        },
+      ],
+    }),
+  );
+  // The row, not a dashboard-shaped summary of it: same class, same link.
+  assert.ok(html.includes('class="jobs-rows is-bare"'), html);
+  assert.ok(html.includes('href="/en/jobs/job-7"'), html);
+  assert.ok(html.includes("Backend Engineer"), html);
+  assert.ok(html.includes("Greenhouse"), html);
 });
 
 test("ApplicationList with no applications shows its empty message", () => {
