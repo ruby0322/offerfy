@@ -593,12 +593,143 @@ textarea {
   margin-top: 1.25rem;
 }
 
-.jobs-apply {
-  display: inline-block;
-  padding: 0.5rem 0.9rem;
-  background: var(--ink);
-  color: var(--paper);
+/* Every control in the posting's action row is this one shape. They were
+   three different ones -- the apply link carried its own padding and body
+   font size, the rest a Tailwind utility string with smaller text and no
+   radius -- so the row read as a pile of unrelated things. Fixed height
+   rather than padding alone, because a link and a button do not agree on
+   line-height. */
+.jobs-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 40px;
+  padding: 0 0.95rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--sheet, var(--paper));
+  color: var(--ink);
+  font-size: 0.9rem;
   text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.jobs-action:hover:not(:disabled) {
+  border-color: var(--ink);
+  background: var(--hover);
+}
+
+.jobs-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.jobs-action.is-primary {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+
+.jobs-action.is-primary:hover {
+  background: color-mix(in srgb, var(--ink) 88%, var(--paper));
+  border-color: var(--ink);
+}
+
+.jobs-action .jobs-action-caret {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.jobs-action.is-primary .jobs-action-caret {
+  color: var(--paper);
+  opacity: 0.7;
+}
+
+/* The master picker hanging off "Tailor for this role". */
+.jobs-tailor {
+  position: relative;
+  display: inline-flex;
+}
+
+.jobs-tailor-menu {
+  display: none;
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  min-width: 15rem;
+  max-width: calc(100vw - 2.5rem);
+  padding: 0.55rem;
+  background: var(--sheet, var(--paper));
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 12%);
+}
+
+.jobs-tailor[data-open="1"] .jobs-tailor-menu {
+  display: block;
+}
+
+.jobs-tailor-menu h3 {
+  margin: 0.15rem 0.35rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--clay);
+}
+
+.jobs-tailor-opt {
+  display: block;
+  width: 100%;
+  padding: 0.4rem 0.45rem;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.88rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.jobs-tailor-opt:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.jobs-tailor-opt:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.jobs-tailor-when {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+/* The kicker sits on the title's line rather than above it: as a block it
+   read as a stray dot with a gap under it. */
+.jobs-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.jobs-head .blog-kicker {
+  margin-bottom: 0;
+  flex: 0 0 6px;
+}
+
+/* On the posting page the kicker leads the meta line instead, so it cannot
+   be a flex child -- the row is prose with "·" separators, and a flex gap
+   would push every one of them apart. */
+.blog-meta .blog-kicker {
+  display: inline-block;
+  margin: 0 0.45rem 0 0;
+  vertical-align: 0.05em;
 }
 
 .jobs-attribution {
@@ -1022,7 +1153,13 @@ textarea {
 
 /* Each row holds its list twice, so translating by half lands exactly on the
    copy and the loop has no seam. Different durations keep the rows from
-   marching in lockstep. */
+   marching in lockstep.
+
+   There is deliberately no :hover pause. The chips are links to each
+   employer's roles, and pausing under the cursor made the wall feel like a
+   control you had to operate rather than a ribbon you can reach into. Aiming
+   at a moving chip is fine at these speeds; `prefers-reduced-motion` below
+   stops the rail outright for anyone who needs it to hold still. */
 .landing-rail-a {
   animation: landing-rail-left 46s linear infinite;
 }
@@ -1053,10 +1190,6 @@ textarea {
   }
 }
 
-.landing-rail:hover .landing-rail-row {
-  animation-play-state: paused;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .landing-rail-row {
     animation: none;
@@ -1064,6 +1197,9 @@ textarea {
 }
 
 .landing-chip {
+  cursor: pointer;
+  text-decoration: none;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
@@ -1072,6 +1208,16 @@ textarea {
   background: var(--sheet, var(--paper));
   border-radius: 999px;
   padding: 0.45rem 0.95rem;
+}
+
+.landing-chip:hover {
+  border-color: var(--ink);
+  background: var(--hover);
+}
+
+.landing-chip:focus-visible {
+  outline: 2px solid var(--clay);
+  outline-offset: 2px;
 }
 
 .landing-chip svg {
@@ -2567,4 +2713,963 @@ textarea {
    editor uses. */
 .preview-text-layer ::selection {
   background: color-mix(in srgb, var(--clay) 30%, transparent);
+}
+
+/* --- Jobs: live board, filter bar, result rows -------------------------- */
+
+.jobs-crumb {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.jobs-crumb a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.jobs-crumb a:hover {
+  color: var(--clay);
+  text-decoration: underline;
+}
+
+.jobs-section-label {
+  margin: 0 0 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--clay);
+}
+
+.jobs-pulse {
+  margin-top: 1.75rem;
+}
+
+.jobs-pulse-strip,
+.jobs-pulse-card,
+.jobs-collection,
+.jobs-rows {
+  background: var(--sheet, var(--paper));
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+
+.jobs-pulse-strip {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  padding: 0.85rem 1.1rem;
+  font-size: 0.9rem;
+}
+
+.jobs-pulse-strip b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.jobs-pulse-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.jobs-pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  animation: jobs-pulse-blink 1.9s ease-in-out infinite;
+}
+
+@keyframes jobs-pulse-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+
+/* The dot is the only thing on the page that claims liveness; holding it
+   still for reduced-motion costs nothing, since the sentence next to it
+   says the same thing. */
+@media (prefers-reduced-motion: reduce) {
+  .jobs-pulse-dot {
+    animation: none;
+  }
+}
+
+.jobs-pulse-new {
+  color: var(--clay);
+}
+
+.jobs-pulse-age {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.jobs-pulse-boards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.9rem;
+  margin-top: 0.9rem;
+  /* Each card is as tall as what is inside it. A grid item stretches to its
+     row by default, so opening one card grew the closed one to match it --
+     a tall empty box with a heading at the top, reading as a card that had
+     been opened and found to have nothing in it. */
+  align-items: start;
+}
+
+/* A grid item's default `min-width: auto` is the min-content of its rows,
+   and a row's title is `white-space: nowrap` -- so without this the track
+   sizes to the longest job title ever posted and the whole page scrolls
+   sideways (614px of card in a 390px viewport). `min-width: 0` hands the
+   track back to the 1fr and lets the titles ellipsize as they were meant
+   to; the rows' own `min-width: 0` can only shrink inside a track that is
+   already the right size. */
+.jobs-pulse-card {
+  min-width: 0;
+}
+
+.jobs-pulse-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.8rem 1rem;
+}
+
+.jobs-pulse-head h2 {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--clay);
+}
+
+.jobs-pulse-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.6rem 1rem;
+  border-top: 1px solid var(--rule);
+}
+
+.jobs-pulse-foot a {
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.jobs-pulse-foot a:hover {
+  color: var(--clay);
+  text-decoration: underline;
+}
+
+/* The two lists collapse, and collapsed they keep their employers' marks
+   instead of going blank -- see the comment in JobPulseBoard.tsx. The
+   default triangle goes because the caret on the right is the affordance,
+   and the row is already a pointer. */
+summary.jobs-pulse-head {
+  justify-content: flex-start;
+  gap: 0.6rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+summary.jobs-pulse-head::-webkit-details-marker {
+  display: none;
+}
+
+summary.jobs-pulse-head:hover .jobs-pulse-caret {
+  color: var(--clay);
+}
+
+/* Wraps rather than clips: a logo cut in half down its middle reads as a
+   rendering bug, and MARK_CAP is small enough that the second row is rare. */
+.jobs-pulse-marks {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.jobs-pulse-caret {
+  color: var(--muted);
+  font-size: 0.7rem;
+  transition: transform 0.15s ease;
+}
+
+/* Open, the marks are the rows' own logos one line down, so the strip would
+   only be saying it twice; the caret takes over the right edge. */
+.jobs-pulse-card[open] .jobs-pulse-marks {
+  display: none;
+}
+
+.jobs-pulse-card[open] .jobs-pulse-caret {
+  margin-left: auto;
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jobs-pulse-caret {
+    transition: none;
+  }
+}
+
+.jobs-pulse-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.7rem 1rem;
+  border-top: 1px solid var(--rule);
+  text-decoration: none;
+  color: inherit;
+}
+
+.jobs-pulse-row:hover {
+  background: var(--hover);
+}
+
+.jobs-pulse-row:hover .jobs-pulse-title {
+  color: var(--clay);
+}
+
+.jobs-pulse-grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.jobs-pulse-title,
+.jobs-pulse-meta {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobs-pulse-meta {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.jobs-pulse-delta {
+  font-size: 0.8rem;
+  color: var(--clay);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.job-when {
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- employer marks ----------------------------------------------------- */
+
+.job-logo {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--paper);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.job-logo svg {
+  width: 22px;
+  height: 22px;
+}
+
+.job-logo-sm {
+  width: 34px;
+  height: 34px;
+  flex-basis: 34px;
+}
+
+.job-logo-sm svg {
+  width: 18px;
+  height: 18px;
+}
+
+.job-logo-mono {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--clay);
+}
+
+.job-logo-sm .job-logo-mono {
+  font-size: 0.8rem;
+}
+
+/* --- curated boards ----------------------------------------------------- */
+
+.jobs-curated {
+  margin-top: 1.1rem;
+}
+
+.jobs-curated-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.7rem;
+}
+
+.jobs-collection {
+  display: block;
+  padding: 0.85rem 0.95rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.jobs-collection:hover {
+  border-color: var(--ink);
+  background: var(--hover);
+}
+
+.jobs-collection:hover .jobs-collection-name {
+  color: var(--clay);
+}
+
+.jobs-collection-name {
+  display: block;
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.jobs-collection-desc {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.jobs-collection-count {
+  display: block;
+  margin-top: 0.45rem;
+  font-size: 0.78rem;
+  color: var(--clay);
+  font-variant-numeric: tabular-nums;
+}
+
+.jobs-curated.is-compact {
+  margin-top: 2.5rem;
+  border-top: 1px solid var(--rule);
+  padding-top: 1.25rem;
+}
+
+.jobs-curated.is-compact .jobs-curated-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.jobs-curated.is-compact .jobs-collection {
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+}
+
+.jobs-curated.is-compact .jobs-collection-name {
+  display: inline;
+  font-size: 0.9rem;
+}
+
+.jobs-curated.is-compact .jobs-collection-count {
+  display: inline;
+  margin-left: 0.35rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+/* --- search row and facet bar ------------------------------------------- */
+
+.jobs-controls {
+  margin-top: 2rem;
+}
+
+.jobs-accent {
+  margin-top: 1.4rem;
+}
+
+.jobs-search {
+  display: flex;
+  gap: 0.6rem;
+  align-items: stretch;
+}
+
+/* 16px (1rem) is the floor that keeps iOS from zooming on focus and never
+   zooming back. Same rule as the old filter form carried. */
+.jobs-search input[type="search"] {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  padding: 0 0.85rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--sheet, var(--paper));
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.jobs-search > button[type="submit"] {
+  height: 44px;
+  padding: 0 1.3rem;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--paper);
+  border: 1px solid var(--ink);
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.jobs-where {
+  position: relative;
+}
+
+.jobs-where-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  height: 44px;
+  max-width: 17rem;
+  padding: 0 0.85rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--sheet, var(--paper));
+  color: var(--ink);
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.jobs-where-btn svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  color: var(--clay);
+}
+
+.jobs-where-btn:hover,
+.jobs-where[data-open="1"] .jobs-where-btn {
+  border-color: var(--ink);
+}
+
+.jobs-where-cap {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobs-where-caret,
+.jobs-facet-caret {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.jobs-where-panel {
+  display: none;
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  width: 29rem;
+  max-width: calc(100vw - 2.5rem);
+  padding: 0.9rem 1rem 1rem;
+  background: var(--sheet, var(--paper));
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 12%);
+}
+
+.jobs-where[data-open="1"] .jobs-where-panel {
+  display: block;
+}
+
+.jobs-where-panel h3,
+.jobs-menu h3 {
+  margin: 0.15rem 0.35rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--clay);
+}
+
+.jobs-where-detected {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 0 0.7rem;
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.jobs-where-detected svg {
+  width: 15px;
+  height: 15px;
+  color: var(--clay);
+}
+
+.jobs-where-detected b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.jobs-where-swap {
+  margin-left: auto;
+  color: var(--clay);
+  font-size: 0.8rem;
+}
+
+.jobs-where-countries {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.1rem 0.4rem;
+}
+
+.jobs-where-cities {
+  border-top: 1px solid var(--rule);
+  margin-top: 0.8rem;
+  padding-top: 0.8rem;
+}
+
+.jobs-where-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.jobs-where-hint {
+  margin: 0 0.35rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.jobs-where-foot {
+  margin-top: 0.8rem;
+  font-size: 0.82rem;
+}
+
+.jobs-where-foot a {
+  color: var(--clay);
+}
+
+.jobs-facets {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.jobs-facet {
+  position: relative;
+}
+
+.jobs-facet-pill {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--sheet, var(--paper));
+  overflow: hidden;
+}
+
+.jobs-facet-pill:hover,
+.jobs-facet[data-open="1"] .jobs-facet-pill {
+  border-color: var(--ink);
+}
+
+.jobs-facet-pill.is-set {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.jobs-facet-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 34px;
+  padding: 0 0.7rem;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: 0.87rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.jobs-facet-pill.is-set .jobs-facet-btn {
+  color: var(--paper);
+  padding-right: 0.35rem;
+}
+
+.jobs-facet-clear {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.6rem 0 0.1rem;
+  color: var(--paper);
+  opacity: 0.7;
+  text-decoration: none;
+  font-size: 1rem;
+}
+
+.jobs-facet-clear:hover {
+  opacity: 1;
+}
+
+.jobs-facet-board {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 34px;
+  padding: 0 0.75rem;
+  border-radius: 999px;
+  background: var(--clay);
+  color: #fff;
+  font-size: 0.87rem;
+  white-space: nowrap;
+}
+
+.jobs-facet-board-tag {
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.jobs-menu {
+  display: none;
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  min-width: 15rem;
+  max-width: calc(100vw - 2.5rem);
+  padding: 0.55rem;
+  background: var(--sheet, var(--paper));
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 12%);
+}
+
+.jobs-facet[data-open="1"] .jobs-menu {
+  display: block;
+}
+
+/* The 0.4rem of air between a pill and its panel belongs to neither of them,
+   so while the cursor is crossing it the facet is not hovered and the menu
+   would close under the pointer on its way in. This covers that strip with
+   something that IS inside the facet. The grace period in
+   lib/use-hover-menu.ts handles the rest (a diagonal exit, a slow hand); this
+   handles the common case without even starting that timer. */
+.jobs-menu::before,
+.jobs-where-panel::before {
+  content: "";
+  position: absolute;
+  top: -0.45rem;
+  left: 0;
+  right: 0;
+  height: 0.45rem;
+}
+
+.jobs-menu.is-wide {
+  min-width: 24rem;
+}
+
+.jobs-menu-two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 0.3rem;
+}
+
+.jobs-menu-find {
+  width: 100%;
+  height: 34px;
+  margin-bottom: 0.35rem;
+  padding: 0 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.jobs-menu-foot {
+  border-top: 1px solid var(--rule);
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+}
+
+.jobs-menu-note {
+  display: block;
+  padding: 0 0.45rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.jobs-opt {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.33rem 0.45rem;
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+  font-size: 0.88rem;
+}
+
+.jobs-opt:hover {
+  background: var(--hover);
+}
+
+.jobs-opt.is-on {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.jobs-opt-n {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.jobs-opt.is-on .jobs-opt-n {
+  color: var(--paper);
+  opacity: 0.6;
+}
+
+.jobs-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--sheet, var(--paper));
+  color: inherit;
+  text-decoration: none;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.jobs-pill:hover {
+  border-color: var(--ink);
+}
+
+.jobs-pill.is-on {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+
+.jobs-pill.is-on .jobs-opt-n {
+  color: var(--paper);
+  opacity: 0.65;
+}
+
+.jobs-logo-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.jobs-logo-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.75rem 0.3rem 0.4rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--sheet, var(--paper));
+  color: inherit;
+  text-decoration: none;
+  font-size: 0.86rem;
+}
+
+.jobs-logo-chip:hover {
+  border-color: var(--ink);
+}
+
+.jobs-logo-chip .job-logo {
+  width: 24px;
+  height: 24px;
+  flex-basis: 24px;
+  border: 0;
+  background: none;
+}
+
+.jobs-logo-chip .job-logo svg {
+  width: 17px;
+  height: 17px;
+}
+
+.jobs-clear {
+  margin-top: 0.8rem;
+  font-size: 0.85rem;
+}
+
+.jobs-clear a {
+  color: var(--clay);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+/* --- result rows -------------------------------------------------------- */
+
+.jobs-rows {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.jobs-row {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.95rem 1rem;
+  border-top: 1px solid var(--rule);
+  text-decoration: none;
+  color: inherit;
+}
+
+.jobs-rows > li:first-child .jobs-row {
+  border-top: 0;
+}
+
+.jobs-row:hover {
+  background: var(--hover);
+}
+
+.jobs-row:hover .jobs-row-title {
+  color: var(--clay);
+}
+
+.jobs-row-grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.jobs-row-title {
+  display: block;
+  font-size: 1.12rem;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+}
+
+.jobs-row-meta {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* --- phone -------------------------------------------------------------- */
+
+/* 899px is NARROW_SCREEN (lib/use-media-query.ts), the one threshold that
+   decides phone layout across the app. */
+@media (max-width: 899px) {
+  .jobs-pulse-boards,
+  .jobs-curated-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Beside the heading there is room for five marks, so the strip takes a
+     line of its own and fits the whole cap on it. */
+  summary.jobs-pulse-head {
+    flex-wrap: wrap;
+    row-gap: 0.55rem;
+  }
+
+  /* `order` and not DOM order, because the marks must stay the summary's
+     last child for the open state to keep reading as heading-then-caret. */
+  .jobs-pulse-marks {
+    order: 2;
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+
+  .jobs-pulse-card .jobs-pulse-caret {
+    order: 1;
+    margin-left: auto;
+  }
+
+  .jobs-pulse-age {
+    margin-left: 0;
+  }
+
+  .jobs-search {
+    flex-wrap: wrap;
+  }
+
+  .jobs-search input[type="search"] {
+    flex-basis: 100%;
+  }
+
+  .jobs-where,
+  .jobs-where-btn {
+    flex: 1;
+    width: 100%;
+    max-width: none;
+  }
+
+  /* The filter row scrolls sideways rather than wrapping into a wall of
+     pills: one row of facets stays one row at every width, which is the
+     whole point of putting the options inside the facets. */
+  .jobs-facets {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 0.3rem;
+  }
+
+  .jobs-facets::-webkit-scrollbar {
+    display: none;
+  }
+
+  .jobs-facet {
+    flex: 0 0 auto;
+  }
+
+  /* A popover anchored to a button inside a horizontal scroller would be
+     clipped by it, so on a phone the menus open full width under the bar. */
+  .jobs-menu,
+  .jobs-where-panel {
+    position: fixed;
+    left: 1rem;
+    right: 1rem;
+    top: auto;
+    width: auto;
+    max-width: none;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+
+  .jobs-where-countries {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .jobs-menu.is-wide {
+    min-width: 0;
+  }
 }

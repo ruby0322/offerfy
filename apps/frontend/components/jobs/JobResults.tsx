@@ -4,6 +4,8 @@ import { useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import type { AppLocale } from "@/i18n/routing";
+import EmployerLogo from "@/components/jobs/EmployerLogo";
+import { JobTime } from "@/components/jobs/Timestamps";
 import {
   fetchJobListPage,
   sourceLabel,
@@ -46,32 +48,25 @@ export default function JobResults({ locale, query, initial }: Props) {
 
   return (
     <>
-      <ul className="blog-list">
+      <ul className="jobs-rows">
         {items.map((job) => (
           <li key={job.id}>
-            <Link href={`/jobs/${job.id}`} className="blog-row">
-              <p className="blog-meta">
-                <span>{sourceLabel(job.source, locale)}</span>
-                {job.company ? (
-                  <>
-                    <span aria-hidden="true"> · </span>
-                    <span>{job.company}</span>
-                  </>
-                ) : null}
-                {job.location ? (
-                  <>
-                    <span aria-hidden="true"> · </span>
-                    <span>{job.location}</span>
-                  </>
-                ) : null}
-                {job.remote ? (
-                  <>
-                    <span aria-hidden="true"> · </span>
-                    <span>{t("remote")}</span>
-                  </>
-                ) : null}
-              </p>
-              <h2 className="font-display">{job.title}</h2>
+            <Link href={`/jobs/${job.id}`} className="jobs-row">
+              <EmployerLogo company={job.company} />
+              <span className="jobs-row-grow">
+                <span className="jobs-row-title font-display">{job.title}</span>
+                <span className="jobs-row-meta">
+                  {job.company}
+                  {job.location ? ` · ${job.location}` : null}
+                  {job.remote ? ` · ${t("remote")}` : null}
+                  {` · ${sourceLabel(job.source, locale)}`}
+                </span>
+              </span>
+              {/* posted_at is absent for most of Workday, whose boards
+                  publish "Posted Yesterday" as a phrase. The row simply
+                  carries no age rather than showing when we first saw it,
+                  which is a different fact. */}
+              {job.posted_at ? <JobTime iso={job.posted_at} /> : null}
             </Link>
           </li>
         ))}

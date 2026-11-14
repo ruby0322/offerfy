@@ -12,9 +12,9 @@ export default async function JobView({ locale, job }: Props) {
   const t = await getTranslations("jobs");
   return (
     <article className="jobs-article mx-auto max-w-[72rem] px-5">
-      <div className="blog-kicker" aria-hidden="true" />
       {!job.is_active ? <p className="jobs-closed">{t("closed")}</p> : null}
       <p className="blog-meta">
+        <span className="blog-kicker" aria-hidden="true" />
         <span>{sourceLabel(job.source, locale)}</span>
         <span aria-hidden="true"> · </span>
         <span>{job.company}</span>

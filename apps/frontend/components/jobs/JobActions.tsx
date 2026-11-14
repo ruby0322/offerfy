@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Link, useRouter } from "@/i18n/navigation";
+import TailorMenu, { type TailorMaster } from "@/components/jobs/TailorMenu";
 import { ApiError, createTailor, getMe, listResumes } from "@/lib/api";
 import {
   fetchApplication,
@@ -12,8 +13,11 @@ import {
   type Application,
 } from "@/lib/applications";
 
-const ACTION =
-  "inline-block border border-current px-3.5 py-2 text-sm disabled:opacity-50";
+// One shape for every control in the row. The old utility string differed
+// from the apply link in padding, font size and corner, so the row read as
+// three unrelated controls; .jobs-action fixes the height too, because a
+// link and a button do not agree on line-height.
+const ACTION = "jobs-action";
 
 type Props = {
   jobId: string;
@@ -31,7 +35,10 @@ type State =
   | { kind: "loading" }
   | { kind: "guest" }
   | { kind: "unknown" }
-  | { kind: "ready"; application: Application | null; masterId: string | null };
+  | { kind: "ready"; application: Application | null; masters: Master[] };
+
+/** A master resume the person could tailor from. */
+type Master = TailorMaster;
 
 // The server component cannot know any of this: /jobs/[id] is public and
 // rendered without the visitor's cookie. So it is loaded here, on mount.
@@ -55,9 +62,18 @@ export default function JobActions({ jobId, applyUrl, title, company, applyLabel
           fetchApplication(jobId),
           listResumes(),
         ]);
-        const master = resumes.find((r) => r.kind === "master");
+        // Every master, not the first one found: a person with a backend
+        // master and a new-grad master was silently always tailoring from
+        // whichever the list happened to return first.
+        const masters: Master[] = resumes
+          .filter((r) => r.kind === "master")
+          .map((r) => ({
+            id: r.id,
+            title: r.title ?? null,
+            updatedAt: r.updated_at ?? null,
+          }));
         if (!cancelled) {
-          setState({ kind: "ready", application, masterId: master?.id ?? null });
+          setState({ kind: "ready", application, masters });
         }
       } catch (err) {
         if (cancelled) return;
@@ -80,7 +96,7 @@ export default function JobActions({ jobId, applyUrl, title, company, applyLabel
   // person's click is recorded.
   const applyLink = (
     <a
-      className="jobs-apply"
+      className="jobs-action is-primary"
       href={applyUrl}
       rel="noopener noreferrer"
       target="_blank"
@@ -121,7 +137,7 @@ export default function JobActions({ jobId, applyUrl, title, company, applyLabel
     return <div className="flex flex-wrap items-center gap-3">{applyLink}</div>;
   }
 
-  const { application, masterId } = state;
+  const { application, masters } = state;
   const saved = application !== null;
   const pastSaved = application !== null && application.status !== "saved";
 
@@ -141,7 +157,7 @@ export default function JobActions({ jobId, applyUrl, title, company, applyLabel
   }
 
   function update(next: Application | null) {
-    setState({ kind: "ready", application: next, masterId });
+    setState({ kind: "ready", application: next, masters });
   }
 
   async function toggleSave() {
@@ -173,7 +189,7 @@ export default function JobActions({ jobId, applyUrl, title, company, applyLabel
     }
   }
 
-  async function tailor() {
+  async function tailor(masterId: string) {
     if (!masterId) return;
     setBusy(true);
     setError(null);
@@ -214,10 +230,15 @@ export default function JobActions({ jobId, applyUrl, title, company, applyLabel
       >
         {pastSaved ? statusLabel(application.status) : saved ? t("saved") : t("save")}
       </button>
-      {masterId ? (
-        <button type="button" className={ACTION} onClick={tailor} disabled={busy}>
-          {application?.tailor_resume_id ? t("tailorAgain") : t("tailorForThisRole")}
-        </button>
+      {masters.length > 0 ? (
+        <TailorMenu
+          masters={masters}
+          busy={busy}
+          label={application?.tailor_resume_id ? t("tailorAgain") : t("tailorForThisRole")}
+          heading={t("tailorFrom")}
+          untitled={t("tailorUntitled")}
+          onPick={tailor}
+        />
       ) : (
         <Link className={ACTION} href="/upload">
           {t("tailorNeedsResume")}
