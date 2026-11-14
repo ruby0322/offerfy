@@ -400,7 +400,11 @@ class DashboardOut(BaseModel):
     match_count: int
     # The first few of those matches, in the same shape /v1/jobs returns, so
     # the dashboard can render them with the jobs page's own row.
-    matches: list[JobListItem]
+    # Defaulted, not required: the handler that fills it is still in flight on
+    # another branch. Required here with no writer made every GET /v1/dashboard
+    # fail pydantic validation, so the field stays optional until its producer
+    # lands.
+    matches: list[JobListItem] = []
     applications: list[ApplicationOut]
     resume_health: ResumeHealthOut
     employer_views: EmployerViewsOut
