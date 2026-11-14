@@ -10,10 +10,17 @@ export type WallItem = {
   d: string | null;
   /** Brand colour, or null when the mark takes --ink so it survives both themes. */
   hex: string | null;
+  /** Carried through from the mark: a silhouette with a counter needs evenodd. */
+  fillRule?: "evenodd";
 };
 
 const GLYPHS: WallItem[] = EMPLOYER_NAMES.filter((name) => EMPLOYER_MARKS[name]).map(
-  (name) => ({ name, d: EMPLOYER_MARKS[name].d, hex: EMPLOYER_MARKS[name].hex }),
+  (name) => ({
+    name,
+    d: EMPLOYER_MARKS[name].d,
+    hex: EMPLOYER_MARKS[name].hex,
+    fillRule: EMPLOYER_MARKS[name].fillRule,
+  }),
 );
 
 const WORDS: WallItem[] = EMPLOYER_WORDMARKS.map((name) => ({ name, d: null, hex: null }));

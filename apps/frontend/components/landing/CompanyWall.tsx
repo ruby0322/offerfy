@@ -14,14 +14,19 @@ function Chip({ item, dup, label }: { item: WallItem; dup: boolean; label: strin
       className={`landing-chip${dup ? " landing-chip-dup" : ""}`}
       // The second copy of the row exists only so the loop has no seam. It is
       // the same link twice, so it is hidden from assistive tech and taken out
-      // of the tab order -- otherwise tabbing the wall visits all 88 employers
+      // of the tab order -- otherwise tabbing the wall visits all 90 employers
       // twice. Same pattern as the jobs marquee.
       tabIndex={dup ? -1 : undefined}
       aria-hidden={dup || undefined}
       title={label}
     >
       {item.d ? (
-        <svg viewBox="0 0 24 24" aria-hidden="true" fill={item.hex ?? "var(--ink)"}>
+        <svg
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          fill={item.hex ?? "var(--ink)"}
+          fillRule={item.fillRule}
+        >
           <path d={item.d} />
         </svg>
       ) : null}
