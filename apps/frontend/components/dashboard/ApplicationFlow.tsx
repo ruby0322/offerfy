@@ -113,7 +113,17 @@ function Mark({ company, x, y }: { company: string; x: number; y: number }) {
   );
 }
 
-export default function ApplicationFlow({ rows }: { rows: Application[] }) {
+type Props = {
+  rows: Application[];
+  /**
+   * Render without the card chrome, for embedding inside a section that is
+   * already a card -- the overview puts the diagram and the ongoing rows in
+   * one card, and two nested cards read as a mistake.
+   */
+  bare?: boolean;
+};
+
+export default function ApplicationFlow({ rows, bare = false }: Props) {
   const t = useTranslations("dashboard");
   const flow = useMemo(() => buildApplicationFlow(rows), [rows]);
 
@@ -144,7 +154,11 @@ export default function ApplicationFlow({ rows }: { rows: Application[] }) {
   }, [flow]);
 
   if (flow.tracked === 0) {
-    return (
+    return bare ? (
+      <p className="mt-3 text-sm text-muted-foreground" data-testid="application-flow">
+        {t("flowEmpty")}
+      </p>
+    ) : (
       <section className="rr-card px-5 py-4" data-testid="application-flow">
         <h2 className="text-sm font-semibold tracking-tight">{t("flowHeading")}</h2>
         <p className="mt-2 text-sm text-muted-foreground">{t("flowEmpty")}</p>
@@ -154,18 +168,18 @@ export default function ApplicationFlow({ rows }: { rows: Application[] }) {
 
   const byId = new Map(geometry.nodes.map((n) => [n.id, n]));
 
+  const Wrapper = bare ? "div" : "section";
   return (
-    <section
-      aria-labelledby="applications-flow"
+    <Wrapper
+      aria-labelledby={bare ? undefined : "applications-flow"}
       data-testid="application-flow"
-      className="rr-card px-5 py-4"
+      className={bare ? "" : "rr-card px-5 py-4"}
     >
-      <h2
-        id="applications-flow"
-        className="text-sm font-semibold tracking-tight"
-      >
-        {t("flowHeading")}
-      </h2>
+      {bare ? null : (
+        <h2 id="applications-flow" className="text-sm font-semibold tracking-tight">
+          {t("flowHeading")}
+        </h2>
+      )}
       <div className="mt-3 overflow-x-auto">
         <svg
           viewBox={`0 0 ${VIEW_W} ${geometry.height}`}
@@ -281,6 +295,6 @@ export default function ApplicationFlow({ rows }: { rows: Application[] }) {
           {t("metricReplyRate")}
         </span>
       </p>
-    </section>
+    </Wrapper>
   );
 }

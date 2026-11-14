@@ -1008,3 +1008,108 @@ def prune_refusals(db: Session, *, now: datetime | None = None) -> int:
     )
     db.commit()
     return int(deleted)
+
+
+# --------------------------------------------------------------------------
+# Where the week's spend went
+# --------------------------------------------------------------------------
+
+# The purposes a person can see, in the order the breakdown lists them: the
+# ones they drive first, the background ones after. A purpose the CHECK
+# constraint allows but this tuple omits still appears -- `other` collects it,
+# because a breakdown whose parts do not sum to the meter is worse than one
+# with a vague row in it.
+BREAKDOWN_ORDER: tuple[str, ...] = (
+    "chat",
+    "import",
+    "extract",
+    "match",
+    "digest",
+    "vision",
+    "profile",
+    "repair",
+)
+
+
+@dataclass(frozen=True)
+class SpendSlice:
+    purpose: str
+    uusd: int
+    rounds: int
+
+    @property
+    def credits(self) -> float:
+        return round(self.uusd / CREDIT_UUSD, 2)
+
+
+@dataclass(frozen=True)
+class Breakdown:
+    """One window's spend, split by what it was spent on and by day.
+
+    Priced through round_cost_uusd, the same function enforcement uses, so no
+    figure here can disagree with the meter. That means iterating rows rather
+    than aggregating in SQL; a week of one person's calls is tens to low
+    hundreds of rows, and correctness beats a round trip here.
+    """
+
+    period_start: datetime
+    slices: tuple[SpendSlice, ...]
+    # Taipei-local calendar days, in order, so the caller can draw Mon..Sun
+    # without deciding what a day is.
+    daily: tuple[tuple[str, int], ...]
+    total_uusd: int
+    unmeasured_rounds: int
+
+    @property
+    def total_credits(self) -> float:
+        return round(self.total_uusd / CREDIT_UUSD, 2)
+
+
+def breakdown(
+    db: Session,
+    user: User | None,
+    guest: GuestSession | None,
+    *,
+    now: datetime | None = None,
+) -> Breakdown:
+    start = window_start(now)
+    query = _apply_subject(
+        db.query(LlmCall).filter(LlmCall.created_at >= start), user=user, guest=guest
+    )
+    if query is None:
+        # No subject is no spend, never everyone's spend -- the same reading
+        # _apply_subject's callers already take.
+        return Breakdown(start, (), (), 0, 0)
+
+    by_purpose: dict[str, list[int]] = {}
+    by_day: dict[str, int] = {}
+    total = 0
+    unmeasured = 0
+    for row in query.all():
+        uusd, measured = round_cost_uusd(row)
+        purpose = row.purpose if row.purpose in BREAKDOWN_ORDER else "other"
+        bucket = by_purpose.setdefault(purpose, [0, 0])
+        bucket[0] += uusd
+        bucket[1] += 1
+        # Bucketed in Taipei, because the window itself resets at Taipei
+        # midnight; UTC days would put Monday's first edits on Sunday.
+        day = row.created_at.astimezone(TAIPEI).date().isoformat()
+        by_day[day] = by_day.get(day, 0) + uusd
+        total += uusd
+        if not measured:
+            unmeasured += 1
+
+    order = [p for p in BREAKDOWN_ORDER if p in by_purpose]
+    if "other" in by_purpose:
+        order.append("other")
+    slices = tuple(
+        SpendSlice(purpose=p, uusd=by_purpose[p][0], rounds=by_purpose[p][1])
+        for p in order
+    )
+    return Breakdown(
+        period_start=start,
+        slices=slices,
+        daily=tuple(sorted(by_day.items())),
+        total_uusd=total,
+        unmeasured_rounds=unmeasured,
+    )

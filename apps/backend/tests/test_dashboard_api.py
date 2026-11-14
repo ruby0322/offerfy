@@ -2,6 +2,7 @@ from sqlalchemy import event
 
 from app.config import get_settings
 from app.deps import SESSION_COOKIE, _sign
+from app.jobs.match_sweep import freshness_cutoff
 from app.models import Application, DisclosureEvent, JobPreference, Resume, User
 from app.services.jobs import applications as service
 from app.services.revisions import pin_current_draft, set_draft_source
@@ -11,8 +12,8 @@ from tests.test_match_sweep import _posting
 from tests.test_talent_api import LIST, _bearer, _candidate, _key
 
 TOP_LEVEL = {
-    "preference", "match_count", "matches", "applications", "resume_health",
-    "employer_views", "digest",
+    "preference", "match_count", "new_match_count", "matches", "applications",
+    "resume_health", "employer_views", "digest",
 }
 HEALTH_KEYS = {
     "has_master", "published", "facts_state", "matching_revision_current", "needs_rebuild",
@@ -263,3 +264,53 @@ def test_applications_are_unreachable_from_the_employer_path(client, db_session)
         assert job.id not in res.text and job.apply_url not in res.text
         names = {k.lower() for k in keys(res.json())}
         assert not {n for n in names if "applic" in n or "apply" in n or n == "notes"}
+
+
+def test_new_match_count_is_none_until_a_since_is_given(client, db_session):
+    # A first visit has no window. 0 would claim "nothing new" where the truth
+    # is "we were not asked", and the line that reads it would then lie.
+    _signed_in(client, db_session, "sub-since-none")
+    body = client.get("/v1/dashboard").json()
+    assert body["new_match_count"] is None
+
+
+def test_a_malformed_since_is_ignored_rather_than_a_422(client, db_session):
+    # The line it feeds is a nicety; refusing the whole dashboard because a
+    # stale tab sent a bad timestamp would be the wrong trade.
+    _signed_in(client, db_session, "sub-since-bad")
+    res = client.get("/v1/dashboard", params={"since": "not-a-timestamp"})
+    assert res.status_code == 200
+    assert res.json()["new_match_count"] is None
+
+
+def test_since_counts_only_postings_first_seen_after_it(client, db_session):
+    """The window keys on when the catalogue first saw a posting.
+
+    Not on posted_at: most of Workday publishes "Posted Yesterday" as a phrase
+    and carries no date, so a posted_at window would drop a whole provider
+    from "new to you".
+    """
+    from datetime import timedelta
+
+    from tests.test_build_digests import _posting
+
+    user = _signed_in(client, db_session, "sub-since-window")
+    db_session.add(
+        JobPreference(
+            user_id=user.id,
+            target_functions="|backend|",
+            target_locations="|tw|",
+            target_seniority=None,
+            remote_required=None,
+        )
+    )
+    db_session.commit()
+
+    held = _posting(db_session, first_seen=freshness_cutoff() + timedelta(days=1))
+    fresh = _posting(db_session, first_seen=freshness_cutoff() + timedelta(days=5))
+    assert held.id != fresh.id
+
+    cutoff = (freshness_cutoff() + timedelta(days=3)).isoformat()
+    body = client.get("/v1/dashboard", params={"since": cutoff}).json()
+    assert body["match_count"] == 2, "both postings match the preference"
+    assert body["new_match_count"] == 1, "only the one first seen inside the window"

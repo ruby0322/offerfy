@@ -44,6 +44,11 @@ class ResumeListItem(BaseModel):
     locale: str
     kind: str = "master"
     parent_resume_id: str | None = None
+    # What a tailored version was aimed at. Null on a master, which is aimed
+    # at nothing in particular. Added for the resume list's "aimed at"
+    # column: seven tailored copies with similar titles are told apart by the
+    # role they were cut for, not by their names.
+    target_label: str | None = None
     updated_at: str | None = None
 
     model_config = {"from_attributes": True}
@@ -264,6 +269,39 @@ class RevisionDetail(BaseModel):
 class PublicShareOut(BaseModel):
     title: str
     locale: str
+
+
+class SpendSliceOut(BaseModel):
+    """What one purpose cost this window.
+
+    `purpose` is the raw vocabulary (chat, import, extract, match, digest,
+    vision, profile, repair, other); the label is the frontend's job, because
+    "extract" means nothing to the person whose resume was read.
+    """
+
+    purpose: str
+    credits: float
+    rounds: int
+
+
+class UsageBreakdownOut(BaseModel):
+    period_start: str
+    slices: list[SpendSliceOut]
+    # (Taipei calendar day, credits) in order, so a caller can draw the window
+    # without deciding where a day starts.
+    daily: list[tuple[str, float]]
+    total_credits: float
+    unmeasured_rounds: int
+
+
+class DisclosureRecipientOut(BaseModel):
+    """One employer who has been shown this person's profile."""
+
+    recipient_label: str | None
+    recipient_contact: str | None
+    first_disclosed_at: str
+    last_disclosed_at: str
+    disclosure_count: int
 
 
 class UsageOut(BaseModel):

@@ -409,6 +409,10 @@ class DigestOut(BaseModel):
 class DashboardOut(BaseModel):
     preference: JobPreferenceOut
     match_count: int
+    # How many of those the catalogue first saw since the `since` the caller
+    # passed. None when it passed none -- a first visit has no window, and 0
+    # would claim "nothing new" where the truth is "we were not asked".
+    new_match_count: int | None = None
     # The first few of those matches, in the same shape /v1/jobs returns, so
     # the dashboard can render them with the jobs page's own row. Required, and
     # it must stay required: a writer exists (routers/dashboard.py fills it).

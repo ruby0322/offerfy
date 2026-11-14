@@ -1,185 +1,85 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
-import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
-import Footer from "@/components/Footer";
-import Nav from "@/components/Nav";
-import { useToast } from "@/components/Toaster";
-import { Link, useRouter } from "@/i18n/navigation";
-import {
-  ApiError,
-  claimResumes,
-  deleteResume,
-  getMe,
-  listResumes,
-  logout,
-  type Resume,
-} from "@/lib/api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useFormatter, useTranslations } from "next-intl";
+import ApplicationFlow from "@/components/dashboard/ApplicationFlow";
+import CreditsStrip from "@/components/dashboard/CreditsStrip";
+import MatchesBlock from "@/components/dashboard/MatchesBlock";
+import NextActionBand from "@/components/dashboard/NextActionBand";
+import OngoingTable from "@/components/dashboard/OngoingTable";
+import { nextSteps } from "@/components/dashboard/nextSteps";
 import { COUNTRY_KEYS, FUNCTION_KEYS, SENIORITY_KEYS } from "@/components/jobs/facet-labels";
-import ApplicationList from "@/components/dashboard/ApplicationList";
-import EmployerViews from "@/components/dashboard/EmployerViews";
-import SlotTwo from "@/components/dashboard/SlotTwo";
-import ResumeHealthCard from "@/components/dashboard/ResumeHealthCard";
+import { Link, useRouter } from "@/i18n/navigation";
+import { ApiError, listResumes } from "@/lib/api";
+import type { Application } from "@/lib/applications";
 import { fetchDashboard, type Dashboard } from "@/lib/dashboard";
 import { preferenceSummary } from "@/lib/jobs";
+import { readLastVisit, writeLastVisit } from "@/lib/last-visit";
 
-function groupResumes(resumes: Resume[]) {
-  const masters = resumes.filter((r) => (r.kind ?? "master") === "master");
-  const masterIds = new Set(masters.map((r) => r.id));
-  const byParent = new Map<string, Resume[]>();
-  const orphans: Resume[] = [];
-  for (const r of resumes) {
-    if (r.kind !== "tailor") continue;
-    if (r.parent_resume_id && masterIds.has(r.parent_resume_id)) {
-      byParent.set(r.parent_resume_id, [...(byParent.get(r.parent_resume_id) ?? []), r]);
-    } else {
-      orphans.push(r);
-    }
-  }
-  return {
-    groups: masters.map((master) => ({ master, tailors: byParent.get(master.id) ?? [] })),
-    orphans,
-  };
-}
-
-function DeleteButton({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      data-testid="dashboard-delete"
-      className="rr-btn rr-btn-ghost text-muted-foreground hover:text-destructive"
-      onClick={onClick}
-    >
-      <Trash2 aria-hidden="true" className="size-4" />
-    </button>
-  );
-}
-
-function TailorRow({
-  resume,
-  openLabel,
-  badge,
-  deleteLabel,
-  onDelete,
-}: {
-  resume: Resume;
-  openLabel: string;
-  badge: string;
-  deleteLabel: string;
-  onDelete: () => void;
-}) {
-  return (
-    <li className="flex items-center justify-between gap-3" data-testid="dashboard-tailor">
-      <p className="flex min-w-0 items-center gap-2 text-sm">
-        <span className="truncate">{resume.title || resume.id}</span>
-        <span className="shrink-0 rounded-sm border border-primary/40 px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-primary">
-          {badge}
-        </span>
-      </p>
-      <div className="flex shrink-0 items-center gap-1">
-        <Link href={`/editor/${resume.id}`} className="rr-btn rr-btn-ghost">
-          {openLabel}
-        </Link>
-        <DeleteButton label={deleteLabel} onClick={onDelete} />
-      </div>
-    </li>
-  );
-}
-
-type Doomed = { resume: Resume; tailorCount: number };
-
+/**
+ * The overview: what changed, the one thing to do, and the shape of the search.
+ *
+ * Four blocks and no free-floating numbers. Every figure that wants studying
+ * has moved to the tab that owns it -- the application metrics to
+ * Applications, employer views and resume state to Profile, credits to Usage
+ * -- because a row of numbers with no subject beside it is something you have
+ * to hold in your head on the way down the page. What is left is a line
+ * saying what is new, one action, the matches, and the pipeline as a shape
+ * with the few rows that need you.
+ */
 export default function DashboardPage() {
   const t = useTranslations("dashboard");
   const tCommon = useTranslations("common");
-  const tPicker = useTranslations("picker");
   const tJobs = useTranslations("jobs");
+  const format = useFormatter();
   const router = useRouter();
-  const toast = useToast();
-  const [resumes, setResumes] = useState<Resume[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [email, setEmail] = useState<string | null>(null);
-  const [dash, setDash] = useState<Dashboard | null>(null);
-  const [doomed, setDoomed] = useState<Doomed | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  const reloadDashboard = useCallback(async () => {
-    try {
-      setDash(await fetchDashboard());
+  const [dash, setDash] = useState<Dashboard | null>(null);
+  const [rows, setRows] = useState<Application[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [masterId, setMasterId] = useState<string | null>(null);
+  // Read once, before the first fetch stamps the new visit, so the "since"
+  // line describes the previous visit rather than this one.
+  const since = useRef<string | null>(null);
+  const [lastVisit, setLastVisit] = useState<Date | null>(null);
+
+  const load = useCallback(
+    async (window: string | null) => {
+      const next = await fetchDashboard(window);
+      setDash(next);
+      setRows(next.applications);
       setError(null);
-    } catch {
-      // A failed refresh after a rebuild leaves the last good view up; the
-      // card's own rebuild error already told the person what went wrong.
-    }
-  }, []);
+      return next;
+    },
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
-    // The dashboard's own data is one request. It starts at once, beside the
-    // resume list below, rather than behind getMe -> claimResumes.
-    const first = fetchDashboard();
-    (async () => {
-      try {
-        const next = await first;
-        if (!cancelled) {
-          setDash(next);
-          setError(null);
-        }
-      } catch (err) {
+    since.current = readLastVisit();
+    if (since.current) {
+      const parsed = new Date(since.current);
+      if (!Number.isNaN(parsed.getTime())) setLastVisit(parsed);
+    }
+    load(since.current).catch((err) => {
+      if (cancelled) return;
+      if (err instanceof ApiError && err.status === 401) router.replace("/login");
+      else setError(err instanceof ApiError ? err.message : t("needLogin"));
+    });
+    // Stamped after the request is issued, so a reload inside the same second
+    // still reports the earlier window rather than an empty one.
+    writeLastVisit();
+    // The master's id is only needed to route a "publish your resume" step.
+    listResumes()
+      .then((items) => {
         if (cancelled) return;
-        if (err instanceof ApiError && err.status === 401) router.replace("/login");
-        else setError(err instanceof ApiError ? err.message : t("needLogin"));
-      }
-    })();
-    getMe()
-      .then((me) => {
-        if (!cancelled) setEmail(me?.email ?? null);
+        setMasterId(items.find((r) => (r.kind ?? "master") === "master")?.id ?? null);
       })
       .catch(() => {});
-    // The file manager still needs a just-signed-in guest's anonymous resumes
-    // claimed first, so claim -> list stays a chain, but off the critical path
-    // of everything above it.
-    (async () => {
-      try {
-        try {
-          await claimResumes();
-        } catch {
-          /* claim is best-effort */
-        }
-        const items = await listResumes();
-        if (cancelled) return;
-        setResumes(items);
-        // A claim may have just given this person a master the first
-        // dashboard response did not know about: refetch only when it said
-        // there was none and the list now shows one.
-        const firstDash = await first.catch(() => null);
-        if (
-          firstDash &&
-          !firstDash.resume_health.has_master &&
-          items.some((r) => (r.kind ?? "master") === "master")
-        ) {
-          const next = await fetchDashboard().catch(() => null);
-          if (!cancelled && next) {
-            setDash(next);
-            setError(null);
-          }
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof ApiError ? err.message : t("needLogin"));
-        }
-      }
-    })();
     return () => {
       cancelled = true;
     };
-  }, [router, t]);
-
-  const masterId = resumes?.find((r) => (r.kind ?? "master") === "master")?.id ?? null;
+  }, [load, router, t]);
 
   const summary = useMemo(() => {
     if (!dash) return "";
@@ -194,205 +94,116 @@ export default function DashboardPage() {
     });
   }, [dash, tJobs]);
 
-  const { groups, orphans } = useMemo(() => groupResumes(resumes ?? []), [resumes]);
-  // The badges only need explaining to someone who has just grown their first
-  // tailored version, so the line appears then and stops being noise after.
-  const hasTailors = groups.some((group) => group.tailors.length > 0) || orphans.length > 0;
+  const steps = useMemo(() => {
+    if (!dash) return [];
+    return nextSteps({
+      applications: rows,
+      health: dash.resume_health,
+      digest: dash.digest,
+      hasPreference: summary !== "",
+      masterId,
+    });
+  }, [dash, rows, summary, masterId]);
 
-  async function onLogout() {
-    try {
-      await logout();
-    } finally {
-      router.push("/");
-    }
+  const strongFits = useMemo(
+    () => (dash?.digest?.items ?? []).filter((i) => (i.fit_score ?? 0) >= 0.8).length,
+    [dash],
+  );
+
+  function replace(next: Application) {
+    setRows((prev) => prev.map((r) => (r.job_id === next.job_id ? next : r)));
   }
-
-  function askDelete(resume: Resume, tailorCount: number) {
-    setDeleteError(null);
-    setDoomed({ resume, tailorCount });
-  }
-
-  async function onConfirmDelete() {
-    if (!doomed || deleting) return;
-    const { id, title } = doomed.resume;
-    setDeleting(true);
-    setDeleteError(null);
-    try {
-      await deleteResume(id);
-      // The backend cascades a master's tailors, so drop them here too.
-      setResumes((prev) =>
-        (prev ?? []).filter((r) => r.id !== id && r.parent_resume_id !== id),
-      );
-      setDoomed(null);
-      toast(tCommon("deletedToast", { title: title || id }));
-    } catch (err) {
-      setDeleteError(err instanceof ApiError && err.message ? err.message : tCommon("deleteError"));
-    } finally {
-      setDeleting(false);
-    }
-  }
-
-  const doomedKind = doomed?.resume.kind ?? "master";
 
   return (
-    <div className="rr-shell">
-      <Nav variant="app" />
-      <main className="mx-auto max-w-4xl px-4 py-10 sm:px-5 sm:py-12">
-        <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="rr-page-title">{t("title")}</h1>
-            {email ? <p className="mt-2 text-sm text-muted-foreground">{email}</p> : null}
-            {dash ? (
-              <p className="mt-2 text-sm" data-testid="dashboard-profile">
-                {summary ? (
-                  <span className="text-muted-foreground">{summary} {"\u00b7"} </span>
-                ) : null}
-                <Link href="/preferences" className="underline">
-                  {t("editPreferences")}
-                </Link>
-              </p>
-            ) : null}
-          </div>
-          <div className="flex gap-2">
-            <Link href="/new" className="rr-btn">
-              {t("newResume")}
-            </Link>
-            <button type="button" className="rr-btn rr-btn-ghost" onClick={onLogout}>
-              {t("logout")}
-            </button>
-          </div>
-        </div>
-
-        {error ? <p className="text-sm text-destructive">{error}</p> : null}
-
-        {!dash && !error ? (
-          <p className="text-sm text-muted-foreground">{tCommon("loading")}</p>
-        ) : null}
-
+    <main className="mx-auto max-w-5xl px-4 py-8 sm:px-5 sm:py-10">
+      <div className="mb-6">
+        <h1 className="rr-page-title">{t("overviewTitle")}</h1>
         {dash ? (
-          <div className="mb-10 grid gap-6">
-            <SlotTwo
-              digest={dash.digest}
-              matchCount={dash.match_count}
-              matches={dash.matches}
-              hasPreference={summary !== ""}
-            />
-            <ApplicationList initial={dash.applications} />
-            <ResumeHealthCard
-              health={dash.resume_health}
-              masterId={masterId}
-              onRebuilt={reloadDashboard}
-            />
-            <EmployerViews views={dash.employer_views} />
-          </div>
-        ) : null}
-
-        {resumes ? (
-          <h2 className="mb-3 text-sm font-semibold tracking-tight text-muted-foreground">
-            {t("headingResumes")}
-          </h2>
-        ) : null}
-
-        {resumes && resumes.length === 0 ? (
-          <div data-testid="dashboard-empty">
-            <p className="text-sm text-muted-foreground">{t("empty")}</p>
-            <div className="mt-6 grid gap-4 md:grid-cols-2">
-              <Link href="/upload" className="rr-card rr-choice-card block p-7">
-                <h2 className="text-lg font-semibold tracking-tight">{tPicker("uploadTitle")}</h2>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  {tPicker("uploadBody")}
-                </p>
+          <>
+            {/* What changed since you last looked. The reason to open this
+                page on a day when nothing else has. */}
+            <p className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm">
+              {lastVisit ? (
+                <>
+                  <span className="text-muted-foreground">
+                    {t("sinceLabel", {
+                      date: format.relativeTime(lastVisit, new Date()),
+                    })}
+                  </span>
+                  {dash.new_match_count !== null && dash.new_match_count > 0 ? (
+                    <span className="font-semibold">
+                      {t("sinceNewMatches", { count: dash.new_match_count })}
+                    </span>
+                  ) : null}
+                  {strongFits > 0 ? (
+                    <span className="font-semibold">
+                      {t("sinceStrongFits", { count: strongFits })}
+                    </span>
+                  ) : null}
+                  {dash.employer_views.disclosure_count > 0 ? (
+                    <span className="font-semibold">
+                      {t("sinceEmployerViews", {
+                        count: dash.employer_views.disclosure_count,
+                      })}
+                    </span>
+                  ) : null}
+                </>
+              ) : (
+                <span className="text-muted-foreground">{t("sinceFirstVisit")}</span>
+              )}
+            </p>
+            <p className="mt-2.5 inline-flex flex-wrap items-center gap-2 rounded-full border border-rule bg-sheet px-3 py-1 text-[0.78rem] text-muted-foreground">
+              {summary ? <span>{summary}</span> : <span>{t("matchEmpty")}</span>}
+              <Link href="/preferences" className="underline underline-offset-2">
+                {t("editPreferences")}
               </Link>
-              <Link href="/create" className="rr-card rr-choice-card block p-7">
-                <h2 className="text-lg font-semibold tracking-tight">{tPicker("createTitle")}</h2>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  {tPicker("createBody")}
-                </p>
+            </p>
+          </>
+        ) : null}
+      </div>
+
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {!dash && !error ? (
+        <p className="text-sm text-muted-foreground">{tCommon("loading")}</p>
+      ) : null}
+
+      {dash ? (
+        <div className="grid gap-4">
+          <NextActionBand
+            steps={steps}
+            applications={rows}
+            onChanged={replace}
+            onRebuilt={() => void load(since.current).catch(() => {})}
+          />
+          <CreditsStrip />
+          <MatchesBlock
+            digest={dash.digest}
+            matches={dash.matches}
+            matchCount={dash.match_count}
+            newMatchCount={dash.new_match_count}
+          />
+          <section className="rr-card px-5 py-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+              <h2 className="text-[0.9375rem] font-semibold tracking-tight">
+                {t("headingApplications")}{" "}
+                <span className="font-normal text-muted-foreground">
+                  · {t("applicationsLead", { tracked: rows.length, needs: steps.length })}
+                </span>
+              </h2>
+              <Link
+                href="/dashboard/applications"
+                className="text-xs text-muted-foreground underline"
+              >
+                {t("openStatusTable")}
               </Link>
             </div>
-          </div>
-        ) : null}
-
-        {resumes && resumes.length > 0 && hasTailors ? (
-          <p className="mb-4 text-xs leading-5 text-muted-foreground">{t("tailorExplainer")}</p>
-        ) : null}
-
-        {resumes && resumes.length > 0 ? (
-          <ul className="grid gap-3">
-            {groups.map(({ master, tailors }) => (
-              <li key={master.id} className="rr-card rr-row-card px-5 py-4" data-testid="dashboard-master">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium tracking-tight">{master.title || master.id}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {master.source === "upload" ? t("sourceUpload") : t("sourceCreate")}
-                      {tailors.length > 0 ? ` · ${t("tailorCount", { count: tailors.length })}` : ""}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Link href={`/editor/${master.id}`} className="rr-btn rr-btn-ghost">
-                      {t("open")}
-                    </Link>
-                    <DeleteButton
-                      label={tCommon("deleteConfirm")}
-                      onClick={() => askDelete(master, tailors.length)}
-                    />
-                  </div>
-                </div>
-                {tailors.length > 0 ? (
-                  <ul className="mt-3 grid gap-2 border-l border-rule pl-4">
-                    {tailors.map((tailor) => (
-                      <TailorRow
-                        key={tailor.id}
-                        resume={tailor}
-                        openLabel={t("open")}
-                        badge={t("tailorBadge")}
-                        deleteLabel={tCommon("deleteConfirm")}
-                        onDelete={() => askDelete(tailor, 0)}
-                      />
-                    ))}
-                  </ul>
-                ) : null}
-              </li>
-            ))}
-            {orphans.map((tailor) => (
-              <li key={tailor.id} className="rr-card rr-row-card px-5 py-4">
-                <ul>
-                  <TailorRow
-                    resume={tailor}
-                    openLabel={t("open")}
-                    badge={t("tailorBadge")}
-                    deleteLabel={tCommon("deleteConfirm")}
-                    onDelete={() => askDelete(tailor, 0)}
-                  />
-                </ul>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </main>
-      <Footer variant="app" />
-      {doomed ? (
-        <ConfirmDeleteDialog
-          title={tCommon("deleteTitle", { title: doomed.resume.title || doomed.resume.id })}
-          description={
-            doomedKind === "tailor"
-              ? tCommon("deleteTailorHint")
-              : doomed.tailorCount > 0
-                ? tCommon("deleteMasterWithTailorsHint", { count: doomed.tailorCount })
-                : tCommon("deleteMasterHint")
-          }
-          busy={deleting}
-          error={deleteError}
-          onConfirm={() => void onConfirmDelete()}
-          onClose={() => setDoomed(null)}
-          labels={{
-            confirm: tCommon("deleteConfirm"),
-            confirming: tCommon("deleting"),
-            cancel: tCommon("deleteCancel"),
-          }}
-        />
+            {/* The shape, then the few rows that need you. No metrics here:
+                those are figures you study, and studying has its own tab. */}
+            <ApplicationFlow rows={rows} bare />
+            <OngoingTable rows={rows} />
+          </section>
+        </div>
       ) : null}
-    </div>
+    </main>
   );
 }

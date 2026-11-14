@@ -14,13 +14,18 @@ from app.db import get_db
 from app.deps import require_user
 from app.models import LlmCall, Resume, User
 from app.schemas import (
+    DisclosureRecipientOut,
     TalentProfileDetail,
     TalentProfileSourceUpdate,
     TalentProfileStatus,
 )
 from app.services.consent import has_consent
 from app.services.metering import metered, preflight
-from app.services.disclosure import disclosure_count, last_disclosed_at
+from app.services.disclosure import (
+    disclosure_count,
+    last_disclosed_at,
+    recipients_of,
+)
 from app.services.profile import (
     record_build_spend,
     build_profile,
@@ -165,3 +170,32 @@ def delete_talent_profile(
     delete_profile_for_user(db, user)
     db.commit()
     return Response(status_code=204)
+
+
+@router.get("/v1/me/disclosures", response_model=list[DisclosureRecipientOut])
+def list_disclosures(
+    db: Session = Depends(get_db), user: User = Depends(require_user)
+):
+    """Who has been shown this person's profile, most recent contact first.
+
+    `services.disclosure.recipients_of` has existed and been tested since the
+    consent ledger landed, reachable from no route at all -- so the dashboard
+    could say "5 employers have seen your details" and nothing more. A count
+    is not actionable; three named employers with dates are.
+
+    Read from the ledger, not from the profile: withdrawing consent deletes
+    the profile and keeps the disclosures, and someone who re-grants still
+    needs to see who already holds the old copy.
+    """
+    rows = recipients_of(db, user)
+    rows.sort(key=lambda row: row["last_disclosed_at"], reverse=True)
+    return [
+        DisclosureRecipientOut(
+            recipient_label=row["recipient_label"],
+            recipient_contact=row["recipient_contact"],
+            first_disclosed_at=row["first_disclosed_at"].isoformat(),
+            last_disclosed_at=row["last_disclosed_at"].isoformat(),
+            disclosure_count=row["disclosure_count"],
+        )
+        for row in rows
+    ]

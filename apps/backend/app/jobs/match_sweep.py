@@ -48,6 +48,8 @@ built: see `_exclusions` for why neither digest track wants it.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import json
 
 from sqlalchemy import false, func, nulls_last, or_, select
@@ -287,12 +289,26 @@ def prefilter_query(db: Session, pref: JobPreference) -> Query:
     return _exclusions(q, pref)
 
 
-def count_matches(db: Session, pref: JobPreference) -> int:
+def count_matches(
+    db: Session, pref: JobPreference, *, since: datetime | None = None
+) -> int:
+    """How many live postings this preference matches.
+
+    `since` narrows to postings the catalogue first saw after that moment, for
+    the dashboard's "new since your last visit" line. It keys on
+    `first_seen_at` rather than `posted_at` deliberately: most of Workday
+    publishes "Posted Yesterday" as a phrase and carries no date at all, so a
+    posted_at window would silently drop a whole provider. first_seen_at is
+    when *we* learned of it, which is also the honest reading of "new to you".
+    """
     # Harmlessly redundant since the guard moved into prefilter_query; kept so
     # the cheap answer costs no round trip.
     if constrains_nothing(pref):
         return 0
-    return prefilter_query(db, pref).count()
+    q = prefilter_query(db, pref)
+    if since is not None:
+        q = q.filter(Job.first_seen_at > since)
+    return q.count()
 
 
 def match_preview(db: Session, pref: JobPreference, limit: int) -> list[Job]:

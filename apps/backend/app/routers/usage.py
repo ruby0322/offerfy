@@ -6,11 +6,19 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.deps import get_current_user, owner_context
 from app.models import User
-from app.schemas import UsageGrantOut, UsageOut, UsageTierOut, UsageTiersOut
+from app.schemas import (
+    SpendSliceOut,
+    UsageBreakdownOut,
+    UsageGrantOut,
+    UsageOut,
+    UsageTierOut,
+    UsageTiersOut,
+)
 from app.services import model_choice
 from app.services.grants import all_grants, grant_status
 from app.services.usage import (
     CREDIT_UUSD,
+    breakdown,
     GUEST,
     TIERS,
     approx_edits_left,
@@ -139,4 +147,32 @@ def read_tiers():
         )
     return UsageTiersOut(
         tiers=tiers, reset_at=window_end().isoformat(), enforced=limits_enabled()
+    )
+
+
+@router.get("/v1/usage/breakdown", response_model=UsageBreakdownOut)
+def read_breakdown(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+):
+    """Where this window's allowance went.
+
+    The companion to /v1/usage: that one says how much is left, this one says
+    what spent it, which is the half that changes behaviour. Same
+    `owner_context(ensure=False)` as the meter, so a guest sees their own
+    spend and a first-time visitor sees an empty window rather than a 401.
+    """
+    user, guest = owner_context(request, response, db, user, ensure=False)
+    data = breakdown(db, user, guest)
+    return UsageBreakdownOut(
+        period_start=data.period_start.isoformat(),
+        slices=[
+            SpendSliceOut(purpose=s.purpose, credits=s.credits, rounds=s.rounds)
+            for s in data.slices
+        ],
+        daily=[(day, round(uusd / CREDIT_UUSD, 2)) for day, uusd in data.daily],
+        total_credits=data.total_credits,
+        unmeasured_rounds=data.unmeasured_rounds,
     )

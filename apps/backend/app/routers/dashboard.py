@@ -13,7 +13,9 @@ from __future__ import annotations
 import logging
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -48,7 +50,12 @@ router = APIRouter()
 # is a cap on a preview, not a page size: "see all N" goes to /jobs, which
 # is where paging lives. Five fills the card on a phone without turning the
 # dashboard into a second jobs page.
-MATCH_PREVIEW = 5
+#
+# Raised from 5 to 12 when the Matches tab landed: the overview shows three
+# of these and the tab shows the rest grouped by the day they arrived, which
+# needs more than a card's worth. Still a cap on a preview rather than a
+# page size -- "see all" goes to /jobs, which is where paging lives.
+MATCH_PREVIEW = 12
 
 
 def digest_out(digest: Digest) -> DigestOut:
@@ -78,11 +85,37 @@ def digest_out(digest: Digest) -> DigestOut:
     )
 
 
+def _since(raw: str | None) -> datetime | None:
+    """Parse the caller's "what is new to me" marker, or None.
+
+    A bad value is treated as absent rather than as an error: the line it
+    feeds is a nicety, and refusing the whole dashboard over a malformed
+    timestamp from a stale tab would be the wrong trade. A naive value is read
+    as UTC so a comparison against first_seen_at cannot raise.
+    """
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 @router.get("/v1/dashboard", response_model=DashboardOut)
 def get_dashboard(
-    db: Session = Depends(get_db), user: User = Depends(require_user)
+    since: str | None = Query(
+        default=None,
+        description=(
+            "ISO timestamp of the caller's previous visit. When given, the "
+            "response carries new_match_count: postings first seen after it."
+        ),
+    ),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
     pref = current_or_seeded(db, user)
+    window = _since(since)
     last = last_disclosed_at(db, user)
     digest = digest_service.latest_for_user(db, user=user)
     if digest is not None:
@@ -108,6 +141,9 @@ def get_dashboard(
     return DashboardOut(
         preference=preference_out(db, user, pref),
         match_count=count_matches(db, pref),
+        new_match_count=(
+            None if window is None else count_matches(db, pref, since=window)
+        ),
         matches=[list_item(row) for row in match_preview(db, pref, MATCH_PREVIEW)],
         applications=[
             application_out(row) for row in pipeline_service.pipeline(db, user=user)

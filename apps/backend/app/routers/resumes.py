@@ -282,6 +282,7 @@ def list_resumes(
             locale=r.locale,
             kind=r.kind or "master",
             parent_resume_id=r.parent_resume_id,
+            target_label=r.target_label,
             updated_at=_iso(r.updated_at),
         )
         for r in rows
