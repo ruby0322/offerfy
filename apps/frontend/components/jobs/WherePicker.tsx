@@ -93,7 +93,13 @@ export default function WherePicker({
         </span>
       </button>
 
+      {/* See FacetMenu: on a phone this panel is a bottom sheet, and a sheet
+          needs a scrim and a way out. */}
+      <span className="jobs-sheet-scrim" aria-hidden="true" onMouseDown={close} />
       <div className="jobs-where-panel" role="menu">
+        <button type="button" className="jobs-sheet-done" onClick={close}>
+          {t("filterDone")}
+        </button>
         {detected && zone ? (
           <p className="jobs-where-detected">
             {PIN}

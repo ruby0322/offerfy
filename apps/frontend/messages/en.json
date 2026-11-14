@@ -19,7 +19,8 @@
     "usageEdits": "{used} of {limit} AI edits this week",
     "usageCredits": "{used} of {limit} credits this week",
     "usageResets": "resets Monday",
-    "planAndUsage": "Plan & usage"
+    "planAndUsage": "Plan & usage",
+    "menu": "Menu"
   },
   "footer": {
     "locales": "Language",
@@ -249,7 +250,8 @@
     "tailorFrom": "Which resume to tailor",
     "tailorUntitled": "Untitled resume",
     "tailorOneMaster": "Tailor for this role",
-    "tailorUpdated": "updated {date}"
+    "tailorUpdated": "updated {date}",
+    "filterDone": "Done"
   },
   "landing": {
     "hero": {

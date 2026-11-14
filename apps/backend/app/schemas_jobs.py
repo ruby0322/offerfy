@@ -398,6 +398,14 @@ class DigestOut(BaseModel):
 class DashboardOut(BaseModel):
     preference: JobPreferenceOut
     match_count: int
+    # The first few of those matches, in the same shape /v1/jobs returns, so
+    # the dashboard can render them with the jobs page's own row. Required, and
+    # it must stay required: a writer exists (routers/dashboard.py fills it).
+    # It was briefly removed on main while no writer existed, and this merge
+    # then deleted it again with no conflict marker -- delete-versus-unchanged
+    # resolves to deleted, so the field vanished silently while the handler
+    # that fills it merged in fine.
+    matches: list[JobListItem]
     applications: list[ApplicationOut]
     resume_health: ResumeHealthOut
     employer_views: EmployerViewsOut

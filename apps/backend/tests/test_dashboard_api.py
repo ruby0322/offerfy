@@ -11,8 +11,8 @@ from tests.test_match_sweep import _posting
 from tests.test_talent_api import LIST, _bearer, _candidate, _key
 
 TOP_LEVEL = {
-    "preference", "match_count", "applications", "resume_health", "employer_views",
-    "digest",
+    "preference", "match_count", "matches", "applications", "resume_health",
+    "employer_views", "digest",
 }
 HEALTH_KEYS = {
     "has_master", "published", "facts_state", "matching_revision_current", "needs_rebuild",
@@ -40,6 +40,7 @@ def test_the_brand_new_person_gets_every_section_empty(client, db_session):
     assert body["preference"]["facts_state"] == "missing"
     assert body["preference"]["target_functions"] == []
     assert body["match_count"] == 0
+    assert body["matches"] == []
     assert body["applications"] == []
     assert body["resume_health"] == {
         "has_master": False,
@@ -139,7 +140,7 @@ def test_a_populated_person_gets_their_own_non_default_numbers(client, db_sessio
     db_session.commit()
 
     # match_count: a saved preference matching one active, fresh, faceted job.
-    _posting(db_session, function="backend", country="TW")
+    posting = _posting(db_session, function="backend", country="TW")
     db_session.add(
         JobPreference(
             user_id=user.id,
@@ -184,6 +185,9 @@ def test_a_populated_person_gets_their_own_non_default_numbers(client, db_sessio
     body = client.get("/v1/dashboard").json()
 
     assert body["match_count"] == 1
+    # The roles themselves ride along with the count, in the jobs list shape.
+    assert [row["id"] for row in body["matches"]] == [posting.id]
+    assert body["matches"][0]["company"] == "Acme"
     pref = body["preference"]
     assert pref["target_functions"] == ["backend"]
     assert isinstance(pref["updated_at"], str) and pref["updated_at"]

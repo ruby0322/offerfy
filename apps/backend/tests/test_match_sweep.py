@@ -12,6 +12,7 @@ from app.jobs.match_sweep import (
     SENIORITY_LADDER,
     count_matches,
     expand_functions,
+    match_preview,
     prefilter_query,
 )
 from app.models import Application, Job, JobFacets, JobPreference, User
@@ -357,3 +358,57 @@ def test_the_exclusion_survives_the_constrains_nothing_guard(db_session):
     pref.user_id = me.id
     assert count_matches(db_session, pref) == 0
     assert prefilter_query(db_session, pref).count() == 0
+
+
+# --- the preview the dashboard shows beside the count ----------------------
+
+
+def test_the_preview_is_the_newest_of_the_counted_set(db_session):
+    me = _person(db_session, "preview-me")
+    base = freshness_cutoff() + timedelta(days=1)
+    ages = {}
+    for days in (1, 5, 3, 2, 4, 6):
+        job = _posting(db_session)
+        job.posted_at = base + timedelta(days=days)
+        ages[job.id] = days
+    db_session.commit()
+
+    pref = _mine(me.id)
+    assert count_matches(db_session, pref) == 6
+    # Newest first, and capped: the card is a preview, /jobs is the list.
+    assert [ages[row.id] for row in match_preview(db_session, pref, 4)] == [6, 5, 4, 3]
+
+
+def test_a_posting_with_no_posted_at_sorts_last_rather_than_first(db_session):
+    me = _person(db_session, "preview-nulls")
+    dated = _posting(db_session)
+    dated.posted_at = freshness_cutoff() + timedelta(days=2)
+    undated = _posting(db_session)
+    undated.posted_at = None
+    db_session.commit()
+    rows = match_preview(db_session, _mine(me.id), 5)
+    assert [row.id for row in rows] == [dated.id, undated.id]
+
+
+def test_the_preview_shows_nothing_the_count_does_not_count(db_session):
+    """One set, so one answer: acted-on postings are out of both."""
+    me = _person(db_session, "preview-excl")
+    acted = _posting(db_session)
+    _act_on(db_session, me, acted)
+    pref = _mine(me.id)
+    assert count_matches(db_session, pref) == 0
+    assert match_preview(db_session, pref, 5) == []
+
+
+def test_a_preference_that_constrains_nothing_previews_nothing(db_session):
+    _posting(db_session)
+    blank = _pref()
+    blank.user_id = _person(db_session, "preview-blank").id
+    assert count_matches(db_session, blank) == 0
+    assert match_preview(db_session, blank, 5) == []
+
+
+def test_a_zero_limit_asks_no_question_at_all(db_session):
+    me = _person(db_session, "preview-zero")
+    _posting(db_session)
+    assert match_preview(db_session, _mine(me.id), 0) == []

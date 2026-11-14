@@ -195,6 +195,73 @@ textarea {
 .landing-nav,
 .rr-nav {
   border-bottom: 1px solid var(--rule);
+  /* The phone drawer hangs off the header. */
+  position: relative;
+}
+
+/* --- the phone drawer ----------------------------------------------------
+   Below md the header's links are behind one button. The panel is absolute
+   rather than in the flow because the app header is a fixed 3.5rem
+   (.rr-shell .rr-nav), which would crop anything added to the row. */
+
+/* Above the drawer's scrim, so the row itself -- brand, avatar, and the
+   button that closes the drawer again -- is neither dimmed nor covered
+   while the drawer is open. */
+.nav-bar {
+  position: relative;
+  z-index: 71;
+}
+
+/* No `display` here, and none in .nav-drawer either: these rules are
+   unlayered, so they beat Tailwind's @layer utilities -- a `display` here
+   would defeat the md:hidden / md:flex that decides where each of them
+   belongs. Everything else is fair game. */
+.nav-burger {
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  margin-right: -0.4rem;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.nav-drawer {
+  position: absolute;
+  z-index: 70;
+  top: 100%;
+  left: 0;
+  right: 0;
+  gap: 0.1rem;
+  padding: 0.5rem 0.75rem calc(0.75rem + env(safe-area-inset-bottom));
+  background: var(--sheet, var(--paper));
+  color: var(--ink);
+  border-bottom: 1px solid var(--rule);
+  box-shadow: 0 16px 30px rgb(0 0 0 / 16%);
+}
+
+.nav-drawer-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--rule);
+}
+
+/* A button, not a bare div, so the one obvious way to dismiss the drawer is
+   reachable without a pointer and cannot be mistaken for page content. */
+.nav-drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  border: 0;
+  background: rgb(0 0 0 / 30%);
+  /* Or a drag on the scrim scrolls the page behind the drawer. */
+  touch-action: none;
 }
 
 .landing-footer,
@@ -3304,6 +3371,14 @@ summary.jobs-pulse-head:hover .jobs-pulse-caret {
   display: block;
 }
 
+/* Sheet furniture: on a phone a facet panel is a bottom sheet (see the
+   phone block at the end of this file), and these two are what makes it one.
+   Above that width the panel is a popover and neither exists. */
+.jobs-sheet-scrim,
+.jobs-sheet-done {
+  display: none;
+}
+
 .jobs-where-panel h3,
 .jobs-menu h3 {
   margin: 0.15rem 0.35rem 0.45rem;
@@ -3668,6 +3743,29 @@ a.jobs-menu-note:hover {
   border-top: 0;
 }
 
+/* The same rows inside a card that already draws its own box: no second
+   border, and full-bleed to the card's edge so the rules between rows read
+   as part of the card rather than as a frame inside it. The -1.25rem is
+   .rr-card's px-5. */
+.jobs-rows.is-bare {
+  margin: 0.7rem -1.25rem -0.75rem;
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+
+.jobs-rows.is-bare .jobs-row {
+  padding: 0.8rem 1.25rem;
+}
+
+.jobs-rows.is-bare > li:first-child .jobs-row {
+  border-top: 1px solid var(--rule);
+}
+
+.jobs-rows.is-bare .jobs-row-title {
+  font-size: 1rem;
+}
+
 .jobs-row:hover {
   background: var(--hover);
 }
@@ -3764,17 +3862,79 @@ a.jobs-menu-note:hover {
   }
 
   /* A popover anchored to a button inside a horizontal scroller would be
-     clipped by it, so on a phone the menus open full width under the bar. */
+     clipped by it, so on a phone a facet panel is a sheet instead.
+     It is pinned to the BOTTOM edge, which is the fix for what the first
+     attempt at this got wrong: `position: fixed` with `top: auto` resolves
+     to the element's static position measured from the top of the
+     *viewport*, and the filter bar sits most of a screen down the jobs
+     page -- so every menu opened below the fold of the phone, out of
+     reach, with no way to scroll a fixed element into view. Pinning to
+     `bottom: 0` is one position that does not depend on where the bar
+     happens to have scrolled to. */
   .jobs-menu,
   .jobs-where-panel {
     position: fixed;
-    left: 1rem;
-    right: 1rem;
+    left: 0;
+    right: 0;
+    bottom: 0;
     top: auto;
+    z-index: 60;
     width: auto;
     max-width: none;
-    max-height: 60vh;
+    /* dvh, not vh: 100vh on a phone includes the URL bar. */
+    max-height: 72dvh;
     overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0 1rem calc(1rem + env(safe-area-inset-bottom));
+    border-width: 1px 0 0;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -12px 34px rgb(0 0 0 / 22%);
+  }
+
+  /* The strip that covers the gap between a pill and its popover: there is
+     no gap to cover once the panel is at the other end of the screen. */
+  .jobs-menu::before,
+  .jobs-where-panel::before {
+    display: none;
+  }
+
+  /* Sticky, so the way out stays on screen however long the list is. It is
+     also why the sheet has no top padding of its own. */
+  .jobs-sheet-done {
+    display: block;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    width: 100%;
+    margin-bottom: 0.4rem;
+    padding: 0.7rem 0 0.55rem;
+    border: 0;
+    border-bottom: 1px solid var(--rule);
+    background: var(--sheet, var(--paper));
+    color: var(--clay);
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-align: right;
+    cursor: pointer;
+  }
+
+  .jobs-facet[data-open="1"] .jobs-sheet-scrim,
+  .jobs-where[data-open="1"] .jobs-sheet-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgb(0 0 0 / 38%);
+    /* Or a drag on the scrim scrolls the page behind the sheet. */
+    touch-action: none;
+  }
+
+  /* Finger-sized: 0.33rem of padding is a mouse target. */
+  .jobs-opt {
+    align-items: center;
+    min-height: 2.6rem;
+    padding: 0.45rem 0.55rem;
+    font-size: 0.95rem;
   }
 
   .jobs-where-countries {

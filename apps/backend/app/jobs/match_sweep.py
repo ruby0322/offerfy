@@ -50,7 +50,7 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import false, func, or_, select
+from sqlalchemy import false, func, nulls_last, or_, select
 from sqlalchemy.orm import Query, Session
 
 from app.models import Application, Job, JobFacets, JobPreference
@@ -293,3 +293,23 @@ def count_matches(db: Session, pref: JobPreference) -> int:
     if constrains_nothing(pref):
         return 0
     return prefilter_query(db, pref).count()
+
+
+def match_preview(db: Session, pref: JobPreference, limit: int) -> list[Job]:
+    """The newest few of the very same set count_matches counts.
+
+    Ordered like the jobs page's own list -- newest posted first, postings
+    with no posted_at last -- so the rows the dashboard shows are the rows
+    /jobs would put at the top, not an arbitrary page of the match set.
+
+    Reads through prefilter_query rather than re-deriving the filters, so a
+    preview can never disagree with the count above it.
+    """
+    if limit <= 0 or constrains_nothing(pref):
+        return []
+    return (
+        prefilter_query(db, pref)
+        .order_by(nulls_last(Job.posted_at.desc()), Job.id.desc())
+        .limit(limit)
+        .all()
+    )

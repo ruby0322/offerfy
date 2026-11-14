@@ -41,8 +41,10 @@ function digest(items: DigestItem[], status: Digest["status"] = "full"): Digest 
   return { status, built_at: "2026-11-09T00:00:00Z", opened_at: null, candidate_count: items.length, items };
 }
 
+// matches: [] keeps the fallback card's own rows out of these assertions --
+// this file is about which card slot 2 picks, not what either card renders.
 const slot = (d: Digest | null) =>
-  render(createElement(SlotTwo, { digest: d, matchCount: 7, hasPreference: true }));
+  render(createElement(SlotTwo, { digest: d, matchCount: 7, matches: [], hasPreference: true }));
 
 test("slot 2 shows the digest when it has items", () => {
   const html = slot(digest([item({})]));

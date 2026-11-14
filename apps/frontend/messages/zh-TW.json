@@ -19,7 +19,8 @@
     "usageEdits": "本週 AI 編輯 {used} / {limit} 次",
     "usageCredits": "本週額度 {used} / {limit}",
     "usageResets": "週一重置",
-    "planAndUsage": "方案與用量"
+    "planAndUsage": "方案與用量",
+    "menu": "選單"
   },
   "footer": {
     "locales": "語言",
@@ -249,7 +250,8 @@
     "tailorFrom": "要客製哪一份履歷",
     "tailorUntitled": "未命名履歷",
     "tailorOneMaster": "為這個職缺客製",
-    "tailorUpdated": "{date} 更新"
+    "tailorUpdated": "{date} 更新",
+    "filterDone": "完成"
   },
   "landing": {
     "hero": {

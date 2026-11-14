@@ -30,6 +30,8 @@ type Props = {
   /** Rendered under the options, e.g. "All 88 employers". */
   footer?: ReactNode;
   heading: string;
+  /** Closes the phone sheet; unused above the phone breakpoint. */
+  doneLabel: string;
 };
 
 /**
@@ -58,6 +60,7 @@ export default function FacetMenu({
   findLabel,
   footer,
   heading,
+  doneLabel,
 }: Props) {
   const { open, box, hover, toggle, close } = useHoverMenu<HTMLSpanElement>();
   const [find, setFind] = useState("");
@@ -99,7 +102,18 @@ export default function FacetMenu({
           </Link>
         ) : null}
       </span>
+      {/* On a phone the panel is a sheet over the page, so it needs the two
+          things a sheet needs: something dimmed behind it, and a way out
+          that is not "tap the exact right nothing". Both are inert above
+          the phone breakpoint, where the panel is a popover under its
+          pill. The scrim is a child of the facet, so the hook's
+          outside-click listener will not see a tap on it -- it closes the
+          sheet itself. */}
+      <span className="jobs-sheet-scrim" aria-hidden="true" onMouseDown={close} />
       <div className={`jobs-menu${wide ? " is-wide" : ""}`} role="menu">
+        <button type="button" className="jobs-sheet-done" onClick={close}>
+          {doneLabel}
+        </button>
         <h3>{heading}</h3>
         {findLabel ? (
           <input
