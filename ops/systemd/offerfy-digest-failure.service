@@ -1,0 +1,15 @@
+# systemd **user** unit — installs to ~/.config/systemd/user/, not /etc.
+# Triggered by OnFailure= on offerfy-digest.service. Writes to the journal so
+# `journalctl --user -p err` stays the single place to look (same design as
+# offerfy-ingest-failure.service). Cannot fire if the timer silently stops.
+[Unit]
+Description=Record that the Offerfy weekly digest failed
+Documentation=file:///home/ruby0322/offerfy/docs/deploy.md
+
+[Service]
+Type=oneshot
+# Nothing was sent, because nothing is ever sent: the digest is a row the
+# dashboard reads. The failure means some people have no digest row for this
+# week and will see the fallback card instead -- there is no mail queue to
+# inspect and no message to re-send.
+ExecStart=/usr/bin/systemd-cat -p err -t offerfy-digest /bin/sh -c 'echo "weekly digest build FAILED; some users may have no digest row for this week (nothing is emailed; the dashboard reads the row). Check: journalctl --user -u offerfy-digest.service -n 50"'

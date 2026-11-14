@@ -115,6 +115,12 @@ DEFAULT_DECISIONS_MODEL = "gpt-6-luna"
 # would break the `single_column` check in `ats.py`. Vertical distribution, the
 # part that is a real resume problem, is already measured exactly by
 # `page_fill` and the findings.
+# The rubrics `read_layout` may run against rendered resume pages. SCORE_RUBRICS
+# also holds `fit`, which scores a resume against a job posting and means
+# nothing about page layout; `read_layout_report` validates against this tuple
+# and the tool's enum is built from it, so the two cannot drift apart.
+LAYOUT_RUBRICS = ("density", "hierarchy")
+
 SCORE_RUBRICS: dict[str, dict[str, Any]] = {
     # 0..3 with the good answer in the middle: both ends are defects.
     "density": {
@@ -160,6 +166,34 @@ SCORE_RUBRICS: dict[str, dict[str, Any]] = {
             {
                 "label": "Strong",
                 "description": "The structure is obvious at a glance, emphasised consistently.",
+            },
+        ],
+    },
+    # Job matching (services/jobs/score.py), not layout: it lives here because
+    # `_score_questions` builds every score question from this one dict. The
+    # levels run best first and are the display tiers, so unlike the layout
+    # rubrics the endpoint's own 0..1 `score` is not read for it.
+    "fit": {
+        "instructions": (
+            "How well does this person's resume fit this job posting, "
+            "judged only on what the resume and the posting actually say?"
+        ),
+        "levels": [
+            {
+                "label": "Strong fit",
+                "description": "Meets the core requirements at the right level; an obvious one to apply to.",
+            },
+            {
+                "label": "Good fit",
+                "description": "Meets most requirements with a minor gap; a solid application.",
+            },
+            {
+                "label": "Worth a look",
+                "description": "Relevant, but short on nice-to-haves or off in level or direction; none of the gaps would by themselves rule the person out.",
+            },
+            {
+                "label": "Not a fit",
+                "description": "A different kind of role, or missing a skill or requirement the posting treats as essential.",
             },
         ],
     },
@@ -826,7 +860,7 @@ async def read_layout_report(typst_source: str, args: dict | None = None) -> dic
         value
         for value in (args.get("scores") or [])
         if isinstance(value, str)
-        and value in SCORE_RUBRICS
+        and value in LAYOUT_RUBRICS
         and not (value in seen or seen.add(value))
     ][:MAX_SCORES]
 

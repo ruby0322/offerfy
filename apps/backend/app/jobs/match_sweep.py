@@ -40,9 +40,10 @@ count_matches takes a preference that may be TRANSIENT (current_or_seeded
 returns an un-persisted row). Nothing here reads pref.id or touches the session
 with it.
 
-Scope: the applications exclusion is in place (`_exclusions`). The spec also
-excludes postings in the user's last four digests; that table does not exist
-yet, and `_exclusions` is the seam where it attaches.
+Scope: the applications exclusion is in place (`_exclusions`), and it is the
+only one. The spec's second exclusion -- postings in the user's last four
+digests -- was considered when the digest tables arrived and deliberately not
+built: see `_exclusions` for why neither digest track wants it.
 """
 
 from __future__ import annotations
@@ -207,8 +208,18 @@ def _exclusions(query: Query, pref: JobPreference) -> Query:
     a later slice runs this per active user on a schedule.
 
     A posting the person deliberately skipped keeps counting: skipping is not
-    recorded. Still to come (slice 4): the recent-digest exclusion, which
-    hooks in here beside this one.
+    recorded.
+
+    The recent-digest exclusion this was left open for is NOT wanted, and the
+    seam is closed rather than filled. Neither digest track asks for it.
+    `strong_fit` repeats a posting deliberately until the person acts on it --
+    excluding on "already digested" would make a strong match vanish because
+    they were busy for a week, and acting on it is exactly what writes the
+    applications row above. `new_this_week` is bounded by its own window
+    (`first_seen_at` inside the period), so a posting leaves it by ageing, not
+    by being excluded. Adding the exclusion here would also quietly change
+    `count_matches`, which is the number the match-count card shows and has
+    nothing to do with digests. See app/services/jobs/digest.py.
     """
     acted_on = (
         select(1)

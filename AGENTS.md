@@ -193,6 +193,7 @@ there are **three** files now, including the `OnFailure=` handler:
 ```bash
 mkdir -p ~/.config/systemd/user
 cp /home/ruby0322/offerfy/ops/systemd/offerfy-ingest*.{service,timer} ~/.config/systemd/user/
+# the weekly digest's three units install the same way (offerfy-digest*), but stay un-enabled
 systemctl --user daemon-reload
 systemctl --user enable --now offerfy-ingest.timer
 ```
@@ -344,3 +345,12 @@ silently stopped, or a host that went down, produces no event at all — that is
 by the `overdue` flag on the admin page, which needs someone to look. Closing it properly
 needs an off-host dead-man's-switch. Also note there is still **no analytics and no Search
 Console** on the site, so "is Google crawling the job pages" remains unanswerable here.
+
+### The weekly digest timer
+
+`offerfy-digest.timer` runs `app.jobs.build_digests` **Mondays 05:00 Asia/Taipei**
+(`Persistent=true`, 10 min jitter), clear of the ingest slots. Same shape as ingest: a
+systemd **user** unit in `~/.config/systemd/user/`, no sudo, `OnFailure=` writes to
+`journalctl --user -p err`. The unit files are in `ops/systemd/offerfy-digest*` (install
+with the same `cp` glob as ingest); runbook details are in `docs/deploy.md` ("Weekly job digest
+timer"). It spends real money, so it is installed but **not enabled**; enabling it is the human's last deploy step (see deploy.md).

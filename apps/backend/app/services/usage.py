@@ -528,8 +528,20 @@ def reconcile(
         select(UsageCounter.subject_kind, UsageCounter.subject_id, UsageCounter.uusd)
         .where(UsageCounter.window_start == window_start)
     ).all()
-    seen: set[tuple[str, str]] = set()
+    # A 'system' counter carries the person's id but is not charged to them
+    # (metering._system_subjects_for), while the LlmCall rows behind it are
+    # attributed to that person like any other. The two kinds are therefore one
+    # subject on this side of the comparison: summing them is what keeps the
+    # question "did anything bill without going through the meter" answerable.
+    # Comparing them separately would invent a gap on both rows at once -- the
+    # user's counter short by the system spend, the system's matched against no
+    # rows of its own.
+    counted_by_subject: dict[tuple[str, str], int] = {}
     for kind, subject_id, counted in rows:
+        key = ("user" if kind == "system" else kind, subject_id)
+        counted_by_subject[key] = counted_by_subject.get(key, 0) + int(counted)
+    seen: set[tuple[str, str]] = set()
+    for (kind, subject_id), counted in counted_by_subject.items():
         seen.add((kind, subject_id))
         if kind == "network":
             # A network subject is billed alongside its guest session, so its

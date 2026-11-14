@@ -586,9 +586,11 @@ def _user(db_session, *, sub):
 
 
 def _spend_as(db_session, user=None, guest=None, *, turns=1, input_tokens=20_000):
-    from app.services.metering import Meter, system_guard
+    from tests.test_usage import _own_spend_guard
 
-    meter = Meter(system_guard(user=user, guest=guest, purpose="chat", reason="test"))
+    from app.services.metering import Meter
+
+    meter = Meter(_own_spend_guard(user=user, guest=guest))
     for _ in range(turns):
         db_session.add(
             LlmCall(
@@ -674,12 +676,14 @@ def test_usage_overview_surfaces_a_reconciliation_gap(
     client: TestClient, db_session, monkeypatch
 ):
     """A counter with no telemetry behind it means a path billed unmetered."""
-    from app.services.metering import Meter, system_guard
+    from tests.test_usage import _own_spend_guard
 
     _admin_client(client, db_session, monkeypatch)
     user = _user(db_session, sub="sub-gap")
     # Counter only, no LlmCall row -- the shape a missed wrap would leave.
-    Meter(system_guard(user=user, purpose="chat", reason="test")).record(
+    from app.services.metering import Meter
+
+    Meter(_own_spend_guard(user=user)).record(
         {"model": "gpt-5.6-terra", "purpose": "chat", "round_index": 0,
          "input_tokens": 10_000}
     )

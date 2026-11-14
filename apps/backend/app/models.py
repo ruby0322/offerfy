@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -504,7 +505,16 @@ class JobIngestRun(Base):
 # a resume_contents snapshot is derived state built by its own model call, and
 # it happens once per drift rather than once per switch, so its cost needs to
 # be visible as its own line rather than folded into another purpose.
-LLM_CALL_PURPOSES = ("chat", "repair", "vision", "profile", "import", "extract")
+# 'match' and 'digest' are the weekly digest's two calls -- the /v1/decisions
+# scoring pass and the prose pass. They are here because their counters are
+# not: usage_counters moved for both from the day they shipped while llm_calls
+# could not admit them, so app.services.usage.reconcile saw a counter with no
+# telemetry behind it and reported a gap on the admin overview for that window
+# forever. A gap that is always there is an alarm nobody can read, which is
+# the one thing the reconciliation must not become.
+LLM_CALL_PURPOSES = (
+    "chat", "repair", "vision", "profile", "import", "extract", "match", "digest",
+)
 
 
 class LlmCall(Base):
@@ -520,7 +530,8 @@ class LlmCall(Base):
     __tablename__ = "llm_calls"
     __table_args__ = (
         CheckConstraint(
-            "purpose IN ('chat', 'repair', 'vision', 'profile', 'import', 'extract')",
+            "purpose IN ('chat', 'repair', 'vision', 'profile', 'import', "
+            "'extract', 'match', 'digest')",
             name="llm_call_purpose_values",
         ),
         # Not an XOR: a row whose subject has been erased has neither, the same
@@ -650,6 +661,12 @@ class UsageCounter(Base):
     that stops a cookie reset from minting a fresh allowance -- have no table
     to point at.
 
+    'system' is a fourth kind, added in 034: work no HTTP caller is waiting on
+    (the nightly profile refresh, the weekly digest) billed with the person's
+    id but NOT against their allowance, because they did not ask for it. Only
+    metering.system_guard writes it; `balance` reads kind='user' and so never
+    sees it, while `window_totals` sums every kind and so always does.
+
     Weekly only. The hourly burst guard still counts LlmCall rows: a per-week
     counter cannot answer "turns in the last hour", and burst is an abuse guard
     rather than an allowance, so best-effort is the right durability for it.
@@ -659,7 +676,7 @@ class UsageCounter(Base):
     __tablename__ = "usage_counters"
     __table_args__ = (
         CheckConstraint(
-            "subject_kind IN ('user', 'guest', 'network')",
+            "subject_kind IN ('user', 'guest', 'network', 'system')",
             name="usage_counter_subject_kinds",
         ),
         CheckConstraint(
@@ -1207,6 +1224,109 @@ class Application(Base):
 
     # Read-only convenience for the dashboard (pipeline eager-loads it). No
     # schema effect; the foreign key above is the whole relationship in SQL.
+    job: Mapped["Job"] = relationship(viewonly=True, lazy="select")
+
+
+class Digest(Base):
+    """One person's weekly digest: the shortlist they were shown for a week.
+
+    One row per (user, period_start), enforced by the unique constraint, so a
+    rebuild for the same week finds the existing row rather than adding a
+    second. A digest is frozen once written, apart from opened_at: nothing here
+    has an onupdate, and the page reads back exactly what was built. built_at,
+    model and input_hash record how it was made; candidate_count is how many
+    postings were scored to produce it. opened_at is stamped the first time the person
+    views it.
+
+    status ("full", "degraded", "empty") has no CHECK constraint, matching
+    JobPreference.activity and Application.status: the vocabulary lives with
+    its one writer in app.services.jobs.digest.
+    """
+
+    __tablename__ = "digests"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "period_start", name="digests_user_id_period_start_key"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    period_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    built_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    model: Mapped[str] = mapped_column(String(64), nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    candidate_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    opened_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Read-only convenience, ordered here so no call site restates it. No
+    # schema effect (no migration); digest_items.digest_id above is the whole
+    # relationship in SQL.
+    items: Mapped[list["DigestItem"]] = relationship(
+        viewonly=True,
+        lazy="select",
+        order_by="(DigestItem.track, DigestItem.rank)",
+    )
+
+
+class DigestItem(Base):
+    """One posting in one digest, with the score and prose it was shown with.
+
+    track is in the unique constraint because one posting can legitimately
+    appear in both tracks of a single digest (a fresh posting can be both a
+    strong fit and new this week); (digest_id, job_id) alone would forbid
+    exactly that. rank orders the item within its track.
+
+    The four component probabilities (requirements_met, seniority_fit,
+    location_fit, direction_fit) are stored rather than derived: they are the
+    model's judgement at build time, and recomputing them later would give a
+    different answer from the one the person was shown. A degraded digest
+    holds items with no tier, score or prose, so all of those are nullable.
+
+    Like Digest, frozen once written: no onupdate anywhere. track and tier
+    have no CHECK constraint (see app.services.jobs.digest).
+    """
+
+    __tablename__ = "digest_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "digest_id", "job_id", "track", name="digest_items_digest_id_job_id_track_key"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    digest_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("digests.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    job_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    track: Mapped[str] = mapped_column(String(16), nullable=False)
+    tier: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    fit_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gap: Mapped[str | None] = mapped_column(Text, nullable=True)
+    requirements_met: Mapped[float | None] = mapped_column(Float, nullable=True)
+    seniority_fit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_fit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    direction_fit: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Read-only convenience. No schema effect; the job_id foreign key above is
+    # the whole relationship in SQL.
     job: Mapped["Job"] = relationship(viewonly=True, lazy="select")
 
 

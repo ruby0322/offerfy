@@ -371,6 +371,30 @@ class EmployerViewsOut(BaseModel):
     last_disclosed_at: str | None
 
 
+class DigestItemOut(BaseModel):
+    job_id: str
+    job_title: str
+    company: str
+    apply_url: str
+    job_is_active: bool
+    # str, not Literal: a degraded digest's items carry "unranked", which is
+    # deliberately not one of the two real tracks and must pass through as-is.
+    track: str
+    rank: int
+    tier: str | None
+    fit_score: float | None
+    reason: str | None
+    gap: str | None
+
+
+class DigestOut(BaseModel):
+    status: str
+    built_at: str
+    opened_at: str | None
+    candidate_count: int
+    items: list[DigestItemOut]
+
+
 class DashboardOut(BaseModel):
     preference: JobPreferenceOut
     match_count: int
@@ -380,3 +404,5 @@ class DashboardOut(BaseModel):
     applications: list[ApplicationOut]
     resume_health: ResumeHealthOut
     employer_views: EmployerViewsOut
+    # None, not an empty object, when the person has no digest at all.
+    digest: DigestOut | None

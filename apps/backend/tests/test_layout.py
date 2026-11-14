@@ -427,7 +427,7 @@ async def test_out_of_range_pages_fall_back_to_the_whole_document(
 def test_every_rubric_is_an_ordered_scale_with_described_levels():
     # A score is only interpretable if its levels are ordered and distinct, and
     # the model's answer depends on how they are worded, so they are checked.
-    assert set(SCORE_RUBRICS) == {"density", "hierarchy"}
+    assert set(SCORE_RUBRICS) == {"density", "hierarchy", "fit"}
     for name, rubric in SCORE_RUBRICS.items():
         assert rubric["instructions"].endswith("?"), name
         labels = [level["label"] for level in rubric["levels"]]
@@ -689,3 +689,21 @@ def test_a_single_column_resume_lists_items_and_is_not_declared_unreliable():
         report = geometry_report(source)
         assert "geometry" not in report, source[:40]
         assert report["items"]
+
+
+@pytest.mark.anyio
+async def test_read_layout_ignores_a_rubric_that_is_not_a_layout_one(
+    openai_enabled, monkeypatch, stub_pages
+):
+    from app.services.layout import LAYOUT_RUBRICS
+    from app.services.llm import tools
+
+    stub = StubDecisions({"answers": []})
+    monkeypatch.setattr("app.services.layout.httpx.AsyncClient", stub)
+
+    await read_layout_report("source", {"scores": ["fit", "density"]})
+
+    assert [q["name"] for q in stub.calls[0]["body"]["questions"]] == ["density"]
+    # The tool's enum is fed by the same constant, so the two cannot drift.
+    assert LAYOUT_RUBRICS == ("density", "hierarchy")
+    assert "list(LAYOUT_RUBRICS)" in open(tools.__file__).read()

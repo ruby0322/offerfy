@@ -16,7 +16,8 @@ import httpx
 import pytest
 
 from app.models import GuestSession, LLM_CALL_PURPOSES, LlmCall, Resume, User
-from app.services.metering import Meter, system_guard
+from app.services.metering import Meter
+from tests.test_usage import _own_spend_guard
 from app.services.resume_content import (
     EducationEntry,
     ExtractResult,
@@ -373,7 +374,7 @@ def test_record_extract_spend_bills_a_guest_to_the_guest_column(db):
     result = ExtractResult(
         content=ResumeContent(name="Ruby"), model="m", usage={}, source_chars=3
     )
-    meter = Meter(system_guard(guest=guest, purpose="extract", reason="test"))
+    meter = Meter(_own_spend_guard(guest=guest, purpose="extract"))
 
     record_extract_spend(
         db, user=None, guest=guest, resume_id=r.id, result=result, meter=meter
@@ -393,7 +394,7 @@ def test_record_extract_spend_bills_a_signed_in_user_to_the_user_column(db):
     result = ExtractResult(
         content=ResumeContent(name="Ruby"), model="m", usage={}, source_chars=3
     )
-    meter = Meter(system_guard(user=user, purpose="extract", reason="test"))
+    meter = Meter(_own_spend_guard(user=user, purpose="extract"))
 
     record_extract_spend(
         db, user=user, guest=None, resume_id=r.id, result=result, meter=meter

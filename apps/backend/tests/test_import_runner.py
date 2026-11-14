@@ -19,6 +19,7 @@ from app.models import (
     ResumeImportStep,
     _utcnow,
 )
+from app.config import get_settings
 from app.services import import_run, usage
 from app.services.import_run import RENDER_CHECK_KEY, STALE_AFTER_SECONDS
 from app.services.import_runner import RENDER_CHECK_FAILED, run_import
@@ -530,6 +531,46 @@ async def test_import_cost_lands_in_telemetry_and_in_the_counter(
     # The reconciliation itself, which is the thing that would have been
     # permanently noisy with the rows missing.
     assert usage.reconcile(db_session, window_start=window) == []
+
+
+async def test_a_guests_import_still_counts_toward_the_guest_pool(
+    db_session, resume, run, monkeypatch, openai_enabled
+):
+    """The anti-abuse property, pinned.
+
+    An import is the person's OWN work -- they uploaded the file -- so it goes
+    through `deferred_guard`, which bills their own subject kind, and NOT
+    through `system_guard`, which bills kind 'system' for work the platform
+    decided to do on its own. The difference is not cosmetic for a guest: the
+    pool ceiling sums `("guest", "network")` only, and a cookie is free to
+    clear, so that pool is the wall and the per-session allowance is a speed
+    bump in front of it. Billing an import to 'system' takes the wall away and
+    nothing else in the suite would have noticed.
+    """
+    monkeypatch.setenv("USAGE_LIMITS_ENABLED", "true")
+    monkeypatch.setenv("GUEST_WEEKLY_CEILING_UUSD", "1000")
+    get_settings.cache_clear()
+    _stub_upload(monkeypatch)
+    scripted = ScriptedOpenAI(
+        [llm_message(content="Imported.", usage=llm_usage(input_tokens=500_000))]
+    )
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", lambda *a, **k: scripted)
+
+    await run_import(db_session, resume, run, model=OPENAI_ROW)
+    db_session.rollback()
+
+    window = usage.window_start()
+    pooled = usage.window_totals(db_session, window_start=window, kinds=("guest", "network"))
+    assert pooled > 0
+    assert usage.window_totals(db_session, window_start=window) == pooled
+
+    # The wall itself: a newcomer with a fresh cookie is converted, not served.
+    newcomer = GuestSession(key_hash="n" * 60, locale="en")
+    db_session.add(newcomer)
+    db_session.commit()
+    with pytest.raises(Exception) as caught:
+        usage.enforce_usage(db_session, None, newcomer)
+    assert caught.value.detail["limit"] == "guest_pool"
 
 
 async def test_a_superseded_runner_stops_at_its_next_event(

@@ -70,7 +70,7 @@ from app.schemas import (
 )
 from app.services.account import display_name_of
 from app.services.family import family_master
-from app.services.llm import _output_text, _responses_url
+from app.services.llm.providers.openai import output_text, responses_url
 from app.services.llm.providers import openai as openai_provider
 from app.services.model_catalog import spec_or_passthrough
 from app.services.memory import accepted_memory_texts
@@ -495,7 +495,7 @@ async def extract_facts(
         # provider's id to this endpoint.
         return Extraction(error="llm_not_configured", resume_id=resume.id)
     model = spec.id
-    url = _responses_url(settings.openai_base_url or "https://api.openai.com/v1")
+    url = responses_url(settings.openai_base_url or "https://api.openai.com/v1")
     headers = {
         "Authorization": f"Bearer {settings.openai_api_key}",
         "Content-Type": "application/json",
@@ -530,7 +530,7 @@ async def extract_facts(
         return result
     result.usage = usage_of(data)
     output = data.get("output") if isinstance(data.get("output"), list) else []
-    text = _output_text(data, output)
+    text = output_text(data, output)
     if not text.strip():
         logger.warning("profile build returned no text status=%s", data.get("status"))
         result.error = "no_output"

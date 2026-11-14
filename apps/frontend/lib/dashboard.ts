@@ -1,5 +1,6 @@
 import { apiJson } from "@/lib/api";
 import type { Application } from "@/lib/applications";
+import type { Digest } from "@/lib/digest";
 import type { FactsState, JobPreference } from "@/lib/jobs";
 
 export type ResumeHealth = {
@@ -21,6 +22,7 @@ export type Dashboard = {
   applications: Application[];
   resume_health: ResumeHealth;
   employer_views: EmployerViews;
+  digest: Digest | null;
 };
 
 export async function fetchDashboard(): Promise<Dashboard> {

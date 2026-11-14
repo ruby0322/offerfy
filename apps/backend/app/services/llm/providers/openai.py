@@ -72,7 +72,7 @@ def responses_url(base: str) -> str:
     return base + "/v1/responses"
 
 
-def _output_text(data: dict, output: list) -> str:
+def output_text(data: dict, output: list) -> str:
     """The answer text, from the convenience field or by walking the blocks.
 
     `output_text` is what the API provides and what is used when present; the
@@ -343,7 +343,7 @@ class OpenAIProvider:
         yield {
             "kind": ROUND,
             "result": RoundResult(
-                text=_output_text(data, output),
+                text=output_text(data, output),
                 calls=calls,
                 raw=output,
                 usage=_usage_counts(data),

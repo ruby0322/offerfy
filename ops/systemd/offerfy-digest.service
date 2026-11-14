@@ -1,0 +1,29 @@
+# systemd **user** unit — installs to ~/.config/systemd/user/, not /etc.
+# Agent sessions on abbey have no passwordless sudo, and a user timer plus
+# `loginctl enable-linger ruby0322` needs none. See docs/deploy.md.
+#
+# This job SPENDS MONEY (LLM scoring on users' behalf) against the production
+# database. Do not enable the timer casually; see docs/deploy.md.
+#
+# It SENDS NOTHING. Offerfy emails nobody: the job writes a `digests` row per
+# person and the dashboard reads it. There is no mail queue to check when this
+# fails, and no message in flight to chase -- see app/jobs/build_digests.py.
+[Unit]
+Description=Offerfy weekly job digest (score and write)
+Documentation=file:///home/ruby0322/offerfy/docs/deploy.md
+
+# No After=/Requires= on postgres: a user manager cannot order itself against
+# system or docker units. A run that lands before Postgres is up fails, and
+# OnFailure= records it.
+OnFailure=offerfy-digest-failure.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ruby0322/offerfy/apps/backend
+EnvironmentFile=/home/ruby0322/offerfy/.env.production
+Environment=PATH=/home/ruby0322/offerfy/apps/backend/.tools:/home/ruby0322/offerfy/apps/backend/.venv/bin:/usr/local/bin:/usr/bin
+ExecStart=/home/ruby0322/offerfy/apps/backend/.venv/bin/python -m app.jobs.build_digests
+
+TimeoutStartSec=2h
+Nice=10
+IOSchedulingClass=idle

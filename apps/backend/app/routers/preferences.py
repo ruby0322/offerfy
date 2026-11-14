@@ -92,10 +92,16 @@ async def refresh_resume_facts(
 ):
     """Build the person's resume facts now.
 
-    The only production caller of build_facts. It is a POST, not a side effect
-    of the GET, because extraction is a provider call that can take a minute
-    and spends money. No consent is needed: these facts are the person's own
-    and no employer can see them.
+    The only caller of build_facts a person waits on; the weekly digest build
+    rebuilds stale facts too, under system_guard.
+
+    A POST, not a side effect of the GET, because extraction is a provider
+    call that can take a minute and spends money. Unlike the digest's, this
+    build was asked for, so it goes through preflight and does count against
+    the person's allowance.
+
+    No consent is needed: these facts are the person's own, and no employer
+    can see them.
     """
     guard = preflight(db, user=user, guest=None, purpose="profile")
     async with metered(guard) as meter:

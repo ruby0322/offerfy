@@ -42,10 +42,6 @@ from app.services.llm.prompts import (
     SYSTEM_PROMPT,
     TEMPLATE_SWITCH_EXTRA,
 )
-from app.services.llm.providers.openai import (
-    _output_text,
-    responses_url as _responses_url,
-)
 from app.services.llm.tools import TOOLS
 from app.services.llm.turn import (
     aiter_chat_edit,
@@ -65,8 +61,6 @@ __all__ = [
     "SYSTEM_PROMPT",
     "TEMPLATE_SWITCH_EXTRA",
     "TOOLS",
-    "_output_text",
-    "_responses_url",
     "aiter_chat_edit",
     "aiter_llm_turn",
     "llm_configured",

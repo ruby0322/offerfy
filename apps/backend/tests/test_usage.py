@@ -54,6 +54,22 @@ def _resume(db_session, *, user=None, guest=None):
     return resume
 
 
+def _own_spend_guard(user=None, guest=None, purpose="chat", now=None):
+    """A Guard that bills this PERSON, without enforcing.
+
+    `deferred_guard`, the real constructor for exactly this shape: the
+    person's own work, billed to them, not enforced. Not `system_guard`, which
+    bills subject kind 'system' so background work never spends their
+    allowance, and not a hand-built `Guard`, which would make expressible the
+    thing metering.py's docstring says is not.
+    """
+    from app.services.metering import deferred_guard
+
+    return deferred_guard(
+        user=user, guest=guest, purpose=purpose, reason="test fixture", now=now
+    )
+
+
 def _spend(
     db_session,
     *,
@@ -79,9 +95,7 @@ def _spend(
     telemetry and counter are two writes with two durabilities -- and the
     reconciliation tests need both sides.
     """
-    guard = system_guard(
-        user=user, guest=guest, purpose=purpose, reason="test fixture", now=when
-    )
+    guard = _own_spend_guard(user=user, guest=guest, purpose=purpose, now=when)
     meter = Meter(guard)
     for _ in range(turns):
         db_session.add(
