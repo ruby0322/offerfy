@@ -5,7 +5,8 @@ import { useTranslations } from "next-intl";
 import EmployerLogo from "@/components/jobs/EmployerLogo";
 import { Link } from "@/i18n/navigation";
 import type { Application } from "@/lib/applications";
-import { byUrgency, nextAction, quietDays, QUIET_DAYS, readyAgeDays } from "./applications";
+import ApplicationAction from "./ApplicationAction";
+import { byUrgency, quietDays, QUIET_DAYS, readyAgeDays } from "./applications";
 
 /**
  * The few applications that need you, under the diagram on the overview.
@@ -20,7 +21,13 @@ import { byUrgency, nextAction, quietDays, QUIET_DAYS, readyAgeDays } from "./ap
 
 const SHOWN = 5;
 
-export default function OngoingTable({ rows }: { rows: Application[] }) {
+type Props = {
+  rows: Application[];
+  /** Hands the updated row back so the overview can replace it in place. */
+  onChanged: (next: Application) => void;
+};
+
+export default function OngoingTable({ rows, onChanged }: Props) {
   const t = useTranslations("dashboard");
   const now = useMemo(() => new Date(), []);
   const ongoing = useMemo(
@@ -123,16 +130,12 @@ export default function OngoingTable({ rows }: { rows: Application[] }) {
                 <td className="whitespace-nowrap py-1.5 pr-3 align-middle [font-variant-numeric:tabular-nums]">
                   {waiting(app)}
                 </td>
-                <td className="whitespace-nowrap py-1.5 text-right align-middle text-xs text-muted-foreground">
-                  {nextAction(app) === "tailor"
-                    ? t("actionTailor")
-                    : nextAction(app) === "apply"
-                      ? t("actionApply")
-                      : nextAction(app) === "confirm"
-                        ? t("didYouApply")
-                        : nextAction(app) === "logResponse"
-                          ? t("actionLogResponse")
-                          : t("metricNone")}
+                <td className="whitespace-nowrap py-1.5 text-right align-middle">
+                  <ApplicationAction
+                    app={app}
+                    onChanged={onChanged}
+                    emptyLabel={t("metricNone")}
+                  />
                 </td>
               </tr>
             ))}

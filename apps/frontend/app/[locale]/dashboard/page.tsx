@@ -200,7 +200,7 @@ export default function DashboardPage() {
             {/* The shape, then the few rows that need you. No metrics here:
                 those are figures you study, and studying has its own tab. */}
             <ApplicationFlow rows={rows} bare />
-            <OngoingTable rows={rows} />
+            <OngoingTable rows={rows} onChanged={replace} />
           </section>
         </div>
       ) : null}

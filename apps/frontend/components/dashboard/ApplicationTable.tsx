@@ -4,20 +4,14 @@ import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import EmployerLogo from "@/components/jobs/EmployerLogo";
 import { Link } from "@/i18n/navigation";
-import {
-  confirmApplied,
-  markApplied,
-  patchApplication,
-  type Application,
-  type ApplicationStatus,
-} from "@/lib/applications";
+import type { Application, ApplicationStatus } from "@/lib/applications";
+import ApplicationAction from "./ApplicationAction";
 import {
   byUrgency,
   nextAction,
   quietDays,
   QUIET_DAYS,
   readyAgeDays,
-  responseChoices,
 } from "./applications";
 
 /**
@@ -31,9 +25,6 @@ import {
  * Each row keeps exactly the one action it had before; the vocabulary of
  * transitions still lives in ./applications and the service behind it.
  */
-
-const ACTION =
-  "inline-block whitespace-nowrap border border-current px-3 py-1.5 text-sm disabled:opacity-50";
 
 const STAGE_KEY: Record<string, string> = {
   interviewing: "groupInterviewing",
@@ -72,12 +63,8 @@ function matches(app: Application, filter: Filter): boolean {
 
 export default function ApplicationTable({ rows: initial }: { rows: Application[] }) {
   const t = useTranslations("dashboard");
-  const tJobs = useTranslations("jobs");
   const [rows, setRows] = useState<Application[]>(initial);
   const [filter, setFilter] = useState<Filter>("needsYou");
-  const [choosingId, setChoosingId] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [failedId, setFailedId] = useState<string | null>(null);
   // One clock for the whole render, so two rows one second apart cannot
   // disagree about whether they are past the quiet line.
   const now = useMemo(() => new Date(), []);
@@ -96,104 +83,6 @@ export default function ApplicationTable({ rows: initial }: { rows: Application[
     setRows((prev) => prev.map((r) => (r.job_id === next.job_id ? next : r)));
   }
 
-  async function run(app: Application, op: () => Promise<Application>) {
-    setBusyId(app.job_id);
-    setFailedId(null);
-    try {
-      replace(await op());
-      setChoosingId(null);
-    } catch {
-      setFailedId(app.job_id);
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  function action(app: Application) {
-    const busy = busyId === app.job_id;
-    switch (nextAction(app)) {
-      case "tailor":
-        return (
-          <Link className={ACTION} href={`/jobs/${encodeURIComponent(app.job_id)}`}>
-            {t("actionTailor")}
-          </Link>
-        );
-      case "apply":
-        return (
-          <a
-            className={ACTION}
-            href={app.apply_url}
-            rel="noopener noreferrer"
-            target="_blank"
-            // Fire and forget: the link must open whether or not this lands.
-            onClick={() => {
-              markApplied(app.job_id).then(replace).catch(() => {});
-            }}
-          >
-            {t("actionApply")}
-          </a>
-        );
-      case "confirm":
-        return (
-          <span className="inline-flex flex-wrap items-center justify-end gap-2 text-sm">
-            <span className="text-muted-foreground">{t("didYouApply")}</span>
-            <button
-              type="button"
-              className={ACTION}
-              disabled={busy}
-              onClick={() => run(app, () => confirmApplied(app.job_id, true))}
-            >
-              {t("yes")}
-            </button>
-            <button
-              type="button"
-              className={ACTION}
-              disabled={busy}
-              onClick={() => run(app, () => confirmApplied(app.job_id, false))}
-            >
-              {t("no")}
-            </button>
-          </span>
-        );
-      case "logResponse":
-        // Closing now has two buttons, which differ only in whether anyone
-        // replied -- the one fact the status cannot carry afterwards.
-        return choosingId === app.job_id ? (
-          <span className="inline-flex flex-wrap items-center justify-end gap-2">
-            {responseChoices(app).map((c) => (
-              <button
-                key={c.key}
-                type="button"
-                className={ACTION}
-                disabled={busy}
-                onClick={() =>
-                  run(app, () =>
-                    patchApplication(app.job_id, {
-                      status: c.status,
-                      ...(c.replied === undefined ? {} : { replied: c.replied }),
-                    }),
-                  )
-                }
-              >
-                {t(c.key)}
-              </button>
-            ))}
-          </span>
-        ) : (
-          <button
-            type="button"
-            className={ACTION}
-            onClick={() => setChoosingId(app.job_id)}
-          >
-            {t("actionLogResponse")}
-          </button>
-        );
-      default:
-        return <span className="text-muted-foreground">{t("metricNone")}</span>;
-    }
-  }
-
-  /** The one time figure that matters for this row's stage. */
   function waiting(app: Application) {
     const ready = readyAgeDays(app, now);
     if (ready !== null) {
@@ -334,12 +223,11 @@ export default function ApplicationTable({ rows: initial }: { rows: Application[
                     )}
                   </td>
                   <td className="py-2 text-right align-middle">
-                    {action(app)}
-                    {failedId === app.job_id ? (
-                      <p className="mt-1 text-xs text-destructive" role="alert">
-                        {tJobs("actionFailed")}
-                      </p>
-                    ) : null}
+                    <ApplicationAction
+                      app={app}
+                      onChanged={replace}
+                      emptyLabel={t("metricNone")}
+                    />
                   </td>
                 </tr>
               ))}
