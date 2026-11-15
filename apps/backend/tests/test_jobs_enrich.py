@@ -66,6 +66,32 @@ def _add_job(db_session, **kwargs) -> Job:
     # live titles: "tech fresh" moves exactly those 8 and nothing else.
     ("2027 TECH FRESH Spring Class - Data dev", "intern"),
     ("2027 TECH FRESH Spring Class - Biz Engineering", "intern"),
+    # Early-career vocabulary the ladder could not see until 2026-11-15. Each
+    # needle was measured over the same 18,281 distinct live titles; combined,
+    # 172 move and none moves UP the ladder. Employers affected are Micron (56),
+    # NVIDIA (55), Applied Materials (41), NXP (12) and six others.
+    #
+    # "New College Grad" is the big one: 137 of those 137+25 were reading "mid",
+    # because the existing needle is "new grad" and that is not a substring of
+    # "new college grad".
+    ("ASIC Design Engineer - New College Grad 2026", "new_grad"),
+    ("Software Engineer, New College Grad- Master's (Chandler, AZ)", "new_grad"),
+    ("2027 Campus - Analog Design Engineer", "new_grad"),
+    ("FY27 Micron Korea Overseas Campus Hiring", "new_grad"),
+    ("Global Trainee Program 2027", "new_grad"),
+    ("CMF Engineering trainee", "new_grad"),
+    ("Brex Rotational Program", "new_grad"),
+    ("AI Labs Rotational Fellowship, Emerging Talent", "new_grad"),
+    # A student job while studying, not a graduate programme -- the German
+    # Werkstudent shape, which NXP and Adobe both post.
+    ("Working Student (f/m/d) Embedded Software Development", "intern"),
+    ("Werkstudent / Working student Sales", "intern"),
+    ("Registered Apprenticeship Program - Process Technician", "intern"),
+    # GUARD. 培訓 was measured as an early-career needle and REJECTED: its only
+    # match in the whole catalogue is a trainer, not a trainee. Keep this title
+    # out of new_grad, or that mistake is back. ("trainee" is safe because
+    # "trainer" is not spelled with the second e.)
+    ("Global Technical Trainer 全球培訓中心講師 - (Hsinchu based)", "unknown"),
     ("Junior Developer", "junior"),
     ("Engineering Manager, Billing", "manager"),
     ("資深後端工程師", "senior"),
