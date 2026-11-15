@@ -28,7 +28,10 @@ export default function DashboardTabs() {
   const pathname = usePathname();
 
   return (
-    <nav aria-label={t("tabOverview")} className="border-b border-rule bg-sheet">
+    // --paper, matching `.rr-nav` exactly. On --sheet the strip read as a
+    // second, lighter surface stacked under the header instead of part of
+    // it; the hairline is what separates the brand row from the tabs.
+    <nav aria-label={t("tabOverview")} className="border-b border-rule bg-paper">
       {/* Scrolls rather than wraps on a phone: six tabs on two lines reads as
           two rows of navigation instead of one. */}
       <div className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-4 sm:px-5">
