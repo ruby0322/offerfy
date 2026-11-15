@@ -344,16 +344,32 @@ class RateEvent(Base):
     guest_session: Mapped[GuestSession] = relationship(back_populates="rate_events")
 
 
-JOB_SOURCES = ("greenhouse", "lever", "ashby", "taiwanjobs")
+# Must stay in step with app.services.jobs.types.JOB_SOURCES and with the
+# job_source_values check constraint below -- test_jobs_sources.py pins all
+# three together. This tuple sat at four values for two providers' worth of
+# drift (smartrecruiters and workday were both missing) precisely because
+# nothing compared it to anything.
+JOB_SOURCES = (
+    "greenhouse",
+    "lever",
+    "ashby",
+    "smartrecruiters",
+    "workday",
+    "synology",
+    "line",
+    # Retired, but historical rows still carry it: narrowing this or the check
+    # constraint would fail against them.
+    "taiwanjobs",
+)
 
 
 class Job(Base):
     __tablename__ = "jobs"
     __table_args__ = (
         CheckConstraint(
-            # taiwanjobs is retired but stays listed: historical rows carry it.
-            "source IN ('greenhouse', 'lever', 'ashby', 'smartrecruiters', "
-            "'workday', 'line', 'taiwanjobs')",
+            # Derived from JOB_SOURCES rather than spelled out again, so the
+            # two cannot drift the way the tuple above once did.
+            "source IN (" + ", ".join(f"'{s}'" for s in JOB_SOURCES) + ")",
             name="job_source_values",
         ),
         UniqueConstraint("source", "source_id", name="jobs_source_source_id_key"),

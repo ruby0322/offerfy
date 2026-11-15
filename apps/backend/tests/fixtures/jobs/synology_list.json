@@ -1,0 +1,98 @@
+{
+ "list": [
+  {
+   "id": 204,
+   "name": "Product Developer (系統軟體開發)",
+   "job_type": "Full-time",
+   "amount_require": 3,
+   "description": "Data is what empowers today’s businesses, its aggregation drives economies and our society forward. We generate unquantifiable amounts of data each and every second, even if only a fraction of it is ever recorded. Synology designs data management solutions engineered to enable businesses to continue turning the wheels of innovation. As a Product Developer in one of Synology’s most fundamental development teams, you’ll be working on developing a robust and reliable operating system core that forms the backbone of Synology's data management solutions.\n\nYou may have the chance to work on or gain exposure to the following areas:\n\n\nWe care about tail latency < 5ms & correctness.",
+   "summary": "",
+   "location": "Taipei, Taiwan",
+   "place": "Taipei, Taiwan",
+   "job_category_id": 1,
+   "work_experience_id": 1,
+   "job_type_id": 1,
+   "job_category": "Engineering",
+   "job_category_en": "Engineering",
+   "location_id": "HQ",
+   "id_position": "HQ0000204"
+  },
+  {
+   "id": 45,
+   "name": "Software Developer",
+   "job_type": "Full-time",
+   "amount_require": 1,
+   "description": "此職務為公司各類服務面向開發系統，包含但不限於以下這些項目：客戶關係管理系統、內容管理系統、金流付費串接、人力資源系統、生產管理與訂單物流系統等。需與 PM、前端工程師、設計師及需求單位進行跨部門溝通合作\n您將與我們共同開發出高可用性、高擴展性且易於維護的服務，同時確保系統和資料的安全性\n我們正在尋找能夠從不同領域引入新想法的工程師，擴大我們的開發團隊以打造更完善的系統服務\n\n你將協助我們：\n- 以 OOP 和 MVC 概念來設計和開發與使用者互動的響應式網站服務\n- 獨立使用後端框架開發系統，並規劃及實作 Database Schema 和 RESTful APIs\n- 與 DevOps 討論系統架構，並協助佈署和上線系統\n- 與 QA 合作系統 debug 並修復問題\n- 開發和維護能重複利用的開發模組",
+   "summary": "",
+   "location": "Taipei, Taiwan",
+   "place": "Taipei, Taiwan",
+   "job_category_id": 3,
+   "work_experience_id": 6,
+   "job_type_id": 1,
+   "job_category": "Information Management",
+   "job_category_en": "Information Management",
+   "location_id": "HQ",
+   "id_position": "HQ0000045"
+  },
+  {
+   "id": 48,
+   "name": "Graphic Designer",
+   "job_type": "Full-time",
+   "amount_require": 1,
+   "description": "發揮你的想像力和設計能力詮釋品牌形象，與行銷部門合作活動與展覽等概念與設計；與產品部門協助完成各部門的網頁、平面設計需求。若你擁有揮灑不盡的創意、對於視覺設計有敏銳度、喜歡團隊合作、擅於溝通，歡迎加入我們\n\n你將協助我們：\n- 官網網頁設計\n- 平面設計 (含品牌視覺、海報、包裝、產品型錄、Banner、EDM、FB 貼文等)\n- 設計影片圖稿\n- 設計活動/展覽之視覺形象與概念發想",
+   "summary": "",
+   "location": "Taipei, Taiwan",
+   "place": "Taipei, Taiwan",
+   "job_category_id": 6,
+   "work_experience_id": 3,
+   "job_type_id": 1,
+   "job_category": "Design",
+   "job_category_en": "Design",
+   "location_id": "HQ",
+   "id_position": "HQ0000048"
+  },
+  {
+   "id": 241,
+   "name": "Product Sales Specialist",
+   "job_type": "Full-time",
+   "amount_require": 1,
+   "description": "身為 Product Sales Specialist，您將成為 Synology、代理經銷夥伴與終端客戶間最重要的橋樑，協助企業導入 Synology 監控解決方案，優化客戶安防管理、即時蒐集反饋，協助各項售前售後服務，並維持良好的長期合作關係。另外，您須負責台灣監控市場開發，挖掘並培養富潛力且專業技術能力的監控協力夥伴，協助提升 Synology 監控解決方案的銷售表現，打造 Synology 的監控生態系。\n\n你將協助我們：\n- 客戶開發、教育訓練與經營客戶關係，維繫重點客戶與夥伴關係\n- 向客戶簡報產品特色，提供技術諮詢與整體解決方案規劃\n- 每日專案進度回報、審核及追蹤\n- 收集和編譯用戶的反饋\n- 與產品經理及技術開發團隊合作，以滿足客戶的需求\n- 產品售前規劃、舉辦客戶端產品教育訓練、售後協調服務\n- 其他主管交辦事項",
+   "summary": "",
+   "location": "Taipei, Taiwan",
+   "place": "Taipei, Taiwan",
+   "job_category_id": 4,
+   "work_experience_id": 1,
+   "job_type_id": 1,
+   "job_category": "Sales & Customer Service",
+   "job_category_en": "Sales & Customer Service",
+   "location_id": "HQ",
+   "id_position": "HQ0000241"
+  },
+  {
+   "id": 238,
+   "name": "Executive Driver (行政專車司機)",
+   "job_type": "Full-time",
+   "amount_require": 1,
+   "description": "你將協助我們\n- 日常接送：配合主管團隊之行程規劃，負責公司重要客戶、外賓、商務會議、宴會及各項行程之安全接送。\n- 車輛維護：負責公務車輛每日內外清潔及定期保養、檢驗、與維修申報，確保車況維持最佳安全狀態。\n- 行程規劃：出發前確認路線、路況及天氣，規劃最佳行駛路線，確保準時抵達。\n- 安全應變：嚴格遵守交通法規，保持平穩安全駕駛；遇突發狀況（如車禍、故障、塞車或天氣異動），須沉穩應變即時回報。\n- 機動庶務：主管未安排行程時，配合公司指定公務（如文件遞送、總務行政庶務、櫃檯或修繕協助等）。",
+   "summary": "",
+   "location": "Taipei, Taiwan",
+   "place": "Taipei, Taiwan",
+   "job_category_id": 7,
+   "work_experience_id": 12,
+   "job_type_id": 1,
+   "job_category": "Operations & Management",
+   "job_category_en": "Operations & Management",
+   "location_id": "HQ",
+   "id_position": "HQ0000238"
+  }
+ ],
+ "total": 5,
+ "jobType": [
+  {
+   "id": 1,
+   "string_key": "position.job_type_fulltime"
+  }
+ ],
+ "jobCate": [],
+ "workExperi": []
+}

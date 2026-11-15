@@ -18,6 +18,7 @@ from app.services.jobs.line import fetch_line
 from app.services.jobs.scope import ScopeRules, default_scope, title_in_scope
 from app.services.jobs.smartrecruiters import fetch_smartrecruiters
 from app.services.jobs.store import expire_missing, record_run, upsert_jobs
+from app.services.jobs.synology import fetch_synology
 from app.services.jobs.spotlight import rescore_all
 from app.models import Job
 from app.services.jobs.types import Board, NormalizedJob
@@ -118,8 +119,9 @@ def ingest_board(
     # Scope before seen_ids, deliberately: a posting we no longer carry must drop
     # out of seen_ids so expire_missing deactivates it on this very pass. Filtering
     # afterwards would leave every out-of-scope page we ever ingested indexed
-    # forever. smartrecruiters has already scoped itself -- it has to, to avoid a
-    # detail request per posting -- so this is a no-op for it.
+    # forever. smartrecruiters and synology have already scoped themselves --
+    # they have to, to avoid a detail request per posting -- so this is a no-op
+    # for them.
     kept = [job for job in fetched if title_in_scope(job.title, rules)]
     upserted_ids = upsert_jobs(db, kept)
     # Enrichment is derived state, not the posting itself: a bug here must
@@ -267,4 +269,7 @@ def _fetch(
         return fetch_smartrecruiters(client, board.slug, board.company, rules=rules)
     if board.source == "line":
         return fetch_line(client, board.slug, board.company, rules=rules)
+    if board.source == "synology":
+        # board.slug is a location id here, not a company slug -- see synology.py.
+        return fetch_synology(client, board.slug, board.company, rules=rules)
     raise ValueError(f"unsupported board source: {board.source}")

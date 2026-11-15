@@ -1,0 +1,141 @@
+{
+ "204": {
+  "data": {
+   "id": 204,
+   "place": "Taipei, Taiwan",
+   "name": "Product Developer (系統軟體開發)",
+   "location": "Taipei, Taiwan",
+   "job_type": "Full-time",
+   "amount_require": 3,
+   "degree_require": [
+    "Bachelor",
+    "Master"
+   ],
+   "major_prefer": "",
+   "lang_ability": "",
+   "skill": "",
+   "other_condition": "You are expected to have:\n- Experience in system or cloud administration\n- Proficiency in C/C++ and Python or Go\n- Familiarity with system programming in Linux environments\n- Good communication skills\n- Strong understanding of algorithms and data structures\n- Strong analytical and problem-solving skills",
+   "reference_require": "",
+   "team_desc": "Synology's product developers create cutting-edge products used by millions of users around the world. Our portfolio of data storage, networking, and surveillance products are powered by our own software solutions, giving us a unique edge in today's crowded market. We are looking for engineers that can make an impact, bringing in fresh ideas from different areas to help expand our team of high-energy developers.",
+   "description": "Data is what empowers today’s businesses, its aggregation drives economies and our society forward. We generate unquantifiable amounts of data each and every second, even if only a fraction of it is ever recorded. Synology designs data management solutions engineered to enable businesses to continue turning the wheels of innovation. As a Product Developer in one of Synology’s most fundamental development teams, you’ll be working on developing a robust and reliable operating system core that forms the backbone of Synology's data management solutions.\n\nYou may have the chance to work on or gain exposure to the following areas:\n\n\nWe care about tail latency < 5ms & correctness.",
+   "summary": "",
+   "salary_type": 1,
+   "salary_from": null,
+   "salary_to": null,
+   "salary_up_flag": false,
+   "currency": "NT$",
+   "cate_id": 1,
+   "active": true,
+   "job_category": "Engineering",
+   "job_category_en": "Engineering",
+   "job_category_pic_key": "engineering",
+   "work_experience": "Not required",
+   "salary_type_str": "Salary Negotiable"
+  },
+  "maintain_mode": false
+ },
+ "45": {
+  "data": {
+   "id": 45,
+   "place": "Taipei, Taiwan",
+   "name": "Software Developer",
+   "location": "Taipei, Taiwan",
+   "job_type": "Full-time",
+   "amount_require": 1,
+   "degree_require": [
+    "Bachelor",
+    "Master"
+   ],
+   "major_prefer": "",
+   "lang_ability": "",
+   "skill": "",
+   "other_condition": "我們期待你具備：\n- 熟悉 PHP 或至少一種 OO 語言\n- 熟悉 MySQL 或至少一種資料庫\n- 獨立開發網站的能力, 會使用 MVC 架構或相關 framework\n- 與前端工程師討論 API 串接格式之實作經驗\n- Git 版本控制系統使用經驗\n- 個性認真、配合度高、溝通能力佳、企圖心強，並有強烈學習意願\n\n加分條件：\n- 熟悉 PHP (Laravel) \n- 熟悉 PostgreSQL\n- 有雲端服務 AWS/Azure/GCP 佈署系統經驗\n- 有網站前端的開發知識\n- 熟悉前端框架及 SPA 開發流程等\n- 熟悉串接金流功能者 (E.g. Stripe, Paypal)",
+   "reference_require": "",
+   "team_desc": "資訊管理部門的系統開發小組以開發各式各樣的 Web Application 為主要任務，對外達到增加營收及產品曝光度，對內則增加同仁工作效率為目標\n我們重視並希望透過這些系統提供給使用者流暢的體驗，使我們能在市場中脫穎而出",
+   "description": "此職務為公司各類服務面向開發系統，包含但不限於以下這些項目：客戶關係管理系統、內容管理系統、金流付費串接、人力資源系統、生產管理與訂單物流系統等。需與 PM、前端工程師、設計師及需求單位進行跨部門溝通合作\n您將與我們共同開發出高可用性、高擴展性且易於維護的服務，同時確保系統和資料的安全性\n我們正在尋找能夠從不同領域引入新想法的工程師，擴大我們的開發團隊以打造更完善的系統服務\n\n你將協助我們：\n- 以 OOP 和 MVC 概念來設計和開發與使用者互動的響應式網站服務\n- 獨立使用後端框架開發系統，並規劃及實作 Database Schema 和 RESTful APIs\n- 與 DevOps 討論系統架構，並協助佈署和上線系統\n- 與 QA 合作系統 debug 並修復問題\n- 開發和維護能重複利用的開發模組",
+   "summary": "",
+   "salary_type": 1,
+   "salary_from": null,
+   "salary_to": null,
+   "salary_up_flag": false,
+   "currency": "NT$",
+   "cate_id": 3,
+   "active": true,
+   "job_category": "Information Management",
+   "job_category_en": "Information Management",
+   "job_category_pic_key": "info_management",
+   "work_experience": "1 years and above",
+   "salary_type_str": "Salary Negotiable"
+  },
+  "maintain_mode": false
+ },
+ "241": {
+  "data": {
+   "id": 241,
+   "place": "Taipei, Taiwan",
+   "name": "Product Sales Specialist",
+   "location": "Taipei, Taiwan",
+   "job_type": "Full-time",
+   "amount_require": 1,
+   "degree_require": [
+    "Bachelor",
+    "Master"
+   ],
+   "major_prefer": "",
+   "lang_ability": "",
+   "skill": "",
+   "other_condition": "我們期待你具備：\n- 1 年以上的銷售經驗\n- 具有業務軔性",
+   "reference_require": "",
+   "team_desc": "Synology 產品在家用與商用市場皆擁有廣大市占率，我們的解決方案包含檔案管理 & 生產力、儲存、資料保護 & 備份、安全監控。\n \nSynology 監控系統整合市售 200 個品牌、支援超過 20,000 款攝影裝置，更可在單一入口網頁集中管理影像伺服器，進行多站點部署與監控，提升管理效率，幫助企業做到完善監控，滿足安防領域需求，更能透過智慧功能，提升企業生產力。目前，靠「整合生態系」Synology 征服全球市場，掌控全球三百萬支攝影機。",
+   "description": "身為 Product Sales Specialist，您將成為 Synology、代理經銷夥伴與終端客戶間最重要的橋樑，協助企業導入 Synology 監控解決方案，優化客戶安防管理、即時蒐集反饋，協助各項售前售後服務，並維持良好的長期合作關係。另外，您須負責台灣監控市場開發，挖掘並培養富潛力且專業技術能力的監控協力夥伴，協助提升 Synology 監控解決方案的銷售表現，打造 Synology 的監控生態系。\n\n你將協助我們：\n- 客戶開發、教育訓練與經營客戶關係，維繫重點客戶與夥伴關係\n- 向客戶簡報產品特色，提供技術諮詢與整體解決方案規劃\n- 每日專案進度回報、審核及追蹤\n- 收集和編譯用戶的反饋\n- 與產品經理及技術開發團隊合作，以滿足客戶的需求\n- 產品售前規劃、舉辦客戶端產品教育訓練、售後協調服務\n- 其他主管交辦事項",
+   "summary": "",
+   "salary_type": 1,
+   "salary_from": null,
+   "salary_to": null,
+   "salary_up_flag": false,
+   "currency": "NT$",
+   "cate_id": 4,
+   "active": true,
+   "job_category": "Sales & Customer Service",
+   "job_category_en": "Sales & Customer Service",
+   "job_category_pic_key": "sales_cs",
+   "work_experience": "Not required",
+   "salary_type_str": "Salary Negotiable"
+  },
+  "maintain_mode": false
+ },
+ "238": {
+  "data": {
+   "id": 238,
+   "place": "Taipei, Taiwan",
+   "name": "Executive Driver (行政專車司機)",
+   "location": "Taipei, Taiwan",
+   "job_type": "Full-time",
+   "amount_require": 1,
+   "degree_require": [
+    "Bachelor"
+   ],
+   "major_prefer": "",
+   "lang_ability": "",
+   "skill": "",
+   "other_condition": "我們期待你具備:\n- 駕駛經驗：具備中華民國有效之小客車駕駛執照，實際駕駛工作經驗滿 5 年以上，具外賓專責司機或租賃車司機經驗者優先考慮。\n- 優良紀錄：需提供「警察刑事紀錄證明書」（良民證）及「監理所無肇事紀錄證明」。\n- 基本素養：儀表端正、不嚼檳榔、不吸菸（或不於車內及工作時間吸菸）、無不良嗜好，溝通態度沉穩有禮。守時負責、品行端正，具備良好的溝通能力與危機處理應變能力。\n\n加分條件\n- 熟稔大台北地區道路與交通特性\n- 具基本英文或商務對話能力者尤佳\n- 具基本汽車故障排除知識。",
+   "reference_require": "",
+   "team_desc": "行政管理團隊，被賦予文化塑造和制度推行的使命，依組織需求及策略規劃發想出最佳行政管理措施，透過內、外部團隊合作，激盪創新的火花。在這裡每天都是新的體驗，你將有機會學習團隊溝通合作、規劃與實踐專案，每個成員都能提出自己的想法以解決問題。歡迎喜歡跳脫框架的你加入我們，一同成長與學習",
+   "description": "你將協助我們\n- 日常接送：配合主管團隊之行程規劃，負責公司重要客戶、外賓、商務會議、宴會及各項行程之安全接送。\n- 車輛維護：負責公務車輛每日內外清潔及定期保養、檢驗、與維修申報，確保車況維持最佳安全狀態。\n- 行程規劃：出發前確認路線、路況及天氣，規劃最佳行駛路線，確保準時抵達。\n- 安全應變：嚴格遵守交通法規，保持平穩安全駕駛；遇突發狀況（如車禍、故障、塞車或天氣異動），須沉穩應變即時回報。\n- 機動庶務：主管未安排行程時，配合公司指定公務（如文件遞送、總務行政庶務、櫃檯或修繕協助等）。",
+   "summary": "",
+   "salary_type": 3,
+   "salary_from": "42,000",
+   "salary_to": "50,000",
+   "salary_up_flag": false,
+   "currency": "NT$",
+   "cate_id": 7,
+   "active": true,
+   "job_category": "Operations & Management",
+   "job_category_en": "Operations & Management",
+   "job_category_pic_key": "operations",
+   "work_experience": "5 years and above",
+   "salary_type_str": "Monthly Salary NT$ 42,000 - 50,000"
+  },
+  "maintain_mode": false
+ }
+}

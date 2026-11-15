@@ -234,8 +234,8 @@ held 120 boards of which **64 404ed on every pass** — companies that had moved
 that never used Greenhouse/Lever/Ashby at all (TSMC, MediaTek, Shopee, Netflix, Shopify,
 Zendesk…). Those were not lost inventory: they had never returned a single job. They were
 removed, 29 were repaired by correcting the provider or slug (Anthropic is on Greenhouse,
-not Ashby; Anduril is `andurilindustries`), and the file is now 81 boards that all answer
-(79 until Microsoft and LINE were added 2026-11-15).
+not Ashby; Anduril is `andurilindustries`), and the file is now 82 boards that all answer
+(79 until Microsoft, Synology and LINE were added 2026-11-15).
 
 Before adding a board, **probe it**; do not assume. The three endpoints are in
 `greenhouse.py` / `lever.py` / `ashby.py`, plus `smartrecruiters.py`. Note that probing
@@ -381,6 +381,64 @@ descriptions are **not** in the list payload, so each posting costs its own requ
 publishes a structured `function` per posting. Both facts shape the fetcher — it scopes
 from the cheap list metadata first so a posting we will not keep never costs a detail call.
 
+**Synology has a provider of its own** (`services/jobs/synology.py`, migration
+`038_synology_source`, added 2026-11-15, the same day as `line` and independently of it —
+neither is "the fifth", they are two). It is on none of the four ATS providers (every
+slug tried 404s, and its SmartRecruiters 200 is the `totalFound: 0` trap) and it has no
+Workday tenant (422, the same status the nonsense control tenant returns). What it has is
+its own keyless JSON API at `career.synology.com/api`, with `robots.txt` set to
+`Disallow:` with an empty value — allow all. Two endpoints, no key and no token:
+
+- `GET /api/enum/{location}?locale=en-global` is the **list**, and it is unusually cheap:
+  the full `description` is **inline on every row** — byte-identical to the detail call's,
+  checked across all 32 postings. `HQ` is the only location and the endpoint is **not
+  paginated**, so one request returns the whole board, Vietnam and Thailand postings
+  included.
+- `GET /api/position/{location}/{id}?locale=en-global` is the detail, and the only thing
+  it adds that we keep is **`other_condition`** — the requirements block, filled on 32 of
+  32 and absent from the list.
+
+So this source pays for a detail call it does not strictly need, and that is deliberate:
+`other_condition` is the half of a posting this product cares most about, and the whole
+board is 32 postings (~19 after scoping), where the same choice at workday would be 12k.
+**Because the list row is already a complete posting, a detail call that fails falls back
+to it rather than dropping the posting** — `_detail_or_none` swallows, and
+`test_a_failed_detail_call_keeps_the_posting` pins it. `MAX_DETAIL_CALLS` is a cost guard
+of the same kind: a posting past it still ships from its list row, because a cap that
+dropped postings would take them out of `seen_ids` and have `expire_missing` deactivate
+live jobs.
+
+**`slug` is a location id (`HQ`), not an employer handle** — the one row in
+`ats_boards.json` where that is true, because Synology publishes one API for the company
+rather than a board per employer. It stays in the slug field so `source_id` is `HQ:204`
+and `expire_missing`'s prefix scopes per location exactly as it does elsewhere;
+`test_jobs_sources.py` pins it, since a well-meaning "fix" to `synology` would ask the API
+for a location that does not exist and read as a missing board.
+
+Two quirks worth knowing. **There is no posted date anywhere, in either payload, at any
+locale**, so `posted_at` is always `None` — not an oversight to be repaired by inventing
+one. And the API serves **plain text**, not HTML: handing that to `sanitize_html`
+unchanged renders a posting as one unbroken paragraph, so `_html_from_text` builds the
+paragraphs and lists. Note what it has to do with bullets — Synology writes a list with
+its lead-in inside the same block ("You are expected to have:" and then a column of
+`- `), and in zh-TW it mixes `- ` with fullwidth `－` in one list, so lines are grouped
+into runs rather than blocks being classified whole. Titles are mixed zh-TW/English
+(`Product Developer (資安系統程式開發)`), and the English keep needle is what scopes them;
+that works only because `title_in_scope` keeps unknown titles.
+
+**Adding a `JOB_SOURCES` value is the one catalogue change that is NOT safe to land
+before its migration.** Every other board edit is: `offerfy-ingest.service` runs
+`-m app.jobs.ingest_catalog` out of this shared checkout, with no build step, so a new row
+in `ats_boards.json` is simply live at the next 6-hourly pass. A new *source* is different,
+because the row goes live against a `job_source_values` check constraint that production
+has not widened yet, and **`upsert_jobs` sits outside `ingest_board`'s `try`** — only
+`_fetch` is inside it. So the IntegrityError does not degrade to one failed board the way a
+dead ATS does; it propagates out through `ingest_catalog` and takes down the rest of the
+pass with it, including `rescore_all`. Run `alembic upgrade head` (deploy.md hard rule 11)
+*before* the next timer fire, not as a follow-up. Verified 2026-11-15 by migrating a
+throwaway Postgres and running `ingest_board` against it end to end; do it that way rather
+than against prod.
+
 **TaiwanJobs is retired** (migration `015_scope_catalog`). It was 1,549 active postings of
 which **91 were technical** — the rest room attendants, delivery drivers, caregivers. The
 source is gone, but `'taiwanjobs'` stays in `JOB_SOURCES` and in the `job_source_values`
@@ -415,7 +473,7 @@ from imagination is how you lose "Infrastructure Security Engineer" to the word 
 
 Workday reaches the competitive semiconductor tier nothing else could — NVIDIA, Micron,
 Applied Materials, Intel, NXP, Marvell — plus CrowdStrike, Zendesk, Red Hat, Salesforce,
-Adobe and Workday itself, plus Trend Micro. **14 boards, ~12k postings**, in
+Adobe and Workday itself, plus Trend Micro and Logitech. **15 boards, ~12k postings**, in
 `apps/backend/data/workday_boards.json`.
 
 **Trend Micro joined 2026-11-15 and brings two sites on one tenant.**
@@ -445,10 +503,28 @@ needle has to be checked against Japanese titles on every other board (NVIDIA, M
 Intel all post in Japan) and against 営業技術, which is a real engineering role. Measure it
 before adding it.
 
+**Logitech joined 2026-11-15; its site slug is `Logitech`, not `External`.**
+`logitech.wd5` answers 200 with 220 postings on site `Logitech`, and **404s on `External`**
+— worth knowing because `External` is the slug nine of the other fourteen boards use, so the
+obvious first guess is the one that fails here. 145 of the 220 pass `title_in_scope` (66%),
+the rest marketing, finance and territory sales. It brings Hsinchu and Taipei hardware and
+firmware roles, which is the nearest the catalogue gets to the Taiwanese hardware tier that
+TSMC and MediaTek would have supplied.
+
 **It is not TSMC or MediaTek, and it cannot be.** Checked 2026-10-24: TSMC returns 403 to
 every request including its own `robots.txt`, and MediaTek runs a bespoke Strapi site with
 no public jobs API. Both would need scraping, which this project does not do. Do not add a
 Workday row for either; they have no tenant.
+
+**TSMC was re-probed 2026-11-15 on request and nothing has changed.** `careers.tsmc.com`,
+`www.tsmc.com/english/careers` and `careers.tsmc.com/robots.txt` all still return 403 with a
+~5.5 KB block page, and `tsmc`, `tsmcus`, `tsmcna`, `tsmcarizona`, `taiwansemiconductor`,
+`tsmcamerica`, `tsmcnorthamerica` and `tsmceurope` all 404 on Greenhouse, Lever and Ashby;
+`tsmc.wd1`, `wd3` and `wd5` each answer **422, the same status the nonsense control tenant
+returns**, so none of that is evidence of a tenant. Note for whoever re-checks next: the
+Workday wildcard host answered **422** for a nonsense tenant this time, not the 406 recorded
+above — so compare a candidate against a control slug in the same pass rather than against a
+status written down a month ago.
 
 **Adding a board needs a confirmed 200, not a guess.** `*.myworkdayjobs.com` is a wildcard
 host, so a nonsense tenant like `mtk.wd1` still answers 406 — that is not evidence of
