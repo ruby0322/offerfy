@@ -1863,6 +1863,17 @@ textarea {
   border-color: var(--clay);
 }
 
+/* Row-sized buttons: the ones that sit inside a list row rather than at the
+   end of a form. Declared as `.rr-btn.rr-btn-sm` on purpose -- these rules are
+   unlayered, so a Tailwind `px-2.5 py-1` utility would lose to `.rr-btn`'s own
+   padding and the button would silently stay full height. */
+.rr-btn.rr-btn-sm {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.75rem;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
 .rr-btn-ghost {
   background: var(--sheet);
   color: var(--ink);
@@ -3570,7 +3581,8 @@ summary.jobs-pulse-head:hover .jobs-pulse-caret {
    lib/use-hover-menu.ts handles the rest (a diagonal exit, a slow hand); this
    handles the common case without even starting that timer. */
 .jobs-menu::before,
-.jobs-where-panel::before {
+.jobs-where-panel::before,
+.jobs-tailor-menu::before {
   content: "";
   position: absolute;
   top: -0.45rem;

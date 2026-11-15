@@ -1,7 +1,7 @@
 "use client";
 
 import { useFormatter, useTranslations } from "next-intl";
-import EmployerLogo from "@/components/jobs/EmployerLogo";
+import MatchRow from "./MatchRow";
 import { Link } from "@/i18n/navigation";
 import type { Digest } from "@/lib/digest";
 import type { JobListItem } from "@/lib/jobs";
@@ -97,40 +97,21 @@ export default function MatchesBlock({
           ) : (
             <ul className="mt-1">
               {picks.map((item) => (
-                <li
+                <MatchRow
                   key={item.job_id}
-                  className="flex items-center gap-2.5 border-b border-rule py-2 last:border-b-0"
-                >
-                  <EmployerLogo company={item.company} size="sm" />
-                  <span className="min-w-0 flex-1">
+                  jobId={item.job_id}
+                  title={item.job_title}
+                  company={item.company}
+                  score={item.fit_score}
+                  action={
                     <Link
                       href={`/jobs/${encodeURIComponent(item.job_id)}`}
-                      className="block truncate text-[0.8125rem] font-medium"
-                    >
-                      {item.job_title}
-                    </Link>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {item.company}
-                    </span>
-                  </span>
-                  {/* Fixed width, so the scores form a column you can read
-                      down however wide the button beside them is. */}
-                  <span
-                    className={`w-8 shrink-0 text-right font-display text-[1.05rem] font-medium [font-variant-numeric:tabular-nums] ${
-                      (item.fit_score ?? 0) >= 0.8 ? "text-success" : ""
-                    }`}
-                  >
-                    {item.fit_score === null ? "—" : Math.round(item.fit_score * 100)}
-                  </span>
-                  <span className="min-w-[4.75rem] shrink-0 text-right">
-                    <Link
-                      href={`/jobs/${encodeURIComponent(item.job_id)}`}
-                      className="rr-btn whitespace-nowrap px-2.5 py-1 text-xs"
+                      className="rr-btn rr-btn-sm"
                     >
                       {t("digestTailor")}
                     </Link>
-                  </span>
-                </li>
+                  }
+                />
               ))}
             </ul>
           )}
@@ -146,41 +127,23 @@ export default function MatchesBlock({
           ) : (
             <ul className="mt-1">
               {fresh.map((job) => (
-                <li
+                <MatchRow
                   key={job.id}
-                  className="flex items-center gap-2.5 border-b border-rule py-2 last:border-b-0"
-                >
-                  <EmployerLogo company={job.company} size="sm" />
-                  <span className="min-w-0 flex-1">
+                  jobId={job.id}
+                  title={job.title}
+                  company={job.company}
+                  meta={job.location}
+                  score={null}
+                  unscoredTitle={t("freshNotScored")}
+                  action={
                     <Link
                       href={`/jobs/${job.id}`}
-                      className="block truncate text-[0.8125rem] font-medium"
-                    >
-                      {job.title}
-                    </Link>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {job.company}
-                      {job.location ? ` · ${job.location}` : ""}
-                    </span>
-                  </span>
-                  {/* An em dash in the same slot as a score, rather than the
-                      words "not scored" on every row: the column header says
-                      it once, and the rows stay aligned. */}
-                  <span
-                    className="w-8 shrink-0 text-right font-display text-[1.05rem] font-medium text-muted-foreground"
-                    title={t("freshNotScored")}
-                  >
-                    —
-                  </span>
-                  <span className="min-w-[4.75rem] shrink-0 text-right">
-                    <Link
-                      href={`/jobs/${job.id}`}
-                      className="rr-btn rr-btn-ghost whitespace-nowrap px-2.5 py-1 text-xs"
+                      className="rr-btn rr-btn-ghost rr-btn-sm"
                     >
                       {t("open")}
                     </Link>
-                  </span>
-                </li>
+                  }
+                />
               ))}
             </ul>
           )}

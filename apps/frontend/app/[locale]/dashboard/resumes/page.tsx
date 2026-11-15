@@ -237,7 +237,7 @@ export default function ResumesPage() {
                   <span className="truncate">{updated(resume)}</span>
                 </p>
                 <div className="mt-2 flex items-center gap-1">
-                  <Link href={`/editor/${resume.id}`} className="rr-btn px-2.5 py-1 text-xs">
+                  <Link href={`/editor/${resume.id}`} className="rr-btn rr-btn-sm">
                     {t("open")}
                   </Link>
                   <button

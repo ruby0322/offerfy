@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "next-intl";
 import DigestCard from "@/components/dashboard/DigestCard";
-import EmployerLogo from "@/components/jobs/EmployerLogo";
+import MatchRow from "@/components/dashboard/MatchRow";
 import { COUNTRY_KEYS, FUNCTION_KEYS, SENIORITY_KEYS } from "@/components/jobs/facet-labels";
 import { Link, useRouter } from "@/i18n/navigation";
 import { ApiError } from "@/lib/api";
@@ -141,6 +141,7 @@ export default function MatchesPage() {
             {dash.digest ? (
               <div className="mt-3">
                 <DigestCard
+                  hideHeading
                   digest={dash.digest}
                   fallback={
                     <p className="text-sm text-muted-foreground">{t("picksEmpty")}</p>
@@ -179,39 +180,25 @@ export default function MatchesPage() {
                   </p>
                   <ul className="mt-1">
                     {items.map((job) => (
-                      <li
+                      <MatchRow
                         key={job.id}
-                        className="flex items-center gap-2.5 border-b border-rule py-2 last:border-b-0"
-                      >
-                        <EmployerLogo company={job.company} size="sm" />
-                        <span className="min-w-0 flex-1">
+                        jobId={job.id}
+                        title={job.title}
+                        company={job.company}
+                        meta={[job.location, job.remote ? tJobs("remote") : null]
+                          .filter(Boolean)
+                          .join(" · ")}
+                        score={null}
+                        unscoredTitle={t("freshNotScored")}
+                        action={
                           <Link
                             href={`/jobs/${job.id}`}
-                            className="block truncate text-[0.8125rem] font-medium"
-                          >
-                            {job.title}
-                          </Link>
-                          <span className="block truncate text-xs text-muted-foreground">
-                            {job.company}
-                            {job.location ? ` · ${job.location}` : ""}
-                            {job.remote ? ` · ${tJobs("remote")}` : ""}
-                          </span>
-                        </span>
-                        <span
-                          className="w-8 shrink-0 text-right font-display text-[1.05rem] font-medium text-muted-foreground"
-                          title={t("freshNotScored")}
-                        >
-                          —
-                        </span>
-                        <span className="min-w-[4.75rem] shrink-0 text-right">
-                          <Link
-                            href={`/jobs/${job.id}`}
-                            className="rr-btn rr-btn-ghost whitespace-nowrap px-2.5 py-1 text-xs"
+                            className="rr-btn rr-btn-ghost rr-btn-sm"
                           >
                             {t("open")}
                           </Link>
-                        </span>
-                      </li>
+                        }
+                      />
                     ))}
                   </ul>
                 </div>

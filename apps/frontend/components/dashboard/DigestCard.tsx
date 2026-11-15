@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import { Link, useRouter } from "@/i18n/navigation";
+import MatchRow from "./MatchRow";
 import { ApiError, createTailor, getMe, listResumes } from "@/lib/api";
 import { groupByTrack, type Digest, type DigestItem } from "@/lib/digest";
 
@@ -33,6 +34,11 @@ type State =
 type Props = {
   digest: Digest;
   /**
+   * Suppress the card's own heading. The Matches tab frames these rows with
+   * its own, and two headings for one list reads as a bug.
+   */
+  hideHeading?: boolean;
+  /**
    * Shown instead when there is nothing to list; the card alone decides that.
    * Defaults to nothing, which suits a standalone card, but a slot that must
    * not go blank has to pass one: omitting it leaves an empty digest as a gap.
@@ -40,7 +46,7 @@ type Props = {
   fallback?: ReactNode;
 };
 
-export default function DigestCard({ digest, fallback = null }: Props) {
+export default function DigestCard({ digest, fallback = null, hideHeading = false }: Props) {
   const t = useTranslations("dashboard");
   const tJobs = useTranslations("jobs");
   const router = useRouter();
@@ -127,49 +133,33 @@ export default function DigestCard({ digest, fallback = null }: Props) {
   function row(item: DigestItem, track: string) {
     const tierKey = item.tier ? TIER_KEYS[item.tier as keyof typeof TIER_KEYS] : undefined;
     return (
-      <li
+      <MatchRow
         key={`${track}:${item.job_id}`}
-        className="rr-card rr-row-card flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-5 py-3"
-        data-testid="dashboard-digest-item"
-      >
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-medium tracking-tight">
-            <Link href={`/jobs/${encodeURIComponent(item.job_id)}`}>{item.job_title}</Link>
-            <span className="font-normal text-muted-foreground"> {"·"} {item.company}</span>
-          </p>
-          {item.tier || item.fit_score !== null ? (
-            <p className="mt-1 flex flex-wrap gap-x-3 text-xs font-semibold">
-              {item.tier ? <span>{tierKey ? t(tierKey) : item.tier}</span> : null}
-              {item.fit_score !== null ? (
-                <span>{t("digestScore", { score: item.fit_score })}</span>
-              ) : null}
-            </p>
-          ) : null}
-          {item.reason ? <p className="mt-1 break-words text-sm">{item.reason}</p> : null}
-          {item.gap ? (
-            <p className="mt-1 break-words text-sm text-muted-foreground">
-              <span className="font-semibold">{t("digestGapLabel")}</span> {item.gap}
-            </p>
-          ) : null}
-          {!item.job_is_active ? (
-            <p className="mt-1 text-xs text-muted-foreground">{t("jobInactive")}</p>
-          ) : null}
-          {failedId === item.job_id ? (
-            <p className="mt-1 text-xs text-destructive" role="alert">
-              {tJobs("actionFailed")}
-            </p>
-          ) : null}
-        </div>
-        <div className="shrink-0">{action(item)}</div>
-      </li>
+        jobId={item.job_id}
+        title={item.job_title}
+        company={item.company}
+        score={item.fit_score}
+        tier={item.tier ? (tierKey ? t(tierKey) : item.tier) : null}
+        reason={item.reason}
+        gap={item.gap}
+        gapLabel={t("digestGapLabel")}
+        inactiveLabel={item.job_is_active ? null : t("jobInactive")}
+        error={failedId === item.job_id ? tJobs("actionFailed") : null}
+        action={action(item)}
+      />
     );
   }
 
   return (
-    <section data-testid="dashboard-digest" aria-labelledby="dash-digest">
-      <h2 id="dash-digest" className="mb-3 text-lg font-semibold tracking-tight">
-        {t("digestHeading")}
-      </h2>
+    <section
+      data-testid="dashboard-digest"
+      aria-labelledby={hideHeading ? undefined : "dash-digest"}
+    >
+      {hideHeading ? null : (
+        <h2 id="dash-digest" className="mb-3 text-lg font-semibold tracking-tight">
+          {t("digestHeading")}
+        </h2>
+      )}
       {degraded ? (
         // Before any track heading: an unlabelled list reads as ranked.
         <p className="mb-3 text-sm text-muted-foreground" data-testid="dashboard-digest-degraded">
@@ -192,7 +182,7 @@ export default function DigestCard({ digest, fallback = null }: Props) {
                   {key ? t(key) : group.track} {"·"} {group.items.length}
                 </h3>
               )}
-              <ul className="grid gap-2">{group.items.map((item) => row(item, group.track))}</ul>
+              <ul>{group.items.map((item) => row(item, group.track))}</ul>
             </div>
           );
         })}
