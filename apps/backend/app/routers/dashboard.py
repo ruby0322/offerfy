@@ -23,7 +23,7 @@ from app.deps import require_user
 from app.jobs.match_sweep import count_matches, match_preview
 from app.models import User
 from app.routers.applications import application_out
-from app.routers.jobs import list_item
+from app.services.jobs.search import list_item
 from app.routers.preferences import preference_out
 from app.models import Digest
 from app.schemas_jobs import (

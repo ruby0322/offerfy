@@ -5,6 +5,7 @@ import {
   ArrowRight,
   BookOpen,
   BookmarkPlus,
+  Briefcase,
   Check,
   ChevronDown,
   ClipboardList,
@@ -13,10 +14,12 @@ import {
   FileSearch,
   Globe,
   LayoutTemplate,
+  ListFilter,
   LogIn,
   Paperclip,
   Redo2,
   Undo2,
+  UserRoundSearch,
   Wrench,
   X,
 } from "lucide-react";
@@ -29,7 +32,10 @@ import {
   clipText,
   createdTailor,
   editCheckpointAction,
+  jobProfileMatchCount,
+  jobSearchCount,
   memoryProposal,
+  readJobPosting,
   parseAttachedUserMessage,
   parseTemplateSwitchPayload,
   parseToolPayload,
@@ -201,6 +207,52 @@ function toolHeadline(payload: ToolPayload | null, t: Translate): {
       showCheck: Boolean(created),
     };
   }
+  if (payload.name === "search_jobs") {
+    const total = jobSearchCount(payload);
+    return {
+      title: t("toolSearchJobs"),
+      detail:
+        error ??
+        (total == null
+          ? null
+          : total === 0
+            ? t("toolSearchJobsNone")
+            : t("toolSearchJobsHint", { count: total })),
+      failed: Boolean(error),
+      showCheck: !error,
+    };
+  }
+  if (payload.name === "read_job") {
+    const posting = readJobPosting(payload);
+    return {
+      title: t("toolReadJob"),
+      detail:
+        error ??
+        (posting
+          ? t("toolReadJobHint", {
+              title: clipText(posting.title, 40),
+              company: clipText(posting.company, 24),
+            })
+          : null),
+      failed: Boolean(error),
+      showCheck: !error,
+    };
+  }
+  if (payload.name === "read_my_job_profile") {
+    const result = payload.result as { requires_login?: unknown } | null;
+    const needsLogin = Boolean(
+      result && typeof result === "object" && result.requires_login,
+    );
+    const matches = jobProfileMatchCount(payload);
+    return {
+      title: t("toolJobProfile"),
+      detail: needsLogin
+        ? t("toolJobProfileSignIn")
+        : (error ?? (matches != null ? t("toolJobProfileHint", { count: matches }) : null)),
+      failed: Boolean(error),
+      showCheck: !error && !needsLogin,
+    };
+  }
   if (payload.name === "propose_memory") {
     const proposal = memoryProposal(payload);
     return {
@@ -229,6 +281,10 @@ function ToolIcon({ name, failed }: { name: string; failed: boolean }) {
   if (name === "read_master") return <BookOpen className={className} aria-hidden="true" />;
   if (name === "create_tailor") return <FilePlus2 className={className} aria-hidden="true" />;
   if (name === "propose_memory") return <BookmarkPlus className={className} aria-hidden="true" />;
+  if (name === "search_jobs") return <ListFilter className={className} aria-hidden="true" />;
+  if (name === "read_job") return <Briefcase className={className} aria-hidden="true" />;
+  if (name === "read_my_job_profile")
+    return <UserRoundSearch className={className} aria-hidden="true" />;
   return <Wrench className={className} aria-hidden="true" />;
 }
 

@@ -23,6 +23,12 @@ def build_role_card(db: Session, resume: Resume) -> str:
             lines.append(f"- Target role for this tailor: {resume.target_label}")
         if resume.target_context:
             lines.append("- Job description, for this tailor only:\n" + resume.target_context)
+        if resume.target_label or resume.target_context:
+            lines.append(
+                "- That target is what this tailor is for. Work from it rather "
+                "than searching the catalogue again, unless the user asks for "
+                "a different role."
+            )
         lines.append(
             "- Call read_master to see the master resume. "
             "You cannot edit the master from here."
@@ -43,6 +49,26 @@ def build_role_card(db: Session, resume: Resume) -> str:
         "Do not edit the new tailor in this turn; tell the user it will open next.",
         "- propose_memory only suggests a durable preference or fact about the person "
         "(never job-specific wording). It takes effect only after a signed-in user accepts it.",
+        "- search_jobs and read_job read Offerfy's own job catalogue. Use "
+        "them, not web_search, when the user asks about roles: a posting "
+        "found on the open web has no job_id and no apply_url you can trust, "
+        "and Offerfy cannot show it to them afterwards. Read a posting with "
+        "read_job before tailoring for it, and tailor from its description "
+        "rather than from its title.",
+        "- Never invent a posting, an employer or an apply_url, and never "
+        "state a count or a date no tool returned. The catalogue is refreshed "
+        "on a timer, so it is current rather than live to the minute; "
+        "catalog_refreshed_at is when a posting was last confirmed.",
+    ]
+    if resume.user_id is not None:
+        lines.append(
+            "- read_my_job_profile is this person's own job context on "
+            "Offerfy: the roles and places they said they want, how many live "
+            "postings match, what they have saved or applied to, and their "
+            "weekly digest when one exists. Read it before asking them what "
+            "they are looking for."
+        )
+    lines += [
         "- Call propose_memory when the user states something lasting, and "
         "especially when they say never or always to do something. Only part of "
         "a long conversation is replayed to you, and a thing the document does "

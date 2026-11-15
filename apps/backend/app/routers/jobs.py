@@ -5,13 +5,12 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, case, func, nulls_last, or_
+from sqlalchemy import and_, case, func
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import Job, JobFacets
 from app.schemas_jobs import (
-    JOB_SOURCES,
     JobCityOptions,
     JobDetail,
     JobEmployer,
@@ -20,20 +19,29 @@ from app.schemas_jobs import (
     JobFacetOption,
     JobFacetOptions,
     JobList,
-    JobListItem,
     JobPulse,
     JobPulseEmployer,
     JobSitemapItem,
     JobSitemapPage,
 )
-from app.services.jobs.cities import fold_city_counts, stored_values_for
+from app.services.jobs.cities import fold_city_counts
 from app.services.jobs.employers import employer_slug, resolve_slug, slug_index
 from app.services.jobs.enrich import (
-    Taxonomy,
     default_taxonomy,
     valid_countries,
-    valid_functions,
-    valid_seniorities,
+)
+from app.services.jobs.search import (
+    after_cursor as _after_cursor,
+)
+from app.services.jobs.search import (
+    filtered_query,
+    list_item,
+)
+from app.services.jobs.search import (
+    iso as _iso,
+)
+from app.services.jobs.search import (
+    posted_at_order as _posted_at_order,
 )
 from app.services.jobs.spotlight import select_featured
 from app.services.jobs.store import freshness_cutoff
@@ -65,19 +73,6 @@ def _sitemap_conditions():
     return (Job.is_active.is_(True), Job.last_seen_at >= freshness_cutoff())
 
 
-def _iso(dt: datetime | None) -> str | None:
-    if dt is None:
-        return None
-    if dt.tzinfo is None or dt.utcoffset() is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.isoformat()
-
-
-def _like_term(raw: str) -> str:
-    escaped = raw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    return f"%{escaped}%"
-
-
 def _encode_cursor(posted_at: datetime | None, job_id: str) -> str:
     payload = json.dumps({"t": _iso(posted_at) or "", "i": job_id}, separators=(",", ":"))
     return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
@@ -102,146 +97,18 @@ def _decode_cursor(cursor: str) -> tuple[datetime | None, str]:
     return stamp, job_id
 
 
-def _posted_at_order():
-    return (nulls_last(Job.posted_at.desc()), Job.id.desc())
+def _filtered_query(db: Session, **filters):
+    """`services.jobs.search.filtered_query`, with its ValueError as a 422.
 
-
-def _after_cursor(stamp: datetime | None, job_id: str):
-    if stamp is None:
-        return and_(Job.posted_at.is_(None), Job.id < job_id)
-    return or_(
-        Job.posted_at < stamp,
-        and_(Job.posted_at == stamp, Job.id < job_id),
-        Job.posted_at.is_(None),
-    )
-
-
-def _valid_regions(taxonomy: Taxonomy) -> set[str]:
-    return set(taxonomy.location_regions.values())
-
-
-def list_item(job: Job) -> JobListItem:
-    return JobListItem(
-        id=job.id,
-        source=job.source,
-        company=job.company,
-        title=job.title,
-        location=job.location,
-        remote=job.remote,
-        apply_url=job.apply_url,
-        source_url=job.source_url,
-        posted_at=_iso(job.posted_at),
-        last_seen_at=_iso(job.last_seen_at) or "",
-        is_active=job.is_active,
-    )
-
-
-def _filtered_query(
-    db: Session,
-    *,
-    q: str | None,
-    source: str | None,
-    remote: bool | None,
-    active: bool | None,
-    company: str | None = None,
-    country: str | None = None,
-    region: str | None = None,
-    city: str | None = None,
-    seniority: str | None = None,
-    function: str | None = None,
-    posted_within_days: int | None = None,
-):
-    query = db.query(Job)
-    if active is None or active:
-        query = query.filter(Job.is_active.is_(True))
-    elif active is False:
-        query = query.filter(Job.is_active.is_(False))
-    if source:
-        if source not in JOB_SOURCES:
-            raise HTTPException(status_code=422, detail="Invalid source")
-        query = query.filter(Job.source == source)
-    if remote is True:
-        query = query.filter(Job.remote.is_(True))
-    elif remote is False:
-        query = query.filter(Job.remote.is_(False))
-    if company:
-        # Equality, not ILIKE: company is picked from a facet we produced, so
-        # it is an exact stored value. A LIKE here would make "Wise" match
-        # "Wisetech" the day such a board is added.
-        query = query.filter(func.lower(Job.company) == company.strip().lower())
-    if q:
-        term = _like_term(q.strip())
-        if term != "%%":
-            match = or_(
-                Job.title.ilike(term, escape="\\"),
-                Job.company.ilike(term, escape="\\"),
-                Job.location.ilike(term, escape="\\"),
-            )
-            query = query.filter(match)
-
-    # JobFacets is only joined when a facet filter is actually requested.
-    # Unconditionally joining it would wrongly drop every posting with no
-    # facets row at all (the common case -- ~11k live postings have none
-    # yet, and some Workday postings never will) even on a facet-free
-    # request, which is what test_unfiltered_list_still_returns_jobs_with_no_facets_row
-    # and test_facet_filter_excludes_jobs_with_no_facets_row together pin.
-    # The join is also deliberately INNER rather than LEFT: an unenriched
-    # posting genuinely does not match e.g. seniority=mid, so excluding it
-    # is the intended behavior, not an accident of SQL's NULL semantics --
-    # every filter below is an equality comparison, so a LEFT join would
-    # already exclude the unmatched row too (NULL == value is NULL, not
-    # true); INNER just says that intent directly instead of relying on
-    # that to keep covering for it.
-    if seniority or function or country or region or city:
-        query = query.join(JobFacets, JobFacets.job_id == Job.id)
-        taxonomy = default_taxonomy()
-        if seniority:
-            # Comma-separated, because a curated board is often one audience
-            # spread over two rungs: "new grad" is new_grad AND junior, and
-            # "ready to move" is mid, senior and staff_plus. The filter UI
-            # still sends exactly one value; this only widens what the URL
-            # can say. Every member is validated, so one bad name is a 422
-            # rather than a silently narrower list.
-            wanted = [part.strip() for part in seniority.split(",") if part.strip()]
-            if not wanted or any(item not in valid_seniorities(taxonomy) for item in wanted):
-                raise HTTPException(status_code=422, detail="Invalid seniority")
-            query = query.filter(JobFacets.seniority.in_(wanted))
-        if function:
-            if function not in valid_functions(taxonomy):
-                raise HTTPException(status_code=422, detail="Invalid function")
-            query = query.filter(JobFacets.function == function)
-        if region:
-            if region not in _valid_regions(taxonomy):
-                raise HTTPException(status_code=422, detail="Invalid region")
-            query = query.filter(JobFacets.region == region)
-        if country:
-            if country not in valid_countries(taxonomy):
-                raise HTTPException(status_code=422, detail="Invalid country")
-            query = query.filter(JobFacets.country == country)
-        if city and city.strip():
-            # Resolved against the distinct spellings actually stored, not by
-            # LIKE: see services.jobs.cities.stored_values_for for why both
-            # equality and substring get this wrong. The DISTINCT is over a
-            # few hundred values per country, and is only paid when a city
-            # filter is actually asked for.
-            distinct = db.query(JobFacets.city).filter(JobFacets.city.isnot(None))
-            if country:
-                distinct = distinct.filter(JobFacets.country == country)
-            spellings = stored_values_for(
-                city, [row[0] for row in distinct.distinct().all()], taxonomy
-            )
-            # An empty IN () is false in SQL, which is the right answer for a
-            # city no posting names -- an empty list, not an error.
-            query = query.filter(JobFacets.city.in_(spellings))
-
-    if posted_within_days is not None:
-        # Decision: posted_at IS NULL cannot be confirmed within any window,
-        # so it is excluded here, unlike _posted_at_order's nulls_last which
-        # still displays it (at the end) when no age filter is active.
-        cutoff = datetime.now(timezone.utc) - timedelta(days=posted_within_days)
-        query = query.filter(Job.posted_at >= cutoff)
-
-    return query
+    The builder moved to a service so the editor agent's search tool could
+    call it too (see that module's docstring). It raises ValueError rather
+    than HTTPException, so the HTTP surface translates here and answers
+    exactly as it did before the move.
+    """
+    try:
+        return filtered_query(db, **filters)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/v1/jobs", response_model=JobList)

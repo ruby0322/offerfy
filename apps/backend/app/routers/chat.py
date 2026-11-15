@@ -24,6 +24,7 @@ from app.services.family_tools import (
     family_tool_handlers,
     family_tool_specs,
 )
+from app.services.jobs_tools import jobs_tool_handlers, jobs_tool_specs
 from app.services.llm import TEMPLATE_SWITCH_EXTRA, aiter_chat_edit, llm_configured
 from app.services.revisions import set_draft_source
 from app.services.role_card import build_role_card
@@ -253,8 +254,14 @@ async def chat(
     if spec:
         extra += template_api_block(*spec)
     extra += build_role_card(db, resume)
-    family_specs = family_tool_specs(resume)
-    family_handlers = family_tool_handlers(db, resume)
+    # One list each, so the two call sites below cannot drift apart. The
+    # repair loop gets exactly what the main turn got: a tool that vanished
+    # mid-turn would read to the model as the catalogue going away.
+    extra_specs = [*family_tool_specs(resume), *jobs_tool_specs(resume)]
+    extra_handlers = {
+        **family_tool_handlers(db, resume),
+        **jobs_tool_handlers(db, resume, user),
+    }
 
     async def generate():
         # The whole generator is the billable region, so `relay` closes over
@@ -343,8 +350,8 @@ async def chat(
                     prefer_full_source=prefer_full_source,
                     extra_system=extra,
                     verify_compile=True,
-                    extra_tools=family_specs,
-                    tool_handlers=family_handlers,
+                    extra_tools=extra_specs,
+                    tool_handlers=extra_handlers,
                 ):
                     async for frame in relay(event):
                         yield frame
@@ -390,8 +397,8 @@ async def chat(
                         prefer_full_source=True,
                         extra_system=extra,
                         verify_compile=True,
-                        extra_tools=family_specs,
-                        tool_handlers=family_handlers,
+                        extra_tools=extra_specs,
+                        tool_handlers=extra_handlers,
                     ):
                         async for frame in relay(event):
                             yield frame

@@ -110,6 +110,32 @@ export function createdTailor(payload: ToolPayload | null): { id: string; title:
   return { id: result.tailor_id, title: typeof result.title === "string" ? result.title : "" };
 }
 
+export function jobSearchCount(payload: ToolPayload | null): number | null {
+  if (!payload || payload.name !== "search_jobs") return null;
+  const result = payload.result as { total?: unknown } | null;
+  if (!result || typeof result !== "object" || typeof result.total !== "number") return null;
+  return result.total;
+}
+
+export function readJobPosting(
+  payload: ToolPayload | null,
+): { title: string; company: string } | null {
+  if (!payload || payload.name !== "read_job") return null;
+  const result = payload.result as { title?: unknown; company?: unknown } | null;
+  if (!result || typeof result !== "object") return null;
+  if (typeof result.title !== "string" || typeof result.company !== "string") return null;
+  return { title: result.title, company: result.company };
+}
+
+export function jobProfileMatchCount(payload: ToolPayload | null): number | null {
+  if (!payload || payload.name !== "read_my_job_profile") return null;
+  const result = payload.result as { match_count?: unknown } | null;
+  if (!result || typeof result !== "object" || typeof result.match_count !== "number") {
+    return null;
+  }
+  return result.match_count;
+}
+
 export function isSuccessfulTypstEdit(payload: ToolPayload | null): boolean {
   if (!payload || payload.name !== "apply_typst_edit") return false;
   if (resultError(payload.result)) return false;
