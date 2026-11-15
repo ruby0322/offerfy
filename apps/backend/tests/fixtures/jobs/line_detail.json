@@ -1,0 +1,10 @@
+{
+ "result": {
+  "data": {
+   "strapiJobs": {
+    "content": "<p>Build the payment server.</p><script>alert(1)</script><p>Requires 5 years of backend work.</p>",
+    "apply_link": "https://careers.linecorp-global.com/careers/JobApplication?jobId=2082"
+   }
+  }
+ }
+}

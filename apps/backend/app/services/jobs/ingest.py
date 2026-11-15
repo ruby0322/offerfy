@@ -14,6 +14,7 @@ from app.services.jobs.boilerplate import normalize_company, recompute_boilerpla
 from app.services.jobs.enrich import enrich_jobs
 from app.services.jobs.greenhouse import fetch_greenhouse
 from app.services.jobs.lever import fetch_lever
+from app.services.jobs.line import fetch_line
 from app.services.jobs.scope import ScopeRules, default_scope, title_in_scope
 from app.services.jobs.smartrecruiters import fetch_smartrecruiters
 from app.services.jobs.store import expire_missing, record_run, upsert_jobs
@@ -264,4 +265,6 @@ def _fetch(
         return fetch_ashby(client, board.slug, board.company)
     if board.source == "smartrecruiters":
         return fetch_smartrecruiters(client, board.slug, board.company, rules=rules)
+    if board.source == "line":
+        return fetch_line(client, board.slug, board.company, rules=rules)
     raise ValueError(f"unsupported board source: {board.source}")

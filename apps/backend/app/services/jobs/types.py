@@ -12,6 +12,7 @@ JOB_SOURCES = (
     "ashby",
     "smartrecruiters",
     "workday",
+    "line",
     "taiwanjobs",
 )
 

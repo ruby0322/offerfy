@@ -1,0 +1,199 @@
+{
+ "result": {
+  "data": {
+   "allStrapiJobs": {
+    "edges": [
+     {
+      "node": {
+       "strapiId": 3101,
+       "publish": true,
+       "title": "Server-Side Engineer(EPI)",
+       "title_en": "Server-Side Engineer(EPI)",
+       "start_date": "2026-08-27T02:00:00.000Z",
+       "end_date": null,
+       "companies": [
+        {
+         "name": "LINE Taiwan"
+        }
+       ],
+       "cities": [
+        {
+         "name": "Taipei"
+        }
+       ],
+       "job_fields": []
+      }
+     },
+     {
+      "node": {
+       "strapiId": 3102,
+       "publish": true,
+       "title": "Technical Recruiter, Hardware",
+       "title_en": "Technical Recruiter, Hardware",
+       "start_date": "2026-08-27T02:00:00.000Z",
+       "end_date": null,
+       "companies": [
+        {
+         "name": "LINE Taiwan"
+        }
+       ],
+       "cities": [
+        {
+         "name": "Taipei"
+        }
+       ],
+       "job_fields": []
+      }
+     },
+     {
+      "node": {
+       "strapiId": 3103,
+       "publish": false,
+       "title": "Unpublished Draft Engineer",
+       "title_en": "Unpublished Draft Engineer",
+       "start_date": "2024-04-18T00:30:00.000Z",
+       "end_date": null,
+       "companies": [
+        {
+         "name": "LINE Taiwan"
+        }
+       ],
+       "cities": [
+        {
+         "name": "Taipei"
+        }
+       ],
+       "job_fields": [
+        {
+         "name": "Sales"
+        }
+       ]
+      }
+     },
+     {
+      "node": {
+       "strapiId": 3104,
+       "publish": "False",
+       "title": "Stringly Published Engineer",
+       "title_en": "Stringly Published Engineer",
+       "start_date": "2026-08-27T02:00:00.000Z",
+       "end_date": null,
+       "companies": [
+        {
+         "name": "LINE Taiwan"
+        }
+       ],
+       "cities": [
+        {
+         "name": "Taipei"
+        }
+       ],
+       "job_fields": []
+      }
+     },
+     {
+      "node": {
+       "strapiId": 3105,
+       "publish": true,
+       "title": "Expired Window Engineer",
+       "title_en": "Expired Window Engineer",
+       "start_date": "2026-08-27T02:00:00.000Z",
+       "end_date": "2020-01-01T00:00:00.000Z",
+       "companies": [
+        {
+         "name": "LINE Taiwan"
+        }
+       ],
+       "cities": [
+        {
+         "name": "Taipei"
+        }
+       ],
+       "job_fields": []
+      }
+     },
+     {
+      "node": {
+       "strapiId": 3106,
+       "publish": true,
+       "title": "Padded Company Engineer",
+       "title_en": "Padded Company Engineer",
+       "start_date": "2026-08-27T02:00:00.000Z",
+       "end_date": null,
+       "companies": [
+        {
+         "name": "LINE Investment Technologies "
+        }
+       ],
+       "cities": [
+        {
+         "name": "Taipei"
+        }
+       ],
+       "job_fields": []
+      }
+     },
+     {
+      "node": {
+       "strapiId": 3107,
+       "publish": true,
+       "title": "일본어 전문 소프트웨어 엔지니어",
+       "title_en": null,
+       "start_date": "2026-08-27T02:00:00.000Z",
+       "end_date": null,
+       "companies": [
+        {
+         "name": "LINE Plus"
+        }
+       ],
+       "cities": [
+        {
+         "name": "Bundang"
+        }
+       ],
+       "job_fields": []
+      }
+     },
+     {
+      "node": {
+       "strapiId": 3108,
+       "publish": true,
+       "title": "No Description Engineer",
+       "title_en": "No Description Engineer",
+       "start_date": "2026-08-27T02:00:00.000Z",
+       "end_date": null,
+       "companies": [
+        {
+         "name": "LINE Taiwan"
+        }
+       ],
+       "cities": [
+        {
+         "name": "Taipei"
+        }
+       ],
+       "job_fields": []
+      }
+     },
+     {
+      "node": {
+       "strapiId": 3109,
+       "publish": true,
+       "title": "No Company Engineer",
+       "title_en": "No Company Engineer",
+       "start_date": "2026-08-27T02:00:00.000Z",
+       "end_date": null,
+       "companies": [],
+       "cities": [
+        {
+         "name": "Taipei"
+        }
+       ],
+       "job_fields": []
+      }
+     }
+    ]
+   }
+  }
+ }
+}

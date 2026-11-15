@@ -353,7 +353,7 @@ class Job(Base):
         CheckConstraint(
             # taiwanjobs is retired but stays listed: historical rows carry it.
             "source IN ('greenhouse', 'lever', 'ashby', 'smartrecruiters', "
-            "'workday', 'taiwanjobs')",
+            "'workday', 'line', 'taiwanjobs')",
             name="job_source_values",
         ),
         UniqueConstraint("source", "source_id", name="jobs_source_source_id_key"),

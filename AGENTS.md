@@ -234,8 +234,8 @@ held 120 boards of which **64 404ed on every pass** — companies that had moved
 that never used Greenhouse/Lever/Ashby at all (TSMC, MediaTek, Shopee, Netflix, Shopify,
 Zendesk…). Those were not lost inventory: they had never returned a single job. They were
 removed, 29 were repaired by correcting the provider or slug (Anthropic is on Greenhouse,
-not Ashby; Anduril is `andurilindustries`), and the file is now 80 boards that all answer
-(79 until Microsoft was added 2026-11-15).
+not Ashby; Anduril is `andurilindustries`), and the file is now 81 boards that all answer
+(79 until Microsoft and LINE were added 2026-11-15).
 
 Before adding a board, **probe it**; do not assume. The three endpoints are in
 `greenhouse.py` / `lever.py` / `ashby.py`, plus `smartrecruiters.py`. Note that probing
@@ -328,6 +328,52 @@ Lead`, `Sr. Visual Designer` and `Executive Business Administrator - MAI` pass o
 they match no deny needle, not because anything judged them technical. That is the
 documented self-correcting direction (see `title_in_scope`'s docstring) — fix by adding a
 needle if they prove noisy on the jobs page.
+
+**LINE is carried by a fifth provider, `line`, added 2026-11-15.** It is the first
+source that is not somebody's ATS. Every plausible slug 404s on Greenhouse, Lever and
+Ashby, gives the meaningless SmartRecruiters 200/`totalFound: 0`, and 422s on Workday.
+What LINE has instead is `careers.linecorp.com`, a Gatsby site over a Strapi backend, and
+Gatsby ships each page's query result as JSON beside the HTML. `robots.txt` disallows only
+two 2021 paths, so unlike Google there is no wall — which is the whole reason this source
+could be built.
+
+**The number that justified it: 42 in-scope Taipei postings**, from LINE Taiwan and LINE
+Pay Taiwan — the largest block of Taiwan engineering roles the catalogue did not have,
+including the `2027 TECH FRESH` new-graduate classes.
+
+**`publish` is the load-bearing filter, and the counts are a trap.** The list payload
+carries every posting Strapi knows about, draft or live: **306 of 387 are unpublished**.
+Only **81 are published**, of which 53 are Taipei and 64 pass `title_in_scope`. An earlier
+note in this file quoted 387 postings and 77 Taipei roles — those were the unfiltered
+figures and they were wrong. If you re-measure this board, filter `publish is True`
+first, and note `fetch_line` checks it with `is`, not for truthiness: a shape change that
+made the field a string would make `"False"` truthy and quadruple the board silently.
+`test_publish_is_checked_with_is_true_so_a_string_false_does_not_pass` pins that.
+
+**The contract is a build artifact, not an API.** `/page-data/jobs/page-data.json` is how
+Gatsby hydrates the page; nobody promised it to us and a redeploy could reshape it. So
+`fetch_line` reads every field defensively and a shape change surfaces as **board not
+found** — which `refreshed_nothing` already counts as a failed pass — rather than as "LINE
+has no openings", which would expire every row we hold. That distinction is the one thing
+not to simplify away; `test_a_shape_change_reads_as_board_not_found_rather_than_an_empty_board`
+pins it.
+
+**The employer comes off the posting, not the board.** One site carries 13 separate
+employers (LINE Taiwan, LINE Pay Taiwan, LINE Plus, LINE Bank Taiwan, IPX…), so each
+posting's own `companies[0].name` becomes its `company` and the single board row's `LINE`
+is only a fallback. This is why `ats_boards.json` has a second exception to "slug is the
+employer": for `line` the slug is the *site*. Note one Strapi name is stored with a
+trailing space, which would otherwise derive a second employer slug for the same company.
+
+**`job_fields` is a structured taxonomy, deliberately not used yet.** Each posting carries
+one ("Server-side", "Data Engineering", "Human Resources"), and it would be a far better
+scope signal than a title — LINE's titles are Korean, Japanese and Thai as often as
+English, and the deny list has needles for neither Korean nor Japanese, so
+`Senior HR Generalist` and `CS representative(EPI)` currently pass `title_in_scope` as
+technical roles. This is the same gap Trend Micro's Japanese titles expose (§8c). Gating on
+`job_fields` would fix it, but the taxonomy has 58 values of which a dozen are literally
+prefixed `(not in use)`, and §8b's rule is that a scope change is measured both directions
+over the whole live corpus in one pass. Measure it before wiring it in.
 
 **SmartRecruiters is the fourth provider**, added because Grab, Canva and Wise publish
 there and nowhere we could read. It differs from the others in two ways that matter:
