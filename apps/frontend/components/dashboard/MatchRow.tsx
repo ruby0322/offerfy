@@ -102,27 +102,37 @@ export default function MatchRow({
         ) : null}
       </span>
 
-      <span className="min-w-8 shrink-0 pt-0.5 text-right">
-        <span
-          className={`block font-display text-[1.05rem] font-medium leading-none [font-variant-numeric:tabular-nums] ${
-            score === null
-              ? "text-muted-foreground"
-              : score >= STRONG
-                ? "text-success"
-                : ""
-          }`}
-          title={score === null ? unscoredTitle : undefined}
-        >
-          {score === null ? "—" : Math.round(score * 100)}
+      {/* The score and the action share one band, `min-h-7`, and centre
+          inside it. Without that the number is a `leading-none` 17px box and
+          the button is a 28px one, both hung from the top of the row, so the
+          number floats about six pixels above the button beside it. The tier
+          hangs below the band rather than inside it, so it cannot pull the
+          number off that centre line. */}
+      <span className="min-w-8 shrink-0 text-right">
+        <span className="flex min-h-7 items-center justify-end">
+          <span
+            className={`font-display text-[1.05rem] font-medium leading-none [font-variant-numeric:tabular-nums] ${
+              score === null
+                ? "text-muted-foreground"
+                : score >= STRONG
+                  ? "text-success"
+                  : ""
+            }`}
+            title={score === null ? unscoredTitle : undefined}
+          >
+            {score === null ? "—" : Math.round(score * 100)}
+          </span>
         </span>
         {tier ? (
-          <span className="mt-1 block text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+          <span className="mt-0.5 block text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
             {tier}
           </span>
         ) : null}
       </span>
 
-      <span className="min-w-[4.75rem] shrink-0 pt-0.5 text-right">{action}</span>
+      <span className="flex min-h-7 min-w-[4.75rem] shrink-0 items-center justify-end">
+        {action}
+      </span>
     </li>
   );
 }
