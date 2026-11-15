@@ -1636,34 +1636,20 @@ textarea {
    Rows, not a card grid: each of these needs a paragraph to be believed, and
    four paragraphs in four cards is a wall.
 
-   **The figure never changes sides, and the block is narrower than the page.**
-   The first cut put the copy in a 1fr column beside an 18rem figure on a
-   72rem page, which left the text filling 454px of an 824px column: 370px of
-   dead air, a third of the row, in a gutter that moved every time a paragraph
-   changed length -- and the rows alternated, so that ragged inner edge jumped
-   sides on the way down.
+   **Full page width, and the figure changes sides.** These sections sat in a
+   narrower 52rem column for a while, which made the arithmetic easy and left
+   the lower half of the page out of line with the hero, the employer wall and
+   the loop track above it. Back at 72rem the arithmetic is the problem again:
+   a 454px measure beside a 352px figure is 806px of content on a 1152px page,
+   and the leftover opens a gutter wide enough that the two halves of a row
+   stop looking related. So the leftover goes into the measure instead -- the
+   body runs to 72ch here, about 40 characters a line in Chinese, wide but
+   still inside what reads comfortably, which closes most of that gap.
 
-   The arithmetic is the whole problem. A comfortable measure here is ~454px
-   and the figure wants ~368px (see below), which is 822px of content on a
-   1152px page. The leftover 330px has to go somewhere: all of it into the
-   gutter and the two halves stop looking related, all of it into the right
-   margin and the block hangs off a page whose other sections are full width.
-   So the reading column is narrowed and centred, and the figure column is
-   sized against the copy rather than against the page. The paragraphs are two
-   lines now, so the figures came down with them: a 23rem figure stood 228px
-   tall against a ~110px block of text and turned every row into an
-   illustration with a caption. The FAQ and the closing block take the same
-   width, so the lower half of the page is one column rather than three
-   different ones.
-
-   Monotony is the risk taken on purpose: four rows that line up read as a
-   system, four that zigzag read as an accident. */
-.landing-features,
-.landing-faq,
-.landing-cta-block {
-  max-width: 52rem;
-  margin-inline: auto;
-}
+   The side alternates by grid-column, never by reordering the markup: the
+   copy is first in source on every row, so a screen reader and a phone read
+   it in the same order, and on a phone the rows stack and the alternation
+   turns itself off. */
 .landing-feature-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -1683,18 +1669,44 @@ textarea {
 }
 
 @media (min-width: 768px) {
+  /* Both tracks are fixed and the leftover goes to the gap, which is the only
+     way the alternation stays symmetrical. With a 1fr copy column the text
+     leaves its slack on its own right-hand side, and that slack is the gutter
+     on one row and the page margin on the next -- measured at 217px and 54px
+     on consecutive rows. 38rem is the measure itself (72ch), so at full width
+     there is no slack to land anywhere and both outer edges sit on the
+     hero's; the leftover goes to the gap through space-between.
+
+     The copy track is minmax, not a flat 38rem. Flat, the two tracks and the
+     gap need 1016px, so every window between this breakpoint and ~1056px
+     overflowed sideways -- a horizontal scrollbar on the landing page at
+     common laptop widths. minmax lets the copy give way instead, and the cap
+     still holds everywhere there is room for it. */
   .landing-feature-row {
-    grid-template-columns: minmax(0, 1fr) 20rem;
-    gap: 4rem;
+    grid-template-columns: minmax(0, 38rem) 22rem;
+    justify-content: space-between;
+    gap: 3.5rem;
+  }
+
+  .landing-feature-flip {
+    grid-template-columns: 22rem minmax(0, 38rem);
+  }
+
+  .landing-feature-flip .landing-feature-copy {
+    grid-area: 1 / 2;
+  }
+
+  .landing-feature-flip .landing-feature-figure {
+    grid-area: 1 / 1;
   }
 }
 
-/* 20rem above is the floor, not a preference. These viewBoxes are 212 units
-   wide, so a label declared at 8 units renders at 8/212 of whatever width the
-   box gets: 296px of drawing puts them at 11px, under the 15.2px body copy,
-   which is where a figure's labels belong. The first cut was 264px and 10px,
-   which reads as a diagram squinting at you. Go much below this and the
-   labels stop being readable before the drawing stops being visible. */
+/* 22rem above is set by the drawing's smallest type. These viewBoxes are 212
+   units wide, so a label declared at 8 units renders at 8/212 of whatever
+   width the box gets: 328px of drawing puts them at 12.4px, under the 15.2px
+   body copy, which is where a figure's labels belong. The first cut was 264px
+   and 10px, which reads as a diagram squinting at you; much wider and the
+   labels get louder than the sentence explaining them. */
 .landing-feature-figure {
   border: 1px solid var(--rule);
   background: var(--sheet, var(--paper));
@@ -1717,7 +1729,10 @@ textarea {
 
 .landing-feature-body {
   margin: 0;
-  max-width: 54ch;
+  /* Wider than a column of prose would take, because the row is the full
+     72rem and the slack is better spent on the measure than on the gap.
+     About 40 Chinese characters a line, which is the top of comfortable. */
+  max-width: 72ch;
   /* Chinese wraps between any two characters, so a paragraph that ends one
      character into its last line is easy to hit and looks like a mistake.
      Unsupported elsewhere, where it simply does nothing. */
@@ -1733,7 +1748,7 @@ textarea {
   margin: 0.8rem 0 0;
   padding-top: 0.7rem;
   border-top: 1px solid var(--rule);
-  max-width: 54ch;
+  max-width: 72ch;
   font-size: 0.8rem;
   line-height: 1.6;
   color: var(--muted);

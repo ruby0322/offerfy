@@ -8,9 +8,9 @@ import { AgentArt, DigestArt, IngestArt, TrackingArt } from "./feature-art";
  * The four things the product does, one row each.
  *
  * Rows rather than a card grid: each of these needs a paragraph to be
- * believed, and four paragraphs in four cards is a wall. Copy left, figure
- * right, the same way on all four -- the alternating version read as an
- * accident rather than a pattern, and globals.css has the measurements.
+ * believed, and four paragraphs in four cards is a wall. The figure changes
+ * sides down the page, which globals.css does with grid-column rather than by
+ * reordering this markup -- the copy is first in source on every row.
  *
  * The section's heading is visually hidden on purpose. Each row owns an <h3>,
  * and an <h3> with no <h2> above it is a hole in the outline; the page does
@@ -104,8 +104,11 @@ export default async function Features() {
     <section className="landing-section mx-auto max-w-[72rem] px-5">
       <h2 className="sr-only">{t("title")}</h2>
       <div className="landing-features">
-        {rows.map((row) => (
-          <div key={row.key} className="landing-feature-row">
+        {rows.map((row, index) => (
+          <div
+            key={row.key}
+            className={`landing-feature-row${index % 2 === 1 ? " landing-feature-flip" : ""}`}
+          >
             <div className="landing-feature-copy">
               <p className="landing-kicker">
                 <span className="landing-kicker-mark" aria-hidden="true" />

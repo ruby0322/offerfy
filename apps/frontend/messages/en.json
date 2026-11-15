@@ -317,7 +317,7 @@
       "agentToolMaster": "Master"
     },
     "faq": {
-      "title": "Before you ask",
+      "title": "FAQs",
       "items": [
         {
           "q": "Where do the roles come from, and how often do they refresh?",
