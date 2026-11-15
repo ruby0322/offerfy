@@ -433,6 +433,25 @@ def _attributed(text: str, start: int, end: int) -> bool:
     return bool(after and after.group(1).casefold() in _ATTRIBUTIVE_NOUNS)
 
 
+def _vouched(token: str, texts: list[str]) -> bool:
+    """Boundary match with NO length floor, for the scan's accounted-for test.
+
+    `_mentions` refuses a needle under MIN_CITE_CHARS, which is correct when
+    judging whether a CITE is substantial and wrong here. Round 4 widened
+    `_TOKEN` to emit the one-character technologies C and R so the scan could
+    see them -- but `_mentions` structurally cannot vouch for a one-character
+    token and `_on_resume` refuses one too, so seeing them only ever meant
+    rejecting the sentence. "C/C++ and Python on your resume fit this role."
+    was dropped as `undeclared` with C unaccounted for, on a resume whose
+    skills list literally reads |c/c++|.
+    """
+    t = token.strip().casefold()
+    if not t:
+        return False
+    pat = re.compile(rf"(?<![a-z0-9]){re.escape(t)}(?![a-z0-9])")
+    return any(pat.search(x.casefold()) for x in texts if x)
+
+
 def _undeclared_names(
     text: str, allowed: list[str], facts: Any, exempt: str = ""
 ) -> list[str]:
@@ -457,7 +476,7 @@ def _undeclared_names(
         )
         if not looks_named:
             continue
-        if _on_resume(facts, token) or any(_mentions(c, token) for c in allowed):
+        if _on_resume(facts, token) or _vouched(token, [*allowed, _resume_body(facts)]):
             continue
         if (
             exempt

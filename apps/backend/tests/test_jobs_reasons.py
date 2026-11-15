@@ -754,3 +754,36 @@ def test_a_cite_from_a_role_highlight_counts_as_on_resume():
     kept2, dropped2 = validate([invented], facts=facts, scored_ids={"a"})
     assert kept2 == []
     assert dropped2 == [("a", "uncited")]
+
+
+def test_a_one_character_technology_does_not_read_as_an_invented_name():
+    """C and R are real skills, and the scan must be able to account for them.
+
+    Round 4 widened `_TOKEN` to emit one-character technologies so the scan
+    could see them. But `_mentions` refuses a needle under MIN_CITE_CHARS and
+    `_on_resume` refuses one too, so a token the scan could see was a token
+    nothing could vouch for: every sentence naming C/C++ was dropped as
+    `undeclared`, on a resume whose skills list reads |c/c++|. Found on the
+    first real production build.
+    """
+    facts = SimpleNamespace(
+        facts_json=json.dumps(
+            {"headline": "Engineer", "skills": ["C/C++", "Python"], "roles": []}
+        ),
+        skills_text="|c/c++|python|",
+        search_text="engineer c/c++ python",
+    )
+    item = _item(
+        reason="C/C++ and Python on your resume fit this role.",
+        resume=("C/C++", "Python"),
+    )
+    kept, dropped = validate([item], facts=facts, scored_ids={"a"})
+    assert [p.job_id for p in kept] == ["a"], dropped
+
+    # The floor is lifted only for accounting, not for inventing: a name that
+    # is on neither the resume nor the declared cites is still caught.
+    invented = _item(
+        reason="Python and Rust on your resume fit this role.", resume=("Python",)
+    )
+    kept2, dropped2 = validate([invented], facts=facts, scored_ids={"a"})
+    assert kept2 == [] and dropped2 == [("a", "undeclared")], dropped2
