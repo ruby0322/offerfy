@@ -113,27 +113,35 @@ def test_a_closed_application_window_is_dropped():
     assert "Expired Window Engineer" not in _titles(jobs)
 
 
-def test_the_employer_comes_off_the_posting_not_the_board():
-    """One LINE site covers 13 separate employers, so filing all of them under
-    the board's name would make /jobs/employers/line a fiction."""
+def test_the_whole_family_collapses_to_one_employer():
+    """Deliberate, and lossy: the site's 13 legal entities are all filed under
+    the board row's name so that one employer page and one LINE mark cover the
+    family, instead of ten pages whose monograms collided four ways on "LP".
+    """
     client, _ = _client()
     jobs = fetch_line(client, "linecorp", "LINE")
     assert jobs is not None
-    by_title = {j.title: j for j in jobs}
-    assert by_title["Server-Side Engineer(EPI)"].company == "LINE Taiwan"
-    assert by_title["일본어 전문 소프트웨어 엔지니어"].company == "LINE Plus"
-    # Only a posting with no company of its own falls back to the board's name.
-    assert by_title["No Company Engineer"].company == "LINE"
+    assert jobs
+    assert {job.company for job in jobs} == {"LINE"}
 
 
-def test_a_padded_company_name_is_stripped_so_it_is_one_employer_not_two():
-    """Strapi stores at least one name with a trailing space, which would
-    otherwise derive a second employer slug for the same company."""
+def test_a_postings_own_entity_never_reaches_the_company_field():
+    """The fixture rows carry real entities -- LINE Taiwan, LINE Plus, and a
+    "LINE Investment Technologies " stored with a trailing space -- and none may
+    leak through, or the family splits back into separate employer pages. The
+    payload still has them; we just do not read them.
+    """
     client, _ = _client()
     jobs = fetch_line(client, "linecorp", "LINE")
     assert jobs is not None
-    job = next(j for j in jobs if j.title == "Padded Company Engineer")
-    assert job.company == "LINE Investment Technologies"
+    entities = {
+        "LINE Taiwan",
+        "LINE Plus",
+        "LINE Investment Technologies",
+        "LINE Investment Technologies ",
+    }
+    assert entities.isdisjoint({job.company for job in jobs})
+    assert all(job.company == "LINE" for job in jobs)
 
 
 def test_the_localised_title_is_used_when_there_is_no_english_one():

@@ -33,12 +33,24 @@ Four things make this source unlike the others, and all four are load-bearing:
    again, so the scope rules are applied to the cheap list metadata first and a
    detail request is only spent on a posting we mean to keep.
 
-4. **The employer is on the posting, not the board.** One site carries 13
-   employers -- LINE Taiwan, LINE Pay Taiwan, LINE Plus, LINE Bank Taiwan, IPX
-   and more -- which are genuinely different companies, so each posting's own
-   `companies[0].name` becomes its `company` and the board's name is only a
-   fallback. That is what makes `/jobs/employers/line-taiwan` a real page rather
-   than 81 postings filed under one fictional "LINE".
+4. **The whole family is filed as one employer: "LINE".** The site carries 13
+   legal entities -- LINE Taiwan, LINE Pay Taiwan, LINE Plus, LINE Bank Taiwan,
+   IPX and more -- and this fetcher deliberately throws that distinction away,
+   taking the board row's `company` for every posting and ignoring each
+   posting's own `companies[0].name`.
+
+   That is a product decision, not a simplification, and it costs something
+   real: `/jobs/employers/line-taiwan` does not exist, LINE Pay Taiwan is no
+   longer distinguishable from LINE Bank Taiwan (which is a bank), and `IPX`,
+   whose name is not "LINE" anything, is filed under LINE too. What it buys is
+   one employer page carrying the whole family and one LINE mark on it, instead
+   of ten pages whose two-letter monograms collided four ways on "LP".
+
+   If this is ever reversed, the entity is still in the list payload under
+   `companies[0].name` -- nothing upstream is lost, only not read. Note that
+   `upsert_jobs` assigns `row.company` unconditionally, so flipping this
+   renames every existing row on the next pass rather than leaving a split
+   catalogue.
 
 **`job_fields` is a structured taxonomy we deliberately do not use yet.** Each
 posting carries one ("Server-side", "Data Engineering", "Human Resources"), and
@@ -137,7 +149,7 @@ def _normalize_summary(
     return posting_id, NormalizedJob(
         source="line",
         source_id=f"{slug}:{posting_id}",
-        company=_company(raw, company),
+        company=company,
         title=title,
         location=_location(raw),
         # The site has no remote flag of any kind, and guessing one from a
@@ -193,20 +205,6 @@ def _title(raw: dict[str, Any]) -> str:
         if value:
             return value
     return ""
-
-
-def _company(raw: dict[str, Any], fallback: str) -> str:
-    companies = raw.get("companies")
-    if isinstance(companies, list):
-        for entry in companies:
-            if isinstance(entry, dict):
-                # Strapi has at least one name stored with a trailing space
-                # ("LINE Investment Technologies "), which would otherwise be a
-                # second employer slug for the same company.
-                name = str(entry.get("name") or "").strip()
-                if name:
-                    return name
-    return fallback
 
 
 def _location(raw: dict[str, Any]) -> str | None:

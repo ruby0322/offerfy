@@ -358,12 +358,31 @@ has no openings", which would expire every row we hold. That distinction is the 
 not to simplify away; `test_a_shape_change_reads_as_board_not_found_rather_than_an_empty_board`
 pins it.
 
-**The employer comes off the posting, not the board.** One site carries 13 separate
-employers (LINE Taiwan, LINE Pay Taiwan, LINE Plus, LINE Bank Taiwan, IPX…), so each
-posting's own `companies[0].name` becomes its `company` and the single board row's `LINE`
-is only a fallback. This is why `ats_boards.json` has a second exception to "slug is the
-employer": for `line` the slug is the *site*. Note one Strapi name is stored with a
-trailing space, which would otherwise derive a second employer slug for the same company.
+**The whole LINE family is filed as one employer, "LINE".** The site carries 13 legal
+entities (LINE Taiwan, LINE Pay Taiwan, LINE Plus, LINE Bank Taiwan, IPX…) and `fetch_line`
+deliberately discards that: every posting takes the board row's `company` and each
+posting's own `companies[0].name` is ignored. This is also why `ats_boards.json` has a
+second exception to "slug is the employer" — for `line` the slug is the *site*.
+
+**It was built the other way first, and collapsed on 2026-11-15 by request.** Both
+behaviours work, so this is a product call rather than a bug fixed, and the cost is real:
+`/jobs/employers/line-taiwan` and nine siblings no longer exist, LINE Pay Taiwan is not
+distinguishable from LINE Bank Taiwan (a bank), and `IPX` — whose name is not "LINE"
+anything — is filed under LINE too. What it buys is one employer page over the whole
+family carrying the LINE mark, instead of ten pages whose two-letter monograms collided
+four ways on "LP" (LINE Pay Taiwan, LINE Plus, LINE Pay Plus, LINE Pay (Thailand) Korea
+Office) and twice on "LF".
+
+Reversing it is a one-line change in `_normalize_summary` and nothing upstream was lost —
+the entity is still in the list payload. Note that `upsert_jobs` assigns `row.company`
+unconditionally, so a flip in either direction renames every existing row on the next pass
+rather than leaving half the catalogue under old names.
+
+**The mark is keyed `"LINE"` exactly, which is what makes the collapse tidy.** `markFor` is
+an exact-string lookup, so a per-entity catalogue would have needed either ten keys or a
+family prefix rule — and a prefix rule is a trap here, because **`Linear` starts with
+`Line`** and has a mark of its own. `/^line/i` hijacks it; `/^LINE\b/` does not. Collapsing
+avoids the question entirely.
 
 **`job_fields` is a structured taxonomy, deliberately not used yet.** Each posting carries
 one ("Server-side", "Data Engineering", "Human Resources"), and it would be a far better
