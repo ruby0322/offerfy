@@ -7,7 +7,7 @@ import MatchRow from "./MatchRow";
 import { ApiError, createTailor, getMe, listResumes } from "@/lib/api";
 import { groupByTrack, type Digest, type DigestItem } from "@/lib/digest";
 
-const ACTION = "inline-block border border-current px-3 py-1.5 text-sm disabled:opacity-50";
+const ACTION = "rr-btn rr-btn-accent rr-btn-sm disabled:opacity-50";
 
 const TRACK_KEYS = {
   strong_fit: "digestTrackStrongFit",

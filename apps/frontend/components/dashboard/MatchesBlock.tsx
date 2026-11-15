@@ -106,7 +106,7 @@ export default function MatchesBlock({
                   action={
                     <Link
                       href={`/jobs/${encodeURIComponent(item.job_id)}`}
-                      className="rr-btn rr-btn-sm"
+                      className="rr-btn rr-btn-accent rr-btn-sm"
                     >
                       {t("digestTailor")}
                     </Link>

@@ -1867,6 +1867,25 @@ textarea {
    end of a form. Declared as `.rr-btn.rr-btn-sm` on purpose -- these rules are
    unlayered, so a Tailwind `px-2.5 py-1` utility would lose to `.rr-btn`'s own
    padding and the button would silently stay full height. */
+/* The primary action *inside a list row*. Outline, not filled: a solid
+   button on every row of a list reads as a wall of colour, and it competes
+   with the one genuinely filled button on the page -- the next action. The
+   clay text keeps it legible as the row's main move without adding a second
+   fill. More noticeable in Chinese, where a four-character label is half
+   again as wide as its English equivalent and three of them stack into a
+   block. */
+.rr-btn.rr-btn-accent {
+  background: transparent;
+  color: var(--clay);
+  border: 1px solid color-mix(in srgb, var(--clay) 40%, var(--rule));
+}
+
+.rr-btn.rr-btn-accent:hover {
+  background: color-mix(in srgb, var(--clay) 8%, transparent);
+  border-color: var(--clay);
+  opacity: 1;
+}
+
 .rr-btn.rr-btn-sm {
   padding: 0.3rem 0.6rem;
   font-size: 0.75rem;
