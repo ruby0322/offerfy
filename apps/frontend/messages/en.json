@@ -264,7 +264,7 @@
     },
     "companies": {
       "title": "Open roles at the companies you’re targeting",
-      "note": "{count} employers, read directly from Greenhouse, Lever, Ashby, SmartRecruiters and Workday. No LinkedIn or 104 scraping, no reposts, no ghost jobs from an aggregator.",
+      "note": "A hand-picked {count} of the top employers everyone is watching, with roles read straight from their own career systems.",
       "chipLabel": "Open roles at {company}",
       "allEmployers": "Browse every employer"
     },

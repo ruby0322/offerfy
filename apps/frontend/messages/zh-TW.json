@@ -264,7 +264,7 @@
     },
     "companies": {
       "title": "你正在瞄準的那些公司，現在有缺",
-      "note": "{count} 家雇主，直接讀自 Greenhouse、Lever、Ashby、SmartRecruiters 與 Workday。不爬 LinkedIn 或 104，沒有轉貼，也沒有聚合網站上的幽靈職缺。",
+      "note": "精選 {count} 家大家都在關注的頂尖雇主，職缺直接讀自他們自己的徵才系統。",
       "chipLabel": "{company} 的職缺",
       "allEmployers": "看所有雇主"
     },
