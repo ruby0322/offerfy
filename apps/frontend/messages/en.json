@@ -266,21 +266,88 @@
     },
     "companies": {
       "title": "Open roles at the companies you’re targeting",
-      "note": "A hand-picked {count} of the top employers everyone is watching, with roles read straight from their own career systems.",
+      "note": "A hand-picked {count} of the top employers everyone is watching",
       "chipLabel": "Open roles at {company}",
       "allEmployers": "Browse every employer"
     },
     "loop": {
-      "title": "The loop you run for every application",
+      "title": "Each round leaves your master stronger",
       "findTitle": "Find the role",
-      "findBody": "Technical roles only, filtered by seniority, function and region. Every listing links back to the employer’s own posting.",
-      "aimTitle": "Fork your resume for it",
-      "aimBody": "A copy aimed at that one job; your master stays untouched. Paste the description and it stays with that copy, so every chat turn edits against the posting’s own words instead of from memory.",
+      "findBody": "Technical roles only, linked to the source.",
+      "aimTitle": "Fork a copy for it",
+      "aimBody": "The posting pins to the copy. Master untouched.",
       "shipTitle": "Ship it clean",
-      "shipBody": "ATS checks run on the compiled PDF, so a parser reads what a human reads. Then you apply on the employer’s site.",
+      "shipBody": "Eight ATS checks on the compiled PDF.",
       "keepTitle": "Keep what it taught you",
-      "keepBody": "A sharper bullet, a number you finally dug up: tell Offerfy to remember it and it attaches to your master, then comes back in every later chat.",
-      "returnLabel": "So the next application starts from a sharper master, not from scratch."
+      "keepBody": "Say “remember” and it goes back to the master.",
+      "returnLabel": "The next round doesn’t start from scratch."
+    },
+    "features": {
+      "title": "What Offerfy does",
+      "ingestKicker": "Curated sources",
+      "ingestTitle": "Top roles, picked as they appear",
+      "ingestBody": "The official career pages of {count} top employers, five ATS platforms, rescanned four times a day. Hand-picked list. Non-technical roles never get in.",
+      "ingestNote": "Employer you want still missing?",
+      "ingestNoteLink": "Send us an email.",
+      "ingestFigure": "Five career systems converging into one list, with out-of-scope roles refused before they are stored",
+      "digestKicker": "Weekly shortlist",
+      "digestTitle": "Matched roles, every week",
+      "digestBody": "Your time and attention are expensive, so we only send the ones you are most likely to want and actually fit. A week without a real match stays empty.",
+      "digestFigure": "Three of this week’s matches, with employer, title and match score",
+      "agentKicker": "Resume agent",
+      "agentTitle": "Faithful, personal, and actually good AI calls",
+      "agentBody": "Plenty of it runs on AI, and none of it is slop. A full native tool ecosystem plus systematic context, composing decisions that are faithful, explainable and effective. You pick the model too.",
+      "agentFigure": "Four layers of context rebuilt each turn, the edited document, and the tools it can reach for",
+      "agentLayerFacts": "Resume facts",
+      "agentLayerPosting": "The posting",
+      "agentLayerMemory": "Remembered",
+      "agentLayerWindow": "Chat window",
+      "agentDiffOld": "− built a pipeline",
+      "agentDiffNew": "+ 2.1B events/day",
+      "trackKicker": "After you apply",
+      "trackTitle": "Tracking that answers with results",
+      "trackBody": "Every application logged, including the ones nobody answered. Reply rate and median days to reply do the talking.",
+      "trackFigure": "A batch of applications splitting into interviews, replies and silence",
+      "trackInterview": "Interview",
+      "trackReplied": "Replied",
+      "trackSilent": "No reply",
+      "agentToolPosting": "Posting",
+      "agentToolTypst": "Typst",
+      "agentToolAts": "ATS",
+      "agentToolMaster": "Master"
+    },
+    "faq": {
+      "title": "Before you ask",
+      "items": [
+        {
+          "q": "Where do the roles come from, and how often do they refresh?",
+          "a": "The official career pages of top employers, across five ATS platforms, rescanned four times a day. A posting that comes down is marked dead on the next scan."
+        },
+        {
+          "q": "Will it invent experience for me?",
+          "a": "No. It can only rewrite what your resume already says, each change arrives as a line diff, and nothing is kept until you have looked at it. Nothing reaches the PDF that you have not read."
+        },
+        {
+          "q": "Which model runs it? Can I pick?",
+          "a": "Yes, from the composer in the editor. The choice is stored on your account, so it survives a new machine. Every model's rate is listed on the pricing page, and your allowance is spent at actual usage."
+        },
+        {
+          "q": "Does tailoring for a role mess up my master resume?",
+          "a": "No. The tailored one is a fork. Your master only changes when you say “remember this”, and edits are kept as revision history."
+        },
+        {
+          "q": "Will you submit applications for me?",
+          "a": "No. Applying always happens in the employer's own system. What we do is log it the moment you click through, then watch for a reply."
+        }
+      ]
+    },
+    "cta": {
+      "kicker": "Free right now",
+      "headline": "All of this is free right now.\nWhether it stays that way, we can't promise.",
+      "body": "No card, every feature on. Our Terms don’t promise today’s allowances stay.",
+      "primary": "Upload your resume",
+      "secondary": "Browse open roles first",
+      "allowance": "See the current free allowance"
     },
     "mock": {
       "chatPrompt": "Make this bullet match what the posting asks for.",

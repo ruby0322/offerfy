@@ -266,21 +266,88 @@
     },
     "companies": {
       "title": "你正在瞄准的那些公司，现在有空缺",
-      "note": "精选 {count} 家大家都在关注的顶尖雇主，职位直接读自他们自己的招聘系统。",
+      "note": "精选 {count} 家大家都在关注的顶尖雇主",
       "chipLabel": "{company} 的职位",
       "allEmployers": "看所有雇主"
     },
     "loop": {
-      "title": "每投一次，你就跑一次这个循环",
+      "title": "每投一次，主简历就更强",
       "findTitle": "找到职位",
-      "findBody": "只收技术岗，可按职级、领域与地区筛选。每一条都链回雇主自己的原始职位。",
-      "aimTitle": "为它复制一份简历",
-      "aimBody": "针对那一个职位的副本，主简历不会被动到。贴上职位描述，它会一直跟着这份副本，之后每一轮对话都照着职位原本的说法改，而不是凭印象。",
-      "shipTitle": "干净地投出去",
-      "shipBody": "ATS 检查跑在编译出来的 PDF 上，确保解析器读到的跟人看到的一样。然后你到雇主的网站投递。",
+      "findBody": "只有技术岗，链回雇主原页。",
+      "aimTitle": "fork 一份给它",
+      "aimBody": "职位钉在副本上，主简历不动。",
+      "shipTitle": "干净地发出去",
+      "shipBody": "八项 ATS 检查跑在 PDF 上。",
       "keepTitle": "把学到的留下来",
-      "keepBody": "一句更有力的描述、一个你终于挖出来的数字：让 Offerfy 记住，它就会存进你的主简历，之后每次对话都会再带出来。",
-      "returnLabel": "所以下一次投递，是从更强的主简历开始，不是从头再来。"
+      "keepBody": "说「记住」，就写回主简历。",
+      "returnLabel": "下一轮不用从头来。"
+    },
+    "features": {
+      "title": "Offerfy 做的四件事",
+      "ingestKicker": "精选来源",
+      "ingestTitle": "即时精选顶尖职位",
+      "ingestBody": "{count} 家顶尖雇主的官方招聘页，五套 ATS，一天重扫四次。名单一家一家挑，非技术岗进不来。",
+      "ingestNote": "想看的雇主不在里面？",
+      "ingestNoteLink": "寄信告诉我们。",
+      "ingestFigure": "五套招聘系统汇进一份清单，不符范围的职位在入库前被挡掉",
+      "digestKicker": "每周精选",
+      "digestTitle": "每周推荐适配职位",
+      "digestBody": "你的时间和专注力很贵。我们只推你最可能有兴趣、条件也真的对得上的，匹配不到就留空。",
+      "digestFigure": "本周的三条匹配：雇主、职位与匹配分数",
+      "agentKicker": "简历 agent",
+      "agentTitle": "忠实、个性化且出色的 AI 决策",
+      "agentBody": "许多功能背后都有 AI，但不是 AI slop。完整的原生工具生态系加上系统化的 context，组织出忠实、可解释又有效的决策。模型也你自己选。",
+      "agentFigure": "每轮重组的四层脉络、改动后的文档，以及它能动用的工具",
+      "agentLayerFacts": "简历事实",
+      "agentLayerPosting": "钉住职位",
+      "agentLayerMemory": "记住的事",
+      "agentLayerWindow": "对话窗",
+      "agentDiffOld": "− 负责数据管线",
+      "agentDiffNew": "+ 每日 21 亿笔事件",
+      "trackKicker": "投递之后",
+      "trackTitle": "进度追踪，用结果说话",
+      "trackBody": "每一笔都记着，连没回你的都算进去。回复率和回复天数中位数，数字自己会说话。",
+      "trackFigure": "多笔投递分流到面试、回复与没有回应三种结果",
+      "trackInterview": "面试中",
+      "trackReplied": "有回复",
+      "trackSilent": "没回应",
+      "agentToolPosting": "读职位",
+      "agentToolTypst": "改 Typst",
+      "agentToolAts": "ATS 检查",
+      "agentToolMaster": "存回主简历"
+    },
+    "faq": {
+      "title": "先回答你会问的",
+      "items": [
+        {
+          "q": "职位从哪来，多久更新一次？",
+          "a": "顶尖雇主的官方招聘页，五套 ATS，一天重扫四次。下架的职位会在下一次扫描标成失效。"
+        },
+        {
+          "q": "它会帮我编经历吗？",
+          "a": "不会。它只能重写你简历里已经有的东西，每笔改动都附行级 diff，你过目才留下。没有一个字是你没看过就进 PDF 的。"
+        },
+        {
+          "q": "用什么模型？我能自己挑吗？",
+          "a": "可以，在编辑器的输入框直接换。这个选择记在账号上，换一台电脑也还在。每个模型的单价都列在定价页，额度照实际用量扣。"
+        },
+        {
+          "q": "针对职位改过，主简历会被弄乱吗？",
+          "a": "不会。针对职位的那份是 fork 出来的，主简历只有在你说「记住」的时候才会动，而且改动都留着版本记录。"
+        },
+        {
+          "q": "你们会自动帮我投递吗？",
+          "a": "不会。投递一定是在雇主自己的系统上完成。我们做的是在你点出去的那一刻记一笔，然后帮你盯有没有人回。"
+        }
+      ]
+    },
+    "cta": {
+      "kicker": "现在免费",
+      "headline": "现在这些全部免费。\n以后会不会，我们不敢保证。",
+      "body": "不绑卡，功能全开。条款没保证现在的额度和功能不会变。",
+      "primary": "上传简历，跑第一轮",
+      "secondary": "先看有哪些职位",
+      "allowance": "看目前的免费额度"
     },
     "mock": {
       "chatPrompt": "把这条经历改成职位要的样子。",

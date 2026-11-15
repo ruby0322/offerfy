@@ -1,6 +1,9 @@
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
 import CompanyWall from "@/components/landing/CompanyWall";
+import Faq from "@/components/landing/Faq";
+import Features from "@/components/landing/Features";
+import FinalCta from "@/components/landing/FinalCta";
 import Hero from "@/components/landing/Hero";
 import TheLoop from "@/components/landing/TheLoop";
 import JsonLd from "@/components/seo/JsonLd";
@@ -24,6 +27,14 @@ export default async function LandingPage({ params }: Props) {
         <Hero />
         <CompanyWall />
         <TheLoop />
+        {/* The loop is the mechanic; these four are what each step of it
+            actually runs on. The questions come after them because they
+            are all follow-ups to a claim made above, and the CTA comes
+            last because it is the only thing on the page asking for
+            something. */}
+        <Features />
+        <Faq />
+        <FinalCta />
       </main>
       <Footer variant="landing" />
     </div>

@@ -28,6 +28,10 @@
   --cta: var(--clay);
   --cta-ink: #f6f1e8;
   --hover: color-mix(in srgb, var(--ink) 6%, var(--paper));
+  /* The fill behind the landing page's line art. One formula for both themes,
+     the same move --selection makes: --clay and --sheet both flip in .dark, so
+     the tint follows without a second declaration. */
+  --landing-art-tint: color-mix(in srgb, var(--clay) 8%, var(--sheet));
   /* Text selection. One formula for both themes -- --clay and --sheet both
      flip in .dark -- and it has to stay readable under --ink either way. */
   --selection: color-mix(in srgb, var(--clay) 32%, var(--sheet));
@@ -1399,73 +1403,460 @@ textarea {
   color: var(--muted);
 }
 
-/* The return leg. It hangs off the bottom of the track, runs right to left,
-   and its arrowhead turns up into step 01 — the loop closing. */
+/* The closing strip. It carried a dashed return leg that ran back under the
+   four steps and turned up into step 01; TheLoop.tsx says why the drawing went
+   and the sentence stayed. */
 .landing-loop-return {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
   border-top: 1px solid var(--rule);
   background: color-mix(in srgb, var(--clay) 5%, var(--sheet, var(--paper)));
   padding: 0.85rem 1.25rem;
 }
 
-.landing-loop-arrow {
-  position: relative;
-  flex: 1 1 auto;
-  height: 1px;
-  background: var(--clay);
-  opacity: 0.7;
-}
-
-/* The left end turns up, crossing back into step 01. */
-.landing-loop-arrow::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  width: 1px;
-  height: 17px;
-  background: var(--clay);
-}
-
-.landing-loop-arrow::before {
-  content: "";
-  position: absolute;
-  left: -4.5px;
-  bottom: 17px;
-  width: 0;
-  height: 0;
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-bottom: 8px solid var(--clay);
-}
-
 .landing-loop-return-text {
-  flex: 0 1 auto;
   margin: 0;
+  max-width: 58ch;
   font-size: 0.88rem;
   line-height: 1.5;
   color: var(--muted);
-  text-align: right;
 }
 
-@media (max-width: 767px) {
-  .landing-loop-return {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.6rem;
-  }
+/* --- the line art --------------------------------------------------------
+   One rule governs every drawing on this page: **the resting state is the
+   finished state.** Each animation below is additive and sits behind
+   prefers-reduced-motion, so someone who asked for no movement gets the end
+   of each little story rather than a frozen first frame -- the same contract
+   EditorMock keeps, and the reason none of these are client components.
 
-  .landing-loop-arrow {
-    flex: 0 0 auto;
-  }
+   The `display` here is safe where the ones in .nav-burger are not: these
+   rules are unlayered and would beat a Tailwind utility, but nothing carrying
+   .landing-art is ever folded away with md:hidden. Keep it that way. */
+.landing-art {
+  display: block;
+  width: 100%;
+  height: auto;
+}
 
-  .landing-loop-return-text {
-    text-align: left;
+.landing-loop-art {
+  max-width: 7.5rem;
+  margin-bottom: 0.6rem;
+}
+
+@keyframes landing-art-sweep {
+  0%,
+  18% {
+    transform: translateY(0);
+  }
+  50%,
+  68% {
+    transform: translateY(17px);
+  }
+  100% {
+    transform: translateY(0);
   }
 }
+
+@keyframes landing-art-peel {
+  0% {
+    transform: translate(-9px, 4px);
+    opacity: 0.25;
+  }
+  45%,
+  100% {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+}
+
+@keyframes landing-art-scan {
+  0% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(38px);
+  }
+}
+
+@keyframes landing-art-tick {
+  0%,
+  35% {
+    opacity: 0;
+  }
+  55%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes landing-art-fly {
+  0% {
+    transform: translate(26px, -9px);
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+  75%,
+  100% {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+}
+
+@keyframes landing-art-grow {
+  0%,
+  60% {
+    opacity: 0;
+  }
+  80%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes landing-art-drop {
+  0%,
+  55% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  80%,
+  100% {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+}
+
+@keyframes landing-art-rise {
+  0%,
+  30% {
+    transform: translateY(5px);
+    opacity: 0;
+  }
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes landing-art-fade {
+  0%,
+  40% {
+    opacity: 1;
+  }
+  58%,
+  100% {
+    opacity: 0.3;
+  }
+}
+
+@keyframes landing-art-layer {
+  0%,
+  20% {
+    opacity: 0.3;
+  }
+  40%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes landing-art-advance {
+  0%,
+  30% {
+    transform: translateX(0);
+  }
+  60%,
+  100% {
+    transform: translateX(52px);
+  }
+}
+
+@keyframes landing-art-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .landing-art-sweep {
+    animation: landing-art-sweep 3.4s ease-in-out infinite;
+  }
+
+  .landing-art-peel {
+    animation: landing-art-peel 3s ease-in-out infinite;
+  }
+
+  .landing-art-scan {
+    animation: landing-art-scan 2.6s linear infinite;
+  }
+
+  .landing-art-tick {
+    animation: landing-art-tick 2.6s linear infinite;
+  }
+
+  .landing-art-fly {
+    animation: landing-art-fly 3.2s ease-in-out infinite;
+  }
+
+  .landing-art-grow {
+    animation: landing-art-grow 3.2s ease-in-out infinite;
+  }
+
+  .landing-art-drop {
+    animation: landing-art-drop 3.6s ease-in-out infinite;
+  }
+
+  .landing-art-rise {
+    animation: landing-art-rise 3.6s ease-in-out infinite;
+  }
+
+  .landing-art-fade {
+    animation: landing-art-fade 3s ease-in-out infinite;
+  }
+
+  .landing-art-layer {
+    animation: landing-art-layer 2.8s ease-in-out infinite;
+  }
+
+  .landing-art-advance {
+    animation: landing-art-advance 3.4s ease-in-out infinite;
+  }
+
+  .landing-art-pulse {
+    animation: landing-art-pulse 2s ease-in-out infinite;
+  }
+}
+
+/* --- the feature rows ----------------------------------------------------
+   Rows, not a card grid: each of these needs a paragraph to be believed, and
+   four paragraphs in four cards is a wall.
+
+   **The figure never changes sides, and the block is narrower than the page.**
+   The first cut put the copy in a 1fr column beside an 18rem figure on a
+   72rem page, which left the text filling 454px of an 824px column: 370px of
+   dead air, a third of the row, in a gutter that moved every time a paragraph
+   changed length -- and the rows alternated, so that ragged inner edge jumped
+   sides on the way down.
+
+   The arithmetic is the whole problem. A comfortable measure here is ~454px
+   and the figure wants ~368px (see below), which is 822px of content on a
+   1152px page. The leftover 330px has to go somewhere: all of it into the
+   gutter and the two halves stop looking related, all of it into the right
+   margin and the block hangs off a page whose other sections are full width.
+   So the reading column is narrowed and centred, and the figure column is
+   sized against the copy rather than against the page. The paragraphs are two
+   lines now, so the figures came down with them: a 23rem figure stood 228px
+   tall against a ~110px block of text and turned every row into an
+   illustration with a caption. The FAQ and the closing block take the same
+   width, so the lower half of the page is one column rather than three
+   different ones.
+
+   Monotony is the risk taken on purpose: four rows that line up read as a
+   system, four that zigzag read as an accident. */
+.landing-features,
+.landing-faq,
+.landing-cta-block {
+  max-width: 52rem;
+  margin-inline: auto;
+}
+.landing-feature-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: center;
+  padding: 1.75rem 0;
+  border-top: 1px solid var(--rule);
+}
+
+.landing-feature-row:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.landing-feature-row:last-child {
+  padding-bottom: 0;
+}
+
+@media (min-width: 768px) {
+  .landing-feature-row {
+    grid-template-columns: minmax(0, 1fr) 20rem;
+    gap: 4rem;
+  }
+}
+
+/* 20rem above is the floor, not a preference. These viewBoxes are 212 units
+   wide, so a label declared at 8 units renders at 8/212 of whatever width the
+   box gets: 296px of drawing puts them at 11px, under the 15.2px body copy,
+   which is where a figure's labels belong. The first cut was 264px and 10px,
+   which reads as a diagram squinting at you. Go much below this and the
+   labels stop being readable before the drawing stops being visible. */
+.landing-feature-figure {
+  border: 1px solid var(--rule);
+  background: var(--sheet, var(--paper));
+  padding: 0.75rem;
+}
+
+.landing-feature-title {
+  margin: 0.5rem 0 0.55rem;
+  font-size: 1.15rem;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+
+@media (min-width: 768px) {
+  .landing-feature-title {
+    font-size: 1.3rem;
+  }
+}
+
+.landing-feature-body {
+  margin: 0;
+  max-width: 54ch;
+  /* Chinese wraps between any two characters, so a paragraph that ends one
+     character into its last line is easy to hit and looks like a mistake.
+     Unsupported elsewhere, where it simply does nothing. */
+  text-wrap: pretty;
+  font-size: 0.95rem;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+/* A footnote, and it has to read as one: the sentence above it is a claim
+   about what the catalogue carries, and this is the caveat on it. */
+.landing-feature-note {
+  margin: 0.8rem 0 0;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--rule);
+  max-width: 54ch;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+/* --- the questions -------------------------------------------------------
+   <details>, so the browser owns the open state, the keyboard and the
+   semantics, and every answer is in the HTML whether or not it is on screen.
+   The marker is suppressed twice because Safari still wants the WebKit
+   pseudo-element. */
+.landing-faq {
+  border-top: 1px solid var(--rule);
+}
+
+.landing-faq-item {
+  border-bottom: 1px solid var(--rule);
+}
+
+.landing-faq-q {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 0.9rem 0;
+  list-style: none;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.landing-faq-q::-webkit-details-marker {
+  display: none;
+}
+
+.landing-faq-q::marker {
+  content: "";
+}
+
+.landing-faq-q:hover {
+  color: var(--clay);
+}
+
+.landing-faq-chevron {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  color: var(--clay);
+  transition: transform 0.18s ease;
+}
+
+.landing-faq-item[open] .landing-faq-chevron {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-faq-chevron {
+    transition: none;
+  }
+}
+
+.landing-faq-a {
+  margin: 0;
+  padding: 0 0 1rem;
+  max-width: 62ch;
+  font-size: 0.92rem;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+/* --- the closing block ---------------------------------------------------
+   The only framed block on the page, which is how it closes. Clay border and
+   a clay wash rather than a filled panel: a solid CTA band would be the
+   loudest thing here, and the sentence inside it is quiet on purpose. */
+.landing-cta-block {
+  border: 1px solid var(--clay);
+  background: color-mix(in srgb, var(--clay) 7%, var(--sheet, var(--paper)));
+  padding: 2rem 1.5rem 2.25rem;
+  text-align: center;
+}
+
+.landing-cta-headline {
+  margin: 0.6rem auto 0.8rem;
+  max-width: 30ch;
+  /* The message carries a newline between its two sentences. Without this the
+     line breaks wherever the box runs out, which in Chinese is mid-word -- the
+     break lands between two characters of one word rather than at the full
+     stop. Each sentence still wraps inside itself on a narrow screen. */
+  white-space: pre-line;
+  font-size: 1.25rem;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+@media (min-width: 768px) {
+  .landing-cta-headline {
+    font-size: 1.8rem;
+  }
+}
+
+.landing-cta-body {
+  margin: 0 auto 1.4rem;
+  max-width: 48ch;
+  font-size: 0.92rem;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.landing-cta-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.85rem;
+}
+
+.landing-cta-fine {
+  margin: 1rem 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 
 .landing-hero {
   display: grid;

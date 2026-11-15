@@ -266,21 +266,88 @@
     },
     "companies": {
       "title": "你正在瞄準的那些公司，現在有缺",
-      "note": "精選 {count} 家大家都在關注的頂尖雇主，職缺直接讀自他們自己的徵才系統。",
+      "note": "精選 {count} 家大家都在關注的頂尖雇主",
       "chipLabel": "{company} 的職缺",
       "allEmployers": "看所有雇主"
     },
     "loop": {
-      "title": "每投一次，你就跑一次這個循環",
+      "title": "每投一次，主履歷就更強",
       "findTitle": "找到職缺",
-      "findBody": "只收技術職，可依職級、領域與地區篩選。每一則都連回雇主自己的原始職缺。",
-      "aimTitle": "為它複製一份履歷",
-      "aimBody": "針對那一個職缺的副本，主履歷不會被動到。貼上職缺描述，它會一直跟著這份副本，之後每一輪對話都照著職缺原本的說法改，而不是憑印象。",
+      "findBody": "只有技術職，連回雇主原頁。",
+      "aimTitle": "fork 一份給它",
+      "aimBody": "職缺釘在副本上，主履歷不動。",
       "shipTitle": "乾淨地送出去",
-      "shipBody": "ATS 檢查跑在編譯出來的 PDF 上，確保解析器讀到的跟人看到的一樣。接著你到雇主的網站投遞。",
+      "shipBody": "八項 ATS 檢查跑在 PDF 上。",
       "keepTitle": "把學到的留下來",
-      "keepBody": "一句更有力的描述、一個你終於挖出來的數字：叫 Offerfy 記住，它就會存進你的主履歷，之後每次對話都會再帶出來。",
-      "returnLabel": "所以下一次投遞，是從更強的主履歷開始，不是從頭再來。"
+      "keepBody": "說「記住」，就寫回主履歷。",
+      "returnLabel": "下一輪不用從頭來。"
+    },
+    "features": {
+      "title": "Offerfy 做的四件事",
+      "ingestKicker": "精選來源",
+      "ingestTitle": "即時精選頂尖職缺",
+      "ingestBody": "{count} 家頂尖雇主的官方徵才頁，五套 ATS，一天重掃四次。名單一家一家挑，非技術職進不來。",
+      "ingestNote": "想看的雇主不在裡面？",
+      "ingestNoteLink": "寄信告訴我們。",
+      "ingestFigure": "五套徵才系統匯進一份清單，不符範圍的職缺在入庫前被擋掉",
+      "digestKicker": "每週精選",
+      "digestTitle": "每週推薦適配職缺",
+      "digestBody": "你的時間和專注力很貴。我們只推你最可能有興趣、條件也真的對得上的，配不到就留空。",
+      "digestFigure": "本週的三則配對：雇主、職稱與配對分數",
+      "agentKicker": "履歷 agent",
+      "agentTitle": "忠實、個人化且出色的 AI 決策",
+      "agentBody": "許多功能背後都有 AI，但不是 AI slop。完整的原生工具生態系加上系統化的 context，組織出忠實、可解釋又有效的決策。模型也你自己選。",
+      "agentFigure": "每輪重組的四層脈絡、改動後的文件，以及它能動用的工具",
+      "agentLayerFacts": "履歷事實",
+      "agentLayerPosting": "釘住職缺",
+      "agentLayerMemory": "記住的事",
+      "agentLayerWindow": "對話窗",
+      "agentDiffOld": "− 負責資料管線",
+      "agentDiffNew": "+ 每日 21 億筆事件",
+      "trackKicker": "投遞之後",
+      "trackTitle": "進度追蹤，用結果說話",
+      "trackBody": "每一筆都記著，連沒回你的都算進去。回覆率和回覆天數中位數，數字自己會說話。",
+      "trackFigure": "多筆投遞分流到面試、回覆與沒有回應三種結果",
+      "trackInterview": "面試中",
+      "trackReplied": "有回覆",
+      "trackSilent": "沒回應",
+      "agentToolPosting": "讀職缺",
+      "agentToolTypst": "改 Typst",
+      "agentToolAts": "ATS 檢查",
+      "agentToolMaster": "存回主履歷"
+    },
+    "faq": {
+      "title": "先回答你會問的",
+      "items": [
+        {
+          "q": "職缺從哪來，多久更新一次？",
+          "a": "頂尖雇主的官方徵才頁，五套 ATS，一天重掃四次。下架的職缺會在下一次掃描標成失效。"
+        },
+        {
+          "q": "它會幫我編經歷嗎？",
+          "a": "不會。它只能重寫你履歷裡已經有的東西，每筆改動都附行級 diff，你過目才留下。沒有一個字是你沒看過就進 PDF 的。"
+        },
+        {
+          "q": "用什麼模型？我能自己挑嗎？",
+          "a": "可以，在編輯器的輸入框直接換。這個選擇記在帳號上，換一台電腦也還在。每個模型的單價都列在定價頁，額度照實際用量扣。"
+        },
+        {
+          "q": "針對職缺改過，主履歷會被弄亂嗎？",
+          "a": "不會。針對職缺的那份是 fork 出來的，主履歷只有在你說「記住」的時候才會動，而且改動都留著版本紀錄。"
+        },
+        {
+          "q": "你們會自動幫我投遞嗎？",
+          "a": "不會。投遞一定是在雇主自己的系統上完成。我們做的是在你點出去的那一刻記一筆，然後幫你盯有沒有人回。"
+        }
+      ]
+    },
+    "cta": {
+      "kicker": "現在免費",
+      "headline": "現在這些全部免費。\n以後會不會，我們不敢保證。",
+      "body": "不綁卡，功能全開。條款沒保證現在的額度和功能不會變。",
+      "primary": "上傳履歷，跑第一輪",
+      "secondary": "先看有哪些職缺",
+      "allowance": "看目前的免費額度"
     },
     "mock": {
       "chatPrompt": "把這則經歷改成職缺要的樣子。",
