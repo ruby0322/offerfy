@@ -50,6 +50,7 @@ import {
   getResume,
   getResumeFamily,
   listMemory,
+  getResumeShare,
   publishResume,
   putResumeSource,
   putSelectedModel,
@@ -225,6 +226,12 @@ export default function EditorShell({ resumeId }: Props) {
   const [unpublishedChanges, setUnpublishedChanges] = useState(false);
   const [updatedAt, setUpdatedAt] = useState("");
   const [publishing, setPublishing] = useState(false);
+  // Whether this resume has a public link, which is what the button is
+  // called after. Pinning a version and sharing one are different things:
+  // the button pins, and only a shared resume has anything to "publish" to.
+  // Unknown reads as private, the common case, so the label settles rather
+  // than flips for most people.
+  const [isPublic, setIsPublic] = useState(false);
   const [family, setFamily] = useState<ResumeFamily | null>(null);
   const [tailorDialogOpen, setTailorDialogOpen] = useState(false);
   const [creatingTailor, setCreatingTailor] = useState(false);
@@ -1313,14 +1320,30 @@ export default function EditorShell({ resumeId }: Props) {
     }
   }
 
+  // The settings panel fetches this too and reports it through onShareState,
+  // but it is inside a tab that is unmounted until opened, so the toolbar
+  // would be unlabelled until someone went looking.
+  useEffect(() => {
+    let cancelled = false;
+    getResumeShare(resumeId)
+      .then((state) => {
+        if (!cancelled) setIsPublic(state.public);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [resumeId]);
+
   async function onPublish() {
     if (!signedIn || publishing) return;
     setPublishing(true);
     try {
       const state = await publishResume(resumeId);
       setUnpublishedChanges(state.unpublished_changes ?? false);
+      setIsPublic(state.public);
     } catch {
-      setStatus(t("publishError"));
+      setStatus(isPublic ? t("publishError") : t("publishSaveError"));
     } finally {
       setPublishing(false);
     }
@@ -1330,6 +1353,7 @@ export default function EditorShell({ resumeId }: Props) {
     if (typeof state.unpublished_changes === "boolean") {
       setUnpublishedChanges(state.unpublished_changes);
     }
+    setIsPublic(state.public);
   }, []);
 
   async function onRestoreEdit(previousSource: string) {
@@ -1886,8 +1910,8 @@ export default function EditorShell({ resumeId }: Props) {
           />
         }
         status={status}
-        publishLabel={t("publish")}
-        publishingLabel={t("publishing")}
+        publishLabel={isPublic ? t("publish") : t("publishSave")}
+        publishingLabel={isPublic ? t("publishing") : t("publishSaving")}
         unpublishedChanges={signedIn && unpublishedChanges}
         publishing={publishing}
         onPublish={signedIn ? onPublish : undefined}

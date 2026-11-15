@@ -264,14 +264,28 @@ export default function EditorSettingsPanel({
                 ) : null}
                 {onPublish ? (
                   <div className="flex flex-col gap-2">
-                    <p className="text-xs text-muted-foreground">{t("settingsPublishHint")}</p>
+                    {/* This button pins the current draft as a version. On a
+                        shared resume that version is also what the link
+                        serves, so it is called publishing; on a private one
+                        there is nothing to publish to and it is a save. */}
+                    <p className="text-xs text-muted-foreground">
+                      {share?.public
+                        ? t("settingsPublishHint")
+                        : t("settingsPublishHintPrivate")}
+                    </p>
                     <Button
                       type="button"
                       size="sm"
                       disabled={publishing || !unpublishedChanges}
                       onClick={onPublish}
                     >
-                      {publishing ? t("publishing") : t("publish")}
+                      {share?.public
+                        ? publishing
+                          ? t("publishing")
+                          : t("publish")
+                        : publishing
+                          ? t("publishSaving")
+                          : t("publishSave")}
                     </Button>
                   </div>
                 ) : null}
