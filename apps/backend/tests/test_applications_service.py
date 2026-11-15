@@ -8,6 +8,7 @@ from app.models import Application, Job, Resume, User
 from app.services.jobs.applications import (
     GROUP_ORDER,
     STATUSES,
+    ResumeNotOwned,
     confirm_applied,
     link_tailor,
     mark_applied,
@@ -441,3 +442,57 @@ def test_an_applied_row_has_no_reply_recorded(db_session):
     row = mark_applied(db_session, user=u, job_id=j.id)
     confirm_applied(db_session, application=row)
     assert row.replied_at is None
+
+
+def _resume(db_session, user, body="= Master"):
+    resume = Resume(user_id=user.id, typst_source=body, source="create")
+    db_session.add(resume)
+    db_session.commit()
+    return resume
+
+
+def test_mark_applied_records_the_resume_that_was_sent(db_session):
+    """Applying without tailoring still says which resume went out."""
+    u, j = _user(db_session), _job(db_session)
+    master = _resume(db_session, u)
+
+    row = mark_applied(db_session, user=u, job_id=j.id, resume_id=master.id)
+
+    assert row.status == "applied"
+    assert row.tailor_resume_id == master.id
+    assert row.applied_at is not None
+
+
+def test_mark_applied_will_not_send_someone_elses_resume(db_session):
+    u, other, j = _user(db_session), _user(db_session, "sub-other"), _job(db_session)
+    theirs = _resume(db_session, other, "= Theirs")
+
+    with pytest.raises(ResumeNotOwned):
+        mark_applied(db_session, user=u, job_id=j.id, resume_id=theirs.id)
+
+    # The refusal must not leave a half-written row behind.
+    assert (
+        db_session.query(Application)
+        .filter(Application.user_id == u.id, Application.job_id == j.id)
+        .one()
+        .status
+        == "saved"
+    )
+
+
+def test_a_second_click_does_not_rewrite_which_resume_was_sent(db_session):
+    u, j = _user(db_session), _job(db_session)
+    first = _resume(db_session, u, "= First")
+    second = _resume(db_session, u, "= Second")
+
+    mark_applied(db_session, user=u, job_id=j.id, resume_id=first.id)
+    row = mark_applied(db_session, user=u, job_id=j.id, resume_id=second.id)
+
+    assert row.tailor_resume_id == first.id
+
+
+def test_mark_applied_without_a_resume_is_unchanged(db_session):
+    u, j = _user(db_session), _job(db_session)
+    row = mark_applied(db_session, user=u, job_id=j.id)
+    assert row.status == "applied"
+    assert row.tailor_resume_id is None

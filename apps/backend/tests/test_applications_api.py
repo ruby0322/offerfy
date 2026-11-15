@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.config import get_settings
 from app.deps import SESSION_COOKIE, _sign
-from app.models import Application, Job, User
+from app.models import Application, Job, Resume, User
 
 from tests.test_applications_service import _job, _tailor
 
@@ -332,3 +332,47 @@ def test_patch_rejects_a_truthy_string_for_replied(client, db_session):
         ).status_code
         == 422
     )
+
+
+def test_applied_can_name_the_resume_that_was_sent(client, db_session):
+    """Applying without tailoring: the row records which resume went out."""
+    user = _signed_in(client, db_session, "sub-direct")
+    job = _job(db_session)
+    master = Resume(user_id=user.id, typst_source="= Master", source="create")
+    db_session.add(master)
+    db_session.commit()
+
+    res = client.post(
+        f"/v1/me/applications/{job.id}/applied", json={"resume_id": master.id}
+    )
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "applied"
+    assert body["tailor_resume_id"] == master.id
+
+
+def test_applied_refuses_a_resume_that_is_not_yours(client, db_session):
+    _signed_in(client, db_session, "sub-direct-2")
+    stranger = User(google_sub="sub-stranger", email="s@example.com", locale="en")
+    db_session.add(stranger)
+    db_session.commit()
+    theirs = Resume(user_id=stranger.id, typst_source="= Theirs", source="create")
+    db_session.add(theirs)
+    db_session.commit()
+    job = _job(db_session)
+
+    res = client.post(
+        f"/v1/me/applications/{job.id}/applied", json={"resume_id": theirs.id}
+    )
+
+    # 422, not 404: saying "not found" would answer whether that id exists.
+    assert res.status_code == 422
+
+
+def test_applied_still_works_with_no_body(client, db_session):
+    """The job page and the editor post nothing; that must keep working."""
+    _signed_in(client, db_session, "sub-direct-3")
+    job = _job(db_session)
+    res = client.post(f"/v1/me/applications/{job.id}/applied")
+    assert res.status_code == 200 and res.json()["tailor_resume_id"] is None

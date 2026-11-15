@@ -16,6 +16,7 @@ from app.db import get_db
 from app.deps import require_user
 from app.models import Application, Job, User
 from app.schemas_jobs import (
+    ApplicationApplied,
     ApplicationConfirm,
     ApplicationCreate,
     ApplicationOut,
@@ -110,12 +111,24 @@ def unsave_application(
 
 @router.post("/v1/me/applications/{job_id}/applied", response_model=ApplicationOut)
 def mark_applied(
-    job_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)
+    job_id: str,
+    body: ApplicationApplied | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
     # The id is in the path, so a missing posting is a missing resource: 404.
     if db.get(Job, job_id) is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    return application_out(service.mark_applied(db, user=user, job_id=job_id))
+    try:
+        row = service.mark_applied(
+            db, user=user, job_id=job_id, resume_id=body.resume_id if body else None
+        )
+    except service.ResumeNotOwned:
+        # Not 404: the posting exists and the caller is signed in. The named
+        # resume is simply not theirs to send, and saying "not found" would
+        # answer whether someone else's id exists.
+        raise HTTPException(status_code=422, detail="Unknown resume")
+    return application_out(row)
 
 
 @router.post("/v1/me/applications/{job_id}/confirm", response_model=ApplicationOut)

@@ -45,7 +45,7 @@ from sqlalchemy import case, delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import Application, User, _utcnow
+from app.models import Application, Resume, User, _utcnow
 
 STATUSES: tuple[str, ...] = ("saved", "tailored", "applied", "interviewing", "closed")
 SOURCES: tuple[str, ...] = ("digest", "search")
@@ -182,9 +182,38 @@ def job_id_for_tailor(db: Session, resume) -> str | None:
     )
 
 
-def mark_applied(db: Session, *, user: User, job_id: str) -> Application:
-    """The outbound click: applied, stamped, confirmation still owed."""
+class ResumeNotOwned(Exception):
+    """The caller named a resume that is not theirs, or does not exist."""
+
+
+def mark_applied(
+    db: Session, *, user: User, job_id: str, resume_id: str | None = None
+) -> Application:
+    """The outbound click: applied, stamped, confirmation still owed.
+
+    `resume_id` is for applying without tailoring first -- the person picks
+    which resume they are sending and the row records it, so the pipeline
+    does not have to pretend an untailored application used nothing. It is
+    the same column `link_tailor` writes, because the question it answers is
+    the same one ("which resume went to this employer?") and a second column
+    would make `tailor_resume_id` mean "tailored for this job" in one row and
+    "whatever was sent" in another.
+
+    Unlike link_tailor this does NOT move the row to tailored: nothing was
+    tailored. It goes straight to applied, and a row that was already past
+    saved keeps the resume it already had -- overwriting it would rewrite
+    history on a second click.
+    """
     application = _get_or_create(db, user, job_id, "search")
+    if resume_id is not None and application.tailor_resume_id is None:
+        owned = (
+            db.query(Resume.id)
+            .filter(Resume.id == resume_id, Resume.user_id == user.id)
+            .scalar()
+        )
+        if owned is None:
+            raise ResumeNotOwned(resume_id)
+        application.tailor_resume_id = resume_id
     if _advance(application, "applied") and application.applied_at is None:
         application.applied_at = _utcnow()
     db.commit()

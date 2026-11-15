@@ -104,8 +104,19 @@ export async function unsaveJob(jobId: string): Promise<void> {
   await apiJson<unknown>(base(jobId), { method: "DELETE" });
 }
 
-export async function markApplied(jobId: string): Promise<Application> {
-  return apiJson<Application>(`${base(jobId)}/applied`, { method: "POST" });
+/**
+ * The outbound click. `resumeId` names what is being sent when the person
+ * skips tailoring; the server records it and refuses an id that is not
+ * theirs. Omitted keeps the bodyless POST the job page and editor send.
+ */
+export async function markApplied(
+  jobId: string,
+  resumeId?: string,
+): Promise<Application> {
+  return apiJson<Application>(`${base(jobId)}/applied`, {
+    method: "POST",
+    ...(resumeId ? { body: JSON.stringify({ resume_id: resumeId }) } : {}),
+  });
 }
 
 export async function confirmApplied(jobId: string, applied: boolean): Promise<Application> {

@@ -1,14 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
+import { listResumes, type Resume } from "@/lib/api";
 import {
   confirmApplied,
   markApplied,
   patchApplication,
   type Application,
 } from "@/lib/applications";
+import ActionDialog, { type DialogChoice } from "./ActionDialog";
 import { nextAction, responseChoices } from "./applications";
 
 /**
@@ -21,6 +23,12 @@ import { nextAction, responseChoices } from "./applications";
  * reimplement per surface: `nextAction` decides what to offer and
  * `responseChoices` decides what closing means, both in ./applications.
  *
+ * Anything with more than one outcome opens a dialog rather than expanding
+ * in place. In a row the choices arrived as two or three bare verbs with the
+ * posting they concerned a column away, and "一直沒有回覆" says nothing about
+ * who never answered. The dialog names the employer and the role first, then
+ * asks. See ./ActionDialog.
+ *
  * Styling is the shared row hierarchy: the move that advances the search is
  * `rr-btn-accent`, bookkeeping is `rr-btn-ghost`, and nothing here is filled
  * -- the one filled button on a page is the next-action band.
@@ -28,6 +36,9 @@ import { nextAction, responseChoices } from "./applications";
 
 const PRIMARY = "rr-btn rr-btn-accent rr-btn-sm disabled:opacity-50";
 const SECONDARY = "rr-btn rr-btn-ghost rr-btn-sm disabled:opacity-50";
+
+/** Which question is open, if any. */
+type Mode = null | "confirm" | "logResponse" | "applyDirect";
 
 type Props = {
   app: Application;
@@ -40,16 +51,34 @@ type Props = {
 export default function ApplicationAction({ app, onChanged, emptyLabel }: Props) {
   const t = useTranslations("dashboard");
   const tJobs = useTranslations("jobs");
-  const [choosing, setChoosing] = useState(false);
+  const [mode, setMode] = useState<Mode>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  // Only fetched when the resume question is actually asked: every row on the
+  // page would otherwise ask for the same list on mount.
+  const [resumes, setResumes] = useState<Resume[] | null>(null);
+
+  useEffect(() => {
+    if (mode !== "applyDirect" || resumes !== null) return;
+    let cancelled = false;
+    listResumes()
+      .then((items) => {
+        if (!cancelled) setResumes(items);
+      })
+      .catch(() => {
+        if (!cancelled) setResumes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, resumes]);
 
   async function run(op: () => Promise<Application>) {
     setBusy(true);
     setFailed(false);
     try {
       onChanged(await op());
-      setChoosing(false);
+      setMode(null);
     } catch {
       setFailed(true);
     } finally {
@@ -60,10 +89,19 @@ export default function ApplicationAction({ app, onChanged, emptyLabel }: Props)
   function control() {
     switch (nextAction(app)) {
       case "tailor":
+        // Two ways on from a saved posting: tailor it, or send something you
+        // already have. The second is not a lesser version of the first --
+        // plenty of applications do not deserve a bespoke resume -- but it
+        // stays the quieter button, because tailoring is what the product is.
         return (
-          <Link className={PRIMARY} href={`/jobs/${encodeURIComponent(app.job_id)}`}>
-            {t("actionTailor")}
-          </Link>
+          <>
+            <Link className={PRIMARY} href={`/jobs/${encodeURIComponent(app.job_id)}`}>
+              {t("actionTailor")}
+            </Link>
+            <button type="button" className={SECONDARY} onClick={() => setMode("applyDirect")}>
+              {t("actionApplyDirect")}
+            </button>
+          </>
         );
       case "apply":
         return (
@@ -82,52 +120,13 @@ export default function ApplicationAction({ app, onChanged, emptyLabel }: Props)
         );
       case "confirm":
         return (
-          <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
-            <span className="text-xs text-muted-foreground">{t("didYouApply")}</span>
-            <button
-              type="button"
-              className={SECONDARY}
-              disabled={busy}
-              onClick={() => run(() => confirmApplied(app.job_id, true))}
-            >
-              {t("yes")}
-            </button>
-            <button
-              type="button"
-              className={SECONDARY}
-              disabled={busy}
-              onClick={() => run(() => confirmApplied(app.job_id, false))}
-            >
-              {t("no")}
-            </button>
-          </span>
+          <button type="button" className={SECONDARY} onClick={() => setMode("confirm")}>
+            {t("didYouApply")}
+          </button>
         );
       case "logResponse":
-        // Closing offers two buttons that differ only in whether anyone
-        // replied -- the one fact the status cannot carry once it is closed.
-        return choosing ? (
-          <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
-            {responseChoices(app).map((c) => (
-              <button
-                key={c.key}
-                type="button"
-                className={SECONDARY}
-                disabled={busy}
-                onClick={() =>
-                  run(() =>
-                    patchApplication(app.job_id, {
-                      status: c.status,
-                      ...(c.replied === undefined ? {} : { replied: c.replied }),
-                    }),
-                  )
-                }
-              >
-                {t(c.key)}
-              </button>
-            ))}
-          </span>
-        ) : (
-          <button type="button" className={SECONDARY} onClick={() => setChoosing(true)}>
+        return (
+          <button type="button" className={SECONDARY} onClick={() => setMode("logResponse")}>
             {t("actionLogResponse")}
           </button>
         );
@@ -138,14 +137,115 @@ export default function ApplicationAction({ app, onChanged, emptyLabel }: Props)
     }
   }
 
+  /** One short line per choice, where the wording alone leaves a doubt. */
+  const RESPONSE_HINT: Record<string, string> = {
+    responseHeardBack: "hintHeardBack",
+    responseSaidNo: "hintSaidNo",
+    responseNoAnswer: "hintNoAnswer",
+  };
+
+  function dialog() {
+    if (mode === null) return null;
+    const shared = {
+      company: app.company,
+      jobTitle: app.job_title,
+      busy,
+      error: failed ? tJobs("actionFailed") : null,
+      cancelLabel: t("dialogCancel"),
+      onClose: () => {
+        if (busy) return;
+        setMode(null);
+        setFailed(false);
+      },
+    };
+
+    if (mode === "confirm") {
+      return (
+        <ActionDialog
+          {...shared}
+          question={t("askConfirmApplied")}
+          note={t("askConfirmAppliedNote")}
+          choices={[
+            { key: "yes", label: t("yes"), primary: true },
+            { key: "no", label: t("no") },
+          ]}
+          onChoose={(key) => run(() => confirmApplied(app.job_id, key === "yes"))}
+        />
+      );
+    }
+
+    if (mode === "logResponse") {
+      const choices: DialogChoice[] = responseChoices(app).map((c) => ({
+        key: c.key,
+        label: t(c.key),
+        hint: RESPONSE_HINT[c.key] ? t(RESPONSE_HINT[c.key] as "hintHeardBack") : undefined,
+        primary: c.status === "interviewing",
+      }));
+      return (
+        <ActionDialog
+          {...shared}
+          question={t("askLogResponse")}
+          note={t("askLogResponseNote")}
+          choices={choices}
+          onChoose={(key) => {
+            const choice = responseChoices(app).find((c) => c.key === key);
+            if (!choice) return;
+            void run(() =>
+              patchApplication(app.job_id, {
+                status: choice.status,
+                ...(choice.replied === undefined ? {} : { replied: choice.replied }),
+              }),
+            );
+          }}
+        />
+      );
+    }
+
+    const loading = resumes === null;
+    return (
+      <ActionDialog
+        {...shared}
+        question={t("askWhichResume")}
+        note={t("askWhichResumeNote")}
+        choices={(resumes ?? []).map((resume) => ({
+          key: resume.id,
+          label: resume.title || resume.id,
+          hint:
+            (resume.kind ?? "master") === "tailor"
+              ? resume.target_label || t("tailorBadge")
+              : t("masterBadge"),
+        }))}
+        onChoose={(resumeId) => {
+          // Opened here, synchronously inside the click, or a popup blocker
+          // eats it: after an await the browser no longer calls this a
+          // user gesture.
+          window.open(app.apply_url, "_blank", "noopener,noreferrer");
+          void run(() => markApplied(app.job_id, resumeId));
+        }}
+        onClose={shared.onClose}
+      >
+        {loading ? (
+          <p className="text-sm text-muted-foreground">{t("loadingResumes")}</p>
+        ) : resumes.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t("resumesEmpty")}</p>
+        ) : undefined}
+      </ActionDialog>
+    );
+  }
+
   return (
-    <span className="inline-flex flex-col items-end gap-1">
-      {control()}
-      {failed ? (
-        <span className="text-xs text-destructive" role="alert">
-          {tJobs("actionFailed")}
+    <>
+      <span className="inline-flex flex-col items-end gap-1">
+        <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
+          {control()}
         </span>
-      ) : null}
-    </span>
+        {failed && mode === null ? (
+          <span className="text-xs text-destructive" role="alert">
+            {tJobs("actionFailed")}
+          </span>
+        ) : null}
+      </span>
+      {dialog()}
+    </>
   );
 }

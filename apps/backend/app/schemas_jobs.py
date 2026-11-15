@@ -334,6 +334,18 @@ class ApplicationConfirm(BaseModel):
     applied: StrictBool
 
 
+class ApplicationApplied(BaseModel):
+    """Optional body for the outbound click.
+
+    `resume_id` says which resume is being sent when the person skips
+    tailoring. Absent -- including a bodyless POST, which is what the editor
+    and the job page still send -- means "not stated", and the row keeps
+    whatever it had.
+    """
+
+    resume_id: str | None = Field(default=None, max_length=36)
+
+
 class ApplicationPatch(BaseModel):
     # Only what a person reports themselves; every other status is reached by
     # the action that implies it. The service re-checks this.
