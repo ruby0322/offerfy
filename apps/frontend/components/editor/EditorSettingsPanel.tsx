@@ -106,11 +106,26 @@ export default function EditorSettingsPanel({
     };
   }, [resumeId, onShareState]);
 
-  async function onSaveName(event: FormEvent) {
-    event.preventDefault();
+  /**
+   * Save the name when the field is left, or on Enter.
+   *
+   * There was a button, and it said 儲存 a foot from the button that pins a
+   * version -- two unrelated things under one word. The field does not need
+   * it: the editor already saves the document itself 400ms after a keystroke,
+   * so a title that waits for a click is the odd one out. An empty field puts
+   * the saved name back rather than erroring, since there is nothing the
+   * person could have meant by it.
+   */
+  async function saveName() {
+    if (saving) return;
     const trimmed = name.trim();
     if (!trimmed) {
-      setNameStatus(t("settingsNameError"));
+      setName(title);
+      setNameStatus("");
+      return;
+    }
+    if (trimmed === title.trim()) {
+      setNameStatus("");
       return;
     }
     setSaving(true);
@@ -125,6 +140,11 @@ export default function EditorSettingsPanel({
     } finally {
       setSaving(false);
     }
+  }
+
+  async function onSaveName(event: FormEvent) {
+    event.preventDefault();
+    await saveName();
   }
 
   async function setPublic(isPublic: boolean) {
@@ -178,17 +198,13 @@ export default function EditorSettingsPanel({
                 className="rr-input"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
+                onBlur={() => void saveName()}
                 maxLength={255}
                 aria-label={t("settingsName")}
               />
-              <div className="flex items-center gap-3">
-                <Button type="submit" size="sm" disabled={saving}>
-                  {t("settingsSave")}
-                </Button>
-                {nameStatus ? (
-                  <span className="text-xs text-muted-foreground">{nameStatus}</span>
-                ) : null}
-              </div>
+              {nameStatus ? (
+                <span className="text-xs text-muted-foreground">{nameStatus}</span>
+              ) : null}
             </form>
           </CardContent>
         </Card>
