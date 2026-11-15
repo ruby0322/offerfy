@@ -360,6 +360,7 @@
     "responseNoAnswer": "Never heard back",
     "responseNotMoving": "Not moving forward",
     "applicationsLead": "{tracked} tracked · {needs} need you",
+    "replyRateInline": "{rate}% reply rate",
     "metricReplyRate": "Reply rate",
     "metricReplyRateOf": "{replied} of {sent} sent",
     "metricReplyRateNone": "nothing sent yet",

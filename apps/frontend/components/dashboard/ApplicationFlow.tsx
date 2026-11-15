@@ -3,10 +3,14 @@
 import { useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { markFor, monogram } from "@/components/employer-marks";
+import { NARROW_SCREEN, useMediaQuery } from "@/lib/use-media-query";
+import ApplicationFlowPortrait from "./ApplicationFlowPortrait";
 import {
   buildApplicationFlow,
   employersOf,
   flowGeometry,
+  LEAF_KEY,
+  STAGE_KEY,
   type FlowLeafId,
   type FlowNodeId,
   type FlowTone,
@@ -36,32 +40,21 @@ const VIEW_W = 880;
 const TILE = 15;
 const PITCH = 18;
 
-const LEAF_KEY: Record<FlowLeafId, string> = {
-  onlySaved: "leafOnlySaved",
-  neverSent: "leafNeverSent",
-  droppedEarly: "leafDroppedEarly",
-  waiting: "leafWaiting",
-  interviewing: "groupInterviewing",
-  repliedClosed: "leafRepliedClosed",
-  noAnswer: "leafNoAnswer",
-};
-
-const STAGE_KEY: Record<"tracked" | "worked" | "sent", string> = {
-  tracked: "flowTracked",
-  worked: "flowWorked",
-  sent: "flowSent",
-};
-
 function fill(tone: FlowTone | "stage"): string {
   if (tone === "forward") return "var(--success)";
   if (tone === "stalled") return "var(--warn)";
+  if (tone === "answered") return "var(--chart-3)";
   if (tone === "ended") return "var(--muted)";
   return "var(--clay)";
 }
 
 /** Bands are washed out so the labels on top of them stay readable. */
 function bandOpacity(tone: FlowTone | "stage"): number {
-  return tone === "forward" ? 0.45 : tone === "stalled" ? 0.34 : tone === "ended" ? 0.2 : 0.28;
+  if (tone === "forward") return 0.45;
+  if (tone === "stalled") return 0.34;
+  if (tone === "answered") return 0.3;
+  if (tone === "ended") return 0.2;
+  return 0.28;
 }
 
 function isLeaf(id: FlowNodeId): id is FlowLeafId {
@@ -125,6 +118,10 @@ type Props = {
 
 export default function ApplicationFlow({ rows, bare = false }: Props) {
   const t = useTranslations("dashboard");
+  // False on the server and on the first paint, so the wide drawing is what a
+  // crawler and the first frame get; the portrait swaps in once the query is
+  // readable. The same width the editor folds at.
+  const narrow = useMediaQuery(NARROW_SCREEN);
   const flow = useMemo(() => buildApplicationFlow(rows), [rows]);
 
   // One tall pipeline must not produce a 2000px diagram, and one short one
@@ -166,8 +163,6 @@ export default function ApplicationFlow({ rows, bare = false }: Props) {
     );
   }
 
-  const byId = new Map(geometry.nodes.map((n) => [n.id, n]));
-
   const Wrapper = bare ? "div" : "section";
   return (
     <Wrapper
@@ -180,6 +175,9 @@ export default function ApplicationFlow({ rows, bare = false }: Props) {
           {t("flowHeading")}
         </h2>
       )}
+      {narrow ? (
+        <ApplicationFlowPortrait rows={rows} />
+      ) : (
       <div className="mt-3 overflow-x-auto">
         <svg
           viewBox={`0 0 ${VIEW_W} ${geometry.height}`}
@@ -235,12 +233,7 @@ export default function ApplicationFlow({ rows, bare = false }: Props) {
               // collisions and for running off the edges.
               const place = node.label!;
               const { companies, extra } = employersOf(rows, node.id, place.markCapacity);
-              const tone =
-                node.tone === "stalled"
-                  ? "var(--warn)"
-                  : node.tone === "forward"
-                    ? "var(--success)"
-                    : "var(--muted)";
+              const tone = node.tone === "stage" ? "var(--ink)" : fill(node.tone);
               return (
                 <g key={`l-${node.id}`}>
                   <text
@@ -277,24 +270,7 @@ export default function ApplicationFlow({ rows, bare = false }: Props) {
           </g>
         </svg>
       </div>
-      {/* The spine in words, for a phone too narrow for the drawing and for
-          anyone reading with the diagram scrolled out of view. */}
-      <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        {(["tracked", "worked", "sent"] as const).map((stage) => {
-          const node = byId.get(stage);
-          if (!node) return null;
-          return (
-            <span key={stage} className="[font-variant-numeric:tabular-nums]">
-              <span className="font-semibold text-foreground">{node.value}</span>{" "}
-              {t(STAGE_KEY[stage] as "flowTracked")}
-            </span>
-          );
-        })}
-        <span className="[font-variant-numeric:tabular-nums]">
-          <span className="font-semibold text-foreground">{flow.replied}</span>{" "}
-          {t("flowReplied")}
-        </span>
-      </p>
+      )}
     </Wrapper>
   );
 }

@@ -39,12 +39,19 @@ export type FlowLeafId =
   /** Closed without ever being sent. */
   | "droppedEarly";
 
-export type FlowTone = "forward" | "stalled" | "ended";
+export type FlowTone = "forward" | "stalled" | "ended" | "answered";
 
-/** A leaf's tone drives its colour: amber is a stall only the person can clear. */
+/**
+ * A leaf's tone drives its colour: amber is a stall only the person can clear.
+ *
+ * `answered` exists so that "they replied, and it ended" is not drawn as the
+ * same grey as "nobody ever answered". That distinction is the whole reason
+ * `replied_at` is a column, and at a glance it is the difference between a
+ * resume that gets read and one that does not.
+ */
 export const LEAF_TONE: Record<FlowLeafId, FlowTone> = {
   interviewing: "forward",
-  repliedClosed: "ended",
+  repliedClosed: "answered",
   noAnswer: "ended",
   waiting: "stalled",
   neverSent: "stalled",
@@ -178,6 +185,58 @@ export function employersOf(
 
 export type FlowNodeId = "tracked" | "worked" | "sent" | FlowLeafId;
 
+export type FlowStageId = "tracked" | "worked" | "sent";
+
+export type FlowStage = {
+  id: FlowStageId;
+  /** What this stage was handed: the sum of everything downstream of it. */
+  value: number;
+  /** What left here, in drawing order. Zero-valued leaves are kept. */
+  leaks: FlowLeafId[];
+};
+
+/**
+ * The spine: three stages, and which outcomes leave at each.
+ *
+ * Both renderings read it -- the left-to-right SVG and the portrait list a
+ * phone gets -- so they cannot come to disagree about what the sent node
+ * counts or which leaf hangs off which stage. Each value is the sum of its
+ * own downstream leaves rather than a field of ApplicationFlow, which is what
+ * makes the drawing conserve: every row is under exactly one stage.
+ */
+export function flowSpine(flow: ApplicationFlow): [FlowStage, FlowStage, FlowStage] {
+  const l = flow.leaves;
+  const sent = l.waiting + l.interviewing + l.repliedClosed + l.noAnswer;
+  const worked = sent + l.neverSent + l.droppedEarly;
+  const tracked = worked + l.onlySaved;
+  return [
+    { id: "tracked", value: tracked, leaks: ["onlySaved"] },
+    { id: "worked", value: worked, leaks: ["neverSent", "droppedEarly"] },
+    {
+      id: "sent",
+      value: sent,
+      leaks: ["interviewing", "repliedClosed", "noAnswer", "waiting"],
+    },
+  ];
+}
+
+/** The i18n keys for the spine and the leaves, so both renderings label alike. */
+export const STAGE_KEY: Record<FlowStageId, string> = {
+  tracked: "flowTracked",
+  worked: "flowWorked",
+  sent: "flowSent",
+};
+
+export const LEAF_KEY: Record<FlowLeafId, string> = {
+  onlySaved: "leafOnlySaved",
+  neverSent: "leafNeverSent",
+  droppedEarly: "leafDroppedEarly",
+  waiting: "leafWaiting",
+  interviewing: "groupInterviewing",
+  repliedClosed: "leafRepliedClosed",
+  noAnswer: "leafNoAnswer",
+};
+
 export type FlowNodeBox = {
   id: FlowNodeId;
   value: number;
@@ -287,10 +346,8 @@ export function flowGeometry(
     overflowRoom,
   } = opts;
   const leaves = flow.leaves;
-  const sent =
-    leaves.waiting + leaves.interviewing + leaves.repliedClosed + leaves.noAnswer;
-  const worked = sent + leaves.neverSent + leaves.droppedEarly;
-  const tracked = worked + leaves.onlySaved;
+  const spine = flowSpine(flow);
+  const [{ value: tracked }, { value: worked }, { value: sent }] = spine;
 
   const nodes: FlowNodeBox[] = [];
   const bands: FlowBandPath[] = [];
@@ -379,23 +436,11 @@ export function flowGeometry(
     return onwardBox;
   }
 
-  const workedBox = hop(trackedBox, columns[1], { id: "worked", value: worked }, [
-    "onlySaved",
-  ]);
+  const workedBox = hop(trackedBox, columns[1], { id: "worked", value: worked }, spine[0].leaks);
   const sentBox = workedBox
-    ? hop(workedBox, columns[2], { id: "sent", value: sent }, [
-        "neverSent",
-        "droppedEarly",
-      ])
+    ? hop(workedBox, columns[2], { id: "sent", value: sent }, spine[1].leaks)
     : null;
-  if (sentBox) {
-    hop(sentBox, columns[3], null, [
-      "interviewing",
-      "repliedClosed",
-      "noAnswer",
-      "waiting",
-    ]);
-  }
+  if (sentBox) hop(sentBox, columns[3], null, spine[2].leaks);
 
   // The box has to hold the deepest label row as well as the tallest node:
   // a one-application leaf at the bottom is 6px of bar and 29px of text.

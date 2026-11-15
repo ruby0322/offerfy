@@ -90,8 +90,8 @@ export default function UsagePage() {
       {!usage ? (
         <p className="text-sm text-muted-foreground">{tCommon("loading")}</p>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-          <div className="grid gap-4">
+        <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] [&>*]:min-w-0">
+          <div className="grid min-w-0 gap-4 [&>*]:min-w-0">
             <section className="rr-card px-5 py-4" data-testid="usage-allowance">
               <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                 <h2 className="text-[0.9375rem] font-semibold tracking-tight">
@@ -254,7 +254,7 @@ export default function UsagePage() {
             </section>
           </div>
 
-          <div className="grid gap-4">
+          <div className="grid min-w-0 gap-4 [&>*]:min-w-0">
             <section className="rr-card px-5 py-4" data-testid="usage-rates">
               <h2 className="text-[0.9375rem] font-semibold tracking-tight">
                 {t("ratesHeading")}

@@ -4,9 +4,11 @@ import { useMemo } from "react";
 import { useTranslations } from "next-intl";
 import EmployerLogo from "@/components/jobs/EmployerLogo";
 import { Link } from "@/i18n/navigation";
+import { NARROW_SCREEN, useMediaQuery } from "@/lib/use-media-query";
 import type { Application } from "@/lib/applications";
 import ApplicationAction from "./ApplicationAction";
-import { byUrgency, quietDays, QUIET_DAYS, readyAgeDays } from "./applications";
+import ApplicationCard, { StageChip, WaitingLabel } from "./ApplicationCard";
+import { byUrgency } from "./applications";
 
 /**
  * The few applications that need you, under the diagram on the overview.
@@ -29,6 +31,7 @@ type Props = {
 
 export default function OngoingTable({ rows, onChanged }: Props) {
   const t = useTranslations("dashboard");
+  const narrow = useMediaQuery(NARROW_SCREEN);
   const now = useMemo(() => new Date(), []);
   const ongoing = useMemo(
     () => byUrgency(rows.filter((r) => r.status !== "closed"), now),
@@ -38,46 +41,18 @@ export default function OngoingTable({ rows, onChanged }: Props) {
 
   if (ongoing.length === 0) return null;
 
-  function waiting(app: Application) {
-    const ready = readyAgeDays(app, now);
-    if (ready !== null) {
-      return (
-        <span className={ready > 2 ? "font-semibold text-warn" : "text-muted-foreground"}>
-          {t("readyAgo", { count: ready })}
-        </span>
-      );
-    }
-    if (app.status === "applied") {
-      const quiet = quietDays(app, now);
-      return (
-        <span
-          className={quiet > QUIET_DAYS ? "font-semibold text-warn" : "text-muted-foreground"}
-        >
-          {t("quietDays", { count: quiet })}
-        </span>
-      );
-    }
-    return <span className="text-muted-foreground">{t("metricNone")}</span>;
-  }
-
-  const STAGE_KEY: Record<string, string> = {
-    interviewing: "groupInterviewing",
-    applied: "groupApplied",
-    tailored: "groupTailored",
-    saved: "groupSaved",
-  };
-  const STAGE_CLASS: Record<string, string> = {
-    interviewing: "border-success text-success",
-    applied: "border-primary text-primary",
-    tailored: "border-foreground text-foreground",
-    saved: "border-rule text-muted-foreground",
-  };
-
   return (
     <div className="mt-4 border-t border-rule pt-3" data-testid="dashboard-ongoing">
       <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">
         {t("ongoingHeading")} · {ongoing.length}
       </p>
+      {narrow ? (
+        <ul className="mt-1 min-w-0" data-testid="ongoing-cards">
+          {shown.map((app) => (
+            <ApplicationCard key={app.job_id} app={app} now={now} onChanged={onChanged} />
+          ))}
+        </ul>
+      ) : (
       <div className="mt-2 overflow-x-auto">
         <table className="w-full border-collapse text-sm">
           <thead>
@@ -99,15 +74,7 @@ export default function OngoingTable({ rows, onChanged }: Props) {
             {shown.map((app) => (
               <tr key={app.job_id} className="border-b border-rule last:border-b-0">
                 <td className="py-1.5 pr-3 align-middle">
-                  <span
-                    className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                      STAGE_CLASS[app.status] ?? "border-rule text-muted-foreground"
-                    }`}
-                  >
-                    {STAGE_KEY[app.status]
-                      ? t(STAGE_KEY[app.status] as "groupApplied")
-                      : app.status}
-                  </span>
+                  <StageChip status={app.status} />
                 </td>
                 <td className="min-w-[12rem] py-1.5 pr-3 align-middle">
                   <span className="flex items-center gap-2">
@@ -128,7 +95,7 @@ export default function OngoingTable({ rows, onChanged }: Props) {
                   </span>
                 </td>
                 <td className="whitespace-nowrap py-1.5 pr-3 align-middle [font-variant-numeric:tabular-nums]">
-                  {waiting(app)}
+                  <WaitingLabel app={app} now={now} />
                 </td>
                 <td className="whitespace-nowrap py-1.5 text-right align-middle">
                   <ApplicationAction
@@ -142,6 +109,7 @@ export default function OngoingTable({ rows, onChanged }: Props) {
           </tbody>
         </table>
       </div>
+      )}
       <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-[0.78rem] text-muted-foreground">
         <span>{t("ongoingShowing", { shown: shown.length, total: ongoing.length })}</span>
         <Link href="/dashboard/applications" className="underline text-foreground">

@@ -4,15 +4,11 @@ import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import EmployerLogo from "@/components/jobs/EmployerLogo";
 import { Link } from "@/i18n/navigation";
+import { NARROW_SCREEN, useMediaQuery } from "@/lib/use-media-query";
 import type { Application, ApplicationStatus } from "@/lib/applications";
 import ApplicationAction from "./ApplicationAction";
-import {
-  byUrgency,
-  nextAction,
-  quietDays,
-  QUIET_DAYS,
-  readyAgeDays,
-} from "./applications";
+import ApplicationCard, { StageChip, WaitingLabel } from "./ApplicationCard";
+import { byUrgency, nextAction } from "./applications";
 
 /**
  * Every application as one table, sorted by what needs the person.
@@ -26,21 +22,13 @@ import {
  * transitions still lives in ./applications and the service behind it.
  */
 
+/** The filter chips name stages, so they share the table's own vocabulary. */
 const STAGE_KEY: Record<string, string> = {
   interviewing: "groupInterviewing",
   applied: "groupApplied",
   tailored: "groupTailored",
   saved: "groupSaved",
   closed: "groupClosed",
-};
-
-/** Chip colour by stage: forward is green, in-flight clay, finished muted. */
-const STAGE_CLASS: Record<string, string> = {
-  interviewing: "border-success text-success",
-  applied: "border-primary text-primary",
-  tailored: "border-foreground text-foreground",
-  saved: "border-rule text-muted-foreground",
-  closed: "border-rule text-muted-foreground",
 };
 
 type Filter = "needsYou" | "all" | ApplicationStatus;
@@ -63,6 +51,7 @@ function matches(app: Application, filter: Filter): boolean {
 
 export default function ApplicationTable({ rows: initial }: { rows: Application[] }) {
   const t = useTranslations("dashboard");
+  const narrow = useMediaQuery(NARROW_SCREEN);
   const [rows, setRows] = useState<Application[]>(initial);
   const [filter, setFilter] = useState<Filter>("needsYou");
   // One clock for the whole render, so two rows one second apart cannot
@@ -81,28 +70,6 @@ export default function ApplicationTable({ rows: initial }: { rows: Application[
 
   function replace(next: Application) {
     setRows((prev) => prev.map((r) => (r.job_id === next.job_id ? next : r)));
-  }
-
-  function waiting(app: Application) {
-    const ready = readyAgeDays(app, now);
-    if (ready !== null) {
-      return (
-        <span className={ready > 2 ? "font-semibold text-warn" : "text-muted-foreground"}>
-          {t("readyAgo", { count: ready })}
-        </span>
-      );
-    }
-    if (app.status === "applied") {
-      const quiet = quietDays(app, now);
-      return (
-        <span
-          className={quiet > QUIET_DAYS ? "font-semibold text-warn" : "text-muted-foreground"}
-        >
-          {t("quietDays", { count: quiet })}
-        </span>
-      );
-    }
-    return <span className="text-muted-foreground">{t("metricNone")}</span>;
   }
 
   return (
@@ -130,8 +97,8 @@ export default function ApplicationTable({ rows: initial }: { rows: Application[
               onClick={() => setFilter(f)}
               className={
                 filter === f
-                  ? "whitespace-nowrap rounded-full border border-foreground bg-foreground px-3 py-1 text-xs font-semibold text-background"
-                  : "whitespace-nowrap rounded-full border border-rule px-3 py-1 text-xs font-semibold text-muted-foreground"
+                  ? "whitespace-nowrap rounded-full border border-foreground bg-foreground px-3 py-1 text-xs font-semibold coarse:px-3.5 coarse:py-2 text-background"
+                  : "whitespace-nowrap rounded-full border border-rule px-3 py-1 text-xs font-semibold coarse:px-3.5 coarse:py-2 text-muted-foreground"
               }
             >
               {f === "needsYou"
@@ -149,6 +116,12 @@ export default function ApplicationTable({ rows: initial }: { rows: Application[
         <p className="mt-4 text-sm text-muted-foreground" data-testid="application-table-empty">
           {rows.length === 0 ? t("applicationsEmpty") : t("filterNeedsYou")}
         </p>
+      ) : narrow ? (
+        <ul className="mt-2 min-w-0" data-testid="application-cards">
+          {shown.map((app) => (
+            <ApplicationCard key={app.job_id} app={app} now={now} onChanged={replace} />
+          ))}
+        </ul>
       ) : (
         <div className="mt-3 overflow-x-auto">
           <table className="w-full border-collapse text-sm">
@@ -177,15 +150,7 @@ export default function ApplicationTable({ rows: initial }: { rows: Application[
                   data-testid="application-row"
                 >
                   <td className="py-2 pr-3 align-middle">
-                    <span
-                      className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                        STAGE_CLASS[app.status] ?? "border-rule text-muted-foreground"
-                      }`}
-                    >
-                      {STAGE_KEY[app.status]
-                        ? t(STAGE_KEY[app.status] as "groupApplied")
-                        : app.status}
-                    </span>
+                    <StageChip status={app.status} />
                   </td>
                   <td className="min-w-[13rem] py-2 pr-3 align-middle">
                     <span className="flex items-center gap-2">
@@ -205,7 +170,7 @@ export default function ApplicationTable({ rows: initial }: { rows: Application[
                     </span>
                   </td>
                   <td className="whitespace-nowrap py-2 pr-3 align-middle [font-variant-numeric:tabular-nums]">
-                    {waiting(app)}
+                    <WaitingLabel app={app} now={now} />
                   </td>
                   <td className="whitespace-nowrap py-2 pr-3 align-middle text-xs text-muted-foreground">
                     {app.source === "digest" ? t("sourceDigest") : t("sourceSearch")}

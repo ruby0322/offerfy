@@ -5,6 +5,7 @@ import {
   buildApplicationFlow,
   employersOf,
   flowGeometry,
+  flowSpine,
   LEAF_TONE,
   leafOf,
   type FlowLeafId,
@@ -333,4 +334,73 @@ test("mark capacity follows the room beside each leaf", () => {
   assert.ok(cap("waiting") > cap("onlySaved"), "the outcome column has more room");
   assert.ok(cap("onlySaved") > 0, "a mid-flow leaf still fits some marks");
   assert.ok(cap("neverSent") > 0);
+});
+
+test("the spine conserves: each stage holds everything that left at or after it", () => {
+  // What makes both drawings honest. A stage's number must be its own leaks
+  // plus whatever the next stage was handed, or a band accounts for rows that
+  // are not there -- and the portrait list, which has no band widths to give
+  // it away, would be wrong silently.
+  const rows = [
+    row({ status: "saved" }),
+    row({ status: "saved" }),
+    row({ status: "tailored", tailor_resume_id: "t1" }),
+    row({ status: "closed" }),
+    row({ status: "applied", applied_at: SENT }),
+    row({ status: "interviewing", applied_at: SENT, replied_at: ANSWERED }),
+    row({ status: "closed", applied_at: SENT, replied_at: ANSWERED }),
+    row({ status: "closed", applied_at: SENT }),
+  ];
+  const flow = buildApplicationFlow(rows);
+  const spine = flowSpine(flow);
+
+  assert.deepEqual(
+    spine.map((s) => s.id),
+    ["tracked", "worked", "sent"],
+  );
+  assert.equal(spine[0].value, rows.length);
+  for (let i = 0; i < spine.length; i += 1) {
+    const leaked = spine[i].leaks.reduce((sum, leaf) => sum + flow.leaves[leaf], 0);
+    const onward = i + 1 < spine.length ? spine[i + 1].value : 0;
+    assert.equal(spine[i].value, leaked + onward, `stage ${spine[i].id}`);
+  }
+  // Every leaf is claimed by exactly one stage, so nothing is drawn twice or
+  // dropped from the portrait.
+  const claimed = spine.flatMap((s) => s.leaks).sort();
+  assert.deepEqual(claimed, (Object.keys(flow.leaves) as FlowLeafId[]).sort());
+});
+
+test("the spine and the drawing agree about every stage", () => {
+  const rows = [
+    row({ status: "saved" }),
+    row({ status: "tailored", tailor_resume_id: "t1" }),
+    row({ status: "applied", applied_at: SENT }),
+    row({ status: "closed", applied_at: SENT, replied_at: ANSWERED }),
+  ];
+  const flow = buildApplicationFlow(rows);
+  const geometry = flowGeometry(flow, {
+    width: 880,
+    scale: 7,
+    nodeWidth: 10,
+    columns: [92, 300, 470, 630],
+    gap: 14,
+    padY: 14,
+    minHeight: 6,
+    labelBlock: 34,
+    markSize: 15,
+    markPitch: 18,
+    labelInset: 8,
+    overflowRoom: 26,
+  });
+  for (const stage of flowSpine(flow)) {
+    const node = geometry.nodes.find((n) => n.id === stage.id);
+    assert.equal(node?.value, stage.value, `stage ${stage.id}`);
+  }
+});
+
+test("a replied-then-closed row is not drawn as silence", () => {
+  // The whole reason replied_at is a column: "they answered, and it ended"
+  // and "nobody ever answered" are different outcomes and read differently.
+  assert.equal(LEAF_TONE.repliedClosed, "answered");
+  assert.equal(LEAF_TONE.noAnswer, "ended");
 });

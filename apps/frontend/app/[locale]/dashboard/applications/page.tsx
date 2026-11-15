@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import ApplicationFlow from "@/components/dashboard/ApplicationFlow";
 import ApplicationMetrics from "@/components/dashboard/ApplicationMetrics";
 import ApplicationTable from "@/components/dashboard/ApplicationTable";
+import { applicationMetrics } from "@/components/dashboard/applicationMetrics";
 import { nextAction } from "@/components/dashboard/applications";
 import { useRouter } from "@/i18n/navigation";
 import { ApiError } from "@/lib/api";
@@ -55,6 +56,10 @@ export default function ApplicationsPage() {
     () => rows.filter((app) => nextAction(app) !== null).length,
     [rows],
   );
+  // Only the reply rate is read here: the tile row it belongs to is gone
+  // below 900px, and this is the one figure on the page that judges the
+  // resume rather than the effort, so it should not go with the tiles.
+  const replyRate = useMemo(() => applicationMetrics(rows).replyRate, [rows]);
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-8 sm:px-5 sm:py-10">
@@ -64,6 +69,12 @@ export default function ApplicationsPage() {
           {dash ? (
             <p className="mt-2 text-sm text-muted-foreground">
               {t("applicationsLead", { tracked: rows.length, needs })}
+              {replyRate !== null ? (
+                <span className="wide:hidden">
+                  {" · "}
+                  {t("replyRateInline", { rate: replyRate })}
+                </span>
+              ) : null}
             </p>
           ) : null}
         </div>
@@ -75,8 +86,10 @@ export default function ApplicationsPage() {
       ) : null}
 
       {dash ? (
-        <div className="grid gap-5">
-          <ApplicationMetrics rows={rows} />
+        <div className="grid min-w-0 gap-5 [&>*]:min-w-0">
+          <div className="hidden min-w-0 wide:block">
+            <ApplicationMetrics rows={rows} />
+          </div>
           <ApplicationFlow rows={rows} />
           {/* Keyed on the payload so a refetch rebuilds the table's own
               row state rather than leaving it holding stale rows. */}

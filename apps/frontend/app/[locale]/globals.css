@@ -1,6 +1,22 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* The width below which the product stops being two columns, as a variant.
+   Same number as NARROW_SCREEN in lib/use-media-query.ts, which AGENTS.md
+   calls the one place that decides what a phone is: before this the dashboard
+   invented its own folds with `sm:` and `lg:` while the editor folded at 900,
+   so the two halves of the product disagreed. Use `narrow:` for a fold that is
+   pure CSS, and the hook where the fold changes what renders. */
+@custom-variant narrow (@media (max-width: 899px));
+/* The complement, so a fold never needs `hidden sm:block narrow:hidden`:
+   two display utilities that both apply resolve by stylesheet order rather
+   than by intent, which is a coin toss written as CSS. */
+@custom-variant wide (@media (min-width: 900px));
+/* A thumb, as opposed to a narrow window. Asking about the input device is
+   the honest test: it leaves a desktop the density its tables were drawn for
+   at any window size, and it raises a touch tablet too. */
+@custom-variant coarse (@media (pointer: coarse));
+
 :root {
   /* Brand surface. Change here; shadcn and --rr-* alias these. */
   --paper: #f6f1e8;
@@ -1893,6 +1909,18 @@ textarea {
   white-space: nowrap;
 }
 
+/* The small variant is 28px, which is right in a desktop table row and too
+   small for a thumb. Raised by input device rather than by width: asking
+   `pointer: coarse` is the honest test, and it leaves a desktop at any window
+   size with the density the tables were designed for. */
+@media (pointer: coarse) {
+  .rr-btn.rr-btn-sm {
+    min-height: 40px;
+    padding: 0.5rem 0.8rem;
+    font-size: 0.8125rem;
+  }
+}
+
 .rr-btn-ghost {
   background: var(--sheet);
   color: var(--ink);
@@ -3110,6 +3138,25 @@ summary.jobs-pulse-head:hover .jobs-pulse-caret {
 .job-logo-sm svg {
   width: 18px;
   height: 18px;
+}
+
+/* The row-of-employers tile, for the portrait 分流圖's leak lines, where a
+   leaf carries up to three marks beside a 13px label. 34px would wrap the
+   row at phone width; this is the size the companion was reviewed at. */
+.job-logo-xs {
+  width: 19px;
+  height: 19px;
+  flex-basis: 19px;
+  border-radius: 5px;
+}
+
+.job-logo-xs svg {
+  width: 11px;
+  height: 11px;
+}
+
+.job-logo-xs .job-logo-mono {
+  font-size: 0.5625rem;
 }
 
 .job-logo-mono {

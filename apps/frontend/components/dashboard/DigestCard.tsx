@@ -171,7 +171,7 @@ export default function DigestCard({ digest, fallback = null, hideHeading = fals
           {tJobs("actionFailed")}
         </p>
       ) : null}
-      <div className="grid gap-5">
+      <div className="grid min-w-0 gap-5 [&>*]:min-w-0">
         {groups.map((group) => {
           const key = TRACK_KEYS[group.track as keyof typeof TRACK_KEYS];
           return (

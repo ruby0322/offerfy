@@ -360,6 +360,7 @@
     "responseNoAnswer": "一直没有回复",
     "responseNotMoving": "不再推进",
     "applicationsLead": "共 {tracked} 条 · {needs} 条需要你处理",
+    "replyRateInline": "回复率 {rate}%",
     "metricReplyRate": "回复率",
     "metricReplyRateOf": "已投 {sent} 条，{replied} 条收到回复",
     "metricReplyRateNone": "还没有投递",

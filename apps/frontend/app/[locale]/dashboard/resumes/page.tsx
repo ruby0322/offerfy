@@ -8,6 +8,7 @@ import ResumeThumb from "@/components/dashboard/ResumeThumb";
 import { useToast } from "@/components/Toaster";
 import { Link, useRouter } from "@/i18n/navigation";
 import { useStoredPreference } from "@/lib/stored-preference";
+import { NARROW_SCREEN, useMediaQuery } from "@/lib/use-media-query";
 import {
   ApiError,
   claimResumes,
@@ -67,6 +68,9 @@ export default function ResumesPage() {
   const [resumes, setResumes] = useState<Resume[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, choose] = useStoredPreference<View>(VIEW_KEY, VIEWS, "list");
+  // Five columns is 78px each at phone width. The list view keeps its rows
+  // but folds them into two lines, so it stays the dense view next to blocks.
+  const narrow = useMediaQuery(NARROW_SCREEN);
   const [doomed, setDoomed] = useState<Doomed | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -168,8 +172,8 @@ export default function ResumesPage() {
                 onClick={() => choose(option)}
                 className={
                   view === option
-                    ? "whitespace-nowrap bg-foreground px-3 py-1.5 text-xs font-semibold text-background"
-                    : "whitespace-nowrap bg-sheet px-3 py-1.5 text-xs font-semibold text-muted-foreground"
+                    ? "whitespace-nowrap bg-foreground px-3 py-1.5 text-xs font-semibold coarse:py-2.5 text-background"
+                    : "whitespace-nowrap bg-sheet px-3 py-1.5 text-xs font-semibold coarse:py-2.5 text-muted-foreground"
                 }
               >
                 {t(option === "list" ? "viewList" : "viewBlocks")}
@@ -263,6 +267,57 @@ export default function ResumesPage() {
 
       {resumes && resumes.length > 0 && view === "list" ? (
         <section className="rr-card px-5 py-4" data-testid="resumes-list">
+          {narrow ? (
+            <ul className="min-w-0">
+              {flat.map(({ resume, isTailor }) => (
+                <li
+                  key={resume.id}
+                  className={`flex min-w-0 flex-col gap-1.5 border-b border-rule py-3 last:border-b-0 ${
+                    isTailor ? "pl-4" : ""
+                  }`}
+                >
+                  <span className="min-w-0 truncate text-sm font-medium">
+                    {isTailor ? "↳ " : ""}
+                    {resume.title || resume.id}
+                  </span>
+                  <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 text-xs text-muted-foreground">
+                    <span
+                      className={
+                        isTailor
+                          ? "inline-flex rounded-full border border-primary px-2 py-0.5 font-semibold text-primary"
+                          : "inline-flex rounded-full border border-rule px-2 py-0.5 font-semibold text-muted-foreground"
+                      }
+                    >
+                      {isTailor ? t("tailorBadge") : t("masterBadge")}
+                    </span>
+                    {isTailor && resume.target_label ? (
+                      <span className="min-w-0 truncate">{resume.target_label}</span>
+                    ) : null}
+                    <span className="whitespace-nowrap">{updated(resume)}</span>
+                    <span className="ml-auto flex items-center gap-1">
+                      <Link href={`/editor/${resume.id}`} className="rr-btn rr-btn-ghost rr-btn-sm">
+                        {t("open")}
+                      </Link>
+                      <button
+                        type="button"
+                        aria-label={tCommon("deleteConfirm")}
+                        title={tCommon("deleteConfirm")}
+                        className="rr-btn rr-btn-ghost rr-btn-sm text-muted-foreground hover:text-destructive"
+                        onClick={() =>
+                          askDelete(
+                            resume,
+                            groups.find((g) => g.master.id === resume.id)?.tailors.length ?? 0,
+                          )
+                        }
+                      >
+                        <Trash2 aria-hidden="true" className="size-3.5" />
+                      </button>
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-sm">
               <thead>
@@ -330,6 +385,7 @@ export default function ResumesPage() {
               </tbody>
             </table>
           </div>
+          )}
           <p className="mt-3 text-xs leading-5 text-muted-foreground">{t("tailorExplainer")}</p>
         </section>
       ) : null}

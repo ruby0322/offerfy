@@ -2,8 +2,11 @@ import { markFor, monogram } from "@/components/employer-marks";
 
 type Props = {
   company: string;
-  /** "sm" is the live board's 34px tile; the default is the 42px list tile. */
-  size?: "sm" | "md";
+  /**
+   * "xs" is the 19px tile the portrait 分流圖 puts beside a leak line, "sm"
+   * the live board's 34px one; the default is the 42px list tile.
+   */
+  size?: "xs" | "sm" | "md";
 };
 
 /**
@@ -16,7 +19,10 @@ type Props = {
 export default function EmployerLogo({ company, size = "md" }: Props) {
   const mark = markFor(company);
   return (
-    <span className={`job-logo${size === "sm" ? " job-logo-sm" : ""}`} aria-hidden="true">
+    <span
+      className={`job-logo${size === "md" ? "" : ` job-logo-${size}`}`}
+      aria-hidden="true"
+    >
       {mark ? (
         <svg viewBox="0 0 24 24" fill={mark.hex ?? "var(--ink)"} fillRule={mark.fillRule}>
           <path d={mark.d} />

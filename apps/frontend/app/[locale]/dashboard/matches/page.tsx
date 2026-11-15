@@ -115,7 +115,7 @@ export default function MatchesPage() {
       ) : null}
 
       {dash ? (
-        <div className="grid gap-5">
+        <div className="grid min-w-0 gap-5 [&>*]:min-w-0">
           <section className="rr-card px-5 py-4" data-testid="matches-weekly">
             <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
               <h2 className="text-[0.9375rem] font-semibold tracking-tight">

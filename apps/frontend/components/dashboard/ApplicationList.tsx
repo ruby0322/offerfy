@@ -153,7 +153,7 @@ export default function ApplicationList({ initial }: Props) {
           {t("applicationsEmpty")}
         </p>
       ) : (
-        <div className="grid gap-5">
+        <div className="grid min-w-0 gap-5 [&>*]:min-w-0">
           {groups.map((group) => {
             const key = GROUP_KEYS[group.status as keyof typeof GROUP_KEYS];
             return (
@@ -162,7 +162,7 @@ export default function ApplicationList({ initial }: Props) {
                   {/* A status this build does not know keeps its raw name. */}
                   {key ? t(key) : group.status} {"·"} {group.items.length}
                 </h3>
-                <ul className="grid gap-2">
+                <ul className="grid min-w-0 gap-2 [&>*]:min-w-0">
                   {group.items.map((app) => {
                     const ready = readyAgeDays(app, now);
                     return (

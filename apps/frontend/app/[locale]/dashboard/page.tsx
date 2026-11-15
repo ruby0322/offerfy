@@ -168,7 +168,7 @@ export default function DashboardPage() {
       ) : null}
 
       {dash ? (
-        <div className="grid gap-4">
+        <div className="grid min-w-0 gap-4 [&>*]:min-w-0">
           <NextActionBand
             steps={steps}
             applications={rows}

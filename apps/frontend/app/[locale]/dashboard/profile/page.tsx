@@ -12,6 +12,7 @@ import {
   type DisclosureRecipient,
 } from "@/lib/dashboard";
 import { preferenceSummary } from "@/lib/jobs";
+import { NARROW_SCREEN, useMediaQuery } from "@/lib/use-media-query";
 
 /**
  * One page for the two things matching actually runs on, and the record of
@@ -36,6 +37,9 @@ export default function ProfilePage() {
   const [email, setEmail] = useState<string | null>(null);
   const [masterTitle, setMasterTitle] = useState<string | null>(null);
   const [seen, setSeen] = useState<DisclosureRecipient[] | null>(null);
+  // The ledger is four columns; at phone width an employer's contact address
+  // alone is wider than the two date columns it sits beside.
+  const narrow = useMediaQuery(NARROW_SCREEN);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -120,8 +124,8 @@ export default function ProfilePage() {
       ) : null}
 
       {dash && health ? (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-          <div className="grid gap-4">
+        <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] [&>*]:min-w-0">
+          <div className="grid min-w-0 gap-4 [&>*]:min-w-0">
             <section className="rr-card px-5 py-4" data-testid="profile-preference">
               <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                 <h2 className="text-[0.9375rem] font-semibold tracking-tight">
@@ -204,7 +208,7 @@ export default function ProfilePage() {
             </section>
           </div>
 
-          <div className="grid gap-4">
+          <div className="grid min-w-0 gap-4 [&>*]:min-w-0">
             <section className="rr-card px-5 py-4" data-testid="profile-seen">
               <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                 <h2 className="text-[0.9375rem] font-semibold tracking-tight">
@@ -219,6 +223,41 @@ export default function ProfilePage() {
               ) : seen.length === 0 ? (
                 <p className="mt-2 text-sm text-muted-foreground">{t("employerViewsEmpty")}</p>
               ) : (
+                narrow ? (
+                <ul className="mt-1 min-w-0">
+                  {seen.map((row) => (
+                    <li
+                      key={`${row.recipient_label}-${row.first_disclosed_at}`}
+                      className="flex min-w-0 flex-col gap-1 border-b border-rule py-2.5 last:border-b-0"
+                    >
+                      <span className="flex min-w-0 items-baseline justify-between gap-3">
+                        <span className="min-w-0 truncate text-sm font-medium">
+                          {row.recipient_label ?? t("seenUnnamed")}
+                        </span>
+                        <span className="shrink-0 text-xs text-muted-foreground [font-variant-numeric:tabular-nums]">
+                          {t("colTimes")} {row.disclosure_count}
+                        </span>
+                      </span>
+                      {row.recipient_contact ? (
+                        <span className="min-w-0 truncate text-xs text-muted-foreground">
+                          {row.recipient_contact}
+                        </span>
+                      ) : null}
+                      <span className="text-xs text-muted-foreground">
+                        {format.dateTime(new Date(row.first_disclosed_at), {
+                          month: "short",
+                          day: "numeric",
+                        })}
+                        {" – "}
+                        {format.dateTime(new Date(row.last_disclosed_at), {
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                ) : (
                 <div className="mt-2 overflow-x-auto">
                   <table className="w-full border-collapse text-sm">
                     <thead>
@@ -272,6 +311,7 @@ export default function ProfilePage() {
                     </tbody>
                   </table>
                 </div>
+                )
               )}
               {/* The ledger keeps disclosures after consent is withdrawn, on
                   purpose: someone who re-grants still needs to know who holds
