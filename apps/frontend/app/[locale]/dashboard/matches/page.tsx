@@ -203,10 +203,10 @@ export default function MatchesPage() {
                         >
                           —
                         </span>
-                        <span className="w-[4.75rem] shrink-0 text-right">
+                        <span className="min-w-[4.75rem] shrink-0 text-right">
                           <Link
                             href={`/jobs/${job.id}`}
-                            className="rr-btn rr-btn-ghost px-2.5 py-1 text-xs"
+                            className="rr-btn rr-btn-ghost whitespace-nowrap px-2.5 py-1 text-xs"
                           >
                             {t("open")}
                           </Link>

@@ -32,7 +32,8 @@ import {
  * transitions still lives in ./applications and the service behind it.
  */
 
-const ACTION = "inline-block border border-current px-3 py-1.5 text-sm disabled:opacity-50";
+const ACTION =
+  "inline-block whitespace-nowrap border border-current px-3 py-1.5 text-sm disabled:opacity-50";
 
 const STAGE_KEY: Record<string, string> = {
   interviewing: "groupInterviewing",
@@ -240,8 +241,8 @@ export default function ApplicationTable({ rows: initial }: { rows: Application[
               onClick={() => setFilter(f)}
               className={
                 filter === f
-                  ? "rounded-full border border-foreground bg-foreground px-3 py-1 text-xs font-semibold text-background"
-                  : "rounded-full border border-rule px-3 py-1 text-xs font-semibold text-muted-foreground"
+                  ? "whitespace-nowrap rounded-full border border-foreground bg-foreground px-3 py-1 text-xs font-semibold text-background"
+                  : "whitespace-nowrap rounded-full border border-rule px-3 py-1 text-xs font-semibold text-muted-foreground"
               }
             >
               {f === "needsYou"

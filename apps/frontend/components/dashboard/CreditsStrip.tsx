@@ -121,7 +121,7 @@ export default function CreditsStrip() {
         </p>
       </div>
 
-      <Link href="/dashboard/usage" className="rr-btn rr-btn-ghost shrink-0 px-3 py-1.5 text-xs">
+      <Link href="/dashboard/usage" className="rr-btn rr-btn-ghost shrink-0 whitespace-nowrap px-3 py-1.5 text-xs">
         {t("usageDetails")}
       </Link>
     </section>

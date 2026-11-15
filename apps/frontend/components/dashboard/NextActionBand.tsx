@@ -71,7 +71,7 @@ export default function NextActionBand({
       case "send":
         return app ? (
           <a
-            className="rr-btn"
+            className="rr-btn whitespace-nowrap"
             href={app.apply_url}
             rel="noopener noreferrer"
             target="_blank"
@@ -88,7 +88,7 @@ export default function NextActionBand({
           <span className="flex flex-wrap items-center gap-2 text-sm">
             <button
               type="button"
-              className="rr-btn"
+              className="rr-btn whitespace-nowrap"
               disabled={busy}
               onClick={() => run(() => confirmApplied(app.job_id, true))}
             >
@@ -96,7 +96,7 @@ export default function NextActionBand({
             </button>
             <button
               type="button"
-              className="rr-btn rr-btn-ghost"
+              className="rr-btn rr-btn-ghost whitespace-nowrap"
               disabled={busy}
               onClick={() => run(() => confirmApplied(app.job_id, false))}
             >
@@ -108,7 +108,7 @@ export default function NextActionBand({
         return (
           <button
             type="button"
-            className="rr-btn"
+            className="rr-btn whitespace-nowrap"
             disabled={busy}
             // Spends credits, so it only ever runs from this press.
             onClick={() => run(async () => void (await refreshResumeFacts()))}
@@ -118,13 +118,13 @@ export default function NextActionBand({
         );
       case "followUp":
         return app ? (
-          <Link className="rr-btn" href={`/jobs/${encodeURIComponent(app.job_id)}`}>
+          <Link className="rr-btn whitespace-nowrap" href={`/jobs/${encodeURIComponent(app.job_id)}`}>
             {t("actionLogResponse")}
           </Link>
         ) : null;
       default:
         return first.href ? (
-          <Link className="rr-btn" href={first.href}>
+          <Link className="rr-btn whitespace-nowrap" href={first.href}>
             {first.kind === "tailor" ? t("digestTailor") : t("open")}
           </Link>
         ) : null;
@@ -164,7 +164,7 @@ export default function NextActionBand({
           {primary()}
           {app ? (
             <Link
-              className="rr-btn rr-btn-ghost"
+              className="rr-btn rr-btn-ghost whitespace-nowrap"
               href={`/jobs/${encodeURIComponent(app.job_id)}`}
             >
               {t("open")}

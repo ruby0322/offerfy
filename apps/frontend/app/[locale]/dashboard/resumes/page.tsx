@@ -168,8 +168,8 @@ export default function ResumesPage() {
                 onClick={() => choose(option)}
                 className={
                   view === option
-                    ? "bg-foreground px-3 py-1.5 text-xs font-semibold text-background"
-                    : "bg-sheet px-3 py-1.5 text-xs font-semibold text-muted-foreground"
+                    ? "whitespace-nowrap bg-foreground px-3 py-1.5 text-xs font-semibold text-background"
+                    : "whitespace-nowrap bg-sheet px-3 py-1.5 text-xs font-semibold text-muted-foreground"
                 }
               >
                 {t(option === "list" ? "viewList" : "viewBlocks")}

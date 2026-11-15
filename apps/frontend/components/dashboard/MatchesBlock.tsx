@@ -122,10 +122,10 @@ export default function MatchesBlock({
                   >
                     {item.fit_score === null ? "—" : Math.round(item.fit_score * 100)}
                   </span>
-                  <span className="w-[4.75rem] shrink-0 text-right">
+                  <span className="min-w-[4.75rem] shrink-0 text-right">
                     <Link
                       href={`/jobs/${encodeURIComponent(item.job_id)}`}
-                      className="rr-btn px-2.5 py-1 text-xs"
+                      className="rr-btn whitespace-nowrap px-2.5 py-1 text-xs"
                     >
                       {t("digestTailor")}
                     </Link>
@@ -172,10 +172,10 @@ export default function MatchesBlock({
                   >
                     —
                   </span>
-                  <span className="w-[4.75rem] shrink-0 text-right">
+                  <span className="min-w-[4.75rem] shrink-0 text-right">
                     <Link
                       href={`/jobs/${job.id}`}
-                      className="rr-btn rr-btn-ghost px-2.5 py-1 text-xs"
+                      className="rr-btn rr-btn-ghost whitespace-nowrap px-2.5 py-1 text-xs"
                     >
                       {t("open")}
                     </Link>
