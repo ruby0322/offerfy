@@ -227,3 +227,35 @@ def test_guest_propose_memory_says_login_required(
     rows = _tool_rows(client, master["id"])
     assert rows[0]["result"]["requires_login"] is True
     assert rows[0]["result"]["item_id"] == item.id
+
+
+def test_only_one_tailor_per_turn_survives_the_per_call_handler_rebuild(
+    client, openai_enabled, monkeypatch
+):
+    """The cap is turn-scoped state, and the handlers are now rebuilt per call.
+
+    `family_tool_handlers` holds "only one tailor per turn" in a `created`
+    list closed over by the factory. The chat router rebuilds the handlers on
+    every tool call, so that a streaming turn holds no database session for
+    its whole life -- which resets that list, and lets the model make tailors
+    without limit, unless the same list is threaded through every rebuild.
+
+    So: ask for two in one turn, and expect the second to be refused.
+    """
+    master = client.post("/v1/resumes", json={"locale": "en", "title": "M"}).json()
+    first = client.post(f"/v1/resumes/{master['id']}/tailors", json={"title": "A"}).json()
+    _patch(
+        monkeypatch,
+        [
+            llm_message(tool_calls=[tool_call("create_tailor", {"title": "One"}, "ct-1")]),
+            llm_message(tool_calls=[tool_call("create_tailor", {"title": "Two"}, "ct-2")]),
+            llm_message(content="Done."),
+        ],
+    )
+    result = post_chat(client, first["id"], json={"message": "make two tailors"})
+    rows = _tool_rows(client, first["id"])
+    assert len(rows) == 2
+    assert rows[0]["result"]["ok"] is True
+    assert "Only one tailor per turn" in rows[1]["result"]["error"]
+    # And only one actually came into existence.
+    assert len([e for e in result["events"] if e["type"] == "tailor_created"]) == 1

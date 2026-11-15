@@ -34,7 +34,27 @@ def _make_engine(url: str) -> Engine:
             cursor.close()
 
         return engine
-    return create_engine(url, pool_pre_ping=True)
+    # A single board page view fans out ~10 backend calls *in parallel*
+    # (components/jobs/board-route.tsx), so a view checks out several
+    # connections at once rather than one. On SQLAlchemy's defaults
+    # (pool_size=5, max_overflow=10) three concurrent views exhausted a
+    # worker's 15 slots; every later request then queued for the full
+    # pool_timeout, and because the routers are sync `def` each queued request
+    # also held an anyio threadpool thread. The threadpool filled with blocked
+    # handlers and the API stopped answering *everything*, /healthz included,
+    # while systemd and the :8001 listener both still looked healthy.
+    #
+    # 25 per worker x 2 workers = 50, against Postgres max_connections=100.
+    # pool_timeout is deliberately short: a saturated pool should fail fast and
+    # visibly rather than park a threadpool thread for 30s and take the whole
+    # API down quietly with it.
+    return create_engine(
+        url,
+        pool_pre_ping=True,
+        pool_size=15,
+        max_overflow=10,
+        pool_timeout=3,
+    )
 
 
 def get_engine() -> Engine:

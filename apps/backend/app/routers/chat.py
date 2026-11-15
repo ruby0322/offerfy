@@ -3,13 +3,20 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pathlib import Path
 import asyncio
+import json
 import logging
+from collections.abc import Callable
 
 from datetime import datetime, timezone
 
-from app.db import get_db
-from app.deps import get_current_user, load_resume_for_owner, owner_context
-from app.models import ChatMessage, User
+from app.db import get_db, get_session_factory
+from app.deps import (
+    get_current_user,
+    load_resume_for_owner,
+    owner_context,
+    resolve_user,
+)
+from app.models import ChatMessage, GuestSession, Resume, User
 from app.schemas import ChatMessageOut, ChatRequest, TemplateRef
 from app.services.attachment import llm_content_for_upload, stored_user_message
 from app.services.chat_messages import (
@@ -163,22 +170,102 @@ def _tailor_created(trace: dict) -> dict | None:
     return None
 
 
+def _turn_session() -> Session:
+    """A session for one unit of work inside a chat turn.
+
+    A chat turn must not hold the request's session. `Depends(get_db)` keeps
+    its session alive until the response finishes, and a StreamingResponse
+    does not finish until the stream does -- so one connection pool slot
+    would be pinned for as long as the model takes, and enough concurrent
+    turns would exhaust the pool. `Meter` already works this way for exactly
+    this reason; see its docstring. `tests/test_sse_sessions.py` pins it.
+    """
+    return get_session_factory()()
+
+
+def _reload_owner(
+    db: Session, resume_id: str, user_id: str | None, guest_id: str | None
+) -> tuple[Resume | None, User | None, GuestSession | None]:
+    """Re-attach the turn's three rows to a fresh session, by id.
+
+    The turn carries ids, never ORM instances: an instance loaded on a session
+    that has since closed is detached, and reading an expired attribute off
+    one raises. Same reasoning as the detached import/tailor runners.
+    """
+    resume = db.get(Resume, resume_id)
+    user = db.get(User, user_id) if user_id else None
+    guest = db.get(GuestSession, guest_id) if guest_id else None
+    return resume, user, guest
+
+
+def _scoped_tool_handlers(
+    names: list[str],
+    resume_id: str,
+    user_id: str | None,
+    created: list[str],
+) -> dict[str, Callable[[dict], str]]:
+    """The family/jobs tool handlers, each rebuilt on its own short-lived session.
+
+    The factories close over the session they are handed, so building them
+    once for the turn would hold a connection for the turn -- the whole thing
+    this avoids. Rebuilding per call costs two `db.get`s and a dict build,
+    which is nothing next to the model round trip that asked for the tool.
+
+    `created` is threaded in rather than left to the factory's own default
+    because it is what enforces "only one tailor per turn". A factory rebuilt
+    per call would start from a fresh empty list every time and the cap would
+    silently disappear.
+    """
+
+    def bind(name: str) -> Callable[[dict], str]:
+        def handler(args: dict) -> str:
+            with _turn_session() as db:
+                resume = db.get(Resume, resume_id)
+                if resume is None:
+                    return json.dumps({"error": "Resume not found"})
+                user = db.get(User, user_id) if user_id else None
+                built = {
+                    **family_tool_handlers(db, resume, created=created),
+                    **jobs_tool_handlers(db, resume, user),
+                }
+                fn = built.get(name)
+                if fn is None:
+                    return json.dumps({"error": f"unknown tool {name}"})
+                return fn(args)
+
+        return handler
+
+    return {name: bind(name) for name in names}
+
+
 @router.post("/v1/resumes/{resume_id}/chat")
 async def chat(
     resume_id: str,
     request: Request,
     response: Response,
-    db: Session = Depends(get_db),
-    user: User | None = Depends(get_current_user),
 ):
-    user, guest = owner_context(request, response, db, user, ensure=True)
-    resume = load_resume_for_owner(resume_id, request, db, user, guest)
-    # Once, before the turn starts, and never again inside it. Here rather
-    # than inside generate() so the refusal is an ordinary 429 JSON response:
-    # entering the meter inside the generator would turn it into an error frame
-    # on a stream that then has to end. The Guard it returns is the evidence
-    # the check passed, and the only thing `metered` accepts.
-    guard = preflight(db, user=user, guest=guest, purpose="chat")
+    # No Depends(get_db) and no Depends(get_current_user) on purpose -- see
+    # _turn_session. Each phase below opens a session and closes it, so
+    # nothing is held across the request-body await or across the stream.
+    with _turn_session() as db:
+        user = resolve_user(request, db)
+        user, guest = owner_context(request, response, db, user, ensure=True)
+        resume = load_resume_for_owner(resume_id, request, db, user, guest)
+        # Once, before the turn starts, and never again inside it. Here rather
+        # than inside generate() so the refusal is an ordinary 429 JSON response:
+        # entering the meter inside the generator would turn it into an error frame
+        # on a stream that then has to end. The Guard it returns is the evidence
+        # the check passed, and the only thing `metered` accepts -- a frozen
+        # dataclass of plain values, so it crosses the stream boundary safely.
+        guard = preflight(db, user=user, guest=guest, purpose="chat")
+        owned_id = resume.id
+        user_id = user.id if user is not None else None
+        guest_id = guest.id if guest is not None else None
+        # `ensure_guest` only flushes; the request session used to be committed
+        # by get_db on the way out. Without this the new guest row -- and with
+        # it the ownership of everything this turn writes -- is discarded when
+        # the session closes.
+        db.commit()
 
     message, filename, data, prefer_full_source, requested_model, template = (
         await _parse_chat_input(request)
@@ -196,76 +283,92 @@ async def chat(
     if not llm_configured():
         raise HTTPException(status_code=503, detail="Chat is not configured")
 
-    # Resolved before the stream opens, for the same reason the quota is: a
-    # model this caller may not have is an ordinary 400 rather than an error
-    # frame on a stream that then has to end. An explicit choice is also
-    # *stored* here, so the picker on the next page load agrees with the model
-    # this turn ran on -- the alternative is a client that thinks it switched
-    # and a server that did not.
-    tier = tier_of(db, user, guest)
-    if requested_model:
-        model_choice.choose(db, user, guest, tier=tier, name=requested_model)
-    model = model_choice.selected(
-        db, user, guest, tier=tier, requested=requested_model
+    with _turn_session() as db:
+        resume, user, guest = _reload_owner(db, owned_id, user_id, guest_id)
+        if resume is None:
+            raise HTTPException(status_code=404, detail="Resume not found")
+        # Resolved before the stream opens, for the same reason the quota is: a
+        # model this caller may not have is an ordinary 400 rather than an error
+        # frame on a stream that then has to end. An explicit choice is also
+        # *stored* here, so the picker on the next page load agrees with the model
+        # this turn ran on -- the alternative is a client that thinks it switched
+        # and a server that did not.
+        tier = tier_of(db, user, guest)
+        if requested_model:
+            model_choice.choose(db, user, guest, tier=tier, name=requested_model)
+        model = model_choice.selected(
+            db, user, guest, tier=tier, requested=requested_model
+        )
+
+        stored = stored_user_message(message, filename)
+        llm_content: str | list[dict] = stored
+        if filename and data is not None:
+            extracted = extract_upload_text(filename, data)
+            instruction = (
+                (message or "Please use this attached file.")
+                + f"\n\nThe user attached {filename}. "
+                "Call read_typst, then apply_typst_edit with the full `source` "
+                "to rewrite the resume from the attachment."
+            )
+            llm_content = llm_content_for_upload(
+                filename, data, instruction=instruction, extracted=extracted
+            )
+            owner = user_id or guest_id or "anon"
+            # Archival copy of the attachment: the reply is built from `data` and
+            # `extracted` above, so a storage failure must not fail the chat turn.
+            put_object(
+                f"uploads/{owner}/{owned_id}/chat/{filename}",
+                data,
+                "application/octet-stream",
+                required=False,
+            )
+
+        user_msg = ChatMessage(resume_id=owned_id, role="user", content=stored)
+        db.add(user_msg)
+        db.commit()
+
+        history = _history(db, owned_id)
+        messages = [{"role": m.role, "content": m.content} for m in history]
+        context_notice = _context_notice(history)
+        if messages:
+            messages[-1]["content"] = llm_content
+        original_source = resume.typst_source
+        # The picker's own request names the target directly; a message typed
+        # by hand still falls back to `mentioned_template`'s language-independent
+        # guess. Either way the intent is a (name, version) pair, never an
+        # English sentence matched against itself.
+        spec = (template.name, template.version) if template else mentioned_template(message)
+        template_switch = spec is not None
+        if template_switch or filename:
+            prefer_full_source = True
+        extra = TEMPLATE_SWITCH_EXTRA if template_switch else ""
+        if spec:
+            extra += template_api_block(*spec)
+        extra += build_role_card(db, resume)
+        # One list each, so the two call sites below cannot drift apart. The
+        # repair loop gets exactly what the main turn got: a tool that vanished
+        # mid-turn would read to the model as the catalogue going away.
+        extra_specs = [*family_tool_specs(resume), *jobs_tool_specs(resume)]
+        # Built once here only to learn the *names* the model may call -- the
+        # handlers themselves are bound to this session and must not outlive
+        # it, so the real ones come from _scoped_tool_handlers below. Taken
+        # from the dict rather than from extra_specs because the two sets are
+        # not identical: jobs_tool_handlers registers a refusing handler for a
+        # tool it does not advertise.
+        tool_names = sorted({
+            **family_tool_handlers(db, resume),
+            **jobs_tool_handlers(db, resume, user),
+        })
+
+    # One list for the whole turn, shared by every rebuild of the handlers.
+    created_tailors: list[str] = []
+    extra_handlers = _scoped_tool_handlers(
+        tool_names, owned_id, user_id, created_tailors
     )
-
-    stored = stored_user_message(message, filename)
-    llm_content: str | list[dict] = stored
-    if filename and data is not None:
-        extracted = extract_upload_text(filename, data)
-        instruction = (
-            (message or "Please use this attached file.")
-            + f"\n\nThe user attached {filename}. "
-            "Call read_typst, then apply_typst_edit with the full `source` "
-            "to rewrite the resume from the attachment."
-        )
-        llm_content = llm_content_for_upload(
-            filename, data, instruction=instruction, extracted=extracted
-        )
-        owner = user.id if user is not None else (guest.id if guest else "anon")
-        # Archival copy of the attachment: the reply is built from `data` and
-        # `extracted` above, so a storage failure must not fail the chat turn.
-        put_object(
-            f"uploads/{owner}/{resume.id}/chat/{filename}",
-            data,
-            "application/octet-stream",
-            required=False,
-        )
-
-    user_msg = ChatMessage(resume_id=resume.id, role="user", content=stored)
-    db.add(user_msg)
-    db.commit()
-
-    history = _history(db, resume.id)
-    messages = [{"role": m.role, "content": m.content} for m in history]
-    context_notice = _context_notice(history)
-    if messages:
-        messages[-1]["content"] = llm_content
-    original_source = resume.typst_source
-    # The picker's own request names the target directly; a message typed
-    # by hand still falls back to `mentioned_template`'s language-independent
-    # guess. Either way the intent is a (name, version) pair, never an
-    # English sentence matched against itself.
-    spec = (template.name, template.version) if template else mentioned_template(message)
-    template_switch = spec is not None
-    if template_switch or filename:
-        prefer_full_source = True
-    extra = TEMPLATE_SWITCH_EXTRA if template_switch else ""
-    if spec:
-        extra += template_api_block(*spec)
-    extra += build_role_card(db, resume)
-    # One list each, so the two call sites below cannot drift apart. The
-    # repair loop gets exactly what the main turn got: a tool that vanished
-    # mid-turn would read to the model as the catalogue going away.
-    extra_specs = [*family_tool_specs(resume), *jobs_tool_specs(resume)]
-    extra_handlers = {
-        **family_tool_handlers(db, resume),
-        **jobs_tool_handlers(db, resume, user),
-    }
 
     async def generate():
         # The whole generator is the billable region, so `relay` closes over
-        # `meter` the way it already closes over the session. Entering here
+        # `meter` the way it already closes over the turn's ids. Entering here
         # rather than in the handler keeps the refusal above a plain 429.
         async with metered(guard) as meter:
             assistant_text = ""
@@ -292,8 +395,11 @@ async def chat(
                     # telemetry and may be lost, while meter.record increments the
                     # counter the limit is enforced against. Per round rather than
                     # per turn, because the whole cost model is built on the
-                    # per-round token mix.
-                    persist_usage(db, resume.id, event, purpose, user=user, guest=guest)
+                    # per-round token mix. Each already commits on its own
+                    # session, so neither can roll the other back.
+                    with _turn_session() as db:
+                        _, u, g = _reload_owner(db, owned_id, user_id, guest_id)
+                        persist_usage(db, owned_id, event, purpose, user=u, guest=g)
                     meter.record(event)
                 elif kind == "delta":
                     # Display only: nothing is persisted until the assistant event lands.
@@ -304,20 +410,22 @@ async def chat(
                     # though it had said it out loud.
                     yield sse_frame({"type": "reasoning", "text": event["text"]})
                 elif kind == "tool":
-                    row = persist_tool_message(db, resume.id, event["trace"])
-                    yield sse_frame(
-                        {
-                            "type": "tool",
-                            "message": _message_out(row).model_dump(),
-                        }
-                    )
-                    created = _tailor_created(event["trace"])
-                    if created:
-                        yield sse_frame(created)
+                    # Serialised inside the session: _message_out reads columns
+                    # off the row, which a closed session would have expired.
+                    with _turn_session() as db:
+                        row = persist_tool_message(db, owned_id, event["trace"])
+                        payload = _message_out(row).model_dump()
+                    yield sse_frame({"type": "tool", "message": payload})
+                    tailor_evt = _tailor_created(event["trace"])
+                    if tailor_evt:
+                        yield sse_frame(tailor_evt)
                 elif kind == "source":
                     new_source = event["typst_source"]
-                    set_draft_source(db, resume, new_source)
-                    db.commit()
+                    with _turn_session() as db:
+                        resume_row = db.get(Resume, owned_id)
+                        if resume_row is not None:
+                            set_draft_source(db, resume_row, new_source)
+                            db.commit()
                     yield sse_frame(
                         {
                             "type": "source",
@@ -329,13 +437,10 @@ async def chat(
                     assistant_text = (
                         event["content"] or assistant_text or "Updated the Typst source."
                     )
-                    row = persist_assistant_message(db, resume.id, assistant_text)
-                    yield sse_frame(
-                        {
-                            "type": "assistant",
-                            "message": _message_out(row).model_dump(),
-                        }
-                    )
+                    with _turn_session() as db:
+                        row = persist_assistant_message(db, owned_id, assistant_text)
+                        payload = _message_out(row).model_dump()
+                    yield sse_frame({"type": "assistant", "message": payload})
 
             try:
                 # First frame when it applies, so the trimming is part of the
@@ -404,17 +509,17 @@ async def chat(
                             yield frame
                 # After the last persist_usage has committed, so the number the
                 # client is handed is the number in the database. Telemetry may be
-                # lost without costing an answer, and so may this.
+                # lost without costing an answer, and so may this. No rollback
+                # needed any more: the session here is this block's own, and
+                # closing it discards anything half-done.
                 try:
-                    bal = balance(db, user, guest)
-                    yield sse_frame(
-                        quota_event(
-                            bal, approx_edits_left(db, user, guest, bal, model=model)
-                        )
-                    )
+                    with _turn_session() as db:
+                        _, u, g = _reload_owner(db, owned_id, user_id, guest_id)
+                        bal = balance(db, u, g)
+                        edits_left = approx_edits_left(db, u, g, bal, model=model)
+                    yield sse_frame(quota_event(bal, edits_left))
                 except Exception:
                     logger.warning("quota frame failed", exc_info=True)
-                    db.rollback()
                 yield sse_frame(
                     {
                         "type": "done",

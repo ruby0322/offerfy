@@ -73,8 +73,18 @@ def family_tool_specs(resume: Resume) -> list[dict]:
     return specs
 
 
-def family_tool_handlers(db: Session, resume: Resume) -> dict[str, Callable[[dict], str]]:
-    created: list[str] = []
+def family_tool_handlers(
+    db: Session, resume: Resume, *, created: list[str] | None = None
+) -> dict[str, Callable[[dict], str]]:
+    """The family tools, bound to one session and one resume.
+
+    `created` is the "only one tailor per turn" state. It defaults to a fresh
+    list, which is right for a caller that builds these once per turn. A
+    caller that rebuilds them per tool call -- the chat router does, so that a
+    streaming turn holds no session -- must pass the same list each time, or
+    the cap resets on every call and the model can make tailors without limit.
+    """
+    created = [] if created is None else created
 
     def read_master(_args: dict) -> str:
         master = family_master(db, resume)

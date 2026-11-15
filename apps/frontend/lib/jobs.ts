@@ -366,10 +366,17 @@ export async function fetchJobPulse(query: JobQuery = {}): Promise<JobPulse | nu
 /**
  * How many roles a query matches, and nothing else. Used for the curated
  * board counts, where six numbers are wanted and none of the postings are.
+ *
+ * Cached for an hour. `boardCounts()` is the only caller, and it asks for all
+ * six boards on every board page view using each board's own fixed query -- so
+ * these six URLs are byte-identical across every request, visitor filters
+ * included. Uncached they were six of the ~ten calls a single view checked out
+ * *in parallel*, which is what exhausted the connection pool under crawler
+ * load. The figure moves a few times a day; an hour old is fine.
  */
 export async function fetchJobCount(query: JobQuery): Promise<number | undefined> {
   const qs = jobListParams(query, { limit: 1 }).toString();
-  const data = await backendJson<Partial<JobList>>(`/v1/jobs?${qs}`);
+  const data = await backendJsonCached<Partial<JobList>>(`/v1/jobs?${qs}`, 3600);
   return typeof data?.total === "number" ? data.total : undefined;
 }
 

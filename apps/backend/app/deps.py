@@ -46,7 +46,16 @@ def clear_session_cookie(response: Response) -> None:
     response.delete_cookie(SESSION_COOKIE, path="/")
 
 
-def get_current_user(request: Request, db: Session = Depends(get_db)) -> User | None:
+def resolve_user(request: Request, db: Session) -> User | None:
+    """The cookie -> User lookup, on a session the caller owns.
+
+    Split out of `get_current_user` so an endpoint can authorize *without*
+    taking `Depends(get_db)`. SSE endpoints need that: FastAPI holds a `yield`
+    dependency's session until the response finishes, which for a stream means
+    for the stream's whole life, pinning one connection pool slot per open
+    stream. Taking `Depends(get_current_user)` alone was enough to do it,
+    because that dependency pulls `get_db` in itself.
+    """
     raw = request.cookies.get(SESSION_COOKIE)
     if not raw:
         return None
@@ -54,6 +63,10 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User | 
     if not user_id:
         return None
     return db.get(User, user_id)
+
+
+def get_current_user(request: Request, db: Session = Depends(get_db)) -> User | None:
+    return resolve_user(request, db)
 
 
 def get_guest(

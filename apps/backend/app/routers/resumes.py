@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 from datetime import datetime, timezone
@@ -9,7 +10,13 @@ from fastapi.responses import Response as RawResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.db import get_db, get_session_factory
-from app.deps import get_current_user, load_resume_for_owner, owner_context, require_user
+from app.deps import (
+    get_current_user,
+    load_resume_for_owner,
+    owner_context,
+    require_user,
+    resolve_user,
+)
 from app.models import GuestSession, Job, Resume, ResumeImport, ResumeRevision, TailorRun, User
 from app.schemas import (
     AtsReport,
@@ -346,6 +353,38 @@ def _owned_resume(
 ) -> Resume:
     user, guest = owner_context(request, response, db, user, ensure=ensure)
     return load_resume_for_owner(resume_id, request, db, user, guest)
+
+
+def _stream_owned_id(
+    resume_id: str,
+    request: Request,
+    response: Response,
+    snapshot: Callable[[Session, str], object | None],
+    missing: str,
+) -> str:
+    """Authorize an SSE stream on a session that closes *before* it opens.
+
+    Returns the owned resume's id, which is all the stream generators take.
+
+    The session here is deliberately not `Depends(get_db)`, and the user is
+    resolved with `resolve_user` rather than `Depends(get_current_user)`.
+    Either dependency would have FastAPI hold its session until the response
+    finished -- and a StreamingResponse does not finish until the stream does,
+    so every open stream pinned one of the engine's pool slots. Enough
+    concurrent viewers exhausted the pool, and because the routers are sync
+    `def` the blocked requests also filled the threadpool, taking down routes
+    that touch no database at all. The generators already open their own
+    session per poll (see `_stream_import_snapshots`), so nothing below needs
+    this one.
+    """
+    factory = get_session_factory()
+    with factory() as db:
+        user = resolve_user(request, db)
+        resume = _owned_resume(resume_id, request, response, db, user)
+        owned_id = resume.id
+        if snapshot(db, owned_id) is None:
+            raise HTTPException(status_code=404, detail=missing)
+    return owned_id
 
 
 def _member(r: Resume) -> FamilyMember:
@@ -859,14 +898,12 @@ def stream_import(
     resume_id: str,
     request: Request,
     response: Response,
-    db: Session = Depends(get_db),
-    user: User | None = Depends(get_current_user),
 ):
-    resume = _owned_resume(resume_id, request, response, db, user)
-    if import_snapshot(db, resume.id) is None:
-        raise HTTPException(status_code=404, detail="No import for this resume")
+    owned_id = _stream_owned_id(
+        resume_id, request, response, import_snapshot, "No import for this resume"
+    )
     return StreamingResponse(
-        _stream_import_snapshots(resume.id), media_type="text/event-stream", headers=SSE_HEADERS
+        _stream_import_snapshots(owned_id), media_type="text/event-stream", headers=SSE_HEADERS
     )
 
 
@@ -945,12 +982,10 @@ def stream_tailor_run(
     resume_id: str,
     request: Request,
     response: Response,
-    db: Session = Depends(get_db),
-    user: User | None = Depends(get_current_user),
 ):
-    resume = _owned_resume(resume_id, request, response, db, user)
-    if tailor_snapshot(db, resume.id) is None:
-        raise HTTPException(status_code=404, detail="No tailor pass for this resume")
+    owned_id = _stream_owned_id(
+        resume_id, request, response, tailor_snapshot, "No tailor pass for this resume"
+    )
     return StreamingResponse(
-        _stream_tailor_snapshots(resume.id), media_type="text/event-stream", headers=SSE_HEADERS
+        _stream_tailor_snapshots(owned_id), media_type="text/event-stream", headers=SSE_HEADERS
     )
