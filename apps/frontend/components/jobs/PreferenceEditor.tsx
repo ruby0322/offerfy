@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Link } from "@/i18n/navigation";
-import { ApiError } from "@/lib/api";
+import { ApiError, usageRefusalOf, type UsageRefusal } from "@/lib/api";
 import {
   fetchJobPreferences,
   refreshResumeFacts,
@@ -46,6 +46,7 @@ export default function PreferenceEditor({ initial }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildMsg, setRebuildMsg] = useState<{ text: string; bad: boolean } | null>(null);
+  const format = useFormatter();
 
   // Same fallback as the filter bar: an unknown value shows itself rather than throws.
   function labeled(keys: Record<string, JobsMessageKey>, value: string): string {
@@ -126,6 +127,33 @@ export default function PreferenceEditor({ initial }: Props) {
     }
   }
 
+  /**
+   * What to say about a refusal. "Try again shortly" is right for a genuine
+   * burst and wrong for everything else here, so it is not the default.
+   *
+   * The hourly cap on profile builds is zero below the matching tier, which
+   * means the button cannot work at all rather than works-again-soon: the
+   * refusal is the same `burst` either way, and the tier is what separates
+   * them. (UsageLimitCard reads next_tier the same way to decide whether to
+   * offer the settings link.)
+   */
+  function refusalText(refusal: UsageRefusal): string {
+    if (refusal.limit === "burst") {
+      return refusal.tier === "matching"
+        ? t("rebuildTooOften")
+        : t("rebuildNeedsMatching");
+    }
+    if (refusal.limit === "weekly_turns" || refusal.limit === "weekly_credits") {
+      return t("rebuildOutOfAllowance", {
+        date: format.dateTime(new Date(refusal.reset_at), {
+          month: "short",
+          day: "numeric",
+        }),
+      });
+    }
+    return t("rebuildTooOften");
+  }
+
   async function rebuild() {
     setRebuilding(true);
     setRebuildMsg(null);
@@ -152,8 +180,14 @@ export default function PreferenceEditor({ initial }: Props) {
         const next = await fetchJobPreferences();
         applyPreference(next);
       }
-    } catch {
-      setRebuildMsg({ text: t("rebuildFailed"), bad: true });
+    } catch (err) {
+      // A 429 is not a failure to read the resume -- it never got that far --
+      // so it must not say so. The refusal carries which limit fired.
+      const refusal = usageRefusalOf(err);
+      setRebuildMsg({
+        text: refusal ? refusalText(refusal) : t("rebuildFailed"),
+        bad: true,
+      });
     } finally {
       setRebuilding(false);
     }

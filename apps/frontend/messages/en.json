@@ -608,7 +608,10 @@
     "rebuilding": "Reading your resume… this can take up to 90 seconds",
     "rebuildDone": "Done. We read your resume. If you had not saved yet, the choices below now reflect it.",
     "rebuildFailed": "We could not read your resume. Try again in a moment.",
-    "rebuildNoSource": "Publish a resume first, then try again.",
+    "rebuildNoSource": "Save a version of your resume in the editor first, then try again.",
+    "rebuildTooOften": "Too many requests just now. Please try again shortly.",
+    "rebuildNeedsMatching": "Turn on matching recommendations first, so Offerfy may read your resume.",
+    "rebuildOutOfAllowance": "This week's AI allowance is used up. It resets on {date}.",
     "seePrivacy": "How we handle your resume",
     "locationsIgnoredRemote": "Ignored while “Remote” is selected below: we match remote roles wherever the employer is based. Set Remote back to “No preference” to filter by country again.",
     "rebuildDoneKeptEdits": "Done. We read your resume. Your unsaved changes below were left as they are — save them, or reload the page to see what your resume suggests."
