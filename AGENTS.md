@@ -234,7 +234,8 @@ held 120 boards of which **64 404ed on every pass** — companies that had moved
 that never used Greenhouse/Lever/Ashby at all (TSMC, MediaTek, Shopee, Netflix, Shopify,
 Zendesk…). Those were not lost inventory: they had never returned a single job. They were
 removed, 29 were repaired by correcting the provider or slug (Anthropic is on Greenhouse,
-not Ashby; Anduril is `andurilindustries`), and the file is now 79 boards that all answer.
+not Ashby; Anduril is `andurilindustries`), and the file is now 80 boards that all answer
+(79 until Microsoft was added 2026-11-15).
 
 Before adding a board, **probe it**; do not assume. The three endpoints are in
 `greenhouse.py` / `lever.py` / `ashby.py`, plus `smartrecruiters.py`. Note that probing
@@ -312,6 +313,22 @@ positive is visible on the jobs page and fixed by adding a needle -- but if a `p
 `flight operator` needle is added, note that `Head of Flight Test Engineering` is a real
 engineering role and must survive it.
 
+**Microsoft is carried, but only its AI org.** Added 2026-11-15 on Greenhouse token
+`microsoftcorporation` — 77 postings, every one naming Microsoft AI (MAI) in its
+description, confirmed by a 200 with a non-empty `jobs` array. **This is not all of
+Microsoft.** The main careers site has moved to Eightfold (`jobs.careers.microsoft.com`
+redirects to `apply.careers.microsoft.com`, served by `app.eightfold.ai`), which is not a
+provider we read, so the several thousand postings there are not in the catalogue. Do not
+read the employer page's 77 as Microsoft's coverage, and do not "fix" it by adding a
+Workday row — `microsoft` 422s on both wd1 and wd5.
+
+All 77 pass `title_in_scope`, which is worth a glance rather than a celebration: the board
+is engineering-led, but `Clinical Specialist`, `Creative Director, MAI Creative Studio
+Lead`, `Sr. Visual Designer` and `Executive Business Administrator - MAI` pass only because
+they match no deny needle, not because anything judged them technical. That is the
+documented self-correcting direction (see `title_in_scope`'s docstring) — fix by adding a
+needle if they prove noisy on the jobs page.
+
 **SmartRecruiters is the fourth provider**, added because Grab, Canva and Wise publish
 there and nowhere we could read. It differs from the others in two ways that matter:
 descriptions are **not** in the list payload, so each posting costs its own request, and it
@@ -352,8 +369,35 @@ from imagination is how you lose "Infrastructure Security Engineer" to the word 
 
 Workday reaches the competitive semiconductor tier nothing else could — NVIDIA, Micron,
 Applied Materials, Intel, NXP, Marvell — plus CrowdStrike, Zendesk, Red Hat, Salesforce,
-Adobe and Workday itself. **12 boards, ~12k postings**, in
+Adobe and Workday itself, plus Trend Micro. **14 boards, ~12k postings**, in
 `apps/backend/data/workday_boards.json`.
+
+**Trend Micro joined 2026-11-15 and brings two sites on one tenant.**
+`trendmicro.wd3` serves `External` (180 postings, global, Taipei included) and
+`External_TrendLife` (19, mostly Taipei and Tokyo, and where the Applied AI roles live).
+Both carry `company: "Trend Micro"` on purpose: one employer page over both boards, while
+`WorkdayBoard.slug` keeps `expire_missing` scoped per site, so neither board can deactivate
+the other's rows.
+
+**"TrendAI" is a brand, not a board.** TrendAI is Trend Micro's own name for its enterprise
+business unit, so third-party aggregators list these postings under it — but `TrendAI` and
+`External_TrendAI` both 404, and those roles are on `External`. Do not go looking for a
+third site.
+
+**Trend Micro is the first board since TaiwanJobs to bring Japanese titles, and the deny
+list cannot see them.** `data/job_scope.json` has 17 CJK `deny_always` needles, but they are
+all **Traditional Chinese** from the TaiwanJobs era. Japanese writes sales as 営業, and the
+zh-TW needle is 業務 — different characters, so no match. The result is that
+`法人営業（リテールチャネル担当・名古屋）`, `キーアカウント営業（家電量販店 本部担当）` and
+their siblings pass `title_in_scope` as technical roles. Four of the 14 in-scope
+`External_TrendLife` titles are Japanese sales jobs this way.
+
+This is the Wing-aviation case in a second script: a whole role family the deny list has
+never seen. It was **left in place rather than patched blind** — §8b's rule is that a scope
+retune is measured in both directions over the whole live corpus in one pass, and a 営業
+needle has to be checked against Japanese titles on every other board (NVIDIA, Micron and
+Intel all post in Japan) and against 営業技術, which is a real engineering role. Measure it
+before adding it.
 
 **It is not TSMC or MediaTek, and it cannot be.** Checked 2026-10-24: TSMC returns 403 to
 every request including its own `robots.txt`, and MediaTek runs a bespoke Strapi site with
