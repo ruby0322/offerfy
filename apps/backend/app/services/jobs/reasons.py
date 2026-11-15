@@ -276,13 +276,37 @@ def _mentions(haystack: str, needle: str) -> bool:
     )
 
 
+def _resume_body(facts: Any) -> str:
+    """The resume as the MODEL was shown it, for the cite check to agree with.
+
+    `skills_text` and `search_text` are narrow summaries -- a pipe-delimited
+    skills list and a headline blob. The prompt is built from `facts_text`,
+    which renders the whole resume including projects and experience. Checking
+    cites against only the two summaries meant every PROJECT citation was
+    judged invented, which on the first real production run dropped 4 of 5
+    items: "MobileNetV3 infection-risk classifier", "campus treasure-hunt
+    game", "10-minute cached API layer" and "LaTeX user manual" are all
+    genuinely on that resume and none of them is a skill.
+
+    The guarantee is unchanged -- a cite must appear in the resume -- but "the
+    resume" now means the same text in both halves instead of a subset of it.
+    A cite absent from this body is still rejected.
+    """
+    try:
+        return facts_text(facts)
+    except Exception:  # unreadable facts_json: fall back to the summaries
+        return ""
+
+
 def _on_resume(facts: Any, cite: str) -> bool:
     skills = getattr(facts, "skills_text", "") or ""
     search = getattr(facts, "search_text", "") or ""
     token = cite.strip().casefold()
     if len(token) < MIN_CITE_CHARS:
         return False
-    return f"|{token}|" in skills.casefold() or _mentions(search, token)
+    if f"|{token}|" in skills.casefold() or _mentions(search, token):
+        return True
+    return _mentions(_resume_body(facts), token)
 
 
 @dataclass(frozen=True)

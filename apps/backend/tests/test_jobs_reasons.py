@@ -706,3 +706,51 @@ async def test_ten_postings_sent_ten_reasons_written_and_the_prompt_says_ten(
     assert len(run.prose) == 10 and run.dropped == []
     sent = stub.calls[0]["body"]["input"][0]["content"]
     assert "at most 10 items" in sent and "at most 5" not in sent
+
+
+def test_a_cite_from_a_role_highlight_counts_as_on_resume():
+    """The cite check must read the same resume the prompt showed the model.
+
+    `skills_text` is a pipe-delimited skills list and `search_text` a headline
+    blob; the prompt is built from `facts_text`, which also renders each role's
+    highlights -- which is where projects live. Checking cites against the two
+    summaries alone judged every project citation invented, and on the first
+    real production run that dropped 4 of 5 items.
+    """
+    facts = SimpleNamespace(
+        facts_json=json.dumps(
+            {
+                "headline": "Backend engineer",
+                "skills": ["Python"],
+                "roles": [
+                    {
+                        "employer": "Acme",
+                        "title": "Engineer",
+                        "start": "2019-01",
+                        "end": "Present",
+                        "highlights": ["Shipped a MobileNetV3 infection-risk classifier"],
+                    }
+                ],
+            }
+        ),
+        skills_text="|python|",
+        search_text="backend engineer acme engineer python",
+    )
+    # The premise: the project is in neither summary column.
+    assert "mobilenetv3" not in facts.skills_text.casefold()
+    assert "mobilenetv3" not in facts.search_text.casefold()
+
+    item = _item(
+        reason="Python and the MobileNetV3 infection-risk classifier on your resume fit this role.",
+        resume=("Python", "MobileNetV3 infection-risk classifier"),
+    )
+    kept, dropped = validate([item], facts=facts, scored_ids={"a"})
+    assert [p.job_id for p in kept] == ["a"], dropped
+
+    # And the hole stays shut: a cite in none of the three is still invented.
+    invented = _item(
+        reason="Your Rust work fits this role.", resume=("Python", "Rust")
+    )
+    kept2, dropped2 = validate([invented], facts=facts, scored_ids={"a"})
+    assert kept2 == []
+    assert dropped2 == [("a", "uncited")]
