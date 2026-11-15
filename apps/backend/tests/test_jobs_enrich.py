@@ -59,6 +59,13 @@ def _add_job(db_session, **kwargs) -> Job:
     ("New Grad Software Engineer", "new_grad"),
     ("Software Engineer, University Graduate", "new_grad"),
     ("Software Engineering Intern", "intern"),
+    # LINE Taiwan names its student programme instead of its level: the title
+    # says neither "intern" nor 實習, so seven of these read "unknown" and one
+    # read "mid", and the employer was absent from /jobs/internships entirely
+    # even though the postings are internships. Measured over 18,281 distinct
+    # live titles: "tech fresh" moves exactly those 8 and nothing else.
+    ("2027 TECH FRESH Spring Class - Data dev", "intern"),
+    ("2027 TECH FRESH Spring Class - Biz Engineering", "intern"),
     ("Junior Developer", "junior"),
     ("Engineering Manager, Billing", "manager"),
     ("資深後端工程師", "senior"),
