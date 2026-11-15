@@ -1347,6 +1347,77 @@ class DigestItem(Base):
     job: Mapped["Job"] = relationship(viewonly=True, lazy="select")
 
 
+class TailorRun(Base):
+    """One server-driven first pass over a tailor resume against its posting.
+
+    The same shape as ResumeImport and for the same reason: offerfy-api runs
+    uvicorn with two workers and a reconnecting client can land on either, so
+    the only place progress can live is Postgres. `heartbeat_at` tells a
+    runner that died mid-pass from one still working, and `version` is the
+    reconnection contract -- a client re-renders when it moves.
+
+    It exists because the pass used to be a chat message the *frontend* sent.
+    That had two faults this table fixes. The canned prompt was persisted with
+    role="user", so it read as if the person had typed it; and the work lived
+    in one SSE response, so a reload mid-pass lost it with no way to tell --
+    the frontend's "has this resume been kickstarted" flag was `messages
+    length > 0`, which the orphaned user row itself satisfied, so it never
+    re-fired. See app.services.tailor_runner, which writes no user message at
+    all.
+
+    No steps table, unlike resume_imports: an import's agent declares its own
+    section plan and edits them one at a time, while this is a single turn
+    (read the resume, read the posting, assess, narrate). `phase` is the one
+    thing the card needs instead, and it is ours, not the model's.
+
+    `job_id` is nullable and carried here rather than only reached through
+    `applications`: a tailor made from the editor's own dialog has no posting,
+    a guest has no applications row at all (applications.user_id is NOT NULL),
+    and a run should say what it was about without a join.
+    """
+
+    __tablename__ = "tailor_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running', 'done', 'failed')",
+            name="tailor_runs_status_values",
+        ),
+        CheckConstraint(
+            "phase IS NULL OR phase IN ('reading', 'assessing', 'writing')",
+            name="tailor_runs_phase_values",
+        ),
+        # The same DB-level guard resume_imports carries, for the same race:
+        # start_run's check-then-insert is not atomic across two workers.
+        Index(
+            "tailor_runs_one_running_per_resume",
+            "resume_id",
+            unique=True,
+            postgresql_where=text("status = 'running'"),
+            sqlite_where=text("status = 'running'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    resume_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # CASCADE matches applications.job_id: a posting that is deleted outright
+    # takes its runs with it rather than leaving them pointing at nothing.
+    job_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    phase: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    heartbeat_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+
 class ResumeContent(Base):
     """A structured snapshot of one resume's content, for switching templates.
 

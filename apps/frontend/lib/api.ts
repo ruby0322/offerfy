@@ -1,5 +1,6 @@
 import type { ModelRow, ModelTable, UsageTierRow, UsageTiers } from "@/lib/usage-tiers";
 import type { ImportSnapshot, ImportStepStatus } from "@/lib/import-progress";
+import { isTailorRunSnapshot, type TailorRunSnapshot } from "@/lib/tailor-run";
 
 export class ApiError extends Error {
   status: number;
@@ -934,6 +935,72 @@ export async function streamImport(
     throw new ApiError("Import stream was not a stream", res.status);
   }
   await streamImportFromBody(res.body, onSnapshot);
+}
+
+/** Same `data:` convention as `parseImportSseBlock`, for the tailor pass's snapshot. */
+function parseTailorRunSseBlock(block: string): TailorRunSnapshot | null {
+  const line = block.trim();
+  if (!line.startsWith("data:")) return null;
+  try {
+    const parsed = JSON.parse(line.slice(5).trim()) as unknown;
+    if (isTailorRunSnapshot(parsed)) return parsed;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/** POST /resumes/{id}/tailor-run. 409 if a pass is already running, 400 on a master. */
+export async function startTailorRun(id: string): Promise<TailorRunSnapshot> {
+  return apiJson<TailorRunSnapshot>(`/api/v1/resumes/${id}/tailor-run`, { method: "POST" });
+}
+
+/** GET /resumes/{id}/tailor-run. `null` on 404 -- no pass has ever been started. */
+export async function getTailorRun(id: string): Promise<TailorRunSnapshot | null> {
+  try {
+    return await apiJson<TailorRunSnapshot>(`/api/v1/resumes/${id}/tailor-run`);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+/** The body-reading half of `streamTailorRun`, split out for the same reason `streamImportFromBody` is: `fetch` is not mockable here. */
+export async function streamTailorRunFromBody(
+  body: ReadableStream<Uint8Array>,
+  onSnapshot: (snapshot: TailorRunSnapshot) => void | Promise<void>,
+): Promise<void> {
+  await readSseBlocks(body, async (block) => {
+    const snapshot = parseTailorRunSseBlock(block);
+    if (snapshot) await onSnapshot(snapshot);
+  });
+}
+
+/**
+ * GET /resumes/{id}/tailor-run/stream. A full snapshot immediately, then one
+ * per version change, closing on "done", "failed" -- or on `stale`, which is
+ * what an API restart mid-pass leaves behind.
+ */
+export async function streamTailorRun(
+  id: string,
+  onSnapshot: (snapshot: TailorRunSnapshot) => void | Promise<void>,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await apiFetch(`/api/v1/resumes/${id}/tailor-run/stream`, {
+    headers: { Accept: "text/event-stream" },
+    signal,
+  });
+  if (!res.ok) {
+    const body = await parseBody(res);
+    throw new ApiError(errorMessage(body, res.statusText || "Request failed"), res.status, body);
+  }
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("event-stream") || !res.body) {
+    throw new ApiError("Tailor pass stream was not a stream", res.status);
+  }
+  await streamTailorRunFromBody(res.body, onSnapshot);
 }
 
 export async function getMe(): Promise<AuthUser | null> {

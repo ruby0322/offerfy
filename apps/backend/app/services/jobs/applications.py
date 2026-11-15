@@ -155,6 +155,33 @@ def link_tailor(
     return application
 
 
+def job_id_for_tailor(db: Session, resume) -> str | None:
+    """The posting a tailor resume was created for, or None.
+
+    The inverse of `link_tailor`, and it lives beside it so the read and the
+    write of this linkage cannot drift. Two callers need it and neither can
+    import the other: `services.role_card` (so every later turn in the
+    conversation can still name the posting) and `services.tailor_runner`
+    (which imports role_card, so the helper cannot live there).
+
+    None is an ordinary answer: a tailor made from the editor's own dialog has
+    a `target_label` instead, and a guest has no applications row at all
+    because `applications.user_id` is NOT NULL.
+    """
+    if resume.user_id is None:
+        return None
+    return (
+        db.query(Application.job_id)
+        .filter(
+            Application.user_id == resume.user_id,
+            Application.tailor_resume_id == resume.id,
+        )
+        .order_by(Application.last_status_at.desc())
+        .limit(1)
+        .scalar()
+    )
+
+
 def mark_applied(db: Session, *, user: User, job_id: str) -> Application:
     """The outbound click: applied, stamped, confirmation still owed."""
     application = _get_or_create(db, user, job_id, "search")

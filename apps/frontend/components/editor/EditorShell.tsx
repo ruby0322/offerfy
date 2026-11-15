@@ -56,7 +56,10 @@ import {
   putSelectedModel,
   sendChat,
   startImport,
+  startTailorRun,
   streamImport,
+  streamTailorRun,
+  getTailorRun,
   switchTemplate,
   type AtsReport,
   type ChatMessage,
@@ -87,6 +90,12 @@ import {
   toImportView,
   type ImportSnapshot,
 } from "@/lib/import-progress";
+import {
+  shouldStartTailorRun,
+  tailorRunBlocksComposer,
+  toTailorRunView,
+  type TailorRunSnapshot,
+} from "@/lib/tailor-run";
 import { peekPendingCreate, takePendingCreate } from "@/lib/pending-create";
 
 const TypstSourceEditor = dynamic(
@@ -148,8 +157,6 @@ export default function EditorShell({ resumeId }: Props) {
   const toast = useToast();
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState<ResumeKind | undefined>();
-  const [targetLabel, setTargetLabel] = useState("");
-  const [targetContext, setTargetContext] = useState("");
   const [createdAt, setCreatedAt] = useState<string | undefined>();
   const [resumeSource, setResumeSource] = useState<ResumeSource | undefined>();
   const [resumeLocale, setResumeLocale] = useState<string | undefined>();
@@ -249,6 +256,12 @@ export default function EditorShell({ resumeId }: Props) {
   // import already finished before this mount's `getImport` call lands --
   // the backend still returns that last snapshot, so "done" renders too).
   const [importSnapshot, setImportSnapshot] = useState<ImportSnapshot | null>(null);
+  const [tailorSnapshot, setTailorSnapshot] = useState<TailorRunSnapshot | null>(null);
+  const [tailorActionPending, setTailorActionPending] = useState(false);
+  // Whether this mount has already resolved "is there a run?". The start
+  // below must not fire before the answer arrives, or a reload mid-pass
+  // starts a second one.
+  const [tailorCheckedFor, setTailorCheckedFor] = useState<string | null>(null);
   const [importElapsedSeconds, setImportElapsedSeconds] = useState(0);
   // A Retry/Resume click in flight. Keeps the card's button inert, so a
   // double click cannot race itself into the 409 the backend answers.
@@ -257,7 +270,13 @@ export default function EditorShell({ resumeId }: Props) {
   const skipTimers = useRef(true);
   const sendingRef = useRef(false);
   const pendingTailorRef = useRef<string | null>(null);
-  const kickstartedRef = useRef(false);
+  // Replaces kickstartedRef: the old flag lived only in this component, so a
+  // reload lost it and the "has this tailor been opened" question fell back to
+  // `messages.length > 0` -- which the orphaned user message satisfied by
+  // itself. The durable answer is the run row; this ref only guards the
+  // renders between starting one and its snapshot arriving.
+  const tailorStartedRef = useRef(false);
+  const tailorAbortRef = useRef<AbortController | null>(null);
   const savePromptedRef = useRef(false);
   const previewObjectUrls = useRef<string[]>([]);
   // How much of the running import this mount has taken in: the `applied`
@@ -538,6 +557,87 @@ export default function EditorShell({ resumeId }: Props) {
     };
   }, [attachImportStream, resumeId]);
 
+  // The tailor pass, in the same three pieces as the import: follow a live
+  // run, pick one up on mount, and start one when there is none.
+  const attachTailorStream = useCallback(() => {
+    tailorAbortRef.current?.abort();
+    const controller = new AbortController();
+    tailorAbortRef.current = controller;
+    void streamTailorRun(
+      resumeId,
+      (snap) => setTailorSnapshot(snap),
+      controller.signal,
+    ).catch(() => {
+      /* a dropped connection just stops updating the card; a reload
+         re-attaches via the mount effect below */
+    });
+  }, [resumeId]);
+
+  // On mount: pick up whatever pass this resume has and keep following it.
+  // This is the whole point of the run row -- a reload mid-pass re-attaches
+  // instead of leaving an unanswered message nothing would ever retry.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getTailorRun(resumeId);
+        if (cancelled) return;
+        setTailorSnapshot(snap);
+        if (snap && snap.status === "running" && !snap.stale) attachTailorStream();
+      } catch {
+        /* the pass is optional; the editor works without it */
+      } finally {
+        if (!cancelled) setTailorCheckedFor(resumeId);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      tailorAbortRef.current?.abort();
+    };
+  }, [attachTailorStream, resumeId]);
+
+  const startTailor = useCallback(async () => {
+    setTailorActionPending(true);
+    try {
+      const snap = await startTailorRun(resumeId);
+      setTailorSnapshot(snap);
+      attachTailorStream();
+    } catch {
+      // Ours, not the backend's sentence: "a tailor pass is already running
+      // for resume <uuid>" is not something to show anyone. A 409 here means
+      // another tab already started it, which the stream will show anyway.
+      toast(t("tailorRunActionError"));
+    } finally {
+      setTailorActionPending(false);
+    }
+  }, [attachTailorStream, resumeId, t, toast]);
+
+  // The pass that opens a tailor, started once the mount knows there is none.
+  // `tailorStartedRef` guards the window between this firing and the snapshot
+  // landing in state, which is more than one render.
+  useEffect(() => {
+    if (tailorStartedRef.current) return;
+    if (!shouldStartTailorRun({ kind, loaded, messageCount: messages.length, snapshot: tailorSnapshot })) {
+      return;
+    }
+    // Only once this mount has actually asked about THIS resume. A boolean
+    // would still read true from the previous one for a render.
+    if (tailorCheckedFor !== resumeId) return;
+    tailorStartedRef.current = true;
+    const handle = window.setTimeout(() => {
+      setLeftTab("chat");
+      saveEditorTab(resumeId, "chat");
+      void startTailor();
+    }, 0);
+    return () => window.clearTimeout(handle);
+  }, [kind, loaded, messages.length, resumeId, startTailor, tailorCheckedFor, tailorSnapshot]);
+
+  const tailorRunView = useMemo(
+    () => (tailorSnapshot ? toTailorRunView(tailorSnapshot) : undefined),
+    [tailorSnapshot],
+  );
+  const tailorRunning = tailorRunBlocksComposer(tailorRunView);
+
   // When the run opened and whether it is still going -- the only two things
   // the clock below needs. Both primitives, so a snapshot that changes
   // nothing else does not restart the interval: depending on the snapshot
@@ -655,8 +755,6 @@ export default function EditorShell({ resumeId }: Props) {
         if (cancelled) return;
         setTitle(resume.title || "");
         setKind(resume.kind);
-        setTargetLabel(resume.target_label?.trim() || "");
-        setTargetContext(resume.target_context?.trim() || "");
         setCreatedAt(resume.created_at);
         setResumeSource(resume.source);
         setResumeLocale(resume.locale);
@@ -831,6 +929,10 @@ export default function EditorShell({ resumeId }: Props) {
     // the compile-error question -- arrives here too, so the refusal belongs
     // here and not only in the UI.
     if (importRunning) return;
+    // Same collision, same refusal: while the tailor pass is running it owns
+    // `resume.typst_source` too. Every programmatic caller arrives here, so
+    // the guard belongs here and not only in the UI.
+    if (tailorRunning) return;
     // Every AI turn comes through here — kickstart, "fix with AI", the
     // compile-error question, a template. On a phone the turn would stream out
     // of sight unless the sheet comes up with it.
@@ -1029,6 +1131,7 @@ export default function EditorShell({ resumeId }: Props) {
       clearReasoning,
       clearStream,
       importRunning,
+      tailorRunning,
       importView,
       pushDelta,
       pushReasoning,
@@ -1044,26 +1147,6 @@ export default function EditorShell({ resumeId }: Props) {
   useEffect(() => {
     sendUserChatRef.current = sendUserChat;
   }, [sendUserChat]);
-
-  // A tailor whose chat is still empty has never been scored against its target,
-  // however the user got here: the automatic hand-off, the card's open button, the
-  // family menu, or a reload. The empty chat is the flag, so this stays idempotent.
-  useEffect(() => {
-    if (!loaded || kind !== "tailor") return;
-    if (messages.length > 0 || kickstartedRef.current) return;
-    const prompt = t("tailorKickstartPrompt", {
-      role: targetLabel || t("tailorKickstartRoleUnknown"),
-      context: targetContext || t("tailorKickstartContextUnknown"),
-    });
-    const handle = window.setTimeout(() => {
-      if (kickstartedRef.current) return;
-      kickstartedRef.current = true;
-      setLeftTab("chat");
-      saveEditorTab(resumeId, "chat");
-      void sendUserChatRef.current(prompt, null);
-    }, 0);
-    return () => window.clearTimeout(handle);
-  }, [kind, loaded, messages.length, resumeId, t, targetContext, targetLabel]);
 
   // A resume created a moment ago opens on chat, so a first-timer meets the
   // composer instead of the starter template's Typst markup. Persist that so a
@@ -1773,7 +1856,13 @@ export default function EditorShell({ resumeId }: Props) {
           onSubmit={onChat}
           sending={sending}
           placeholder={t("composerPlaceholder")}
-          composerBlockedReason={importRunning ? t("importComposerBusy") : null}
+          composerBlockedReason={
+            importRunning
+              ? t("importComposerBusy")
+              : tailorRunning
+                ? t("tailorRunComposerBusy")
+                : null
+          }
           sendLabel={sending ? t("sending") : t("send")}
           emptyHint={chatEmptyHint}
           ariaLabel={t("tabChat")}
@@ -1793,6 +1882,9 @@ export default function EditorShell({ resumeId }: Props) {
           focusKey={chatFocusKey}
           usage={usagePanel}
           models={modelPanel}
+          tailorRunView={tailorRunView}
+          tailorRunActionPending={tailorActionPending}
+          onTailorRunRetry={startTailor}
           importView={importView}
           importElapsedSeconds={importElapsedSeconds}
           importCardIndex={importCardAt}

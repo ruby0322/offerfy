@@ -5,6 +5,7 @@ import { AnimatePresence, motion, type Variants } from "framer-motion";
 import { ArrowDown, Paperclip, Send, X } from "lucide-react";
 import ChatMessageCard, { type FamilyCardActions } from "@/components/editor/ChatMessageCard";
 import ImportProgressCard from "@/components/editor/ImportProgressCard";
+import TailorRunCard from "@/components/editor/TailorRunCard";
 import LoadingMessage from "@/components/editor/LoadingMessage";
 import ModelPicker, { type ModelPickerLabels } from "@/components/editor/ModelPicker";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -13,6 +14,7 @@ import UsageLimitCard from "@/components/editor/UsageLimitCard";
 import UsageMeter from "@/components/UsageMeter";
 import type { ChatMessage, ModelTable, Usage, UsageRefusal } from "@/lib/api";
 import type { ImportView } from "@/lib/import-progress";
+import type { TailorRunView } from "@/lib/tailor-run";
 import {
   commandTerm,
   filterCommands,
@@ -141,6 +143,14 @@ type Props = {
   importActionPending?: boolean;
   onImportRetry?: () => void;
   onImportResume?: () => void;
+  /** The tailor pass's card. Unlike the import's it is pinned to the TOP of
+   *  the thread: it stands in for the turn that opens the conversation, which
+   *  used to be a canned message sent as the person's own words. Absent once
+   *  no pass has ever been started for this resume. */
+  tailorRunView?: TailorRunView;
+  /** A Run-again click is in flight; the card's button goes inert. */
+  tailorRunActionPending?: boolean;
+  onTailorRunRetry?: () => void;
 };
 
 export type ModelPanelProps = {
@@ -213,6 +223,9 @@ export default function EditorChatPanel({
   importActionPending,
   onImportRetry,
   onImportResume,
+  tailorRunView,
+  tailorRunActionPending,
+  onTailorRunRetry,
 }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -475,6 +488,13 @@ export default function EditorChatPanel({
     importCardIndex ?? messages.length,
     messages.length,
   );
+  const tailorCard = tailorRunView ? (
+    <TailorRunCard
+      view={tailorRunView}
+      actionPending={tailorRunActionPending}
+      onRetry={() => onTailorRunRetry?.()}
+    />
+  ) : null;
   const importCard = importView ? (
     <ImportProgressCard
       view={importView}
@@ -490,7 +510,13 @@ export default function EditorChatPanel({
       <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden px-4">
         <ScrollArea className="chat-scroll h-full min-w-0" viewportRef={viewportRef}>
           <div className="min-w-0 space-y-4 pt-4 pb-10">
-            {messages.length === 0 && !sending ? (
+            {/* The tailor pass's card opens the thread. It is deliberately
+                above the empty-state hint and outside its condition: while
+                the pass runs there are no messages yet, and the hint ("say
+                what you want changed") is the wrong thing to say to someone
+                watching their resume be reviewed. */}
+            {tailorCard}
+            {messages.length === 0 && !sending && !tailorCard ? (
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">{emptyHint}</p>
                 {suggestions && suggestions.length > 0 ? (

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Resume
 from app.services.family import family_master
+from app.services.jobs.applications import job_id_for_tailor
 from app.services.memory import accepted_memory_texts
 from app.services.templates import parse_preview_spec
 
@@ -21,9 +22,23 @@ def build_role_card(db: Session, resume: Resume) -> str:
         )
         if resume.target_label:
             lines.append(f"- Target role for this tailor: {resume.target_label}")
+        # The posting, by id, instead of a copy of its description. A tailor
+        # created from a posting carries no target_label or target_context at
+        # all -- only the applications row knows which job it was for -- so
+        # without this the card said "no target role" for the one path that
+        # always has one. By id rather than inline because read_job fetches it
+        # on demand, while a description pasted here is re-sent on every turn
+        # of the conversation for as long as it lasts.
+        job_id = job_id_for_tailor(db, resume)
+        if job_id:
+            lines.append(
+                f"- This tailor is for Offerfy posting job_id {job_id!r}. Call "
+                "read_job with that id to read the role; do not ask the user "
+                "to paste the description."
+            )
         if resume.target_context:
             lines.append("- Job description, for this tailor only:\n" + resume.target_context)
-        if resume.target_label or resume.target_context:
+        if job_id or resume.target_label or resume.target_context:
             lines.append(
                 "- That target is what this tailor is for. Work from it rather "
                 "than searching the catalogue again, unless the user asks for "

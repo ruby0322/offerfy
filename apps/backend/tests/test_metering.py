@@ -53,6 +53,10 @@ EXPECTED_CALL_SITES = {
     ("services/resume_facts.py", "extract_facts"),  # inside build_facts; its caller wraps
     ("routers/preferences.py", "build_facts"),    # resume-facts refresh
     ("services/import_runner.py", "aiter_chat_edit"),  # one turn, deferred_guard
+    # The tailor's first pass: one turn, deferred_guard for the same reason
+    # the import's is -- nobody is holding an HTTP response open, so refusing
+    # would only mean the pass 429s itself with nothing watching.
+    ("services/tailor_runner.py", "aiter_chat_edit"),
     ("routers/talent_me.py", "build_profile"),    # pointer change + refresh
     ("jobs/refresh_profiles.py", "build_profile"),  # nightly, system_guard
     ("services/llm/turn.py", "read_layout_report"),  # inside aiter_chat_edit

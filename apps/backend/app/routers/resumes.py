@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db, get_session_factory
 from app.deps import get_current_user, load_resume_for_owner, owner_context, require_user
-from app.models import GuestSession, Job, Resume, ResumeImport, ResumeRevision, User
+from app.models import GuestSession, Job, Resume, ResumeImport, ResumeRevision, TailorRun, User
 from app.schemas import (
     AtsReport,
     CompileBody,
@@ -41,6 +41,10 @@ from app.services.extract import (
 )
 from app.services.import_run import ImportAlreadyRunning, snapshot as import_snapshot, start_run
 from app.services.import_runner import run_import
+from app.services.tailor_run import TailorRunAlreadyRunning
+from app.services.tailor_run import snapshot as tailor_snapshot
+from app.services.tailor_run import start_run as start_tailor_run
+from app.services.tailor_runner import job_id_for_tailor, run_tailor
 from app.services.metering import metered, preflight
 from app.services.rate_limit import enforce_guest_rate
 from app.services.resume_content import (
@@ -80,6 +84,12 @@ IMPORT_POLL_SECONDS = 0.4
 # garbage-collected mid-flight, silently abandoning the import. Each task
 # removes itself here via a done-callback once it finishes.
 _import_tasks: set[asyncio.Task] = set()
+
+# The tailor pass's own poll interval and task set. Separate constants and a
+# separate set rather than shared ones: the two runs are independent, and a
+# shared set would make one feature's leak look like the other's.
+TAILOR_POLL_SECONDS = 0.4
+_tailor_tasks: set[asyncio.Task] = set()
 
 
 async def _run_import_detached(resume_id: str, run_id: str, model: str | None) -> None:
@@ -123,6 +133,42 @@ def _schedule_import(resume_id: str, run_id: str, model: str | None = None) -> N
     task = asyncio.create_task(_run_import_detached(resume_id, run_id, model))
     _import_tasks.add(task)
     task.add_done_callback(_import_tasks.discard)
+
+
+async def _run_tailor_detached(resume_id: str, run_id: str, model: str | None) -> None:
+    """Run one tailor pass on its own session, independent of the request.
+
+    Same reasoning as `_run_import_detached`: the route's `Session` is closed
+    by FastAPI at request teardown, long before the pass finishes, so this
+    opens its own from `get_session_factory()`, re-loads both rows by id
+    inside it, and closes it when done.
+    """
+    factory = get_session_factory()
+    db = factory()
+    try:
+        resume = db.get(Resume, resume_id)
+        run = db.get(TailorRun, run_id)
+        if resume is None or run is None:
+            logger.warning(
+                "tailor pass not started: resume_id=%s run_id=%s no longer exist",
+                resume_id,
+                run_id,
+            )
+            return
+        await run_tailor(db, resume, run, model=model)
+    finally:
+        db.close()
+
+
+def _schedule_tailor(resume_id: str, run_id: str, model: str | None = None) -> None:
+    """Schedule `_run_tailor_detached` on the running loop and keep it alive.
+
+    This is the seam route tests monkeypatch to a no-op, so a POST test never
+    starts a real pass -- see `tests/test_tailor_run_api.py`.
+    """
+    task = asyncio.create_task(_run_tailor_detached(resume_id, run_id, model))
+    _tailor_tasks.add(task)
+    task.add_done_callback(_tailor_tasks.discard)
 
 
 def _validate_locale(locale: str | None) -> str:
@@ -821,4 +867,90 @@ def stream_import(
         raise HTTPException(status_code=404, detail="No import for this resume")
     return StreamingResponse(
         _stream_import_snapshots(resume.id), media_type="text/event-stream", headers=SSE_HEADERS
+    )
+
+
+@router.post("/v1/resumes/{resume_id}/tailor-run", status_code=201)
+async def start_tailor(
+    resume_id: str,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+):
+    """Start the tailor's first pass, or 409 if one is already running.
+
+    The posting is resolved here rather than inside the runner so the very
+    first snapshot the client receives already names it: the card draws the
+    employer mark and the job line from this response, with no second request
+    and no frame where it has a run but nothing to say about it.
+    """
+    resume = _owned_resume(resume_id, request, response, db, user, ensure=True)
+    if resume.kind != "tailor":
+        raise HTTPException(status_code=400, detail="Only a tailor resume has a tailor pass")
+    try:
+        run = start_tailor_run(db, resume, job_id=job_id_for_tailor(db, resume))
+    except TailorRunAlreadyRunning as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _schedule_tailor(resume.id, run.id)
+    return tailor_snapshot(db, resume.id)
+
+
+@router.get("/v1/resumes/{resume_id}/tailor-run")
+def get_tailor_run(
+    resume_id: str,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+):
+    resume = _owned_resume(resume_id, request, response, db, user)
+    data = tailor_snapshot(db, resume.id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="No tailor pass for this resume")
+    return data
+
+
+async def _stream_tailor_snapshots(resume_id: str):
+    """Poll `tailor_snapshot` on a fresh session every tick, until the run ends.
+
+    Every point in `_stream_import_snapshots`' docstring applies here
+    unchanged: a fresh session per poll (two workers share only Postgres, and
+    one long-held session would serve its first snapshot forever inside one
+    transaction, which looks exactly like a frozen pass); a frame immediately,
+    then one per `version` change; and a terminating frame on `done`,
+    `failed` *or* `stale`, because nothing reaps a run orphaned by an API
+    restart and a stream that never ends leaks a connection per reload.
+    """
+    factory = get_session_factory()
+    last_version: int | None = None
+    while True:
+        session = factory()
+        try:
+            data = tailor_snapshot(session, resume_id)
+        finally:
+            session.close()
+        if data is None:
+            return
+        if data["version"] != last_version or data["stale"]:
+            last_version = data["version"]
+            yield sse_frame(data)
+        if data["status"] in ("done", "failed") or data["stale"]:
+            return
+        await asyncio.sleep(TAILOR_POLL_SECONDS)
+
+
+@router.get("/v1/resumes/{resume_id}/tailor-run/stream")
+def stream_tailor_run(
+    resume_id: str,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+):
+    resume = _owned_resume(resume_id, request, response, db, user)
+    if tailor_snapshot(db, resume.id) is None:
+        raise HTTPException(status_code=404, detail="No tailor pass for this resume")
+    return StreamingResponse(
+        _stream_tailor_snapshots(resume.id), media_type="text/event-stream", headers=SSE_HEADERS
     )
