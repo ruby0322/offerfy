@@ -117,7 +117,7 @@ def list_jobs(
     source: str | None = None,
     remote: bool | None = None,
     active: bool = True,
-    company: str | None = None,
+    company: list[str] | None = Query(default=None),
     country: str | None = None,
     region: str | None = None,
     city: str | None = None,
@@ -206,7 +206,7 @@ def jobs_facets(
     q: str | None = None,
     source: str | None = None,
     remote: bool | None = None,
-    company: str | None = None,
+    company: list[str] | None = Query(default=None),
     country: str | None = None,
     region: str | None = None,
     city: str | None = None,
@@ -346,7 +346,7 @@ def jobs_pulse(
     q: str | None = None,
     source: str | None = None,
     remote: bool | None = None,
-    company: str | None = None,
+    company: list[str] | None = Query(default=None),
     country: str | None = None,
     region: str | None = None,
     city: str | None = None,
@@ -369,13 +369,11 @@ def jobs_pulse(
     # gets its own pulse -- "839 open internships, +23 in the last 24h, 61
     # employers hiring interns" -- from one endpoint rather than a second one
     # that could drift from this.
-    base = _filtered_query(
-        db,
+    filters = dict(
         q=q,
         source=source,
         remote=remote,
         active=True,
-        company=company,
         country=country,
         region=region,
         city=city,
@@ -383,6 +381,14 @@ def jobs_pulse(
         function=function,
         posted_within_days=posted_within_days,
     )
+    base = _filtered_query(db, company=company, **filters)
+    # The employer leaderboard drops the employer filter, for the reason
+    # jobs_facets spells out at length: it is a control, not a readout. The
+    # board page renders these rows as a multi-select -- pick NVIDIA and the
+    # row has to still offer Stripe, or there is no way to add a second
+    # employer or to see what else was on offer. Everything else here does
+    # describe the filtered list, so it keeps the filter.
+    employer_base = _filtered_query(db, company=None, **filters)
 
     active_total = base.with_entities(func.count(Job.id)).scalar() or 0
     new_24h = (
@@ -409,7 +415,7 @@ def jobs_pulse(
         case((and_(Job.posted_at.isnot(None), Job.posted_at >= week_cutoff), 1), else_=0)
     )
     employer_rows = (
-        base.with_entities(Job.company, func.count(Job.id), new_in_window)
+        employer_base.with_entities(Job.company, func.count(Job.id), new_in_window)
         .group_by(Job.company)
         .order_by(new_in_window.desc(), func.count(Job.id).desc(), Job.company.asc())
         .limit(PULSE_EMPLOYERS)

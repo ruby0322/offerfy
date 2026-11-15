@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hasJobFilters, jobListParams, jobQueryString } from "./jobs";
+import {
+  companyList,
+  hasCompany,
+  hasJobFilters,
+  jobFilterCount,
+  jobListParams,
+  jobPageQuery,
+  jobQueryString,
+  toggleCompany,
+} from "./jobs";
 
 test("jobListParams carries every facet", () => {
   const params = jobListParams({ q: "backend", country: "TW", region: "apac", seniority: "senior",
@@ -26,6 +35,54 @@ test("hasJobFilters sees a facet-only query", () => {
 
 test("jobQueryString drops limit but keeps facets", () => {
   assert.equal(jobQueryString({ country: "TW" }), "?country=TW");
+});
+
+test("jobListParams sends one company parameter per employer", () => {
+  const params = jobListParams({ company: ["Stripe", "Dcard"] });
+  assert.deepEqual(params.getAll("company"), ["Stripe", "Dcard"]);
+});
+
+test("jobListParams omits an empty employer list", () => {
+  assert.equal(jobListParams({ company: [] }).has("company"), false);
+  assert.equal(jobListParams({ company: ["  "] }).has("company"), false);
+});
+
+test("companyList takes every value, trims, and drops repeats case-blind", () => {
+  assert.deepEqual(companyList("Stripe"), ["Stripe"]);
+  assert.deepEqual(companyList(undefined), []);
+  assert.deepEqual(companyList([" Stripe ", "stripe", "", "Dcard"]), ["Stripe", "Dcard"]);
+});
+
+test("toggleCompany adds, then removes the same employer", () => {
+  assert.deepEqual(toggleCompany([], "Stripe"), ["Stripe"]);
+  assert.deepEqual(toggleCompany(["Stripe"], "Dcard"), ["Stripe", "Dcard"]);
+  // Off again whatever case the URL carried it back in.
+  assert.deepEqual(toggleCompany(["Stripe", "Dcard"], "stripe"), ["Dcard"]);
+  assert.deepEqual(toggleCompany(undefined, "Stripe"), ["Stripe"]);
+  assert.equal(hasCompany(["Stripe"], "stripe"), true);
+  assert.equal(hasCompany(["Stripe Press"], "Stripe"), false);
+});
+
+test("an employer row of any size is one filter to clear", () => {
+  assert.equal(jobFilterCount({ company: ["Stripe", "Dcard", "Appier"] }), 1);
+  assert.equal(jobFilterCount({ company: [] }), 0);
+  assert.equal(jobFilterCount({ company: ["Stripe"], country: "TW" }), 2);
+  assert.equal(hasJobFilters({ company: ["Stripe"] }), true);
+  assert.equal(hasJobFilters({ company: [] }), false);
+});
+
+test("jobPageQuery writes the URL's key names, not the API's", () => {
+  // posted_within_days here would be dropped by visitorQueryFrom on the way
+  // back in, which is the bug this function exists to avoid.
+  assert.equal(
+    jobPageQuery({ postedWithinDays: "7", country: "TW" }),
+    "?country=TW&postedWithinDays=7",
+  );
+  assert.equal(
+    jobPageQuery({ company: ["Stripe", "Dcard"] }),
+    "?company=Stripe&company=Dcard",
+  );
+  assert.equal(jobPageQuery({ company: [] }), "");
 });
 
 function stubFetch(body: unknown, calls: { url: string; init?: RequestInit }[]) {

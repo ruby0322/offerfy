@@ -27,6 +27,7 @@ Two differences from the version that lived in the router, both deliberate:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, func, nulls_last, or_
@@ -72,6 +73,21 @@ def after_cursor(stamp: datetime | None, job_id: str):
     )
 
 
+def company_values(company: str | Sequence[str] | None) -> list[str]:
+    """The employers a `company` filter names, folded for case-insensitive use.
+
+    One value or several: `?company=Stripe&company=Dcard` means "either", the
+    OR a multi-select employer row needs. Repeated parameters rather than one
+    comma-joined value -- unlike `seniority` below, which splits on commas
+    because it is a closed vocabulary with no commas in it. A company name is
+    free text out of `data/ats_boards.json`, so the day one of them is
+    "Thermo Fisher, Inc." a comma split would quietly filter for two employers
+    that do not exist. Blank entries are dropped rather than matching "".
+    """
+    raw = [company] if isinstance(company, str) else list(company or ())
+    return [part.strip().lower() for part in raw if part and part.strip()]
+
+
 def valid_regions(taxonomy: Taxonomy) -> set[str]:
     return set(taxonomy.location_regions.values())
 
@@ -99,7 +115,7 @@ def filtered_query(
     source: str | None,
     remote: bool | None,
     active: bool | None,
-    company: str | None = None,
+    company: str | Sequence[str] | None = None,
     country: str | None = None,
     region: str | None = None,
     city: str | None = None,
@@ -126,11 +142,14 @@ def filtered_query(
         query = query.filter(Job.remote.is_(True))
     elif remote is False:
         query = query.filter(Job.remote.is_(False))
-    if company:
+    companies = company_values(company)
+    if companies:
         # Equality, not ILIKE: company is picked from a facet we produced, so
         # it is an exact stored value. A LIKE here would make "Wise" match
-        # "Wisetech" the day such a board is added.
-        query = query.filter(func.lower(Job.company) == company.strip().lower())
+        # "Wisetech" the day such a board is added. IN over that same equality
+        # when several are named, so the employer row's selection is an OR and
+        # one employer still costs the one comparison it always did.
+        query = query.filter(func.lower(Job.company).in_(companies))
     if q:
         term = like_term(q.strip())
         if term != "%%":

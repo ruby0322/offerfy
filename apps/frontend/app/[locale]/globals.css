@@ -2877,6 +2877,16 @@ textarea {
   color: var(--clay);
 }
 
+/* A count beside a section label, which is uppercase, letter-spaced clay --
+   none of which suits a number, and letter-spacing least of all in zh. */
+.jobs-section-note {
+  margin-inline-start: 0.5rem;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--muted);
+}
+
 .jobs-pulse {
   margin-top: 1.75rem;
 }
@@ -3782,6 +3792,23 @@ a.jobs-menu-note:hover {
 
 .jobs-logo-chip:hover {
   border-color: var(--ink);
+}
+
+/* On, in the employer row's multi-select. Not inverted the way .jobs-pill.is-on
+   is: a chip carries the employer's own mark, and those marks are drawn in
+   brand colours (or var(--ink), or the clay monogram) on the chip's own
+   surface, so an ink fill behind them would swallow the logo the chip is
+   recognised by. A doubled ink ring and the --hover tint read as "on" with the
+   mark still legible in both themes. */
+.jobs-logo-chip.is-on {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+  background: var(--hover);
+  font-weight: 600;
+}
+
+.jobs-logo-chip.is-on .jobs-opt-n {
+  color: var(--ink);
 }
 
 .jobs-logo-chip .job-logo {

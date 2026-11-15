@@ -15,7 +15,12 @@ import {
 } from "@/components/jobs/facet-labels";
 import { EMPLOYERS_HREF } from "@/lib/employers";
 import { detectCountry } from "@/lib/geo";
-import { jobFilterCount, type JobFacetOptions, type JobQuery } from "@/lib/jobs";
+import {
+  jobFilterCount,
+  toggleCompany,
+  type JobFacetOptions,
+  type JobQuery,
+} from "@/lib/jobs";
 
 type Props = {
   query: JobQuery;
@@ -57,14 +62,23 @@ export default function FilterBar({
     return fallback ? t(fallback) : value;
   };
 
-  /** The current URL with one key replaced; null removes it. */
+  /**
+   * The current URL with one key replaced; null removes it.
+   *
+   * A list replaces every copy of that key with one parameter per entry —
+   * `company` is the only facet that takes several, and an empty list removes
+   * it, which is what "no employer chosen" means.
+   */
   const hrefWith = useMemo(
     () =>
-      (changes: Partial<Record<keyof JobQuery, string | null>>): string => {
+      (changes: Partial<Record<keyof JobQuery, string | string[] | null>>): string => {
         const next = new URLSearchParams(params?.toString() ?? "");
         for (const [key, value] of Object.entries(changes)) {
           if (value === null || value === "") next.delete(key);
-          else next.set(key, value);
+          else if (Array.isArray(value)) {
+            next.delete(key);
+            for (const item of value) if (item.trim()) next.append(key, item);
+          } else next.set(key, value);
         }
         const text = next.toString();
         return text ? `${pathname}?${text}` : pathname;
@@ -127,6 +141,16 @@ export default function FilterBar({
     label: option.value,
     count: option.count,
   }));
+
+  // The button cannot hold five employer names, so it holds the first and how
+  // many more — the menu and the chip row are where the full set is readable.
+  const employers = query.company ?? [];
+  const employerLabel =
+    employers.length === 0
+      ? undefined
+      : employers.length === 1
+        ? employers[0]
+        : t("filterEmployerMany", { name: employers[0], count: employers.length - 1 });
 
   const posted: FacetOption[] = [
     { value: "1", label: t("posted1") },
@@ -249,8 +273,8 @@ export default function FilterBar({
             label={t("filterEmployer")}
             anyLabel={t("filterAny")}
             clearLabel={t("filterEmployer")}
-            selected={query.company}
-            value={query.company}
+            selected={employerLabel}
+            values={employers}
             options={companies}
             findLabel={t("findEmployer")}
             footer={
@@ -263,7 +287,7 @@ export default function FilterBar({
               ) : null
             }
             clearHref={hrefWith({ company: null })}
-            hrefFor={(value) => hrefWith({ company: value })}
+            hrefFor={(value) => hrefWith({ company: toggleCompany(query.company, value) })}
           />
         )}
 

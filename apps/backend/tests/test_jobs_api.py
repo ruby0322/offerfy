@@ -407,6 +407,29 @@ def test_company_filter_ignores_case(client, db_session):
     assert client.get("/v1/jobs", params={"company": "dcard"}).json()["total"] == 1
 
 
+def test_several_company_params_are_an_or(client, db_session):
+    """?company=A&company=B is "either", which is what a multi-select row sends.
+
+    Repeated parameters, not one comma-joined value: see
+    services.jobs.search.company_values for why a company name must not be
+    split on commas the way seniority is.
+    """
+    _add_job(db_session, source_id="s:1", company="Stripe", title="Payments")
+    _add_job(db_session, source_id="s:2", company="Dcard", title="Android")
+    _add_job(db_session, source_id="s:3", company="Appier", title="Research")
+    body = client.get("/v1/jobs?company=Stripe&company=dcard").json()
+    assert sorted(row["company"] for row in body["items"]) == ["Dcard", "Stripe"]
+    assert body["total"] == 2
+
+
+def test_an_empty_company_param_filters_nothing(client, db_session):
+    """?company= is "no employer chosen", not "an employer named ''"."""
+    _add_job(db_session, source_id="s:1", company="Stripe")
+    _add_job(db_session, source_id="s:2", company="Dcard")
+    assert client.get("/v1/jobs?company=").json()["total"] == 2
+    assert client.get("/v1/jobs?company=&company=Stripe").json()["total"] == 1
+
+
 def test_city_filter_matches_an_alias_spelling(client, db_session):
     """?city=Bengaluru finds the rows an employer spelled "Bangalore".
 
@@ -686,6 +709,27 @@ def test_pulse_scopes_to_the_filters_it_is_given(client, db_session):
     assert interns["employer_count"] == 1
     assert [row["company"] for row in interns["top_employers"]] == ["NVIDIA"]
     assert [row["title"] for row in interns["newest"]] == ["Software Engineering Intern"]
+
+
+def test_pulse_employer_rows_ignore_the_employer_filter(client, db_session):
+    """Picking one employer must not empty the row you picked it from.
+
+    The board page renders top_employers as a multi-select, so the row is a
+    control: under ?company=NVIDIA it still has to offer Stripe, with the
+    count NVIDIA's own selection does not touch. The totals beside it DO
+    narrow -- they describe the list.
+    """
+    nvidia = _add_job(db_session, source_id="n:1", company="NVIDIA", title="Intern")
+    stripe_a = _add_job(db_session, source_id="s:1", company="Stripe", title="Payments")
+    stripe_b = _add_job(db_session, source_id="s:2", company="Stripe", title="Risk")
+    enrich_jobs(db_session, job_ids=[nvidia.id, stripe_a.id, stripe_b.id])
+    db_session.commit()
+
+    body = client.get("/v1/jobs/pulse", params={"company": "NVIDIA"}).json()
+    assert body["active_total"] == 1
+    assert body["employer_count"] == 1
+    rows = {row["company"]: row["open_count"] for row in body["top_employers"]}
+    assert rows == {"NVIDIA": 1, "Stripe": 2}
 
 
 def test_a_facet_does_not_filter_its_own_options(client, db_session):

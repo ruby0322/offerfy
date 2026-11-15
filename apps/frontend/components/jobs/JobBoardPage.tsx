@@ -9,6 +9,9 @@ import JobResults from "@/components/jobs/JobResults";
 import { FUNCTION_KEYS } from "@/components/jobs/facet-labels";
 import { boardQuery, type JobBoard } from "@/lib/job-boards";
 import {
+  hasCompany,
+  jobPageQuery,
+  toggleCompany,
   type JobFacetOption,
   type JobFacetOptions,
   type JobList,
@@ -56,6 +59,34 @@ export default async function JobBoardPage({
     .sort((a, b) => b.count - a.count)
     .slice(0, 6);
 
+  // The employer row, as a multi-select: no chip on means every employer, and
+  // two chips on means either of them. Links rather than checkboxes, like the
+  // city and function rows — a filter stays a navigation with a URL, so it is
+  // shareable and works with JavaScript off; the href just toggles one name
+  // in the list instead of replacing it.
+  //
+  // /v1/jobs/pulse answers top_employers WITHOUT the employer filter applied
+  // (see jobs_pulse), so the row keeps offering the other employers once one
+  // is on. What it cannot offer is an employer outside the busiest few, which
+  // the filter bar's menu can still select — so those are appended, or there
+  // would be no way to switch them back off from here.
+  const chosen = visitorQuery.company ?? [];
+  const employerCount = (name: string) =>
+    (facets?.companies ?? []).find(
+      (option) => option.value.trim().toLowerCase() === name.trim().toLowerCase(),
+    )?.count;
+  const employerRow: { company: string; count: number | undefined }[] = [
+    ...(pulse?.top_employers ?? []).map((employer) => ({
+      company: employer.company,
+      count: employer.open_count,
+    })),
+    ...chosen
+      .filter((name) => !hasCompany((pulse?.top_employers ?? []).map((e) => e.company), name))
+      .map((name) => ({ company: name, count: employerCount(name) })),
+  ];
+  const employerHrefFor = (name: string) =>
+    `/jobs/${board.slug}${jobPageQuery({ ...visitorQuery, company: toggleCompany(chosen, name) })}`;
+
   return (
     <div className="jobs-index mx-auto max-w-[72rem] px-5">
       <p className="jobs-crumb">
@@ -68,21 +99,34 @@ export default async function JobBoardPage({
 
       {pulse ? <JobPulseBoard pulse={pulse} boards={false} /> : null}
 
-      {board.accent === "employers" && pulse && pulse.top_employers.length > 0 ? (
+      {board.accent === "employers" && employerRow.length > 0 ? (
         <section className="jobs-accent">
-          <h2 className="jobs-section-label">{t("boardEmployersHeading")}</h2>
+          <h2 className="jobs-section-label">
+            {t("boardEmployersHeading")}
+            {chosen.length > 0 ? (
+              <span className="jobs-section-note">
+                {t("boardEmployersSelected", { count: chosen.length })}
+              </span>
+            ) : null}
+          </h2>
           <div className="jobs-logo-row">
-            {pulse.top_employers.map((employer) => (
-              <Link
-                key={employer.company}
-                href={`/jobs/${board.slug}?company=${encodeURIComponent(employer.company)}`}
-                className="jobs-logo-chip"
-              >
-                <EmployerLogo company={employer.company} size="sm" />
-                {employer.company}
-                <span className="jobs-opt-n">{employer.open_count.toLocaleString()}</span>
-              </Link>
-            ))}
+            {employerRow.map((employer) => {
+              const on = hasCompany(chosen, employer.company);
+              return (
+                <Link
+                  key={employer.company}
+                  href={employerHrefFor(employer.company)}
+                  className={`jobs-logo-chip${on ? " is-on" : ""}`}
+                  aria-current={on ? "true" : undefined}
+                >
+                  <EmployerLogo company={employer.company} size="sm" />
+                  {employer.company}
+                  {typeof employer.count === "number" ? (
+                    <span className="jobs-opt-n">{employer.count.toLocaleString()}</span>
+                  ) : null}
+                </Link>
+              );
+            })}
           </div>
         </section>
       ) : null}

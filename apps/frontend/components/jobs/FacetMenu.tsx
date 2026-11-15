@@ -22,6 +22,13 @@ type Props = {
   hrefFor: (value: string) => string;
   options: FacetOption[];
   value?: string;
+  /**
+   * For a facet that takes several answers at once: the chosen values, with
+   * `hrefFor` toggling one rather than replacing the lot. Set this instead of
+   * `value`, not as well — the employer facet is the one that has it, because
+   * "either of these two employers" is a question people actually ask.
+   */
+  values?: string[];
   anyLabel: string;
   /** Two columns, for a long vocabulary like function. */
   wide?: boolean;
@@ -55,6 +62,7 @@ export default function FacetMenu({
   hrefFor,
   options,
   value,
+  values,
   anyLabel,
   wide,
   findLabel,
@@ -64,6 +72,13 @@ export default function FacetMenu({
 }: Props) {
   const { open, box, hover, toggle, close } = useHoverMenu<HTMLSpanElement>();
   const [find, setFind] = useState("");
+
+  // Case-folded: an employer arrives from the URL in whatever case was typed
+  // there, while the option carries the stored spelling.
+  const chosen = values ? new Set(values.map((item) => item.trim().toLowerCase())) : null;
+  const isOn = (option: FacetOption) =>
+    chosen ? chosen.has(option.value.trim().toLowerCase()) : option.value === value;
+  const anyOn = chosen ? chosen.size === 0 : !value;
 
   const needle = find.trim().toLowerCase();
   const shown = needle
@@ -127,7 +142,7 @@ export default function FacetMenu({
         ) : null}
         <Link
           href={clearHref}
-          className={`jobs-opt${value ? "" : " is-on"}`}
+          className={`jobs-opt${anyOn ? " is-on" : ""}`}
           role="menuitem"
           onClick={close}
         >
@@ -138,8 +153,9 @@ export default function FacetMenu({
             <Link
               key={option.value}
               href={hrefFor(option.value)}
-              className={`jobs-opt${option.value === value ? " is-on" : ""}`}
+              className={`jobs-opt${isOn(option) ? " is-on" : ""}`}
               role="menuitem"
+              aria-current={isOn(option) ? "true" : undefined}
               onClick={close}
             >
               <span>{option.label}</span>

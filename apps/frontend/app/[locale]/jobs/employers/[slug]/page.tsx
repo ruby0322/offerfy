@@ -59,7 +59,7 @@ export default async function EmployerDetailPage({ params, searchParams }: Props
 
   const raw = await searchParams;
   const visitor = visitorQueryFrom(raw, ["company"]);
-  const query: JobQuery = { ...visitor, company: profile.company };
+  const query: JobQuery = { ...visitor, company: [profile.company] };
 
   const [list, facets] = await Promise.all([fetchJobList(query), fetchJobFacets(query)]);
 

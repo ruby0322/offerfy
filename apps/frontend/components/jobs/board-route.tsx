@@ -7,6 +7,7 @@ import JobBoardPage from "@/components/jobs/JobBoardPage";
 import { boardBySlug, boardQuery, JOB_BOARDS } from "@/lib/job-boards";
 import { resolveLocale } from "@/lib/locale";
 import {
+  companyList,
   fetchJobCitiesServer,
   fetchJobCount,
   fetchJobFacets,
@@ -34,7 +35,8 @@ export function visitorQueryFrom(
   const query: JobQuery = {
     q: first(raw.q),
     remote: first(raw.remote),
-    company: first(raw.company),
+    // Every ?company=, not the first: the employer row is a multi-select.
+    company: companyList(raw.company),
     country: first(raw.country),
     region: first(raw.region),
     city: first(raw.city),

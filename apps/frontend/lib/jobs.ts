@@ -112,7 +112,14 @@ export type JobSitemapPage = {
 export type JobQuery = {
   q?: string;
   remote?: string;
-  company?: string;
+  /**
+   * The employers asked for, as an OR: none is "any employer". A list rather
+   * than one value because the board pages' employer row is a multi-select,
+   * and it travels as repeated `company=` parameters -- see
+   * services/jobs/search.py's company_values for why it is not comma-joined
+   * the way `seniority` is.
+   */
+  company?: string[];
   country?: string;
   region?: string;
   city?: string;
@@ -120,6 +127,35 @@ export type JobQuery = {
   function?: string;
   postedWithinDays?: string;
 };
+
+/** Whatever the URL said for `company`, as the list JobQuery wants. */
+export function companyList(raw: string | string[] | undefined): string[] {
+  const all = Array.isArray(raw) ? raw : raw === undefined ? [] : [raw];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const name of all) {
+    const value = name.trim();
+    // Case-folded for the dedupe only: the stored spelling is what the chip
+    // and the backend's exact match both want back.
+    if (!value || seen.has(value.toLowerCase())) continue;
+    seen.add(value.toLowerCase());
+    out.push(value);
+  }
+  return out;
+}
+
+/** The employer list with `name` added, or removed if it was already there. */
+export function toggleCompany(current: string[] | undefined, name: string): string[] {
+  const list = current ?? [];
+  const folded = name.trim().toLowerCase();
+  const without = list.filter((item) => item.trim().toLowerCase() !== folded);
+  return without.length < list.length ? without : [...list, name];
+}
+
+export function hasCompany(current: string[] | undefined, name: string): boolean {
+  const folded = name.trim().toLowerCase();
+  return (current ?? []).some((item) => item.trim().toLowerCase() === folded);
+}
 
 /** The query keys a facet owns, in the order the filter bar shows them. */
 export const JOB_QUERY_KEYS = [
@@ -174,7 +210,7 @@ export function hasJobFilters(query: JobQuery): boolean {
     query.q?.trim() ||
       query.remote === "true" ||
       query.remote === "false" ||
-      query.company ||
+      query.company?.length ||
       query.country ||
       query.region ||
       query.city ||
@@ -189,6 +225,9 @@ export function jobFilterCount(query: JobQuery): number {
   return JOB_QUERY_KEYS.filter((key) => {
     const value = query[key];
     if (key === "remote") return value === "true" || value === "false";
+    // The employer facet counts once however many employers it names: three
+    // chips in one row are one filter to clear, not three.
+    if (Array.isArray(value)) return value.length > 0;
     return Boolean(value && value.trim());
   }).length;
 }
@@ -199,7 +238,9 @@ export function jobListParams(query: JobQuery, extra?: { cursor?: string; limit?
   if (query.remote === "true" || query.remote === "false") {
     params.set("remote", query.remote);
   }
-  if (query.company) params.set("company", query.company);
+  // Repeated, not joined: the backend reads company as a list and a name
+  // with a comma in it must not become two employers.
+  for (const name of companyList(query.company)) params.append("company", name);
   if (query.city) params.set("city", query.city);
   if (query.country) params.set("country", query.country);
   if (query.region) params.set("region", query.region);
@@ -209,6 +250,29 @@ export function jobListParams(query: JobQuery, extra?: { cursor?: string; limit?
   if (extra?.cursor) params.set("cursor", extra.cursor);
   params.set("limit", String(extra?.limit ?? 20));
   return params;
+}
+
+/**
+ * The same filters as a *page* query string, in the URL's own key names.
+ *
+ * `jobQueryString` writes the API's spelling (`posted_within_days`), which is
+ * right for a fetch and wrong for an href: a link built from it comes back
+ * through `visitorQueryFrom`, which reads `postedWithinDays`, and the filter
+ * would be silently dropped on the way in. This is for links — one employer
+ * chip's href carries every other filter the visitor had set.
+ */
+export function jobPageQuery(query: JobQuery): string {
+  const params = new URLSearchParams();
+  for (const key of JOB_QUERY_KEYS) {
+    const value = query[key];
+    if (Array.isArray(value)) {
+      for (const name of companyList(value)) params.append(key, name);
+    } else if (value && value.trim()) {
+      params.set(key, value.trim());
+    }
+  }
+  const text = params.toString();
+  return text ? `?${text}` : "";
 }
 
 export function jobQueryString(query: JobQuery): string {
