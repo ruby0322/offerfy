@@ -1209,7 +1209,7 @@
             "Separately from the employer-introduction consent (“Open to matching”), any user with a published resume can ask us to read it for job matching, and when they do we send the resume’s content to our language-model provider to extract the facts used for matching (your name, headline and summary, roles and employers, skills, education, languages, locations and years of experience); that extraction is not sharing your resume with employers, who receive nothing from it. If you have turned on “Open to matching”, building the profile we show employers runs that same extraction, so your matching record is filled in without your asking for it separately. That record is kept for your own job matching: turning “Open to matching” off removes the profile employers can see, but not the matching record.",
             "Employers and recruiters: only if you have turned on “Open to matching”, and only through credentials we issue to named organisations. There is no public or self-serve access.",
             "Infrastructure: database, object storage, and hosting that run Offerfy.",
-            "We do not sell personal data. Offerfy does not include a third-party analytics product today."
+            "We do not sell personal data. Offerfy uses Google Analytics, loaded through Google Tag Manager, to measure how the site is used: your browser sends Google the address of each page you open here, your IP address, and basic device and referrer information. We pass Google no resume content and no account identifiers."
           ]
         },
         {
@@ -1241,7 +1241,8 @@
         {
           "heading": "Cookies",
           "paragraphs": [
-            "We use these essential cookies to run the service. There is no cookie banner because we do not use non-essential tracking cookies."
+            "We use these essential cookies to run the service.",
+            "Google Analytics sets its own measurement cookies through Google Tag Manager. Those are not essential: blocking them in your browser costs you no part of Offerfy."
           ],
           "rows": [
             [

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Fraunces, Source_Sans_3 } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages, getTranslations, setRequestLocale } from "next-intl/server";
+import GoogleTagManager from "@/components/analytics/GoogleTagManager";
 import ThemeProvider from "@/components/ThemeProvider";
 import ToastProvider from "@/components/Toaster";
 import { routing } from "@/i18n/routing";
@@ -64,6 +65,7 @@ export default async function LocaleLayout({ children, params }: Props) {
             <ToastProvider>{children}</ToastProvider>
           </NextIntlClientProvider>
         </ThemeProvider>
+        <GoogleTagManager />
       </body>
     </html>
   );
