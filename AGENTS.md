@@ -234,12 +234,83 @@ held 120 boards of which **64 404ed on every pass** — companies that had moved
 that never used Greenhouse/Lever/Ashby at all (TSMC, MediaTek, Shopee, Netflix, Shopify,
 Zendesk…). Those were not lost inventory: they had never returned a single job. They were
 removed, 29 were repaired by correcting the provider or slug (Anthropic is on Greenhouse,
-not Ashby; Anduril is `andurilindustries`), and the file is now 77 boards that all answer.
+not Ashby; Anduril is `andurilindustries`), and the file is now 79 boards that all answer.
 
 Before adding a board, **probe it**; do not assume. The three endpoints are in
 `greenhouse.py` / `lever.py` / `ashby.py`, plus `smartrecruiters.py`. Note that probing
 many slugs concurrently gets you rate-limited and returns false 404s — space the requests
 out and retry anything that is not a definite 404, or you will delete live boards.
+
+**Google is not in the catalogue and cannot be.** Checked 2026-11-13: `google`, `googlellc`,
+`googleinc` and `alphabet` all 404 on Greenhouse, Lever and Ashby, and 422 (wrong site) on
+Workday; the old `careers.google.com/api/v2|v3` JSON endpoints now 404. Like TSMC and
+MediaTek (§8c) it would need scraping, which this project does not do. Do not add a Google
+row on the assumption that so large an employer must be reachable somewhere.
+
+**The reason is robots.txt and licensing, not rendering** — worth knowing, because the
+obvious workarounds are all closed too, and the search has already been done:
+
+- `www.google.com/about/careers/applications/jobs/results` **is** server-rendered: page 1
+  carries 20 postings and their detail links inline. But `google.com/robots.txt` disallows
+  **every `page=` variant** of that path for `User-agent: *`, so a compliant reader is
+  capped at those first 20 of ~stale-unknown thousands. (The blanket
+  `Disallow: .../jobs/results` is in the **Yandex-only** group — do not misread it as
+  applying to us, and do not read the `*` group as permission to enumerate by swapping
+  filter params instead of `page=`.)
+- There is **no machine-readable contract** to parse even within that cap: no careers entry
+  in `google.com/sitemap.xml` (23 child sitemaps, none for careers), and **no `JobPosting`
+  JSON-LD on either the results page or a job detail page** — checked both. Only obfuscated
+  CSS classes (`h3.QJPWVe`), which rotate.
+- **No free aggregator is both stocked and licensed.** Keyless ones carry no Google at all
+  (Arbeitnow, Jobicy, Himalayas, Remotive — checked by employer name; Remotive additionally
+  bans redistribution). The Muse's public API is gone (`api.themuse.com` no longer
+  resolves). Of the free-key ones, Adzuna's terms limit use to personal job search and
+  research — "any use in a product or service that generates revenue or leads [requires] a
+  licence agreement" — and Jooble's terms forbid republication without written permission.
+  Careerjet publishes no readable terms. So the blocker there is the licence, not the key.
+
+**A 200 from SmartRecruiters is not evidence of a board.**
+`GET /v1/companies/<slug>/postings` answers **200 with `totalFound: 0` for any slug at
+all**, including `zzzznotacompany99` — the same shape of trap as the Workday wildcard host
+in §8c. Only a non-empty `content` array proves a SmartRecruiters board exists.
+
+**Two Alphabet subsidiaries are carried instead**, added 2026-11-13 after the Google probe
+came back empty: `waymo` (379 postings) and `wing` (48), both confirmed by a 200 with a
+non-empty `jobs` array. They are the closest the catalogue can get to Google. 368 of their
+427 postings pass `title_in_scope` (Waymo 85%, Wing 89%) -- high, as you would expect from
+two engineering-led companies.
+
+**Waymo exposes a `deny_always` needle that is wrong for it: `driver`.** The needle was
+written for the TaiwanJobs era of delivery drivers, but the Waymo Driver is Waymo's
+*product*, so 11 postings -- nearly all of its senior ML roles, e.g. "Machine Learning
+Engineer, Driver Refinement & Validation" and "Senior Staff ML Engineer, Driver
+Understanding and Evaluation" -- are silently dropped. This is the `cto`-inside-Dire*cto*r
+family of accident, one tier up: a whole word that is a role noun at one employer and a
+product name at another.
+
+**`driver` was moved to `deny_context` on 2026-11-13, measured both ways.** A keep needle
+now overrides it, so `engineer` rescues the Waymo roles while `Delivery Driver`,
+`Truck Driver`, `Bus Driver`, `Forklift Driver`, `Driver, Night Shift` and bare `Driver`
+still have no keep needle and stay out. `test_driver_is_a_context_needle_because_it_is_also_a_product_name`
+pins both directions.
+
+The delta was taken over **15,684 live titles pulled from all 75 slug-based boards** (not
+the stored catalogue — prod reads are refused from an agent session; the ATS payloads are
+the same data one hop upstream). In scope went 11,516 → 11,527: **10 distinct titles
+admitted, 0 excluded.** Every admitted title is a senior engineering or ML role, and one of
+them — `Software Engineer, Driver Experience` — is not Waymo's at all, so the needle had
+been quietly eating driver-facing engineering roles at the rideshare and delivery boards too.
+
+Measure a scope retune this way, in both directions on the same corpus in the same pass. An
+improvement count is not a delta: a change that rescues ten roles and breaks six looks
+identical to this one if you only count the rescues.
+
+**Wing brings a role family the deny list has never seen: aviation operations.**
+`Assistant Chief Pilot`, `Pilot-in-Command Manager` and `sUAS Flight Operator` all pass
+today. That is the self-correcting direction per `title_in_scope`'s docstring -- a false
+positive is visible on the jobs page and fixed by adding a needle -- but if a `pilot` or
+`flight operator` needle is added, note that `Head of Flight Test Engineering` is a real
+engineering role and must survive it.
 
 **SmartRecruiters is the fourth provider**, added because Grab, Canva and Wise publish
 there and nowhere we could read. It differs from the others in two ways that matter:
@@ -333,7 +404,7 @@ Three signals, most useful first:
    failed pass whichever unit it came from.
 3. **`systemctl --user list-timers offerfy-ingest.timer`** — did it fire, when is next.
 
-`job_ingest_runs` holds one row **per board**, ~77 per pass. `ok_count - upserted_count`
+`job_ingest_runs` holds one row **per board**, ~79 per pass. `ok_count - upserted_count`
 is how many postings the scope rules dropped, which `/admin/jobs` shows as "out of scope"
 without needing a column for it. (For smartrecruiters that figure undercounts: it scopes
 itself before fetching descriptions, so its `ok_count` is already post-filter.) `run_id` (migration 014)

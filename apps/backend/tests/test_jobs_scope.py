@@ -130,3 +130,36 @@ def test_an_engineering_role_survives_a_non_technical_domain():
         "Senior Salesforce Engineer",
     ]:
         assert title_in_scope(title), title
+
+
+def test_driver_is_a_context_needle_because_it_is_also_a_product_name():
+    """`driver` was in deny_always for the TaiwanJobs delivery drivers.
+
+    The Waymo Driver is Waymo's product, so the needle silently dropped 11
+    postings -- nearly all of Waymo's senior ML roles -- when that board was
+    added on 2026-11-13. It moved to deny_context, where a keep needle
+    overrides it. Measured over 15,684 live titles from all 75 slug-based
+    boards, the move admitted 10 distinct titles and excluded none.
+
+    This is the `cto`-inside-Dire*cto*r family one tier up: a whole word that
+    is a role noun at one employer and a product name at another. Do not move
+    it back, and do not promote `driver` to a keep needle either -- the point
+    is that it decides nothing on its own.
+    """
+    for title in [
+        "Machine Learning Engineer, Driver Refinement & Validation",
+        "Senior Staff ML Engineer, Driver Understanding and Evaluation",
+        "Staff Software Engineer, Driver Validation",
+        "Software Engineer, Driver Experience",
+    ]:
+        assert title_in_scope(title), title
+
+    for title in [
+        "Delivery Driver",
+        "Truck Driver",
+        "Bus Driver",
+        "Forklift Driver",
+        "Driver, Night Shift",
+        "Driver",
+    ]:
+        assert not title_in_scope(title), title

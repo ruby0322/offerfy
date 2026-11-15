@@ -67,7 +67,6 @@
     "receptionist",
     "janitor",
     "security guard",
-    "driver",
     "courier",
     "nurse",
     "caregiver",
@@ -106,7 +105,7 @@
     "recruiting partner",
     "recruitment"
   ],
-  "_deny_context": "A domain rather than a role, so a keep needle overrides. Prefer a precise phrase over an ambiguous word: 'sales' alone matches Salesforce.",
+  "_deny_context": "A domain rather than a role, so a keep needle overrides. Prefer a precise phrase over an ambiguous word: 'sales' alone matches Salesforce. 'driver' moved here from deny_always on 2026-11-13: it was written for delivery drivers, but the Waymo Driver is a product, so it was dropping Waymo's senior ML roles ('Machine Learning Engineer, Driver Refinement & Validation'). As a context needle the keep word 'engineer' rescues those while 'Delivery Driver', 'Truck Driver' and bare 'Driver' still have no keep needle and stay out.",
   "deny_context": [
     "marketing",
     "brand ",
@@ -128,6 +127,7 @@
     "retail",
     "logistics",
     "fulfillment",
+    "driver",
     "risk",
     "facilities"
   ],

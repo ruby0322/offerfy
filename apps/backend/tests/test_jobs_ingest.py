@@ -92,7 +92,7 @@ def test_shipped_board_list_is_curated():
 
     The list once carried 64 boards that 404ed on every pass -- companies that
     had moved ATS or never used one of these -- which buried the real failures.
-    Liveness itself is checked by /admin/jobs rather than here: probing 77 boards
+    Liveness itself is checked by /admin/jobs rather than here: probing 79 boards
     over the network would make this suite slow and flaky.
     """
     raw = json.loads((BACKEND_DATA / "ats_boards.json").read_text(encoding="utf-8"))
