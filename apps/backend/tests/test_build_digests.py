@@ -57,9 +57,18 @@ pytestmark = pytest.mark.anyio
 
 _seq = itertools.count()
 
-# A Monday, so period_start is a real window_start and NOW sits inside the week
-# being built -- the arrangement the build documents for a backfill.
-PERIOD = datetime(2026, 11, 9, 16, 0, tzinfo=timezone.utc)
+# The start of the CURRENT window, so period_start is a real window_start and
+# NOW sits inside the week being built -- the arrangement the build documents
+# for a backfill.
+#
+# Derived rather than written down. It was a fixed Monday (2026-11-09) until
+# the real clock walked into the next week, at which point
+# `test_the_build_never_consumes_the_users_edit_allowance` began failing: the
+# build's metering writes its counter row under the window of the *real* now,
+# while the test read back the window of this constant, and the two stopped
+# being the same week on 2026-11-15. Anchoring to the live window keeps them
+# together without pretending the write path takes an injected clock.
+PERIOD = usage.window_start()
 NOW = PERIOD + timedelta(days=2)
 PERIOD_ARG = PERIOD.isoformat()
 # Older than `new_this_week` reaches back (NEW_WINDOW, seven days before

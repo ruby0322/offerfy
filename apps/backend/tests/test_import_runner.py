@@ -24,6 +24,23 @@ from app.services import import_run, usage
 from app.services.import_run import RENDER_CHECK_KEY, STALE_AFTER_SECONDS
 from app.services.import_runner import RENDER_CHECK_FAILED, run_import
 from app.services.import_tools import DECLARE_PLAN_TOOL
+
+@pytest.fixture
+def anyio_backend():
+    """asyncio only, as test_build_digests.py and test_jobs_score.py do.
+
+    The code under test reaches `asyncio.to_thread` (the Typst compile runs
+    off the loop), which needs a running asyncio loop and raises "no running
+    event loop" on trio. So the trio half of this suite could never pass: it
+    was not covering a second backend, it was 7 permanently red tests
+    standing next to their own passing asyncio twins.
+
+    Pinning rather than porting to `anyio.to_thread.run_sync`, because
+    production has one loop: uvicorn runs this on asyncio, and a trio variant
+    would be testing a configuration that does not exist.
+    """
+    return "asyncio"
+
 from app.services.llm.prompts import EDIT_TOOL
 from app.services.typst_compile import typst_available
 from tests.openai_script import ScriptedOpenAI, llm_message, llm_usage, tool_call

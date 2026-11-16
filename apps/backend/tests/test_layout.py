@@ -18,6 +18,23 @@ from app.services.typst_compile import typst_available
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
+@pytest.fixture
+def anyio_backend():
+    """asyncio only, as test_build_digests.py and test_jobs_score.py do.
+
+    The code under test reaches `asyncio.to_thread` (the Typst compile runs
+    off the loop), which needs a running asyncio loop and raises "no running
+    event loop" on trio. So the trio half of this suite could never pass: it
+    was not covering a second backend, it was 16 permanently red tests
+    standing next to their own passing asyncio twins.
+
+    Pinning rather than porting to `anyio.to_thread.run_sync`, because
+    production has one loop: uvicorn runs this on asyncio, and a trio variant
+    would be testing a configuration that does not exist.
+    """
+    return "asyncio"
+
+
 STARTER = Path(__file__).resolve().parents[1] / "typst" / "starter.typ"
 
 # Long enough that basic-resume wraps it onto a second line at A4 width.

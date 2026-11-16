@@ -81,8 +81,16 @@ def _grant(db_session, user, credits=50, **kw):
     return grant
 
 
-# A Wednesday, so there is room either side of `now` inside one window.
-MIDWEEK = datetime(2026, 10, 28, 12, 0, tzinfo=timezone.utc)
+# A point inside the CURRENT window, with room either side of it.
+#
+# Derived rather than written down. It used to be a fixed Wednesday
+# (2026-10-28), which worked until the real clock walked past that week: the
+# tests that pass an explicit `starts_at` kept passing, because they build it
+# from `window_start(MIDWEEK)`, while the two that let `issue_grant` default
+# `starts_at` to `now()` started issuing grants into a window this constant no
+# longer named, and read back 0. Anchoring it to the live window keeps both
+# kinds honest and stops the suite rotting again next week.
+MIDWEEK = usage.window_start() + timedelta(days=3)
 
 
 # --------------------------------------------------------------------------
