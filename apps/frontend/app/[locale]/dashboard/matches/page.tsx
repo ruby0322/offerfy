@@ -154,15 +154,14 @@ export default function MatchesPage() {
           </section>
 
           <section className="rr-card px-5 py-4" data-testid="matches-fresh">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-              <h2 className="text-[0.9375rem] font-semibold tracking-tight">
-                {t("freshHeading")}{" "}
-                <span className="font-normal text-muted-foreground">
-                  · {t("freshFromIngest")}
-                </span>
-              </h2>
-              <p className="text-xs text-muted-foreground">{t("freshScoringRhythm")}</p>
-            </div>
+            {/* No second line opposite the heading: the scoring rhythm used
+                to sit here, and it read as a promise about THESE postings. */}
+            <h2 className="text-[0.9375rem] font-semibold tracking-tight">
+              {t("freshHeading")}{" "}
+              <span className="font-normal text-muted-foreground">
+                · {t("freshFromIngest")}
+              </span>
+            </h2>
             {days.length === 0 ? (
               <p className="mt-2 text-sm text-muted-foreground">{t("matchEmpty")}</p>
             ) : (
@@ -189,7 +188,6 @@ export default function MatchesPage() {
                           .filter(Boolean)
                           .join(" · ")}
                         score={null}
-                        unscoredTitle={t("freshNotScored")}
                         action={
                           <Link
                             href={`/jobs/${job.id}`}

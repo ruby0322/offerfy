@@ -120,10 +120,9 @@ export default function MatchesBlock({
         </div>
 
         <div className="mt-4 min-w-0 border-t border-rule pt-3 md:mt-0 md:border-l md:border-t-0 md:pl-5 md:pt-0">
-          <div className="flex items-baseline justify-between gap-2">
-            <p className="text-[0.8125rem] font-bold">{t("freshHeading")}</p>
-            <p className="text-xs text-muted-foreground">{t("freshNotScored")}</p>
-          </div>
+          {/* No "not scored yet" beside the heading: nothing scores this
+              list, so "yet" was a promise. */}
+          <p className="text-[0.8125rem] font-bold">{t("freshHeading")}</p>
           {fresh.length === 0 ? (
             <p className="mt-2 text-sm text-muted-foreground">{t("matchEmpty")}</p>
           ) : (
@@ -136,7 +135,6 @@ export default function MatchesBlock({
                   company={job.company}
                   meta={job.location}
                   score={null}
-                  unscoredTitle={t("freshNotScored")}
                   action={
                     <Link
                       href={`/jobs/${job.id}`}

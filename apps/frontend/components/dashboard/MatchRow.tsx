@@ -13,10 +13,19 @@ import { Link } from "@/i18n/navigation";
  * so the two halves of the Matches tab did not line up with each other or
  * with the overview.
  *
- * The four slots are fixed in order and in width: mark, name, score, action.
- * Score and action have a floor rather than a fixed width -- that keeps the
- * numbers in a readable column while letting a longer label (every CJK one)
- * push the slot out instead of wrapping inside it.
+ * The slots are fixed in order: mark, name, score, action. Score and action
+ * have a floor rather than a fixed width -- that keeps the numbers in a
+ * readable column while letting a longer label (every CJK one) push the slot
+ * out instead of wrapping inside it.
+ *
+ * An UNSCORED row has no score slot at all. It used to carry an em dash and a
+ * "not scored yet" tooltip, which reads as a number on its way -- but the
+ * daily-ingest list this shape also serves is never scored, and whether any
+ * posting in it is ever scored depends on a different ordering and a cap it
+ * knows nothing about (see build_digests.candidates). A blank where a number
+ * goes was making a promise. The slot's width is a floor, not a fixed width,
+ * so dropping it shortens the row rather than leaving a hole; every row in a
+ * given list is scored or unscored together, so none of them lose alignment.
  *
  * Items are top-aligned, not centred: a scored row carries a reason and a gap
  * and is three times the height of an unscored one, and centring would leave
@@ -29,7 +38,7 @@ export type MatchRowProps = {
   company: string;
   /** Appended after the company on the second line (location, remote...). */
   meta?: string | null;
-  /** 0..1 from the weekly scoring, or null when nothing has read it yet. */
+  /** 0..1 from the weekly scoring. Null renders no score slot at all. */
   score?: number | null;
   /** Shown under the score; the backend's own tier wording. */
   tier?: string | null;
@@ -41,8 +50,6 @@ export type MatchRowProps = {
   inactiveLabel?: string | null;
   /** An action that just failed, as a message under the row. */
   error?: string | null;
-  /** Shown in the score slot when `score` is null. */
-  unscoredTitle?: string;
   action: ReactNode;
 };
 
@@ -61,7 +68,6 @@ export default function MatchRow({
   gapLabel,
   inactiveLabel,
   error,
-  unscoredTitle,
   action,
 }: MatchRowProps) {
   return (
@@ -108,27 +114,26 @@ export default function MatchRow({
           number floats about six pixels above the button beside it. The tier
           hangs below the band rather than inside it, so it cannot pull the
           number off that centre line. */}
-      <span className="min-w-8 shrink-0 text-right">
-        <span className="flex min-h-7 items-center justify-end">
-          <span
-            className={`font-display text-[1.05rem] font-medium leading-none [font-variant-numeric:tabular-nums] ${
-              score === null
-                ? "text-muted-foreground"
-                : score >= STRONG
-                  ? "text-success"
-                  : ""
-            }`}
-            title={score === null ? unscoredTitle : undefined}
-          >
-            {score === null ? "—" : Math.round(score * 100)}
-          </span>
+      {score === null && !tier ? null : (
+        <span className="min-w-8 shrink-0 text-right">
+          {score === null ? null : (
+            <span className="flex min-h-7 items-center justify-end">
+              <span
+                className={`font-display text-[1.05rem] font-medium leading-none [font-variant-numeric:tabular-nums] ${
+                  score >= STRONG ? "text-success" : ""
+                }`}
+              >
+                {Math.round(score * 100)}
+              </span>
+            </span>
+          )}
+          {tier ? (
+            <span className="mt-0.5 block text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+              {tier}
+            </span>
+          ) : null}
         </span>
-        {tier ? (
-          <span className="mt-0.5 block text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-            {tier}
-          </span>
-        ) : null}
-      </span>
+      )}
 
       <span className="flex min-h-7 min-w-[4.75rem] shrink-0 items-center justify-end">
         {action}

@@ -534,8 +534,6 @@
     "picksNoneYet": "第一份每周推荐会在星期一生成。",
     "freshHeading": "新增职位",
     "freshFromIngest": "来自每日抓取",
-    "freshNotScored": "尚未評分",
-    "freshScoringRhythm": "评分每周一次，在星期一进行",
     "freshUndated": "来源没有提供日期",
     "resumesLead": "{masters} 份主简历 · {tailors} 份定制版本",
     "viewList": "列表",
