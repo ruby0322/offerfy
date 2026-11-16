@@ -48,10 +48,11 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import Job, Resume, TailorRun, _utcnow
+from app.models import ChatMessage, Job, Resume, TailorRun, _utcnow
 from app.services.revisions import source_hash
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,28 @@ logger = logging.getLogger(__name__)
 # decide about the other rather than inheriting silently.
 STALE_AFTER_SECONDS = 240
 
-PHASES = ("reading", "assessing", "writing")
+# The pass's four stages, in order, each one the tool that enters it. They are
+# a fixed, server-owned list rather than a steps table (see `models.TailorRun`)
+# precisely because they are fixed: `phase` is then the whole cursor, and the
+# card draws the list from it.
+PHASES = ("read_resume", "read_job", "mapping", "proposing")
+
+# Rank, for the forward-only rule in `advance_phase`.
+#
+# The legacy three are ranked rather than dropped because a pass can outlive a
+# deploy: only `finish`/`fail` clear `phase`, and a **stale** run keeps its
+# last phase forever, so rows holding these values exist and must still sort.
+# `assessing` ranks with `mapping` and `writing` past the end, which is where
+# an edit belongs now that the pass is not supposed to make one.
+PHASE_ORDER = {
+    "read_resume": 1,
+    "reading": 1,
+    "read_job": 2,
+    "mapping": 3,
+    "assessing": 3,
+    "proposing": 4,
+    "writing": 5,
+}
 
 # What the runner reports when the posting it was started for has gone. Not
 # an exception: a tailor whose posting was deleted can still be assessed on
@@ -133,7 +155,7 @@ def start_run(db: Session, resume: Resume, *, job_id: str | None) -> TailorRun:
         resume_id=resume.id,
         job_id=job_id,
         status="running",
-        phase="reading",
+        phase="read_resume",
         version=0,
         heartbeat_at=_utcnow(),
     )
@@ -183,12 +205,43 @@ def set_phase(db: Session, run: TailorRun, phase: str) -> None:
     db.commit()
 
 
+def advance_phase(db: Session, run: TailorRun, phase: str) -> None:
+    """Move the card's phase forward, and never back.
+
+    `set_phase` is the raw setter; this is what the runner calls, because the
+    *model* decides the order the stages are entered in and it does not have
+    to be the order they are listed in. A second `read_typst` after proposing
+    (likely -- the prompt asks the model to re-read before copying a `before`
+    string), or `propose_resume_actions` before `map_jd_requirements`, would
+    otherwise walk the cursor backwards and untick steps the person watched
+    complete. The card's claim is "it got at least this far", so the cursor
+    only ever climbs.
+
+    A phase outside `PHASE_ORDER` is ignored by `set_phase`, which logs it.
+    """
+    rank = PHASE_ORDER.get(phase)
+    if rank is None:
+        logger.warning("tailor run %s: ignoring unknown phase %r", run.id, phase)
+        return
+    current = PHASE_ORDER.get(run.phase or "", 0)
+    if rank <= current:
+        return
+    set_phase(db, run, phase)
+
+
 def finish(db: Session, run: TailorRun) -> None:
-    """End a pass successfully. Idempotent on an already-finished run."""
+    """End a pass successfully. Idempotent on an already-finished run.
+
+    `phase` is deliberately **kept**, where it used to be nulled: on a
+    terminal row it means "the furthest stage this pass reached". The card
+    renders a fixed four-step list, so without it a pass where the model
+    skipped a tool would show four ticks. With it, the steps past this one
+    render as skipped, which is both true and the thing the person needs to
+    know when the suggestions look thin.
+    """
     if run.status != "running":
         return
     run.status = "done"
-    run.phase = None
     _bump(run)
     db.commit()
 
@@ -204,8 +257,10 @@ def fail(db: Session, run: TailorRun, error: str) -> None:
     try:
         if run.status != "running":
             return
+        # `phase` kept, for the reason `finish` gives: on a terminal row it is
+        # how far the pass got, which is exactly what a failed card should
+        # say.
         run.status = "failed"
-        run.phase = None
         run.error = error
         _bump(run)
         db.commit()
@@ -257,4 +312,27 @@ def snapshot(db: Session, resume_id: str) -> dict[str, Any] | None:
         # Same contract as import_run.snapshot: the editor repaints on this,
         # not on `version`.
         "source_hash": source_hash(resume.typst_source) if resume is not None else None,
+        # The "re-read the transcript" contract, and a third signal rather
+        # than a reuse of `version` for a reason worth stating here.
+        #
+        # The runner writes its `tool` and `assistant` rows straight to this
+        # database and nothing streams them, so a client that does not re-read
+        # watches the card above an empty transcript until it reloads. The
+        # obvious signal is `version` -- and it is the wrong one. `touch()` is
+        # called on *every* event `aiter_chat_edit` yields, and that includes
+        # one `delta` per streamed text chunk, so `version` moves hundreds of
+        # times per pass: it says "still alive", not "there is something new to
+        # read". Keyed on it, the 0.4s stream poll re-reads the whole
+        # transcript on every frame, which this feature's own large tool rows
+        # would then make expensive.
+        #
+        # A COUNT, not a column: it moves only when `persist_tool_message` or
+        # `persist_assistant_message` actually wrote a row, it needs no
+        # migration, and it costs strictly less than the fetch it prevents.
+        "message_count": (
+            db.query(func.count(ChatMessage.id))
+            .filter(ChatMessage.resume_id == resume_id)
+            .scalar()
+            or 0
+        ),
     }

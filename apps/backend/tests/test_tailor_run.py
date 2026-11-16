@@ -9,8 +9,10 @@ from datetime import timedelta
 import pytest
 
 from app.models import Application, GuestSession, Job, Resume, TailorRun, _utcnow
+from app.services.chat_messages import persist_assistant_message
 from app.services.tailor_run import (
     STALE_AFTER_SECONDS,
+    advance_phase,
     TailorRunAlreadyRunning,
     TailorRunSuperseded,
     fail,
@@ -77,11 +79,11 @@ def _tailor(db_session, master: Resume, **kw) -> Resume:
 # --- lifecycle --------------------------------------------------------------
 
 
-def test_a_new_run_starts_running_in_the_reading_phase(client, db_session):
+def test_a_new_run_starts_running_in_the_first_phase(client, db_session):
     tailor = _tailor(db_session, _master(db_session))
     run = start_run(db_session, tailor, job_id=None)
     assert run.status == "running"
-    assert run.phase == "reading"
+    assert run.phase == "read_resume"
     assert run.version == 0
     assert latest_run(db_session, tailor.id).id == run.id
 
@@ -108,8 +110,10 @@ def test_a_finished_run_lets_the_next_one_start(client, db_session):
     first = start_run(db_session, tailor, job_id=None)
     finish(db_session, first)
     assert first.status == "done"
-    # finish clears the phase: there is no current step once it is over.
-    assert first.phase is None
+    # finish KEEPS the phase: on a terminal row it is the furthest stage the
+    # pass reached, which is what lets the card draw the steps past it as
+    # skipped instead of claiming all four.
+    assert first.phase == "read_resume"
     second = start_run(db_session, tailor, job_id=None)
     assert second.id != first.id
 
@@ -143,7 +147,7 @@ def test_every_mutation_moves_the_version(client, db_session):
     seen = [run.version]
     touch(db_session, run)
     seen.append(run.version)
-    set_phase(db_session, run, "assessing")
+    set_phase(db_session, run, "mapping")
     seen.append(run.version)
     finish(db_session, run)
     seen.append(run.version)
@@ -153,10 +157,60 @@ def test_every_mutation_moves_the_version(client, db_session):
 def test_set_phase_on_an_unchanged_phase_does_not_churn_the_version(client, db_session):
     tailor = _tailor(db_session, _master(db_session))
     run = start_run(db_session, tailor, job_id=None)
-    set_phase(db_session, run, "assessing")
+    set_phase(db_session, run, "mapping")
     before = run.version
-    set_phase(db_session, run, "assessing")
+    set_phase(db_session, run, "mapping")
     assert run.version == before
+
+
+def test_advance_phase_climbs_through_the_four_stages(client, db_session):
+    tailor = _tailor(db_session, _master(db_session))
+    run = start_run(db_session, tailor, job_id=None)
+    for phase in ("read_job", "mapping", "proposing"):
+        advance_phase(db_session, run, phase)
+        assert run.phase == phase
+
+
+def test_advance_phase_refuses_to_go_backwards(client, db_session):
+    """The model picks the order the stages are entered in, not this module.
+    A second resume read after proposing, or proposing before mapping, would
+    otherwise untick steps the person watched complete -- the card's claim is
+    "it got at least this far"."""
+    tailor = _tailor(db_session, _master(db_session))
+    run = start_run(db_session, tailor, job_id=None)
+    advance_phase(db_session, run, "proposing")
+    before = run.version
+    advance_phase(db_session, run, "read_resume")
+    advance_phase(db_session, run, "mapping")
+    assert run.phase == "proposing"
+    # And it costs nothing: a refused move must not churn the version either,
+    # or every repeated read wakes every client up for no change.
+    assert run.version == before
+
+
+def test_advance_phase_ranks_the_legacy_names_too(client, db_session):
+    """A pass can outlive a deploy -- only finish/fail clear `phase`, and a
+    stale run keeps its last one forever -- so the old vocabulary still has
+    to sort rather than read as "unknown"."""
+    tailor = _tailor(db_session, _master(db_session))
+    run = start_run(db_session, tailor, job_id=None)
+    # Written straight onto the row, because that is the only way it happens:
+    # the runner in the *old* process writes it with the old code, and
+    # `set_phase` here deliberately refuses to -- nothing on this side should
+    # ever produce a legacy name, only rank one it finds.
+    run.phase = "assessing"
+    db_session.commit()
+    advance_phase(db_session, run, "read_job")
+    assert run.phase == "assessing"
+    advance_phase(db_session, run, "proposing")
+    assert run.phase == "proposing"
+
+
+def test_advance_phase_ignores_a_name_it_does_not_know(client, db_session):
+    tailor = _tailor(db_session, _master(db_session))
+    run = start_run(db_session, tailor, job_id=None)
+    advance_phase(db_session, run, "nonsense")
+    assert run.phase == "read_resume"
 
 
 def test_an_unknown_phase_is_ignored_rather_than_raised(client, db_session):
@@ -166,7 +220,7 @@ def test_an_unknown_phase_is_ignored_rather_than_raised(client, db_session):
     tailor = _tailor(db_session, _master(db_session))
     run = start_run(db_session, tailor, job_id=None)
     set_phase(db_session, run, "nonsense")
-    assert run.phase == "reading"
+    assert run.phase == "read_resume"
 
 
 # --- staleness and supersession --------------------------------------------
@@ -230,7 +284,7 @@ def test_a_superseded_runner_cannot_change_the_phase_either(client, db_session):
     db_session.commit()
     start_run(db_session, tailor, job_id=None)
     with pytest.raises(TailorRunSuperseded):
-        set_phase(db_session, dead, "writing")
+        set_phase(db_session, dead, "mapping")
 
 
 # --- snapshot ---------------------------------------------------------------
@@ -251,7 +305,7 @@ def test_the_snapshot_carries_the_posting_inline(client, db_session):
     data = snapshot(db_session, tailor.id)
     assert data["run_id"] == run.id
     assert data["status"] == "running"
-    assert data["phase"] == "reading"
+    assert data["phase"] == "read_resume"
     assert data["job_id"] == job.id
     assert data["job"]["company"] == "Stripe"
     assert data["job"]["title"] == "Payments Engineer"
@@ -266,6 +320,38 @@ def test_a_run_with_no_posting_snapshots_a_null_job(client, db_session):
     data = snapshot(db_session, tailor.id)
     assert data["job_id"] is None
     assert data["job"] is None
+
+
+def test_the_message_count_moves_only_when_a_chat_row_is_written(client, db_session):
+    """The "re-read the transcript" signal, and why it is not `version`.
+
+    `touch()` is called on every event the turn yields, including one `delta`
+    per streamed chunk, so `version` moves hundreds of times per pass while
+    the transcript does not move at all. A client keyed on `version` re-reads
+    the whole transcript on every 0.4s frame; keyed on this it re-reads only
+    when the runner actually wrote a row.
+    """
+    tailor = _tailor(db_session, _master(db_session))
+    run = start_run(db_session, tailor, job_id=None)
+    assert snapshot(db_session, tailor.id)["message_count"] == 0
+
+    touch(db_session, run)
+    touch(db_session, run)
+    assert run.version > 0
+    assert snapshot(db_session, tailor.id)["message_count"] == 0
+
+    persist_assistant_message(db_session, tailor.id, "Here is what I found.")
+    assert snapshot(db_session, tailor.id)["message_count"] == 1
+
+
+def test_the_message_count_is_this_resume_only(client, db_session):
+    """A sibling tailor's conversation must not make this card re-read."""
+    master = _master(db_session)
+    tailor = _tailor(db_session, master)
+    other = _tailor(db_session, master)
+    start_run(db_session, tailor, job_id=None)
+    persist_assistant_message(db_session, other.id, "Not this resume's turn.")
+    assert snapshot(db_session, tailor.id)["message_count"] == 0
 
 
 def test_the_source_hash_moves_when_the_resume_source_does(client, db_session):

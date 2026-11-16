@@ -70,6 +70,22 @@ def build_role_card(db: Session, resume: Resume) -> str:
         "and Offerfy cannot show it to them afterwards. Read a posting with "
         "read_job before tailoring for it, and tailor from its description "
         "rather than from its title.",
+        "- map_jd_requirements records what a posting asks for next to what "
+        "this resume says about each point, and the person sees it as a "
+        "table. It describes the document, never the person: no score, no "
+        "total, no percentage, and no verdict on how strong a candidate they "
+        "are. Call it once per turn, after reading the posting.",
+        "- propose_resume_actions records changes the person can apply with "
+        "one click. Each one needs a `before` copied verbatim from the source "
+        "read_typst gave you and appearing in it exactly once, because their "
+        "browser applies it by finding that span -- no second call to you. "
+        "The reply says per action whether it matched; read the source again "
+        "and correct the ones that did not. Neither tool changes the resume: "
+        "apply_typst_edit is still the only thing that does, and it is for "
+        "what the person asks for, not for what you proposed.",
+        "- When you have called those two, say the headline in a sentence or "
+        "two and stop. The cards carry the detail; repeating them as prose "
+        "doubles the conversation and says nothing new.",
         "- Never invent a posting, an employer or an apply_url, and never "
         "state a count or a date no tool returned. The catalogue is refreshed "
         "on a timer, so it is current rather than live to the minute; "

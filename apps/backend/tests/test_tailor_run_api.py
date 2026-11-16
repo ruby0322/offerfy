@@ -59,7 +59,7 @@ def test_starting_a_pass_returns_the_first_snapshot(client):
     assert res.status_code == 201
     body = res.json()
     assert body["status"] == "running"
-    assert body["phase"] == "reading"
+    assert body["phase"] == "read_resume"
     assert body["version"] == 0
     assert body["stale"] is False
     assert body["job"] is None

@@ -1,12 +1,12 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { AlertTriangle, Check, ExternalLink, Loader2, X } from "lucide-react";
+import { AlertTriangle, Check, Circle, ExternalLink, Loader2, Minus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/navigation";
 import EmployerLogo from "@/components/jobs/EmployerLogo";
 import { cn } from "@/lib/utils";
-import type { TailorRunMode, TailorRunView } from "@/lib/tailor-run";
+import type { TailorRunMode, TailorRunView, TailorViewStep } from "@/lib/tailor-run";
 
 type Props = {
   view: TailorRunView;
@@ -16,6 +16,41 @@ type Props = {
   actionPending?: boolean;
   onRetry: () => void;
 };
+
+/** Lifted from `ImportProgressCard`, so the two runs read the same. */
+function StepMark({ status }: { status: TailorViewStep["status"] }) {
+  const className = "size-3.5 shrink-0";
+  if (status === "done") return <Check className={cn(className, "text-success")} aria-hidden="true" />;
+  if (status === "active") {
+    return <Loader2 className={cn(className, "animate-spin text-clay")} aria-hidden="true" />;
+  }
+  if (status === "skipped") {
+    return <Minus className={cn(className, "text-muted-foreground")} aria-hidden="true" />;
+  }
+  return <Circle className={cn(className, "text-muted-foreground")} aria-hidden="true" />;
+}
+
+function StepRow({ step, label }: { step: TailorViewStep; label: string }) {
+  return (
+    <div
+      data-testid={`tailor-step-${step.key}`}
+      className={cn(
+        "flex items-start gap-2 text-xs",
+        step.status === "pending" && "text-muted-foreground",
+        step.status === "active" && "font-medium text-clay",
+        step.status === "done" && "text-success",
+        step.status === "skipped" && "text-muted-foreground line-through",
+      )}
+    >
+      <span className="mt-0.5">
+        <StepMark status={step.status} />
+      </span>
+      {/* No fixed width anywhere on this row: the labels are written in
+          zh-TW first and CJK runs about 1.5x wider than the English. */}
+      <span className="min-w-0 flex-1">{label}</span>
+    </div>
+  );
+}
 
 function HeaderIcon({ mode }: { mode: TailorRunMode }) {
   const className = "size-3.5 shrink-0";
@@ -43,20 +78,27 @@ function HeaderIcon({ mode }: { mode: TailorRunMode }) {
  */
 export default function TailorRunCard({ view, actionPending, onRetry }: Props) {
   const t = useTranslations("editor");
-  const { mode, phase, job, jobId } = view;
+  const { mode, job, jobId, steps, doneCount, totalCount } = view;
 
+  // One running title, with the step list below saying where it is. The three
+  // phase-specific titles it replaces were a worse version of the same thing:
+  // one line that changed twice in a 60-90 second pass, and `assessing` fired
+  // on any narration so it rarely meant what it said.
   const title =
     mode === "running"
-      ? phase === "writing"
-        ? t("tailorRunWriting")
-        : phase === "assessing"
-          ? t("tailorRunAssessing")
-          : t("tailorRunReading")
+      ? t("tailorRunWorking")
       : mode === "done"
         ? t("tailorRunDone")
         : mode === "stale"
           ? t("tailorRunStale")
           : t("tailorRunFailed");
+
+  const stepLabels: Record<TailorViewStep["key"], string> = {
+    read_resume: t("tailorStepReadResume"),
+    read_job: t("tailorStepReadJob"),
+    mapping: t("tailorStepMapping"),
+    proposing: t("tailorStepProposing"),
+  };
 
   return (
     <div className="flex justify-start">
@@ -75,6 +117,13 @@ export default function TailorRunCard({ view, actionPending, onRetry }: Props) {
             <HeaderIcon mode={mode} />
           </span>
           <span className="min-w-0 flex-1 font-medium tracking-tight text-foreground">{title}</span>
+          {/* A counter, not a progress bar: four steps is few enough that the
+              list itself is the progress, and the number is for the glance. */}
+          {mode === "running" ? (
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+              {doneCount} / {totalCount}
+            </span>
+          ) : null}
         </div>
 
         {/* The posting itself. `job` is absent for a tailor made from the
@@ -120,6 +169,17 @@ export default function TailorRunCard({ view, actionPending, onRetry }: Props) {
             )}
           </div>
         ) : null}
+
+        {/* The four stages. Shown once the pass is over as well as during
+            it: after it, the ticks and the struck-through skips are how the
+            person tells a pass that did all four from one that stopped
+            early -- which is the honest explanation when the suggestions look
+            thin. */}
+        <div className="mt-3 flex flex-col gap-1.5 pl-8">
+          {steps.map((step) => (
+            <StepRow key={step.key} step={step} label={stepLabels[step.key]} />
+          ))}
+        </div>
 
         {mode === "stale" ? (
           <p className="mt-2 pl-8 text-xs text-muted-foreground">{t("tailorRunStaleHint")}</p>

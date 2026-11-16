@@ -4,6 +4,7 @@ import { DragEvent, FormEvent, KeyboardEvent, useEffect, useRef, useState } from
 import { AnimatePresence, motion, type Variants } from "framer-motion";
 import { ArrowDown, Paperclip, Send, X } from "lucide-react";
 import ChatMessageCard, { type FamilyCardActions } from "@/components/editor/ChatMessageCard";
+import type { TailorCardActions } from "@/components/editor/TailorSuggestions";
 import ImportProgressCard from "@/components/editor/ImportProgressCard";
 import TailorRunCard from "@/components/editor/TailorRunCard";
 import LoadingMessage from "@/components/editor/LoadingMessage";
@@ -109,6 +110,7 @@ type Props = {
   attachTooLarge: string;
   currentSource?: string;
   onRestoreEdit?: (source: string) => void;
+  tailorActions?: TailorCardActions;
   familyActions?: FamilyCardActions;
   suggestions?: ChatSuggestion[];
   /** The `/` menu. Absent or empty leaves the composer plain. The copy for
@@ -208,6 +210,7 @@ export default function EditorChatPanel({
   attachTooLarge,
   currentSource,
   onRestoreEdit,
+  tailorActions,
   familyActions,
   suggestions,
   commands,
@@ -474,6 +477,7 @@ export default function EditorChatPanel({
           sending={sending}
           currentSource={currentSource}
           onRestoreEdit={onRestoreEdit}
+          tailorActions={tailorActions}
           familyActions={familyActions}
         />
       </motion.div>
@@ -607,6 +611,7 @@ export default function EditorChatPanel({
                   sending={sending}
                   currentSource={currentSource}
                   onRestoreEdit={onRestoreEdit}
+                  tailorActions={tailorActions}
                   familyActions={familyActions}
                 />
               </div>

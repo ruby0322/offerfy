@@ -90,8 +90,15 @@ import {
   toImportView,
   type ImportSnapshot,
 } from "@/lib/import-progress";
+import type { TailorAction } from "@/lib/tailor-actions";
+import type { TailorCardActions } from "@/components/editor/TailorSuggestions";
 import {
+  emptyTailorCursor,
+  nextTailorCursor,
+  planTailorAdopt,
+  seedTailorCursor,
   shouldStartTailorRun,
+  tailorBlocksSave,
   tailorRunBlocksComposer,
   toTailorRunView,
   type TailorRunSnapshot,
@@ -285,6 +292,10 @@ export default function EditorShell({ resumeId }: Props) {
   // because every save path has to read it at call time -- `outstanding` goes
   // up and comes down inside one `onImportSnapshot` call, between renders.
   const importCursorRef = useRef(emptyImportCursor());
+  // The same cursor for the tailor pass. Separate from the import's because
+  // the two runs can only ever be consecutive, never concurrent, but they
+  // track different hashes and a shared one would carry debt across them.
+  const tailorCursorRef = useRef(emptyTailorCursor());
   // The stream this mount opened, so a remount (or a retry) aborts the old
   // one before starting a new one rather than leaving two running.
   const importAbortRef = useRef<AbortController | null>(null);
@@ -389,6 +400,30 @@ export default function EditorShell({ resumeId }: Props) {
   const refreshAts = useCallback(async () => {
     const report = await getAtsReport(resumeId);
     setAts(report);
+  }, [resumeId]);
+
+  /**
+   * Re-read the whole transcript from the server.
+   *
+   * For the writers that are not turns: an import runner, a tailor runner and
+   * a template switch all write `chat_messages` rows server-side that nothing
+   * streams to this mount. `setMessages` is otherwise only called at mount
+   * and inside `sendUserChat`, so without this they are invisible until a
+   * reload.
+   *
+   * The mount's own read is deliberately NOT routed through here. It lives
+   * inside the big load effect and its `setMessages` is gated on that
+   * effect's `cancelled` flag; a callback cannot see that flag, so moving it
+   * would let a slow read from the previous resume land on the new one.
+   */
+  const refreshMessages = useCallback(async () => {
+    try {
+      const history = await getChatMessages(resumeId);
+      setMessages(history.messages.map(withMessageId));
+      setContextCut(history.contextCut);
+    } catch {
+      /* a later frame re-reads it, and so does a reload */
+    }
   }, [resumeId]);
 
   const failCompile = useCallback((err: unknown, fallback: string) => {
@@ -508,17 +543,9 @@ export default function EditorShell({ resumeId }: Props) {
       // closing summary unless they reload. `version` is the signal: it is
       // bumped by every write the runner makes, including the ones that
       // persist those rows.
-      if (plan.readTranscript) {
-        try {
-          const history = await getChatMessages(resumeId);
-          setMessages(history.messages.map(withMessageId));
-          setContextCut(history.contextCut);
-        } catch {
-          /* a later frame re-reads it, and so does a reload */
-        }
-      }
+      if (plan.readTranscript) await refreshMessages();
     },
-    [resumeId],
+    [refreshMessages, resumeId],
   );
 
   // Opens the live stream for a running import and feeds every snapshot
@@ -559,19 +586,70 @@ export default function EditorShell({ resumeId }: Props) {
 
   // The tailor pass, in the same three pieces as the import: follow a live
   // run, pick one up on mount, and start one when there is none.
+
+  // One tailor snapshot, applied to the editor.
+  //
+  // This used to be `(snap) => setTailorSnapshot(snap)` and nothing else,
+  // which was the bug: the card was mirrored from the import, the handler was
+  // not. The runner writes its `tool` and `assistant` rows straight to the
+  // database and the pass's SSE stream carries only the run snapshot, so the
+  // person watched a spinning card above an empty transcript and saw the
+  // agent's work only after a reload.
+  //
+  // The ordering below is the import's, for the import's reasons: the adopt
+  // is marked outstanding *before* the fetch so every save path refuses while
+  // this buffer is behind the server, the cursor advances only once the adopt
+  // lands so a transient failure is retried by the next frame, and the adopt
+  // runs *before* the transcript read, because a round trip between the two
+  // is a window in which the run already reads "done" while `source` is
+  // stale.
+  const onTailorSnapshot = useCallback(
+    async (next: TailorRunSnapshot) => {
+      setTailorSnapshot(next);
+      const plan = planTailorAdopt(next, tailorCursorRef.current);
+      if (plan.adoptSource) {
+        tailorCursorRef.current = { ...tailorCursorRef.current, outstanding: true };
+        let adopted = false;
+        try {
+          const fresh = await getResume(resumeId);
+          skipTimers.current = true;
+          setSource(fresh.typst_source || "");
+          setUpdatedAt(fresh.updated_at || "");
+          setUnpublishedChanges(fresh.unpublished_changes ?? true);
+          adopted = true;
+          try {
+            await refreshAfterSourceChangeRef.current();
+          } finally {
+            skipTimers.current = false;
+          }
+        } catch {
+          /* the pass is unaffected -- it writes server-side. The cursor stays
+             in debt, which asks the next frame to retry and keeps every save
+             path from writing this stale buffer over the run's own work. */
+        } finally {
+          tailorCursorRef.current = nextTailorCursor(
+            next,
+            tailorCursorRef.current,
+            adopted ? "adopted" : "failed",
+          );
+        }
+      } else {
+        tailorCursorRef.current = nextTailorCursor(next, tailorCursorRef.current, "not-needed");
+      }
+      if (plan.readTranscript) await refreshMessages();
+    },
+    [refreshMessages, resumeId],
+  );
+
   const attachTailorStream = useCallback(() => {
     tailorAbortRef.current?.abort();
     const controller = new AbortController();
     tailorAbortRef.current = controller;
-    void streamTailorRun(
-      resumeId,
-      (snap) => setTailorSnapshot(snap),
-      controller.signal,
-    ).catch(() => {
+    void streamTailorRun(resumeId, onTailorSnapshot, controller.signal).catch(() => {
       /* a dropped connection just stops updating the card; a reload
          re-attaches via the mount effect below */
     });
-  }, [resumeId]);
+  }, [onTailorSnapshot, resumeId]);
 
   // On mount: pick up whatever pass this resume has and keep following it.
   // This is the whole point of the run row -- a reload mid-pass re-attaches
@@ -583,6 +661,10 @@ export default function EditorShell({ resumeId }: Props) {
         const snap = await getTailorRun(resumeId);
         if (cancelled) return;
         setTailorSnapshot(snap);
+        // This mount read the source and the transcript itself, so the
+        // snapshot it just saw is already accounted for -- seeding stops the
+        // first live frame re-reading both for nothing.
+        if (snap) tailorCursorRef.current = seedTailorCursor(snap);
         if (snap && snap.status === "running" && !snap.stale) attachTailorStream();
       } catch {
         /* the pass is optional; the editor works without it */
@@ -601,6 +683,10 @@ export default function EditorShell({ resumeId }: Props) {
     try {
       const snap = await startTailorRun(resumeId);
       setTailorSnapshot(snap);
+      // A pass that has just been created has written nothing yet, so this
+      // snapshot is accounted for too -- and seeding here also clears any
+      // debt a previous pass on this mount left behind.
+      tailorCursorRef.current = seedTailorCursor(snap);
       attachTailorStream();
     } catch {
       // Ours, not the backend's sentence: "a tailor pass is already running
@@ -839,6 +925,10 @@ export default function EditorShell({ resumeId }: Props) {
     // would persist is a buffer we know does not match the server, and a
     // reload recovers both the import and a working editor.
     if (importBlocksSave(importView?.mode, importCursorRef.current)) return;
+    // The same refusal for a tailor pass, which had none: the composer gate
+    // stops a typed turn, but this timer is not a turn and it PUTs whatever
+    // buffer this mount holds.
+    if (tailorBlocksSave(tailorRunView?.mode, tailorCursorRef.current)) return;
     const handle = window.setTimeout(async () => {
       try {
         setStatus(t("saving"));
@@ -859,7 +949,17 @@ export default function EditorShell({ resumeId }: Props) {
       }
     }, 400);
     return () => window.clearTimeout(handle);
-  }, [failCompile, importView, loaded, refreshAts, refreshPreview, resumeId, source, t]);
+  }, [
+    failCompile,
+    importView,
+    tailorRunView,
+    loaded,
+    refreshAts,
+    refreshPreview,
+    resumeId,
+    source,
+    t,
+  ]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -955,7 +1055,14 @@ export default function EditorShell({ resumeId }: Props) {
       // `source` is then known to be the older document, and sending it would
       // overwrite the sections the import wrote. The turn runs against the
       // server's copy instead, which is the one the person is looking at.
-      if (!importBlocksSave(importView?.mode, importCursorRef.current)) {
+      // And for a tailor pass. The `if (tailorRunning) return` above looks
+      // like it covers this, but that is `mode === "running"` only: a pass
+      // that has finished with its adopt still outstanding walks straight
+      // through it, and `source` is then known to be the older document.
+      if (
+        !importBlocksSave(importView?.mode, importCursorRef.current) &&
+        !tailorBlocksSave(tailorRunView?.mode, tailorCursorRef.current)
+      ) {
         skipTimers.current = true;
         const saved = await putResumeSource(resumeId, { typst_source: source });
         if (saved.updated_at) setUpdatedAt(saved.updated_at);
@@ -1133,6 +1240,7 @@ export default function EditorShell({ resumeId }: Props) {
       importRunning,
       tailorRunning,
       importView,
+      tailorRunView,
       pushDelta,
       pushReasoning,
       refreshAfterSourceChange,
@@ -1174,6 +1282,7 @@ export default function EditorShell({ resumeId }: Props) {
     // the same way a chat send in flight blocks those callers rather than
     // letting them write a half-streamed source.
     if (importBlocksSave(importView?.mode, importCursorRef.current)) return true;
+    if (tailorBlocksSave(tailorRunView?.mode, tailorCursorRef.current)) return true;
     skipTimers.current = true;
     try {
       const saved = await putResumeSource(resumeId, { typst_source: source });
@@ -1336,14 +1445,7 @@ export default function EditorShell({ resumeId }: Props) {
       // comment above) -- so without an explicit re-read here the person
       // would not see it in the transcript until a reload.
       await onRestoreHistory(result.resume);
-      try {
-        const history = await getChatMessages(resumeId);
-        setMessages(history.messages.map(withMessageId));
-        setContextCut(history.contextCut);
-      } catch {
-        /* a reload re-reads it -- nothing re-polls the transcript after a
-           switch, so that is the only recovery */
-      }
+      await refreshMessages();
       return {
         name: template.name,
         version: template.version,
@@ -1439,6 +1541,46 @@ export default function EditorShell({ resumeId }: Props) {
     setIsPublic(state.public);
   }, []);
 
+  /**
+   * One suggestion from a tailor pass, applied in the browser.
+   *
+   * It goes through `onRestoreEdit`, which is the editor's one client-side
+   * source writer: it already holds the re-entrancy guard, suppresses the
+   * autosave timers while it works, PUTs, and repaints the preview, the PDF
+   * and the ATS report. Two writers would be two chances to lose a document.
+   *
+   * The refusal is the part that is new here. `onRestoreEdit` has no idea a
+   * run may own the source, so without this a click during a live pass -- or
+   * after one whose adopt never landed -- PUTs this mount's buffer over the
+   * runner's own work, inside `set_draft_source`'s coalesce window where
+   * history cannot get it back.
+   */
+  function onApplySuggestion(next: string) {
+    if (importBlocksSave(importView?.mode, importCursorRef.current)) return;
+    if (tailorBlocksSave(tailorRunView?.mode, tailorCursorRef.current)) return;
+    void onRestoreEdit(next);
+  }
+
+  /**
+   * Hand a suggestion back to the agent instead of applying it.
+   *
+   * For the ones whose `before` no longer matches the document, and the
+   * message has to quote the change **in full**: tool rows are never
+   * replayed to the model (`chat.py`'s `_history` filters to user and
+   * assistant roles), so it has no memory of having proposed this. A message
+   * saying "do the second suggestion" would reach a model that cannot see
+   * any.
+   */
+  function onAskAboutSuggestion(action: TailorAction) {
+    void sendUserChat(
+      t("actionAskPrompt", {
+        title: action.title,
+        before: action.before,
+        after: action.after,
+      }),
+    );
+  }
+
   async function onRestoreEdit(previousSource: string) {
     if (sendingRef.current || previousSource === source) return;
     sendingRef.current = true;
@@ -1533,6 +1675,31 @@ export default function EditorShell({ resumeId }: Props) {
       onOpenResume: (id) => void onSwitchResumeRef.current(id),
     }),
     [busyMemoryId, memory, memoryLoaded, resumeId, runMemoryAction, signedIn],
+  );
+
+  // Through refs, the same way `onSwitchResumeRef` reaches `familyActions`:
+  // both handlers are plain functions redeclared every render, so holding
+  // them directly would rebuild this object on every keystroke and re-render
+  // every card in the transcript.
+  const onApplySuggestionRef = useRef(onApplySuggestion);
+  const onAskAboutSuggestionRef = useRef(onAskAboutSuggestion);
+  useEffect(() => {
+    onApplySuggestionRef.current = onApplySuggestion;
+    onAskAboutSuggestionRef.current = onAskAboutSuggestion;
+  });
+
+  const tailorActions = useMemo<TailorCardActions>(
+    () => ({
+      // The same two refusals the apply itself re-checks. Here so the button
+      // looks inert rather than silently doing nothing.
+      disabled:
+        sending ||
+        importBlocksSave(importView?.mode, importCursorRef.current) ||
+        tailorBlocksSave(tailorRunView?.mode, tailorCursorRef.current),
+      onApply: (next) => onApplySuggestionRef.current(next),
+      onAsk: (action) => onAskAboutSuggestionRef.current(action),
+    }),
+    [importView?.mode, sending, tailorRunView?.mode],
   );
 
   // The dock's one affordance: raise the sheet on chat with the caret already
@@ -1874,6 +2041,7 @@ export default function EditorShell({ resumeId }: Props) {
           currentSource={source}
           onRestoreEdit={onRestoreEdit}
           familyActions={familyActions}
+          tailorActions={tailorActions}
           suggestions={chatSuggestions}
           commands={chatCommands}
           commandsTitle={t("cmdMenuTitle")}

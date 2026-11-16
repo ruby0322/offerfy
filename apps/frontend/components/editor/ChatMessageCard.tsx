@@ -14,10 +14,12 @@ import {
   FileSearch,
   Globe,
   LayoutTemplate,
+  ListChecks,
   ListFilter,
   LogIn,
   Paperclip,
   Redo2,
+  TableProperties,
   Undo2,
   UserRoundSearch,
   Wrench,
@@ -44,6 +46,14 @@ import {
   type ToolPayload,
 } from "@/lib/chat-tools";
 import { diffFromEditPayload } from "@/lib/edit-diff";
+import {
+  MAP_REQUIREMENTS_TOOL,
+  PROPOSE_ACTIONS_TOOL,
+  parseActionList,
+  parseRequirementMap,
+} from "@/lib/tailor-actions";
+import TailorRequirementTable from "@/components/editor/TailorRequirementTable";
+import TailorSuggestions, { type TailorCardActions } from "@/components/editor/TailorSuggestions";
 
 export type FamilyCardActions = {
   memoryById: Record<string, MemoryItem>;
@@ -62,6 +72,7 @@ type Props = {
   currentSource?: string;
   onRestoreEdit?: (source: string) => void;
   familyActions?: FamilyCardActions;
+  tailorActions?: TailorCardActions;
 };
 
 function asString(value: unknown): string | null {
@@ -238,6 +249,26 @@ function toolHeadline(payload: ToolPayload | null, t: Translate): {
       showCheck: !error,
     };
   }
+  if (payload.name === MAP_REQUIREMENTS_TOOL) {
+    // No detail line: the table below is the detail, and a count repeated
+    // above it reads as two different numbers at a glance.
+    return {
+      title: t("toolMapRequirements"),
+      detail: error,
+      failed: Boolean(error),
+      showCheck: !error,
+    };
+  }
+
+  if (payload.name === PROPOSE_ACTIONS_TOOL) {
+    return {
+      title: t("toolProposeActions"),
+      detail: error,
+      failed: Boolean(error),
+      showCheck: !error,
+    };
+  }
+
   if (payload.name === "read_my_job_profile") {
     const result = payload.result as { requires_login?: unknown } | null;
     const needsLogin = Boolean(
@@ -285,6 +316,8 @@ function ToolIcon({ name, failed }: { name: string; failed: boolean }) {
   if (name === "read_job") return <Briefcase className={className} aria-hidden="true" />;
   if (name === "read_my_job_profile")
     return <UserRoundSearch className={className} aria-hidden="true" />;
+  if (name === MAP_REQUIREMENTS_TOOL) return <TableProperties className={className} aria-hidden="true" />;
+  if (name === PROPOSE_ACTIONS_TOOL) return <ListChecks className={className} aria-hidden="true" />;
   return <Wrench className={className} aria-hidden="true" />;
 }
 
@@ -536,12 +569,14 @@ function ToolCallCard({
   currentSource = "",
   onRestoreEdit,
   familyActions,
+  tailorActions,
 }: {
   message: ChatMessage;
   sending?: boolean;
   currentSource?: string;
   onRestoreEdit?: (source: string) => void;
   familyActions?: FamilyCardActions;
+  tailorActions?: TailorCardActions;
 }) {
   const t = useTranslations("editor");
   const payload = parseToolPayload(message.content);
@@ -559,11 +594,17 @@ function ToolCallCard({
     ) : null;
   const diffLines =
     payload && payload.name === "apply_typst_edit" && !failed ? diffFromEditPayload(payload) : [];
+  // Both tools render their arguments as a card of their own, so the generic
+  // raw-argument <details> below would just print the same JSON twice.
+  const requirementMap = failed ? null : parseRequirementMap(payload);
+  const actionList = failed ? null : parseActionList(payload);
   const showDetails = Boolean(
     payload &&
       payload.name !== "apply_typst_edit" &&
       payload.name !== "read_typst" &&
       payload.name !== "read_ats" &&
+      payload.name !== MAP_REQUIREMENTS_TOOL &&
+      payload.name !== PROPOSE_ACTIONS_TOOL &&
       (asString(payload.arguments.search) ||
         asString(payload.arguments.replace) ||
         asString(payload.arguments.query) ||
@@ -609,6 +650,14 @@ function ToolCallCard({
             <div className="ml-auto">{actionButton}</div>
           </div>
         ) : null}
+        {requirementMap ? <TailorRequirementTable map={requirementMap} /> : null}
+        {actionList ? (
+          <TailorSuggestions
+            list={actionList}
+            currentSource={currentSource}
+            actions={tailorActions}
+          />
+        ) : null}
         {!failed ? <FamilyToolAction payload={payload} actions={familyActions} /> : null}
         {showDetails && payload ? (
           <details className="group pl-8">
@@ -630,6 +679,7 @@ export default function ChatMessageCard({
   currentSource,
   onRestoreEdit,
   familyActions,
+  tailorActions,
 }: Props) {
   const locale = useLocale();
   const isUser = message.role === "user";
@@ -647,6 +697,7 @@ export default function ChatMessageCard({
         currentSource={currentSource}
         onRestoreEdit={onRestoreEdit}
         familyActions={familyActions}
+        tailorActions={tailorActions}
       />
     );
   }

@@ -1385,9 +1385,17 @@ class TailorRun(Base):
     all.
 
     No steps table, unlike resume_imports: an import's agent declares its own
-    section plan and edits them one at a time, while this is a single turn
-    (read the resume, read the posting, assess, narrate). `phase` is the one
-    thing the card needs instead, and it is ours, not the model's.
+    section plan and edits them one at a time, while this pass has four fixed
+    stages (read the resume, read the posting, map its requirements, propose
+    changes). `phase` is the one thing the card needs instead, and it is ours,
+    not the model's.
+
+    Those four stage names live in `phase`, which is why this is still not a
+    steps table: the list is a constant in `app.services.tailor_run.PHASES`
+    and in the card, so the only per-run state is how far along it got. A
+    terminal row keeps its phase for that reason -- it is the furthest stage
+    reached, and the card draws everything past it as skipped rather than
+    claiming four ticks on a pass that skipped a tool.
 
     `job_id` is nullable and carried here rather than only reached through
     `applications`: a tailor made from the editor's own dialog has no posting,
@@ -1402,7 +1410,14 @@ class TailorRun(Base):
             name="tailor_runs_status_values",
         ),
         CheckConstraint(
-            "phase IS NULL OR phase IN ('reading', 'assessing', 'writing')",
+            # The four current stages, plus the three this table shipped with.
+            # The legacy values are kept rather than tidied away because a
+            # pass can outlive a deploy: only `finish`/`fail` clear `phase`,
+            # and a stale run keeps its last one forever, so a narrowing
+            # constraint could fail on live data.
+            "phase IS NULL OR phase IN ("
+            "'read_resume', 'read_job', 'mapping', 'proposing', "
+            "'reading', 'assessing', 'writing')",
             name="tailor_runs_phase_values",
         ),
         # The same DB-level guard resume_imports carries, for the same race:

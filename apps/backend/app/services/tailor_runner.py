@@ -68,19 +68,42 @@ from app.services.jobs_tools import (
     jobs_tool_specs,
 )
 from app.services.llm import aiter_chat_edit
-from app.services.llm.prompts import EDIT_TOOL, READ_TOOL
+from app.services.llm.prompts import READ_TOOL
 from app.services.metering import deferred_guard, metered
 from app.services.revisions import set_draft_source
 from app.services.role_card import build_role_card
 from app.services.tailor_run import (
     TailorRunSuperseded,
+    advance_phase,
     fail,
     finish,
-    set_phase,
     touch,
+)
+from app.services.tailor_tools import (
+    MAP_REQUIREMENTS_TOOL,
+    PROPOSE_ACTIONS_TOOL,
+    tailor_tool_handlers,
+    tailor_tool_specs,
 )
 
 logger = logging.getLogger(__name__)
+
+# Which tool call enters which stage. The card's checklist is this table in
+# order, so the stages are observable rather than inferred: each one is the
+# tool that does the work, and nothing else moves the cursor.
+#
+# `EDIT_TOOL` is deliberately absent. The pass is not supposed to edit at all
+# now -- it proposes, and the person applies -- so there is no stage for an
+# edit to enter. An edit that happens anyway is still fully visible as its own
+# tool card, a `source` event and a moved `source_hash`, which is better
+# evidence than a phase string, and it is what lets the stale and failed cards
+# keep promising the resume was not touched.
+_PHASE_FOR_TOOL = {
+    READ_TOOL: "read_resume",
+    READ_JOB_TOOL: "read_job",
+    MAP_REQUIREMENTS_TOOL: "mapping",
+    PROPOSE_ACTIONS_TOOL: "proposing",
+}
 
 # One read of the resume, one read of the posting, a narration, and headroom
 # for a compile repair if the model edits anyway. Far below the import's 20:
@@ -130,7 +153,14 @@ def instruction(resume: Resume, job_id: str | None) -> str:
         "them for it, quote it, or answer it as if it were their message. "
         "Open the conversation yourself.",
         "",
-        "Do this in order, and do not edit the resume yet:",
+        # "Do not edit, at all" rather than the old "not yet". The pass ends
+        # at proposals: `propose_resume_actions` carries exact before/after
+        # pairs and the person's browser applies the ones they pick, so an
+        # edit made here is a change nobody asked for -- and it is what used
+        # to make the stale and failed cards' promise that the resume was
+        # untouched a lie.
+        "Do this in order. Do NOT edit the resume in this pass -- not with "
+        "apply_typst_edit, not at all. The person chooses what changes.",
         f"1. Call {READ_TOOL} to see the resume as it stands.",
     ]
     if job_id:
@@ -146,10 +176,16 @@ def instruction(resume: Resume, job_id: str | None) -> str:
             "role they have in mind before assessing anything."
         )
     lines += [
-        "3. Say how well the resume fits the role: what already matches, what "
-        "is missing, and an overall verdict.",
-        "4. Then give concrete, prioritized suggestions. Wait for them to "
-        "choose what to change before editing anything.",
+        f"3. Call {MAP_REQUIREMENTS_TOOL} with the requirements this posting "
+        "states and where this resume does or does not address each one. "
+        "Describe what the resume says; do not score it and do not total it.",
+        f"4. Call {PROPOSE_ACTIONS_TOOL} with the concrete changes you would "
+        "make, each with an exact before/after pair copied from the source "
+        "you read in step 1. The reply tells you which ones matched; fix any "
+        "that did not and call it again.",
+        "5. Then write two or three sentences: what this posting is really "
+        "asking for, and where you would start. The two cards above carry the "
+        "detail -- do not repeat them as a list.",
         "",
         f"Reply in {language_of(resume)}.",
     ]
@@ -186,10 +222,18 @@ async def run_tailor(
         job_id = run.job_id or job_id_for_tailor(db, resume)
         messages = [{"role": "user", "content": instruction(resume, job_id)}]
         user, guest = _owner(db, resume)
-        extra_specs = [*family_tool_specs(resume), *jobs_tool_specs(resume)]
+        extra_specs = [
+            *family_tool_specs(resume),
+            *jobs_tool_specs(resume),
+            *tailor_tool_specs(resume),
+        ]
         extra_handlers = {
             **family_tool_handlers(db, resume),
             **jobs_tool_handlers(db, resume, user),
+            # Built once, because this is one turn with one session -- so the
+            # per-turn cap inside can keep its own default list, unlike the
+            # chat router's per-call rebuild.
+            **tailor_tool_handlers(db, resume),
         }
         async with metered(_owner_guard(user, guest)) as meter:
             assistant_text = ""
@@ -217,9 +261,12 @@ async def run_tailor(
                 elif kind == "tool":
                     trace = event["trace"]
                     persist_tool_message(db, resume.id, trace)
-                    name = trace.get("name")
-                    if name == EDIT_TOOL:
-                        set_phase(db, run, "writing")
+                    phase = _PHASE_FOR_TOOL.get(trace.get("name") or "")
+                    if phase:
+                        # Forward-only: the model picks the order, and a
+                        # second read after proposing must not untick steps
+                        # the person watched complete. See `advance_phase`.
+                        advance_phase(db, run, phase)
                 elif kind == "source":
                     set_draft_source(db, resume, event["typst_source"])
                     db.commit()
@@ -229,11 +276,10 @@ async def run_tailor(
                 elif kind == "assistant":
                     assistant_text = event["content"] or assistant_text
                     persist_assistant_message(db, resume.id, assistant_text)
-                    # It is narrating its assessment now. Not "writing":
-                    # nothing has been edited unless EDIT_TOOL said so, and
-                    # the phase must not claim an edit that never happened.
-                    if run.phase != "writing":
-                        set_phase(db, run, "assessing")
+                    # No phase move here any more. The four stages are the
+                    # four tools, and narration is what happens after the
+                    # last one -- inferring a stage from prose is what made
+                    # the old `assessing` mean nothing in particular.
         finish(db, run)
     except TailorRunSuperseded:
         # Another pass took over this resume. Say nothing and change nothing:

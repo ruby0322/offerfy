@@ -37,6 +37,7 @@ from app.services.revisions import set_draft_source
 from app.services.role_card import build_role_card
 from app.services.s3 import put_object
 from app.services.sse import SSE_HEADERS, sse_frame
+from app.services.tailor_tools import tailor_tool_handlers, tailor_tool_specs
 from app.services.templates import mentioned_template, template_api_block
 from app.services.typst_compile import compile_status
 from app.services.metering import metered, preflight
@@ -203,18 +204,20 @@ def _scoped_tool_handlers(
     resume_id: str,
     user_id: str | None,
     created: list[str],
+    mapped: list[str],
 ) -> dict[str, Callable[[dict], str]]:
-    """The family/jobs tool handlers, each rebuilt on its own short-lived session.
+    """The family/jobs/tailor tool handlers, each rebuilt on its own short-lived session.
 
     The factories close over the session they are handed, so building them
     once for the turn would hold a connection for the turn -- the whole thing
     this avoids. Rebuilding per call costs two `db.get`s and a dict build,
     which is nothing next to the model round trip that asked for the tool.
 
-    `created` is threaded in rather than left to the factory's own default
-    because it is what enforces "only one tailor per turn". A factory rebuilt
-    per call would start from a fresh empty list every time and the cap would
-    silently disappear.
+    `created` and `mapped` are threaded in rather than left to the factories'
+    own defaults because they are what enforce "only one tailor per turn" and
+    "only one requirement table per turn". A factory rebuilt per call would
+    start from a fresh empty list every time and both caps would silently
+    disappear.
     """
 
     def bind(name: str) -> Callable[[dict], str]:
@@ -227,6 +230,7 @@ def _scoped_tool_handlers(
                 built = {
                     **family_tool_handlers(db, resume, created=created),
                     **jobs_tool_handlers(db, resume, user),
+                    **tailor_tool_handlers(db, resume, mapped=mapped),
                 }
                 fn = built.get(name)
                 if fn is None:
@@ -348,7 +352,11 @@ async def chat(
         # One list each, so the two call sites below cannot drift apart. The
         # repair loop gets exactly what the main turn got: a tool that vanished
         # mid-turn would read to the model as the catalogue going away.
-        extra_specs = [*family_tool_specs(resume), *jobs_tool_specs(resume)]
+        extra_specs = [
+            *family_tool_specs(resume),
+            *jobs_tool_specs(resume),
+            *tailor_tool_specs(resume),
+        ]
         # Built once here only to learn the *names* the model may call -- the
         # handlers themselves are bound to this session and must not outlive
         # it, so the real ones come from _scoped_tool_handlers below. Taken
@@ -358,12 +366,16 @@ async def chat(
         tool_names = sorted({
             **family_tool_handlers(db, resume),
             **jobs_tool_handlers(db, resume, user),
+            **tailor_tool_handlers(db, resume),
         })
 
-    # One list for the whole turn, shared by every rebuild of the handlers.
+    # One list each for the whole turn, shared by every rebuild of the
+    # handlers. `mapped` is the requirement table's one-per-turn cap and needs
+    # the same treatment as `created_tailors` for the same reason.
     created_tailors: list[str] = []
+    mapped_requirements: list[str] = []
     extra_handlers = _scoped_tool_handlers(
-        tool_names, owned_id, user_id, created_tailors
+        tool_names, owned_id, user_id, created_tailors, mapped_requirements
     )
 
     async def generate():

@@ -13,6 +13,7 @@ from app.models import ChatMessage, GuestSession, LlmCall, Resume, _utcnow
 from app.services import tailor_run
 from app.services.jobs_tools import READ_JOB_TOOL
 from app.services.llm.prompts import EDIT_TOOL, READ_TOOL
+from app.services.tailor_tools import MAP_REQUIREMENTS_TOOL, PROPOSE_ACTIONS_TOOL
 from app.services.tailor_runner import (
     TIMEOUT_SECONDS,
     instruction,
@@ -143,6 +144,35 @@ def test_the_prompt_tells_the_model_it_is_not_the_persons_message(db_session, ta
     assert READ_TOOL in text
 
 
+def test_the_prompt_names_all_four_stages_in_order(db_session, tailor):
+    """The card draws a fixed four-step checklist, so a prompt that did not
+    ask for all four would show steps that could never tick."""
+    text = instruction(tailor, "job-123")
+    order = [
+        text.index(READ_TOOL),
+        text.index(READ_JOB_TOOL),
+        text.index(MAP_REQUIREMENTS_TOOL),
+        text.index(PROPOSE_ACTIONS_TOOL),
+    ]
+    assert order == sorted(order)
+
+
+def test_the_prompt_forbids_editing_outright(db_session, tailor):
+    """It used to say "not yet". The pass now ends at proposals -- the person
+    applies the ones they pick -- so an edit here is a change nobody asked
+    for, and it is what made the stale and failed cards' promise that the
+    resume was untouched a lie."""
+    text = instruction(tailor, None)
+    assert "Do NOT edit the resume in this pass" in text
+    assert "not at all" in text
+
+
+def test_the_prompt_tells_the_model_not_to_restate_the_cards(db_session, tailor):
+    """Both tools render as cards. A model that also writes the table out as
+    prose doubles the thread for no new information."""
+    assert "do not repeat them as a list" in instruction(tailor, None)
+
+
 # --- the turn ---------------------------------------------------------------
 
 
@@ -172,7 +202,7 @@ async def test_the_assistant_narration_lands_in_the_transcript(
     assert [m.content for m in assistant] == ["Overall: a good fit."]
 
 
-async def test_a_clean_pass_ends_done_with_no_phase(
+async def test_a_clean_pass_ends_done_at_the_stage_it_reached(
     db_session, tailor, run, monkeypatch, openai_enabled
 ):
     _patch(monkeypatch, [llm_message(content="Done.")])
@@ -181,11 +211,13 @@ async def test_a_clean_pass_ends_done_with_no_phase(
 
     db_session.refresh(run)
     assert run.status == "done"
-    assert run.phase is None
+    # The phase is KEPT on a terminal row: it is how far the pass got, and a
+    # clean run that only narrated never entered a stage past the first.
+    assert run.phase == "read_resume"
     assert run.error is None
 
 
-async def test_tool_calls_are_persisted_and_move_the_phase_to_assessing(
+async def test_tool_calls_are_persisted_and_move_the_phase(
     db_session, tailor, run, monkeypatch, openai_enabled
 ):
     _patch(
@@ -201,10 +233,9 @@ async def test_tool_calls_are_persisted_and_move_the_phase_to_assessing(
     rows = _messages(db_session, tailor.id)
     tools = [json.loads(m.content) for m in rows if m.role == "tool"]
     assert [t["name"] for t in tools] == [READ_TOOL]
-    # The phase is cleared by finish(), so what is asserted is that it got
-    # there: a run that only ever read would otherwise still say "reading".
     db_session.refresh(run)
     assert run.status == "done"
+    assert run.phase == "read_resume"
 
 
 async def test_the_pass_can_read_the_posting_through_the_jobs_tool(
@@ -228,11 +259,82 @@ async def test_the_pass_can_read_the_posting_through_the_jobs_tool(
     assert read["result"]["company"] == "Acme"
 
 
-async def test_an_edit_marks_the_phase_writing_and_moves_the_source(
+async def test_the_four_tools_walk_the_phase_to_the_last_stage(
     db_session, tailor, run, monkeypatch, openai_enabled
 ):
-    """The first pass is told not to edit, but if it does anyway the run must
-    not claim it only read -- and the editor repaints on the source hash."""
+    """Each stage is the tool that does it, so the checklist is observable
+    rather than inferred -- which is what the old `assessing` (set by any
+    narration) never was."""
+    job = _add_job(db_session, source_id="s:1", company="Acme", title="Backend Engineer")
+    _patch(
+        monkeypatch,
+        [
+            llm_message(tool_calls=[tool_call(READ_TOOL, {}, "rt-1")]),
+            llm_message(tool_calls=[tool_call(READ_JOB_TOOL, {"job_id": job.id}, "rj-1")]),
+            llm_message(
+                tool_calls=[
+                    tool_call(
+                        MAP_REQUIREMENTS_TOOL,
+                        {"requirements": [{"requirement": "Python", "status": "in_resume"}]},
+                        "mp-1",
+                    )
+                ]
+            ),
+            llm_message(
+                tool_calls=[
+                    tool_call(
+                        PROPOSE_ACTIONS_TOOL,
+                        {"actions": [{"title": "t", "before": "nope", "after": "y"}]},
+                        "pa-1",
+                    )
+                ]
+            ),
+            llm_message(content="Here is where I would start."),
+        ],
+    )
+
+    await run_tailor(db_session, tailor, run, model=OPENAI_ROW)
+
+    db_session.refresh(run)
+    assert run.status == "done"
+    assert run.phase == "proposing"
+
+
+async def test_a_repeated_read_after_proposing_does_not_untick_the_card(
+    db_session, tailor, run, monkeypatch, openai_enabled
+):
+    """The prompt asks the model to copy `before` verbatim, so re-reading the
+    source late in the pass is expected. The cursor must not follow it back."""
+    _patch(
+        monkeypatch,
+        [
+            llm_message(
+                tool_calls=[
+                    tool_call(
+                        PROPOSE_ACTIONS_TOOL,
+                        {"actions": [{"title": "t", "before": "nope", "after": "y"}]},
+                        "pa-1",
+                    )
+                ]
+            ),
+            llm_message(tool_calls=[tool_call(READ_TOOL, {}, "rt-2")]),
+            llm_message(content="Checked again."),
+        ],
+    )
+
+    await run_tailor(db_session, tailor, run, model=OPENAI_ROW)
+
+    db_session.refresh(run)
+    assert run.phase == "proposing"
+
+
+async def test_an_edit_moves_the_source_even_though_the_pass_forbids_one(
+    db_session, tailor, run, monkeypatch, openai_enabled
+):
+    """The pass is told not to edit at all, and `apply_typst_edit` is still in
+    the model's toolset, so this is what happens when it edits anyway: no
+    stage claims it -- there is none for an edit now -- but the source moves,
+    and the hash the editor repaints on moves with it."""
     before = tailor_run.snapshot(db_session, tailor.id)["source_hash"]
     _patch(
         monkeypatch,
@@ -293,7 +395,8 @@ async def test_a_provider_failure_ends_failed_not_running(
     db_session.refresh(run)
     assert run.status == "failed"
     assert run.error
-    assert run.phase is None
+    # Kept, like finish(): a failed card should say where it got to.
+    assert run.phase == "read_resume"
 
 
 async def test_run_tailor_never_raises(db_session, tailor, run, monkeypatch, openai_enabled):
