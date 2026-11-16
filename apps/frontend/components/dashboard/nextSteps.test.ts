@@ -93,6 +93,35 @@ test("a blocker outranks any amount of pending work", () => {
   assert.deepEqual(steps.slice(1).map((s) => s.kind), ["send", "followUp"]);
 });
 
+test("no resume at all leads the ladder, ahead of the preference", () => {
+  // The hole this closes: `publish` only fires once a master exists, so a
+  // brand new account was told to state a preference while the document the
+  // preference filters had not been written yet.
+  const steps = nextSteps(
+    input({
+      health: { ...HEALTHY, has_master: false, published: false },
+      hasPreference: false,
+      masterId: null,
+    }),
+    NOW,
+  );
+  assert.deepEqual(steps.map((s) => s.kind), ["create", "preferences"]);
+  // The chooser, so the band does not pick upload or blank for them.
+  assert.equal(steps[0].href, "/new");
+});
+
+test("create and publish are never offered together", () => {
+  // They are the same obligation at two stages; an unpublished master is
+  // past the first one.
+  const none = nextSteps(
+    input({ health: { ...HEALTHY, has_master: false, published: false }, masterId: null }),
+    NOW,
+  );
+  assert.deepEqual(none.map((s) => s.kind), ["create"]);
+  const unpublished = nextSteps(input({ health: { ...HEALTHY, published: false } }), NOW);
+  assert.deepEqual(unpublished.map((s) => s.kind), ["publish"]);
+});
+
 test("a missing preference is a blocker too", () => {
   const steps = nextSteps(input({ hasPreference: false }), NOW);
   assert.deepEqual(steps.map((s) => s.kind), ["preferences"]);

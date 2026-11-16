@@ -125,7 +125,11 @@ export default function NextActionBand({
       default:
         return first.href ? (
           <Link className="rr-btn whitespace-nowrap" href={first.href}>
-            {first.kind === "tailor" ? t("digestTailor") : t("open")}
+            {first.kind === "tailor"
+              ? t("digestTailor")
+              : first.kind === "create"
+                ? t("newResume")
+                : t("open")}
           </Link>
         ) : null;
     }

@@ -14,9 +14,12 @@ import { QUIET_DAYS, quietDays, readyAgeDays } from "./applications";
  *
  * The ladder, and why it is in this order:
  *
- * 1. Anything blocking matching entirely — an unpublished resume, no stated
- *    preference, a stale reading. These are not tasks competing with the
- *    others; while one is true the rest of the dashboard is partly fiction.
+ * 1. Anything blocking matching entirely — no resume at all, an unpublished
+ *    one, no stated preference, a stale reading. These are not tasks
+ *    competing with the others; while one is true the rest of the dashboard
+ *    is partly fiction. "No resume at all" leads that group: with nothing to
+ *    read, naming a preference next would be arranging furniture in a house
+ *    with no floor.
  * 2. A tailored resume never sent. Work already paid for and not yet spent,
  *    and it decays: a posting closes while the resume sits.
  * 3. An application gone quiet past the two-week line. Only you can chase it.
@@ -27,6 +30,7 @@ import { QUIET_DAYS, quietDays, readyAgeDays } from "./applications";
  */
 
 export type NextStepKind =
+  | "create"
   | "publish"
   | "preferences"
   | "rebuild"
@@ -70,6 +74,24 @@ export function nextSteps(input: NextStepInput, now: Date = new Date()): NextSte
 
   // 1. Blockers. A resume nothing can read makes every number below it a
   //    guess, so these come before any amount of pending work.
+  //
+  //    No resume at all was missing from this ladder entirely: the publish
+  //    step below only fires once a master exists, so a brand new account
+  //    was told to go and state a preference while the thing the preference
+  //    filters had not been written yet. `has_master` is the whole test --
+  //    a tailor cannot exist without its parent, so false here means no
+  //    documents of any kind.
+  if (!health.has_master) {
+    steps.push({
+      kind: "create",
+      titleKey: "nextCreate",
+      whyKey: "nextCreateWhy",
+      params: {},
+      // The chooser, not one of the two doors: the band has room for one
+      // button, and picking for them is the one thing it must not do.
+      href: "/new",
+    });
+  }
   if (health.has_master && !health.published) {
     steps.push({
       kind: "publish",

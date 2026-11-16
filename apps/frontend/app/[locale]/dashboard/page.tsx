@@ -7,10 +7,11 @@ import CreditsStrip from "@/components/dashboard/CreditsStrip";
 import MatchesBlock from "@/components/dashboard/MatchesBlock";
 import NextActionBand from "@/components/dashboard/NextActionBand";
 import OngoingTable from "@/components/dashboard/OngoingTable";
+import ResumesBlock from "@/components/dashboard/ResumesBlock";
 import { nextSteps } from "@/components/dashboard/nextSteps";
 import { COUNTRY_KEYS, FUNCTION_KEYS, SENIORITY_KEYS } from "@/components/jobs/facet-labels";
 import { Link, useRouter } from "@/i18n/navigation";
-import { ApiError, listResumes } from "@/lib/api";
+import { ApiError, listResumes, type Resume } from "@/lib/api";
 import type { Application } from "@/lib/applications";
 import { fetchDashboard, type Dashboard } from "@/lib/dashboard";
 import { strongFitCount } from "@/lib/digest";
@@ -38,7 +39,9 @@ export default function DashboardPage() {
   const [dash, setDash] = useState<Dashboard | null>(null);
   const [rows, setRows] = useState<Application[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [masterId, setMasterId] = useState<string | null>(null);
+  // Null until the list lands, and after a failure: ResumesBlock reads that
+  // as "say nothing" rather than as "you have no resumes".
+  const [resumes, setResumes] = useState<Resume[] | null>(null);
   // Read once, before the first fetch stamps the new visit, so the "since"
   // line describes the previous visit rather than this one.
   const since = useRef<string | null>(null);
@@ -70,11 +73,11 @@ export default function DashboardPage() {
     // Stamped after the request is issued, so a reload inside the same second
     // still reports the earlier window rather than an empty one.
     writeLastVisit();
-    // The master's id is only needed to route a "publish your resume" step.
+    // One call, two readers: the "publish your resume" step needs the
+    // master's id, and the resumes block needs the rest of the list.
     listResumes()
       .then((items) => {
-        if (cancelled) return;
-        setMasterId(items.find((r) => (r.kind ?? "master") === "master")?.id ?? null);
+        if (!cancelled) setResumes(items);
       })
       .catch(() => {});
     return () => {
@@ -94,6 +97,11 @@ export default function DashboardPage() {
       onsite: tJobs("remoteNo"),
     });
   }, [dash, tJobs]);
+
+  const masterId = useMemo(
+    () => resumes?.find((r) => (r.kind ?? "master") === "master")?.id ?? null,
+    [resumes],
+  );
 
   const steps = useMemo(() => {
     if (!dash) return [];
@@ -178,6 +186,9 @@ export default function DashboardPage() {
             onChanged={replace}
             onRebuilt={() => void load(since.current).catch(() => {})}
           />
+          {/* The document the rest of the page runs on, above the matches it
+              produced and below the one thing to do today. */}
+          <ResumesBlock resumes={resumes} applications={rows} />
           <CreditsStrip />
           <MatchesBlock
             digest={dash.digest}
