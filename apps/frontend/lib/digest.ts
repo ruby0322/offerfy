@@ -28,6 +28,56 @@ export type Digest = {
 // Same values, same order as the backend's TRACKS (services/jobs/digest.py).
 export const TRACK_ORDER = ["strong_fit", "new_this_week"] as const;
 
+// The backend's top tier, verbatim: STRONG_TIERS[0] in services/jobs/digest.py.
+// Rename it there and here together; DigestCard's TIER_KEYS holds the same
+// string for the label.
+export const STRONG_TIER = "Strong fit";
+
+/**
+ * The items with one row per POSTING: the first row for each job_id, in the
+ * order given.
+ *
+ * `items` is one row per (posting, track), so any caller treating it as a
+ * list of roles sees a posting the build filed under both tracks twice. New
+ * builds write the tracks disjoint, but a digest is frozen once written, so
+ * the ones already built still need this.
+ */
+export function uniqueByJob(items: DigestItem[]): DigestItem[] {
+  const seen = new Set<string>();
+  const out: DigestItem[] = [];
+  for (const it of items) {
+    if (seen.has(it.job_id)) continue;
+    seen.add(it.job_id);
+    out.push(it);
+  }
+  return out;
+}
+
+/**
+ * How many POSTINGS in this digest the model rated "Strong fit".
+ *
+ * Two things this does not do, both of which it used to do inline on the
+ * dashboard and both of which inflated the figure:
+ *
+ * It counts distinct job_id, not items. `items` holds one row per
+ * (posting, track), so a posting the build filed under both tracks was
+ * counted twice -- "2 scored a strong fit" for one role. New builds write the
+ * tracks disjoint, but a digest is frozen once written, so the de-duplication
+ * has to live on this side too.
+ *
+ * And it reads `tier`, which is the rating the sentence claims, not
+ * `fit_score >= 0.8`. They are different functions of the same four
+ * probabilities (argmax versus a weighted sum; see services/jobs/score.py),
+ * so the threshold both missed Strong fits scoring below 0.8 and counted Good
+ * fits reaching it -- a line reading "N scored a strong fit" above a card
+ * labelling none of them so.
+ */
+export function strongFitCount(items: DigestItem[]): number {
+  const ids = new Set<string>();
+  for (const it of items) if (it.tier === STRONG_TIER) ids.add(it.job_id);
+  return ids.size;
+}
+
 export type TrackGroup = { track: DigestTrack; items: DigestItem[] };
 
 /**

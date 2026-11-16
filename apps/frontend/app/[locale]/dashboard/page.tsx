@@ -13,6 +13,7 @@ import { Link, useRouter } from "@/i18n/navigation";
 import { ApiError, listResumes } from "@/lib/api";
 import type { Application } from "@/lib/applications";
 import { fetchDashboard, type Dashboard } from "@/lib/dashboard";
+import { strongFitCount } from "@/lib/digest";
 import { preferenceSummary } from "@/lib/jobs";
 import { readLastVisit, writeLastVisit } from "@/lib/last-visit";
 
@@ -105,8 +106,10 @@ export default function DashboardPage() {
     });
   }, [dash, rows, summary, masterId]);
 
+  // Postings rated "Strong fit", counted once each: lib/digest.ts owns both
+  // halves of that, because `items` is one row per (posting, track).
   const strongFits = useMemo(
-    () => (dash?.digest?.items ?? []).filter((i) => (i.fit_score ?? 0) >= 0.8).length,
+    () => strongFitCount(dash?.digest?.items ?? []),
     [dash],
   );
 

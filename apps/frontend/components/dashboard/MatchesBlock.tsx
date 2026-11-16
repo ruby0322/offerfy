@@ -3,7 +3,7 @@
 import { useFormatter, useTranslations } from "next-intl";
 import MatchRow from "./MatchRow";
 import { Link } from "@/i18n/navigation";
-import type { Digest } from "@/lib/digest";
+import { uniqueByJob, type Digest } from "@/lib/digest";
 import type { JobListItem } from "@/lib/jobs";
 
 /**
@@ -46,10 +46,12 @@ export default function MatchesBlock({
   const t = useTranslations("dashboard");
   const format = useFormatter();
 
-  const picks = (digest?.items ?? [])
-    .slice()
-    .sort((a, b) => (b.fit_score ?? 0) - (a.fit_score ?? 0))
-    .slice(0, PICKS);
+  // One row per posting before the slice: `items` is one row per
+  // (posting, track), so a posting in both tracks used to take two of these
+  // three slots -- the same role listed twice, under duplicate React keys.
+  const picks = uniqueByJob(
+    [...(digest?.items ?? [])].sort((a, b) => (b.fit_score ?? 0) - (a.fit_score ?? 0)),
+  ).slice(0, PICKS);
   const fresh = matches.slice(0, FRESH);
   const built = digest ? new Date(digest.built_at) : null;
   const builtValid = built !== null && !Number.isNaN(built.getTime());
