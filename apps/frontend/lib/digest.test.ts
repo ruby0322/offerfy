@@ -26,10 +26,29 @@ test("groupByTrack returns tracks in TRACK_ORDER and omits empty ones", () => {
   assert.deepEqual(groupByTrack([]), []);
 });
 
-test("a posting appearing in both tracks appears in both groups", () => {
+test("a posting written into both tracks is rendered once, under the first", () => {
+  // Digests built before the tracks were made disjoint hold exactly this, and
+  // a digest is frozen once written.
   const groups = groupByTrack([item("a", "strong_fit", 1), item("a", "new_this_week", 1)]);
-  assert.equal(groups.length, 2);
-  for (const g of groups) assert.deepEqual(g.items.map((i) => i.job_id), ["a"]);
+  assert.deepEqual(groups.map((g) => g.track), ["strong_fit"]);
+  assert.deepEqual(groups[0].items.map((i) => i.job_id), ["a"]);
+});
+
+test("de-duplication keeps the counts per heading honest", () => {
+  const groups = groupByTrack([
+    item("a", "strong_fit", 1),
+    item("b", "strong_fit", 2),
+    item("a", "new_this_week", 1),
+    item("c", "new_this_week", 2),
+  ]);
+  assert.deepEqual(groups.map((g) => [g.track, g.items.length]), [
+    ["strong_fit", 2],
+    ["new_this_week", 1],
+  ]);
+  // The headings sum to the number of distinct postings on the card.
+  const total = groups.reduce((n, g) => n + g.items.length, 0);
+  assert.equal(total, new Set(groups.flatMap((g) => g.items.map((i) => i.job_id))).size);
+  assert.equal(total, 3);
 });
 
 test("an unknown track does not vanish from the grouping", () => {

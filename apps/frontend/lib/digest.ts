@@ -32,9 +32,17 @@ export type TrackGroup = { track: DigestTrack; items: DigestItem[] };
 
 /**
  * Items grouped by track: TRACK_ORDER first, then any other track in the order
- * first seen (a degraded digest's "unranked", or one added later). Empty
- * groups are omitted; a posting in two tracks appears in both; each group is
- * in rank order.
+ * first seen (a degraded digest's "unranked", or one added later). Each group
+ * is in rank order, and empty groups are omitted -- including a group left
+ * empty by the de-duplication below.
+ *
+ * A job_id appears ONCE across the whole card, under the first track that
+ * claims it in the order above. The backend now writes the tracks disjoint
+ * (services/jobs/digest.py), so for a digest built after that change this
+ * drops nothing. It is here because a digest is frozen once written: the ones
+ * already in the database hold a posting under both headings, and they would
+ * otherwise keep rendering it twice -- and keep counting it twice in the
+ * per-track heading counts -- until they aged out.
  */
 export function groupByTrack(items: DigestItem[]): TrackGroup[] {
   const by = new Map<string, DigestItem[]>();
@@ -47,8 +55,16 @@ export function groupByTrack(items: DigestItem[]): TrackGroup[] {
     ...TRACK_ORDER.filter((t) => by.has(t)),
     ...[...by.keys()].filter((t) => !(TRACK_ORDER as readonly string[]).includes(t)),
   ];
-  return order.map((track) => ({
-    track,
-    items: [...by.get(track)!].sort((a, b) => a.rank - b.rank),
-  }));
+  const seen = new Set<string>();
+  const groups: TrackGroup[] = [];
+  for (const track of order) {
+    const rows: DigestItem[] = [];
+    for (const it of [...by.get(track)!].sort((a, b) => a.rank - b.rank)) {
+      if (seen.has(it.job_id)) continue;
+      seen.add(it.job_id);
+      rows.push(it);
+    }
+    if (rows.length > 0) groups.push({ track, items: rows });
+  }
+  return groups;
 }

@@ -1315,10 +1315,13 @@ class Digest(Base):
 class DigestItem(Base):
     """One posting in one digest, with the score and prose it was shown with.
 
-    track is in the unique constraint because one posting can legitimately
-    appear in both tracks of a single digest (a fresh posting can be both a
-    strong fit and new this week); (digest_id, job_id) alone would forbid
-    exactly that. rank orders the item within its track.
+    track is in the unique constraint for history, not for a live invariant:
+    a posting used to appear under both tracks of one digest, and
+    (digest_id, job_id) alone would have forbidden that. The tracks are now
+    disjoint by construction (app.services.jobs.digest.classify), so no build
+    writes a job_id twice -- but the digests built before that change still
+    hold such pairs, so the narrower constraint cannot be created without
+    first rewriting frozen rows. rank orders the item within its track.
 
     The four component probabilities (requirements_met, seniority_fit,
     location_fit, direction_fit) are stored rather than derived: they are the

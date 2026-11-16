@@ -28,7 +28,8 @@ def test_new_this_week_admits_worth_a_look_but_not_not_a_fit():
         [sc("s", S, 0.9), sc("w", W, 0.4), sc("n", N, 0.0)],
         new_job_ids={"s", "w", "n"},
     )
-    assert ids(out["new_this_week"]) == ["s", "w"]
+    # "s" is new too, but strong_fit is already showing it; "n" is in neither.
+    assert ids(out["new_this_week"]) == ["w"]
 
 
 def test_new_this_week_is_bounded_by_the_new_job_ids():
@@ -38,22 +39,51 @@ def test_new_this_week_is_bounded_by_the_new_job_ids():
     assert ids(out["new_this_week"]) == ["fresh"]
 
 
-def test_a_posting_can_land_in_both_tracks():
+def test_a_posting_qualifying_for_both_tracks_is_shown_once():
+    """The tracks are disjoint and strong_fit wins.
+
+    Listing one posting under both headings read as two different roles, and
+    made the per-track counts sum to more than the digest held.
+    """
     out = dg.classify([sc("x", S, 0.9)], new_job_ids={"x"})
     assert ids(out["strong_fit"]) == ["x"]
-    assert ids(out["new_this_week"]) == ["x"]
+    assert ids(out["new_this_week"]) == []
+
+
+def test_the_tracks_never_share_a_job_id():
+    scored = [sc(f"j{i}", (S, G, W)[i % 3], i / 20) for i in range(12)]
+    out = dg.classify(scored, new_job_ids={s.job_id for s in scored})
+    strong, fresh = set(ids(out["strong_fit"])), set(ids(out["new_this_week"]))
+    assert strong and fresh and not (strong & fresh)
+    # Counting the headings and counting the postings give the same answer.
+    assert len(strong) + len(fresh) == len(strong | fresh)
+
+
+def test_a_strong_posting_the_cap_dropped_can_still_be_new():
+    """Disjointness is applied AFTER strong_fit's cap, so the digest keeps it.
+
+    Were it applied before, every strong-tier posting beyond the fifth would
+    fall out of both tracks and vanish from the digest.
+    """
+    scored = [sc(f"j{i}", S, i / 10) for i in range(7)]
+    out = dg.classify(scored, new_job_ids={"j0", "j1"}, items_per_track=5)
+    assert ids(out["strong_fit"]) == ["j6", "j5", "j4", "j3", "j2"]
+    assert ids(out["new_this_week"]) == ["j1", "j0"]
 
 
 def test_each_track_is_ordered_by_score_and_capped_at_five():
     scored = [sc(f"j{i}", S, i / 10) for i in range(8)]
     out = dg.classify(scored, new_job_ids={s.job_id for s in scored})
-    expected = ["j7", "j6", "j5", "j4", "j3"]
-    assert ids(out["strong_fit"]) == expected
-    assert ids(out["new_this_week"]) == expected
+    assert ids(out["strong_fit"]) == ["j7", "j6", "j5", "j4", "j3"]
+    # Every one of these is new AND strong-tier, so the second track holds
+    # exactly what the first one's cap pushed out, still in score order.
+    assert ids(out["new_this_week"]) == ["j2", "j1", "j0"]
 
 
 def test_neither_track_is_padded_when_there_are_fewer_than_five():
-    out = dg.classify([sc("a", S, 0.9), sc("b", G, 0.8)], new_job_ids={"a"})
+    out = dg.classify(
+        [sc("a", S, 0.9), sc("b", G, 0.8), sc("c", W, 0.3)], new_job_ids={"c"}
+    )
     assert set(out) == {"strong_fit", "new_this_week"}
     assert len(out["strong_fit"]) == 2
     assert len(out["new_this_week"]) == 1
@@ -67,7 +97,7 @@ def test_a_smaller_override_truncates_both_tracks():
         scored, new_job_ids={s.job_id for s in scored}, items_per_track=2
     )
     assert ids(out["strong_fit"]) == ["j5", "j4"]
-    assert ids(out["new_this_week"]) == ["j5", "j4"]
+    assert ids(out["new_this_week"]) == ["j3", "j2"]
     assert dg.ITEMS_PER_TRACK == 5
 
 
@@ -88,10 +118,11 @@ def test_an_unknown_or_empty_tier_is_in_neither_track():
 
 def test_equal_scores_order_by_job_id_whatever_the_input_order():
     a, b = sc("a", S, 0.5), sc("b", S, 0.5)
-    for scored in ([a, b], [b, a]):
-        out = dg.classify(scored, new_job_ids={"a", "b"})
+    c, d = sc("c", W, 0.4), sc("d", W, 0.4)
+    for scored in ([a, b, c, d], [d, c, b, a]):
+        out = dg.classify(scored, new_job_ids={"a", "b", "c", "d"})
         assert ids(out["strong_fit"]) == ["a", "b"]
-        assert ids(out["new_this_week"]) == ["a", "b"]
+        assert ids(out["new_this_week"]) == ["c", "d"]
 
 
 def test_classify_does_not_mutate_its_input():

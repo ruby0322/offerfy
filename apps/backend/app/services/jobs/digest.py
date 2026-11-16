@@ -6,10 +6,26 @@ role opened this week" reads as a fact. So:
 
   strong_fit     -- tier in STRONG_TIERS ("Strong fit", "Good fit"), whenever
                     the posting appeared.
-  new_this_week  -- anything not "Not a fit" whose job_id is in the new set.
+  new_this_week  -- anything not "Not a fit" whose job_id is in the new set
+                    AND that strong_fit is not already showing.
 
-A posting can sit in both. Neither track is ever padded: a track with two
-qualifying postings has two items, not five with blanks.
+The tracks are DISJOINT, and strong_fit wins. A posting qualifying for both
+used to be listed under each heading, which read as two different roles and
+made the per-track counts sum to more than the digest held. strong_fit wins
+because it is the first heading and it is capped by score: every posting it
+drops scored below all five it kept, so the card's scores still fall as the
+reader goes down it. Were "new" to win instead, the top heading would show
+roles scoring BELOW the ones under the heading after it.
+
+Disjointness is applied after strong_fit's cap, not before: a strong-tier
+posting the cap pushed out is shown under new_this_week if the window admits
+it, rather than being dropped from the digest altogether. So new_this_week
+backfills -- each track still offers up to five, and the two together offer
+up to ten DISTINCT postings, which is the number the spend ceiling was always
+sized for.
+
+Neither track is ever padded: a track with two qualifying postings has two
+items, not five with blanks.
 
 strong_fit deliberately has NO digest-based exclusion. A posting already shown
 in last week's digest is shown again until the person acts on it; the
@@ -64,9 +80,17 @@ def classify(
     # Ties on score fall to job_id, so rank (persisted) does not depend on the
     # order the scoring pass happened to return.
     ranked = sorted(scored, key=lambda s: (-s.fit_score, s.job_id))
-    strong = [s for s in ranked if s.tier in STRONG_TIERS]
-    fresh = [s for s in ranked if s.tier in _NEW_TIERS and s.job_id in new_job_ids]
-    return {"strong_fit": strong[:limit], "new_this_week": fresh[:limit]}
+    strong = [s for s in ranked if s.tier in STRONG_TIERS][:limit]
+    # The cap is applied FIRST, so this holds what strong_fit will actually
+    # show -- not every strong-tier posting. A posting the cap dropped is
+    # still eligible for new_this_week; one on screen above is not.
+    shown = {s.job_id for s in strong}
+    fresh = [
+        s
+        for s in ranked
+        if s.tier in _NEW_TIERS and s.job_id in new_job_ids and s.job_id not in shown
+    ]
+    return {"strong_fit": strong, "new_this_week": fresh[:limit]}
 
 
 def latest_for_user(db: Session, *, user) -> Digest | None:

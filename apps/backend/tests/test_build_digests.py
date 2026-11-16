@@ -473,8 +473,9 @@ async def test_items_carry_the_tier_score_components_and_prose(db_session, monke
     built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
     assert built.status == "full" and built.candidate_count == 1
     assert built.model == "gpt-6-luna" and len(built.input_hash) == 64
-    # One posting, both tracks: a fresh strong fit is legitimately in each.
-    assert sorted(i.track for i in built.items) == ["new_this_week", "strong_fit"]
+    # One posting, ONE item: a fresh strong fit qualifies for both tracks and
+    # strong_fit wins, so the card does not list the same role twice.
+    assert [i.track for i in built.items] == ["strong_fit"]
     for item in built.items:
         assert item.job_id == job.id and item.rank == 1
         assert item.tier == "Strong fit" and item.fit_score == 0.9
@@ -653,9 +654,9 @@ async def test_rebuilding_the_same_period_does_not_duplicate(db_session, monkeyp
     second = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
     assert second is not None
     assert db_session.query(Digest).count() == 1
-    assert db_session.query(DigestItem).count() == 2
+    assert db_session.query(DigestItem).count() == 1
     # Replaced, not appended to: the first digest and its items are gone, and
-    # the two items that exist hang off the second one.
+    # the one item that exists hangs off the second one.
     assert db_session.query(DigestItem).filter(
         DigestItem.digest_id == first_id
     ).count() == 0
@@ -697,10 +698,10 @@ async def test_the_ceiling_finishes_the_user_in_flight_then_stops(db_session, mo
     assert len(digests) == 1 and digests[0].user_id == "u-aaa"
     built = digests[0]
     assert built.status == "full" and built.candidate_count == 1
-    assert len(built.items) == 2
+    assert len(built.items) == 1
     assert all(i.tier and i.fit_score and i.reason for i in built.items)
     # Nobody is half-scored: the only rows that exist belong to the one digest.
-    assert db_session.query(DigestItem).count() == 2
+    assert db_session.query(DigestItem).count() == 1
     assert {u for (u,) in db_session.query(Digest.user_id)} == {"u-aaa"}
     assert second.id not in report.built and third.id not in report.built
 
