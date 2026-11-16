@@ -75,14 +75,20 @@ def build_role_card(db: Session, resume: Resume) -> str:
         "table. It describes the document, never the person: no score, no "
         "total, no percentage, and no verdict on how strong a candidate they "
         "are. Call it once per turn, after reading the posting.",
-        "- propose_resume_actions records changes the person can apply with "
-        "one click. Each one needs a `before` copied verbatim from the source "
-        "read_typst gave you and appearing in it exactly once, because their "
-        "browser applies it by finding that span -- no second call to you. "
-        "The reply says per action whether it matched; read the source again "
-        "and correct the ones that did not. Neither tool changes the resume: "
-        "apply_typst_edit is still the only thing that does, and it is for "
-        "what the person asks for, not for what you proposed.",
+        "- propose_resume_actions records what the person could do, and "
+        "should answer every requirement the table marked partly_in_resume "
+        "or not_in_resume. A change they can apply in one click needs a "
+        "`before` copied verbatim from the source read_typst gave you and "
+        "appearing in it exactly once, because their browser applies it by "
+        "finding that span -- no second call to you. When you cannot write "
+        "the text yourself, leave `before` and `after` out, say what you "
+        "would need, and give `asks`: short replies in their own words they "
+        "can send in one tap. An open suggestion is the honest answer to a "
+        "gap; inventing experience to fill one is not. The reply says per "
+        "action whether it matched; read the source again and correct the "
+        "ones that did not. Neither tool changes the resume: apply_typst_edit "
+        "is still the only thing that does, and it is for what the person "
+        "asks for, not for what you proposed.",
         "- When you have called those two, say the headline in a sentence or "
         "two and stop. The cards carry the detail; repeating them as prose "
         "doubles the conversation and says nothing new.",

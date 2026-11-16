@@ -30,6 +30,8 @@ export type TailorCardActions = {
   onApply: (next: string) => void;
   /** Hand the suggestion to the agent instead, quoting it in full. */
   onAsk: (action: TailorAction) => void;
+  /** Send one of the person's own canned replies as an ordinary turn. */
+  onSend: (text: string) => void;
 };
 
 function SuggestionRow({
@@ -42,6 +44,61 @@ function SuggestionRow({
   actions: TailorCardActions;
 }) {
   const t = useTranslations("editor");
+
+  // The canned replies, where the model gave any. They are the person's own
+  // words in their own language, so they send as an ordinary turn and read as
+  // one in the transcript -- no hidden prompt.
+  const askButtons = action.asks.map((ask) => (
+    <Button
+      key={ask}
+      type="button"
+      size="sm"
+      variant="outline"
+      className="h-6 px-2 text-[11px]"
+      disabled={actions.disabled}
+      onClick={() => actions.onSend(ask)}
+    >
+      {ask}
+    </Button>
+  ));
+
+  const askAgentButton = (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      className="h-6 px-2 text-[11px]"
+      disabled={actions.disabled}
+      onClick={() => actions.onAsk(action)}
+    >
+      {t("actionAskAgent")}
+    </Button>
+  );
+
+  // An OPEN suggestion: nothing to apply, because the resume had nothing to
+  // rewrite or the answer is the person's to give. This is what lets the list
+  // answer a gap in the requirement table at all -- a gap is exactly the case
+  // with no `before` to copy. The canned replies are the way in; with none,
+  // the agent is.
+  if (action.kind === "open" || action.before === null || action.after === null) {
+    return (
+      <div className="rounded-md border border-rule px-3 py-2">
+        <p className="text-xs font-medium text-foreground">{action.title}</p>
+        {action.where || action.requirement ? (
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            {[action.where, action.requirement].filter(Boolean).join("\u3000")}
+          </p>
+        ) : null}
+        {action.why ? (
+          <p className="mt-1 text-[11px] text-muted-foreground">{action.why}</p>
+        ) : null}
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {askButtons.length > 0 ? askButtons : askAgentButton}
+        </div>
+      </div>
+    );
+  }
+
   const state = applyState(currentSource, action.before, action.after);
   const lines = lineDiff(action.before, action.after);
 
@@ -59,7 +116,7 @@ function SuggestionRow({
         data-testid={`tailor-apply-${action.id}`}
         disabled={actions.disabled}
         onClick={() => {
-          const next = applyAction(currentSource, action.before, action.after);
+          const next = applyAction(currentSource, action.before!, action.after!);
           if (next !== null) actions.onApply(next);
         }}
       >
@@ -68,16 +125,7 @@ function SuggestionRow({
     ) : state === "applied" ? (
       <span className="text-[11px] text-success">{t("actionApplied")}</span>
     ) : state === "noop" ? null : (
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="h-6 px-2 text-[11px]"
-        disabled={actions.disabled}
-        onClick={() => actions.onAsk(action)}
-      >
-        {t("actionAskAgent")}
-      </Button>
+      askAgentButton
     );
 
   return (
@@ -85,7 +133,7 @@ function SuggestionRow({
       <p className="text-xs font-medium text-foreground">{action.title}</p>
       {action.where || action.requirement ? (
         <p className="mt-0.5 text-[11px] text-muted-foreground">
-          {[action.where, action.requirement].filter(Boolean).join("　")}
+          {[action.where, action.requirement].filter(Boolean).join("\u3000")}
         </p>
       ) : null}
       {action.why ? (
@@ -104,6 +152,12 @@ function SuggestionRow({
       ) : null}
       {state === "ambiguous" || state === "missing" ? (
         <p className="mt-1 text-[11px] text-muted-foreground">{t("actionSourceMoved")}</p>
+      ) : null}
+      {/* Canned replies ride along on a rewrite too when the model supplied
+          them -- rare, and harmless: they are extra ways to answer, not a
+          replacement for the apply button. */}
+      {askButtons.length > 0 ? (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">{askButtons}</div>
       ) : null}
     </div>
   );

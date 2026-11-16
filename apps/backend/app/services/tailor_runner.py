@@ -179,10 +179,15 @@ def instruction(resume: Resume, job_id: str | None) -> str:
         f"3. Call {MAP_REQUIREMENTS_TOOL} with the requirements this posting "
         "states and where this resume does or does not address each one. "
         "Describe what the resume says; do not score it and do not total it.",
-        f"4. Call {PROPOSE_ACTIONS_TOOL} with the concrete changes you would "
-        "make, each with an exact before/after pair copied from the source "
-        "you read in step 1. The reply tells you which ones matched; fix any "
-        "that did not and call it again.",
+        f"4. Call {PROPOSE_ACTIONS_TOOL} with what they could do about it. "
+        "Cover every requirement you marked partly_in_resume or "
+        "not_in_resume -- those are the gaps you just showed them. Where the "
+        "resume has text to change, give an exact before/after pair copied "
+        "from the source you read in step 1. Where it does not, or where what "
+        "to write depends on something only they know, leave the pair out, "
+        "say what you would need, and give `asks` so they can answer in one "
+        "tap. Do not invent experience to fill a gap. The reply tells you "
+        "which pairs matched; fix any that did not and call it again.",
         "5. Then write two or three sentences: what this posting is really "
         "asking for, and where you would start. The two cards above carry the "
         "detail -- do not repeat them as a list.",

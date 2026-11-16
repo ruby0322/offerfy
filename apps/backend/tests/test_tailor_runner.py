@@ -167,6 +167,16 @@ def test_the_prompt_forbids_editing_outright(db_session, tailor):
     assert "not at all" in text
 
 
+def test_the_prompt_requires_the_gaps_to_be_answered(db_session, tailor):
+    """Without this the list skips exactly the rows that matter: a gap has no
+    `before` to copy, so "give me concrete changes" steered the model into
+    omitting it."""
+    text = instruction(tailor, "job-123")
+    assert "partly_in_resume" in text and "not_in_resume" in text
+    assert "asks" in text
+    assert "Do not invent experience" in text
+
+
 def test_the_prompt_tells_the_model_not_to_restate_the_cards(db_session, tailor):
     """Both tools render as cards. A model that also writes the table out as
     prose doubles the thread for no new information."""

@@ -951,6 +951,7 @@
     "actionAskAgent": "請 AI 處理",
     "actionSourceMoved": "履歷已經變動，這段原文對不上了。",
     "actionAskPrompt": "請幫我做這項修改：{title}\n\n把這段：\n{before}\n\n改成：\n{after}",
+    "actionAskOpenPrompt": "關於這一項：{title}",
     "toolDetails": "詳細內容",
     "toolFrom": "原文",
     "toolTo": "改為",

@@ -951,6 +951,7 @@
     "actionAskAgent": "请 AI 处理",
     "actionSourceMoved": "简历已经变动，这段原文对不上了。",
     "actionAskPrompt": "请帮我做这项修改：{title}\n\n把这段：\n{before}\n\n改成：\n{after}",
+    "actionAskOpenPrompt": "关于这一项：{title}",
     "toolDetails": "详细内容",
     "toolFrom": "原文",
     "toolTo": "改为",

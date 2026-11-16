@@ -1572,13 +1572,23 @@ export default function EditorShell({ resumeId }: Props) {
    * any.
    */
   function onAskAboutSuggestion(action: TailorAction) {
-    void sendUserChat(
-      t("actionAskPrompt", {
-        title: action.title,
-        before: action.before,
-        after: action.after,
-      }),
-    );
+    // An open suggestion has no pair to quote, so it asks about the point
+    // itself. A rewrite quotes both halves, because that is the only way the
+    // model learns what it proposed.
+    const text =
+      action.before !== null && action.after !== null
+        ? t("actionAskPrompt", {
+            title: action.title,
+            before: action.before,
+            after: action.after,
+          })
+        : t("actionAskOpenPrompt", { title: action.title });
+    void sendUserChat(text);
+  }
+
+  /** One of the person's own canned replies, sent as an ordinary turn. */
+  function onSendSuggestionReply(text: string) {
+    void sendUserChat(text);
   }
 
   async function onRestoreEdit(previousSource: string) {
@@ -1683,9 +1693,11 @@ export default function EditorShell({ resumeId }: Props) {
   // every card in the transcript.
   const onApplySuggestionRef = useRef(onApplySuggestion);
   const onAskAboutSuggestionRef = useRef(onAskAboutSuggestion);
+  const onSendSuggestionReplyRef = useRef(onSendSuggestionReply);
   useEffect(() => {
     onApplySuggestionRef.current = onApplySuggestion;
     onAskAboutSuggestionRef.current = onAskAboutSuggestion;
+    onSendSuggestionReplyRef.current = onSendSuggestionReply;
   });
 
   const tailorActions = useMemo<TailorCardActions>(
@@ -1698,6 +1710,7 @@ export default function EditorShell({ resumeId }: Props) {
         tailorBlocksSave(tailorRunView?.mode, tailorCursorRef.current),
       onApply: (next) => onApplySuggestionRef.current(next),
       onAsk: (action) => onAskAboutSuggestionRef.current(action),
+      onSend: (text) => onSendSuggestionReplyRef.current(text),
     }),
     [importView?.mode, sending, tailorRunView?.mode],
   );

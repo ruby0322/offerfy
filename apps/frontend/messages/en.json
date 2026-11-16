@@ -951,6 +951,7 @@
     "actionAskAgent": "Ask the agent",
     "actionSourceMoved": "The resume has moved on; this span no longer matches.",
     "actionAskPrompt": "Please make this change: {title}\n\nReplace:\n{before}\n\nWith:\n{after}",
+    "actionAskOpenPrompt": "About this one: {title}",
     "toolDetails": "Details",
     "toolFrom": "From",
     "toolTo": "To",

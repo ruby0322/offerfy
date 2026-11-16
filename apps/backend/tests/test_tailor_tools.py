@@ -230,9 +230,79 @@ def test_an_unchanged_pair_is_a_noop():
     assert out["items"][0]["reason"] == "no_change"
 
 
-def test_an_empty_before_is_refused():
-    out = _actions([{"title": "x", "before": "", "after": "y"}])
-    assert out["items"][0]["reason"] == "before_empty"
+def test_half_a_pair_is_dropped_with_a_reason():
+    """A `before` with nothing to put in its place cannot be applied, and an
+    `after` with no anchor cannot be placed. Neither is an open suggestion, so
+    guessing which the model meant would be inventing one."""
+    out = _actions(
+        [
+            {"title": "x", "before": "", "after": "y"},
+            {"title": "y", "before": "= 王小明"},
+        ]
+    )
+    assert out["items"] == []
+    assert [d["reason"] for d in out["dropped"]] == [
+        "after_without_before",
+        "before_without_after",
+    ]
+
+
+def test_an_item_with_no_title_is_dropped_not_silently_skipped():
+    out = _actions([{"before": "= 王小明", "after": "= 王大明"}])
+    assert out["items"] == []
+    assert out["dropped"][0]["reason"] == "missing_title"
+
+
+def test_an_open_suggestion_is_kept_with_no_apply_button():
+    """The shape that exists because the suggestions must answer every gap the
+    table named -- and a gap is exactly the case with no `before` to copy."""
+    out = _actions(
+        [
+            {
+                "title": "技能區要不要補上 Go",
+                "why": "履歷沒有任何 Go 的痕跡",
+                "asks": ["我有用過 Go", "沒有 Go 經驗，跳過"],
+            }
+        ]
+    )
+    row = out["items"][0]
+    assert row["kind"] == "open"
+    assert row["appliable"] is False
+    assert row["reason"] == "no_preview"
+    assert row["before"] is None and row["after"] is None
+    assert row["asks"] == ["我有用過 Go", "沒有 Go 經驗，跳過"]
+
+
+def test_an_open_suggestion_does_not_trigger_the_fix_your_spans_hint():
+    """Telling the model to go correct an open suggestion would push it to
+    invent a `before`, which is the one thing it must not do for a gap."""
+    out = _actions([{"title": "ask them about Go"}])
+    assert out["items"][0]["kind"] == "open"
+    assert "hint" not in out
+
+
+def test_a_concrete_rewrite_needs_no_asks():
+    """They are optional on purpose: an apply button is already the way in."""
+    out = _actions(
+        [{"title": "x", "before": "= 王小明", "after": "= 王大明"}]
+    )
+    assert out["items"][0]["kind"] == "edit"
+    assert out["items"][0]["asks"] == []
+
+
+def test_asks_are_clamped_capped_and_deduped():
+    out = _actions(
+        [
+            {
+                "title": "open",
+                "asks": ["a" * 200, "keep", "keep", "b", "c", 7, ""],
+            }
+        ]
+    )
+    asks = out["items"][0]["asks"]
+    assert len(asks) <= 3
+    assert len(asks[0]) < 200
+    assert asks.count("keep") == 1
 
 
 def test_an_over_long_before_is_rejected_never_truncated():
@@ -243,6 +313,12 @@ def test_an_over_long_before_is_rejected_never_truncated():
     row = out["items"][0]
     assert row["reason"] == "before_too_long"
     assert len(row["before"]) == len(long)
+
+
+def test_the_cap_leaves_room_for_every_gap_the_table_can_name():
+    """The table holds up to 12 rows and each gap needs an answer, so a cap of
+    6 would have silently decided which gaps go unanswered."""
+    assert MAX_ACTIONS >= 10
 
 
 def test_unappliable_actions_are_kept_so_the_person_can_still_read_them():

@@ -104,9 +104,68 @@ test("the list reads its items and the server's verdict", () => {
   assert.equal(list?.items[1].reason, "before_missing");
 });
 
-test("an item with no before/after pair is not a suggestion", () => {
-  const list = parseActionList(actionPayload([{ title: "no pair" }]));
+test("an item with no pair is an open suggestion, not a dropped one", () => {
+  // The shape that lets the list answer a gap in the requirement table: a gap
+  // is exactly the case with no `before` to copy.
+  const list = parseActionList(
+    actionPayload([
+      {
+        id: "a1",
+        kind: "open",
+        title: "技能區要不要補上 Go",
+        why: "履歷沒有任何 Go 的痕跡",
+        asks: ["我有用過 Go", "沒有 Go 經驗，跳過"],
+        appliable: false,
+        reason: "no_preview",
+      },
+    ]),
+  );
+  assert.equal(list?.total, 1);
+  assert.equal(list?.items[0].kind, "open");
+  assert.equal(list?.items[0].before, null);
+  assert.deepEqual(list?.items[0].asks, ["我有用過 Go", "沒有 Go 經驗，跳過"]);
+  // It is not appliable, so it must not count toward the apply tally.
+  assert.equal(list?.appliable, 0);
+});
+
+test("a rewrite is read as an edit and carries no asks by default", () => {
+  const list = parseActionList(
+    actionPayload([
+      { id: "a1", kind: "edit", title: "x", before: "a", after: "b", appliable: true },
+    ]),
+  );
+  assert.equal(list?.items[0].kind, "edit");
+  assert.deepEqual(list?.items[0].asks, []);
+});
+
+test("the kind is inferred from the pair when the server sent none", () => {
+  // So a frontend ahead of the API still renders both shapes.
+  const list = parseActionList(
+    actionPayload([
+      { id: "a1", title: "pair", before: "a", after: "b" },
+      { id: "a2", title: "no pair" },
+    ]),
+  );
+  assert.deepEqual(
+    list?.items.map((i) => i.kind),
+    ["edit", "open"],
+  );
+});
+
+test("half a pair is never rendered as an edit", () => {
+  // The server drops these, but an edit card with no anchor would show an
+  // apply button that cannot work, so the reader refuses it too.
+  const list = parseActionList(
+    actionPayload([{ id: "a1", kind: "edit", title: "half", before: "a" }]),
+  );
   assert.equal(list, null);
+});
+
+test("non-string asks are discarded rather than rendered", () => {
+  const list = parseActionList(
+    actionPayload([{ id: "a1", title: "open", asks: ["keep", 7, "", null] }]),
+  );
+  assert.deepEqual(list?.items[0].asks, ["keep"]);
 });
 
 // --- apply state: the part that must not be naive ---------------------------

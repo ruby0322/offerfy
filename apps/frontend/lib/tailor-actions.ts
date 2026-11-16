@@ -45,14 +45,35 @@ export type TailorRequirementMap = {
   counts: Record<RequirementStatus, number>;
 };
 
+/**
+ * Which shape a suggestion is.
+ *
+ * `edit` carries a before/after pair and gets an apply button. `open` carries
+ * neither, because the resume had nothing to rewrite or what to write depends
+ * on something only the person knows -- a gap in the requirement table is
+ * exactly that case, so this shape is what lets the list answer every gap
+ * instead of skipping the ones that mattered most.
+ */
+export type TailorActionKind = "edit" | "open";
+
 export type TailorAction = {
   id: string;
+  kind: TailorActionKind;
   title: string;
   where: string | null;
   requirement: string | null;
   why: string | null;
-  before: string;
-  after: string;
+  /** Null on an `open` suggestion. */
+  before: string | null;
+  after: string | null;
+  /**
+   * Replies the person can send in one tap, in their own words.
+   *
+   * Optional, and empty on most `edit` items by design: a concrete rewrite
+   * already has an apply button, so these only earn their place where there
+   * is nothing to apply.
+   */
+  asks: string[];
   /** The server's verdict against the draft at proposal time. */
   appliable: boolean;
   reason: string | null;
@@ -133,15 +154,33 @@ export function parseActionList(payload: ToolPayload | null): TailorActionList |
     const row = asRecord(raw);
     if (!row) continue;
     const title = asText(row.title);
-    if (!title || typeof row.before !== "string" || typeof row.after !== "string") continue;
+    if (!title) continue;
+    const before = asText(row.before);
+    const after = asText(row.after);
+    // Trust the server's `kind` where it sent one, and fall back to the pair
+    // so a frontend ahead of the API still renders both shapes.
+    const kind: TailorActionKind =
+      row.kind === "open" || row.kind === "edit"
+        ? row.kind
+        : before !== null && after !== null
+          ? "edit"
+          : "open";
+    // Half a pair is dropped server-side; this is the belt-and-braces for a
+    // payload that predates that, since an edit card with no anchor would
+    // render an apply button that cannot work.
+    if (kind === "edit" && (before === null || after === null)) continue;
     items.push({
       id: asText(row.id) ?? `a${items.length + 1}`,
+      kind,
       title,
       where: asText(row.where),
       requirement: asText(row.requirement),
       why: asText(row.why),
-      before: row.before,
-      after: row.after,
+      before,
+      after,
+      asks: Array.isArray(row.asks)
+        ? row.asks.filter((a): a is string => typeof a === "string" && a.length > 0)
+        : [],
       appliable: row.appliable === true,
       reason: asText(row.reason),
     });
