@@ -286,8 +286,16 @@ class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # Indexed because every read of this table filters on it and nothing else:
+    # `chat.list_messages` for a transcript, `chat._history` for the model's
+    # window, and `tailor_run.snapshot`'s COUNT, which a live tailor pass runs
+    # once per 0.4s poll tick. Postgres does not index a foreign key on its
+    # own, so this was a sequential scan over every message on the platform
+    # for every one of those -- and the table carries whole tool traces
+    # (one production resume held 1.44M characters of them), so it is the
+    # rows' size rather than their count that made it worth paying for.
     resume_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("resumes.id"), nullable=False
+        String(36), ForeignKey("resumes.id"), nullable=False, index=True
     )
     role: Mapped[str] = mapped_column(String(32), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
