@@ -71,6 +71,26 @@ def test_the_map_tool_tells_the_model_not_to_score():
     assert "never" in description
 
 
+def test_the_actions_tool_is_described_as_general_not_posting_only():
+    """It was always wired into ordinary chat turns -- `tailor_tool_specs` is
+    not gated on `kind` -- but it opened with "what the person could do about
+    this posting", so the model only reached for it as the tailor pass's
+    fourth step and just edited the document for everything else."""
+    description = tailor_tool_specs(_resume())[1]["description"]
+    first_line = description.splitlines()[0]
+    assert "posting" not in first_line
+    assert "open-ended" in description
+
+
+def test_the_actions_tool_says_not_to_propose_what_was_already_decided():
+    """The other half of the rule. Without it the model proposes instead of
+    acting on a request that was perfectly clear, which is a round trip the
+    person did not ask for."""
+    description = tailor_tool_specs(_resume())[1]["description"]
+    assert "do NOT use this" in description
+    assert "apply_typst_edit" in description
+
+
 def test_the_actions_tool_states_the_verbatim_and_unique_rule():
     """`before` is applied by a string search in the browser, so these two
     properties are the whole contract."""
