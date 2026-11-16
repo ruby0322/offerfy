@@ -430,6 +430,53 @@ def test_an_empty_company_param_filters_nothing(client, db_session):
     assert client.get("/v1/jobs?company=&company=Stripe").json()["total"] == 1
 
 
+def test_several_function_params_are_an_or(client, db_session):
+    """?function=backend&function=ml is "either", like the board's chip row."""
+    _add_job(db_session, source_id="a:1", title="Backend Engineer", location="Taipei, Taiwan")
+    _add_job(db_session, source_id="a:2", title="Machine Learning Engineer", location="Taipei, Taiwan")
+    _add_job(db_session, source_id="a:3", title="Product Designer", location="Taipei, Taiwan")
+    enrich_jobs(db_session)
+    db_session.commit()
+    body = client.get("/v1/jobs?function=backend&function=ml").json()
+    assert sorted(row["title"] for row in body["items"]) == [
+        "Backend Engineer",
+        "Machine Learning Engineer",
+    ]
+    assert body["total"] == 2
+
+
+def test_one_bad_function_among_several_is_still_a_422(client):
+    """A bad name must not be dropped: a narrower list would look like data."""
+    assert client.get("/v1/jobs?function=backend&function=vibes").status_code == 422
+
+
+def test_several_city_params_are_an_or(client, db_session):
+    """Two cities mean either city, each still matching all its spellings."""
+    ids = []
+    for index, location in enumerate(["Taipei, Taiwan", "台北", "新竹市", "Kaohsiung, Taiwan"]):
+        ids.append(
+            _add_job(db_session, source_id=f"tw:{index}", location=location, title=f"T{index}").id
+        )
+    enrich_jobs(db_session, job_ids=ids)
+    db_session.commit()
+    body = client.get("/v1/jobs", params=[("city", "Taipei"), ("city", "Hsinchu")]).json()
+    assert sorted(row["title"] for row in body["items"]) == ["T0", "T1", "T2"]
+    assert body["total"] == 3
+
+
+def test_an_empty_city_or_function_param_filters_nothing(client, db_session):
+    """?city= is "no city chosen", and must not pull the facets join in.
+
+    A present-but-empty parameter used to be truthy enough to join JobFacets,
+    which drops every posting that has no facets row yet -- the catalogue's
+    common case. So the clear link on a chip row would have emptied the page.
+    """
+    _add_job(db_session, source_id="s:1", title="Unenriched")
+    assert client.get("/v1/jobs?city=").json()["total"] == 1
+    assert client.get("/v1/jobs?function=").json()["total"] == 1
+    assert client.get("/v1/jobs?city=&function=").json()["total"] == 1
+
+
 def test_city_filter_matches_an_alias_spelling(client, db_session):
     """?city=Bengaluru finds the rows an employer spelled "Bangalore".
 

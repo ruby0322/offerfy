@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  companyList,
-  hasCompany,
   hasJobFilters,
+  hasValue,
   jobFilterCount,
   jobListParams,
   jobPageQuery,
   jobQueryString,
-  toggleCompany,
+  toggleValue,
+  valueList,
 } from "./jobs";
 
 test("jobListParams carries every facet", () => {
   const params = jobListParams({ q: "backend", country: "TW", region: "apac", seniority: "senior",
-    function: "backend", postedWithinDays: "7" });
+    function: ["backend"], postedWithinDays: "7" });
   assert.equal(params.get("country"), "TW");
   assert.equal(params.get("region"), "apac");
   assert.equal(params.get("seniority"), "senior");
@@ -37,38 +37,51 @@ test("jobQueryString drops limit but keeps facets", () => {
   assert.equal(jobQueryString({ country: "TW" }), "?country=TW");
 });
 
-test("jobListParams sends one company parameter per employer", () => {
-  const params = jobListParams({ company: ["Stripe", "Dcard"] });
+test("jobListParams sends one parameter per value, for all three lists", () => {
+  const params = jobListParams({
+    company: ["Stripe", "Dcard"],
+    city: ["Taipei", "Hsinchu"],
+    function: ["backend", "ml"],
+  });
   assert.deepEqual(params.getAll("company"), ["Stripe", "Dcard"]);
+  assert.deepEqual(params.getAll("city"), ["Taipei", "Hsinchu"]);
+  assert.deepEqual(params.getAll("function"), ["backend", "ml"]);
 });
 
-test("jobListParams omits an empty employer list", () => {
+test("jobListParams omits an empty list", () => {
   assert.equal(jobListParams({ company: [] }).has("company"), false);
   assert.equal(jobListParams({ company: ["  "] }).has("company"), false);
+  assert.equal(jobListParams({ city: [], function: [] }).has("city"), false);
 });
 
-test("companyList takes every value, trims, and drops repeats case-blind", () => {
-  assert.deepEqual(companyList("Stripe"), ["Stripe"]);
-  assert.deepEqual(companyList(undefined), []);
-  assert.deepEqual(companyList([" Stripe ", "stripe", "", "Dcard"]), ["Stripe", "Dcard"]);
+test("valueList takes every value, trims, and drops repeats case-blind", () => {
+  assert.deepEqual(valueList("Stripe"), ["Stripe"]);
+  assert.deepEqual(valueList(undefined), []);
+  assert.deepEqual(valueList([" Stripe ", "stripe", "", "Dcard"]), ["Stripe", "Dcard"]);
 });
 
-test("toggleCompany adds, then removes the same employer", () => {
-  assert.deepEqual(toggleCompany([], "Stripe"), ["Stripe"]);
-  assert.deepEqual(toggleCompany(["Stripe"], "Dcard"), ["Stripe", "Dcard"]);
+test("toggleValue adds, then removes the same value", () => {
+  assert.deepEqual(toggleValue([], "Stripe"), ["Stripe"]);
+  assert.deepEqual(toggleValue(["Stripe"], "Dcard"), ["Stripe", "Dcard"]);
   // Off again whatever case the URL carried it back in.
-  assert.deepEqual(toggleCompany(["Stripe", "Dcard"], "stripe"), ["Dcard"]);
-  assert.deepEqual(toggleCompany(undefined, "Stripe"), ["Stripe"]);
-  assert.equal(hasCompany(["Stripe"], "stripe"), true);
-  assert.equal(hasCompany(["Stripe Press"], "Stripe"), false);
+  assert.deepEqual(toggleValue(["Stripe", "Dcard"], "stripe"), ["Dcard"]);
+  assert.deepEqual(toggleValue(undefined, "Stripe"), ["Stripe"]);
+  assert.equal(hasValue(["Stripe"], "stripe"), true);
+  assert.equal(hasValue(["Stripe Press"], "Stripe"), false);
+  // A city row toggles the same way; the helper is not employer-specific.
+  assert.deepEqual(toggleValue(["Taipei"], "Hsinchu"), ["Taipei", "Hsinchu"]);
+  assert.deepEqual(toggleValue(["Taipei", "Hsinchu"], "taipei"), ["Hsinchu"]);
 });
 
-test("an employer row of any size is one filter to clear", () => {
+test("a multi-select row of any size is one filter to clear", () => {
   assert.equal(jobFilterCount({ company: ["Stripe", "Dcard", "Appier"] }), 1);
   assert.equal(jobFilterCount({ company: [] }), 0);
   assert.equal(jobFilterCount({ company: ["Stripe"], country: "TW" }), 2);
+  assert.equal(jobFilterCount({ city: ["Taipei", "Hsinchu"], function: ["ml"] }), 2);
   assert.equal(hasJobFilters({ company: ["Stripe"] }), true);
   assert.equal(hasJobFilters({ company: [] }), false);
+  assert.equal(hasJobFilters({ city: ["Taipei"] }), true);
+  assert.equal(hasJobFilters({ city: [], function: [] }), false);
 });
 
 test("jobPageQuery writes the URL's key names, not the API's", () => {
@@ -83,6 +96,10 @@ test("jobPageQuery writes the URL's key names, not the API's", () => {
     "?company=Stripe&company=Dcard",
   );
   assert.equal(jobPageQuery({ company: [] }), "");
+  assert.equal(
+    jobPageQuery({ city: ["Taipei", "Hsinchu"], function: ["ml"] }),
+    "?city=Taipei&city=Hsinchu&function=ml",
+  );
 });
 
 function stubFetch(body: unknown, calls: { url: string; init?: RequestInit }[]) {

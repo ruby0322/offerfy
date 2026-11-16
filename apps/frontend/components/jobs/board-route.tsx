@@ -7,7 +7,7 @@ import JobBoardPage from "@/components/jobs/JobBoardPage";
 import { boardBySlug, boardQuery, JOB_BOARDS } from "@/lib/job-boards";
 import { resolveLocale } from "@/lib/locale";
 import {
-  companyList,
+  valueList,
   fetchJobCitiesServer,
   fetchJobCount,
   fetchJobFacets,
@@ -35,13 +35,15 @@ export function visitorQueryFrom(
   const query: JobQuery = {
     q: first(raw.q),
     remote: first(raw.remote),
-    // Every ?company=, not the first: the employer row is a multi-select.
-    company: companyList(raw.company),
+    // Every ?company=, ?city= and ?function=, not the first: those three
+    // rows are multi-selects, and a dropped value would silently widen the
+    // list the visitor is looking at.
+    company: valueList(raw.company),
+    city: valueList(raw.city),
+    function: valueList(raw.function),
     country: first(raw.country),
     region: first(raw.region),
-    city: first(raw.city),
     seniority: first(raw.seniority),
-    function: first(raw.function),
     postedWithinDays: first(raw.postedWithinDays),
   };
   // A board's own axis cannot be overridden from the URL: /jobs/internships

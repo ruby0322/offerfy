@@ -9,9 +9,9 @@ import JobResults from "@/components/jobs/JobResults";
 import { FUNCTION_KEYS } from "@/components/jobs/facet-labels";
 import { boardQuery, type JobBoard } from "@/lib/job-boards";
 import {
-  hasCompany,
+  hasValue,
   jobPageQuery,
-  toggleCompany,
+  toggleValue,
   type JobFacetOption,
   type JobFacetOptions,
   type JobList,
@@ -31,6 +31,15 @@ type Props = {
   cities: JobFacetOption[];
   boardCounts: Record<string, number | undefined>;
 };
+
+/** One chip in an accent row. The count is absent when nothing offers one. */
+type Chip = { value: string; count: number | undefined };
+
+/** A facet option's count, matched case-blind like the filters themselves. */
+function countIn(options: JobFacetOption[], value: string): number | undefined {
+  const folded = value.trim().toLowerCase();
+  return options.find((option) => option.value.trim().toLowerCase() === folded)?.count;
+}
 
 /**
  * One template for all six curated boards.
@@ -59,33 +68,60 @@ export default async function JobBoardPage({
     .sort((a, b) => b.count - a.count)
     .slice(0, 6);
 
-  // The employer row, as a multi-select: no chip on means every employer, and
-  // two chips on means either of them. Links rather than checkboxes, like the
-  // city and function rows — a filter stays a navigation with a URL, so it is
-  // shareable and works with JavaScript off; the href just toggles one name
-  // in the list instead of replacing it.
-  //
-  // /v1/jobs/pulse answers top_employers WITHOUT the employer filter applied
-  // (see jobs_pulse), so the row keeps offering the other employers once one
-  // is on. What it cannot offer is an employer outside the busiest few, which
-  // the filter bar's menu can still select — so those are appended, or there
-  // would be no way to switch them back off from here.
-  const chosen = visitorQuery.company ?? [];
-  const employerCount = (name: string) =>
-    (facets?.companies ?? []).find(
-      (option) => option.value.trim().toLowerCase() === name.trim().toLowerCase(),
-    )?.count;
-  const employerRow: { company: string; count: number | undefined }[] = [
-    ...(pulse?.top_employers ?? []).map((employer) => ({
-      company: employer.company,
+  // Every accent row is a multi-select: no chip on means "any", and two chips
+  // on means either of them. Links rather than checkboxes — a filter stays a
+  // navigation with a URL, so it is shareable and works with JavaScript off;
+  // the href just toggles one value in the list instead of replacing it, and
+  // carries every other filter the visitor had set.
+  const hrefWith = (change: Partial<JobQuery>) =>
+    `/jobs/${board.slug}${jobPageQuery({ ...visitorQuery, ...change })}`;
+
+  /**
+   * One row's chips: what the endpoint offers, plus anything chosen that it
+   * does not offer.
+   *
+   * None of the three rows filters its own options — /v1/jobs/pulse answers
+   * top_employers with the employer filter dropped (see jobs_pulse),
+   * /v1/jobs/facets drops each facet's own key, and /v1/jobs/cities only
+   * ever took the country — so a row keeps offering the rest once one chip is
+   * on. What they cannot offer is a value outside the busiest few, which the
+   * filter bar's menu and a shared URL can still name; those are appended, or
+   * there would be no way to switch them back off from here.
+   */
+  const chipRow = (
+    offered: Chip[],
+    chosen: string[],
+    countOf: (value: string) => number | undefined,
+  ): Chip[] => [
+    ...offered,
+    ...chosen
+      .filter((value) => !hasValue(offered.map((chip) => chip.value), value))
+      .map((value) => ({ value, count: countOf(value) })),
+  ];
+
+  const chosenEmployers = visitorQuery.company ?? [];
+  const employerRow = chipRow(
+    (pulse?.top_employers ?? []).map((employer) => ({
+      value: employer.company,
       count: employer.open_count,
     })),
-    ...chosen
-      .filter((name) => !hasCompany((pulse?.top_employers ?? []).map((e) => e.company), name))
-      .map((name) => ({ company: name, count: employerCount(name) })),
-  ];
-  const employerHrefFor = (name: string) =>
-    `/jobs/${board.slug}${jobPageQuery({ ...visitorQuery, company: toggleCompany(chosen, name) })}`;
+    chosenEmployers,
+    (name) => countIn(facets?.companies ?? [], name),
+  );
+
+  const chosenCities = visitorQuery.city ?? [];
+  const cityRow = chipRow(
+    cities.map((option) => ({ value: option.value, count: option.count })),
+    chosenCities,
+    (name) => countIn(cities, name),
+  );
+
+  const chosenFunctions = visitorQuery.function ?? [];
+  const functionRow = chipRow(
+    topFunctions.map((option) => ({ value: option.value, count: option.count })),
+    chosenFunctions,
+    (name) => countIn(facets?.functions ?? [], name),
+  );
 
   return (
     <div className="jobs-index mx-auto max-w-[72rem] px-5">
@@ -103,26 +139,26 @@ export default async function JobBoardPage({
         <section className="jobs-accent">
           <h2 className="jobs-section-label">
             {t("boardEmployersHeading")}
-            {chosen.length > 0 ? (
+            {chosenEmployers.length > 0 ? (
               <span className="jobs-section-note">
-                {t("boardEmployersSelected", { count: chosen.length })}
+                {t("boardEmployersSelected", { count: chosenEmployers.length })}
               </span>
             ) : null}
           </h2>
           <div className="jobs-logo-row">
-            {employerRow.map((employer) => {
-              const on = hasCompany(chosen, employer.company);
+            {employerRow.map((chip) => {
+              const on = hasValue(chosenEmployers, chip.value);
               return (
                 <Link
-                  key={employer.company}
-                  href={employerHrefFor(employer.company)}
+                  key={chip.value}
+                  href={hrefWith({ company: toggleValue(chosenEmployers, chip.value) })}
                   className={`jobs-logo-chip${on ? " is-on" : ""}`}
                   aria-current={on ? "true" : undefined}
                 >
-                  <EmployerLogo company={employer.company} size="sm" />
-                  {employer.company}
-                  {typeof employer.count === "number" ? (
-                    <span className="jobs-opt-n">{employer.count.toLocaleString()}</span>
+                  <EmployerLogo company={chip.value} size="sm" />
+                  {chip.value}
+                  {typeof chip.count === "number" ? (
+                    <span className="jobs-opt-n">{chip.count.toLocaleString()}</span>
                   ) : null}
                 </Link>
               );
@@ -131,38 +167,64 @@ export default async function JobBoardPage({
         </section>
       ) : null}
 
-      {board.accent === "cities" && cities.length > 0 ? (
+      {board.accent === "cities" && cityRow.length > 0 ? (
         <section className="jobs-accent">
-          <h2 className="jobs-section-label">{t("boardCitiesHeading")}</h2>
+          <h2 className="jobs-section-label">
+            {t("boardCitiesHeading")}
+            {chosenCities.length > 0 ? (
+              <span className="jobs-section-note">
+                {t("boardCitiesSelected", { count: chosenCities.length })}
+              </span>
+            ) : null}
+          </h2>
           <div className="jobs-where-pills">
-            {cities.map((option) => (
-              <Link
-                key={option.value}
-                href={`/jobs/${board.slug}?city=${encodeURIComponent(option.value)}`}
-                className={`jobs-pill${option.value === visitorQuery.city ? " is-on" : ""}`}
-              >
-                {option.value}
-                <span className="jobs-opt-n">{option.count.toLocaleString()}</span>
-              </Link>
-            ))}
+            {cityRow.map((chip) => {
+              const on = hasValue(chosenCities, chip.value);
+              return (
+                <Link
+                  key={chip.value}
+                  href={hrefWith({ city: toggleValue(chosenCities, chip.value) })}
+                  className={`jobs-pill${on ? " is-on" : ""}`}
+                  aria-current={on ? "true" : undefined}
+                >
+                  {chip.value}
+                  {typeof chip.count === "number" ? (
+                    <span className="jobs-opt-n">{chip.count.toLocaleString()}</span>
+                  ) : null}
+                </Link>
+              );
+            })}
           </div>
         </section>
       ) : null}
 
-      {board.accent === "functions" && topFunctions.length > 0 ? (
+      {board.accent === "functions" && functionRow.length > 0 ? (
         <section className="jobs-accent">
-          <h2 className="jobs-section-label">{t("boardFunctionsHeading")}</h2>
+          <h2 className="jobs-section-label">
+            {t("boardFunctionsHeading")}
+            {chosenFunctions.length > 0 ? (
+              <span className="jobs-section-note">
+                {t("boardFunctionsSelected", { count: chosenFunctions.length })}
+              </span>
+            ) : null}
+          </h2>
           <div className="jobs-where-pills">
-            {topFunctions.map((option) => (
-              <Link
-                key={option.value}
-                href={`/jobs/${board.slug}?function=${encodeURIComponent(option.value)}`}
-                className={`jobs-pill${option.value === visitorQuery.function ? " is-on" : ""}`}
-              >
-                {t(FUNCTION_KEYS[option.value] ?? "functionOther")}
-                <span className="jobs-opt-n">{option.count.toLocaleString()}</span>
-              </Link>
-            ))}
+            {functionRow.map((chip) => {
+              const on = hasValue(chosenFunctions, chip.value);
+              return (
+                <Link
+                  key={chip.value}
+                  href={hrefWith({ function: toggleValue(chosenFunctions, chip.value) })}
+                  className={`jobs-pill${on ? " is-on" : ""}`}
+                  aria-current={on ? "true" : undefined}
+                >
+                  {t(FUNCTION_KEYS[chip.value] ?? "functionOther")}
+                  {typeof chip.count === "number" ? (
+                    <span className="jobs-opt-n">{chip.count.toLocaleString()}</span>
+                  ) : null}
+                </Link>
+              );
+            })}
           </div>
         </section>
       ) : null}

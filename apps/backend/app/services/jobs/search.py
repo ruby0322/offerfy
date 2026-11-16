@@ -73,19 +73,29 @@ def after_cursor(stamp: datetime | None, job_id: str):
     )
 
 
-def company_values(company: str | Sequence[str] | None) -> list[str]:
-    """The employers a `company` filter names, folded for case-insensitive use.
+def param_values(raw: str | Sequence[str] | None) -> list[str]:
+    """One repeatable filter's values, whether it arrived once or several times.
 
-    One value or several: `?company=Stripe&company=Dcard` means "either", the
-    OR a multi-select employer row needs. Repeated parameters rather than one
-    comma-joined value -- unlike `seniority` below, which splits on commas
-    because it is a closed vocabulary with no commas in it. A company name is
-    free text out of `data/ats_boards.json`, so the day one of them is
-    "Thermo Fisher, Inc." a comma split would quietly filter for two employers
-    that do not exist. Blank entries are dropped rather than matching "".
+    `?city=Taipei&city=Hsinchu` means "either", the OR a multi-select row of
+    chips needs; a single `?city=Taipei` still means the one. Repeated
+    parameters rather than one comma-joined value -- unlike `seniority`
+    below, which splits on commas because it is a closed vocabulary with no
+    commas in it. A company name is free text out of `data/ats_boards.json`
+    and a city is a spelling some ATS chose, so the day one of them is
+    "Thermo Fisher, Inc." or "Washington, D.C." a comma split would quietly
+    filter for two things that do not exist.
+
+    Blank entries are dropped rather than matching "": `?company=` is "no
+    employer chosen", which is how the chip rows clear themselves. The
+    stored spelling is kept -- the caller folds case if its column needs it.
     """
-    raw = [company] if isinstance(company, str) else list(company or ())
-    return [part.strip().lower() for part in raw if part and part.strip()]
+    items = [raw] if isinstance(raw, str) else list(raw or ())
+    return [part.strip() for part in items if part and part.strip()]
+
+
+def company_values(company: str | Sequence[str] | None) -> list[str]:
+    """The employers a `company` filter names, folded for case-insensitive use."""
+    return [value.lower() for value in param_values(company)]
 
 
 def valid_regions(taxonomy: Taxonomy) -> set[str]:
@@ -118,9 +128,9 @@ def filtered_query(
     company: str | Sequence[str] | None = None,
     country: str | None = None,
     region: str | None = None,
-    city: str | None = None,
+    city: str | Sequence[str] | None = None,
     seniority: str | None = None,
-    function: str | None = None,
+    function: str | Sequence[str] | None = None,
     posted_within_days: int | None = None,
     fresh_only: bool = False,
 ):
@@ -173,7 +183,12 @@ def filtered_query(
     # already exclude the unmatched row too (NULL == value is NULL, not
     # true); INNER just says that intent directly instead of relying on
     # that to keep covering for it.
-    if seniority or function or country or region or city:
+    # Resolved before the join is decided, so a parameter that is present but
+    # empty (`?city=`) does not pull JobFacets in and silently drop every
+    # unenriched posting for a filter that names nothing.
+    functions = param_values(function)
+    cities = param_values(city)
+    if seniority or functions or country or region or cities:
         query = query.join(JobFacets, JobFacets.job_id == Job.id)
         taxonomy = default_taxonomy()
         if seniority:
@@ -187,10 +202,15 @@ def filtered_query(
             if not wanted or any(item not in valid_seniorities(taxonomy) for item in wanted):
                 raise ValueError("Invalid seniority")
             query = query.filter(JobFacets.seniority.in_(wanted))
-        if function:
-            if function not in valid_functions(taxonomy):
+        if functions:
+            # IN over the same equality the single value used, so a board's
+            # function row can offer "either design or ml" and one function
+            # still costs the one comparison it always did. Every member is
+            # validated, so one bad name is a 422 rather than a silently
+            # narrower list.
+            if any(item not in valid_functions(taxonomy) for item in functions):
                 raise ValueError("Invalid function")
-            query = query.filter(JobFacets.function == function)
+            query = query.filter(JobFacets.function.in_(functions))
         if region:
             if region not in valid_regions(taxonomy):
                 raise ValueError("Invalid region")
@@ -199,18 +219,22 @@ def filtered_query(
             if country not in valid_countries(taxonomy):
                 raise ValueError("Invalid country")
             query = query.filter(JobFacets.country == country)
-        if city and city.strip():
+        if cities:
             # Resolved against the distinct spellings actually stored, not by
             # LIKE: see services.jobs.cities.stored_values_for for why both
             # equality and substring get this wrong. The DISTINCT is over a
             # few hundred values per country, and is only paid when a city
-            # filter is actually asked for.
+            # filter is actually asked for -- once, however many cities are
+            # named, because they all fold against the same vocabulary.
             distinct = db.query(JobFacets.city).filter(JobFacets.city.isnot(None))
             if country:
                 distinct = distinct.filter(JobFacets.country == country)
-            spellings = stored_values_for(
-                city, [row[0] for row in distinct.distinct().all()], taxonomy
-            )
+            stored = [row[0] for row in distinct.distinct().all()]
+            spellings: list[str] = []
+            for name in cities:
+                for value in stored_values_for(name, stored, taxonomy):
+                    if value not in spellings:
+                        spellings.append(value)
             # An empty IN () is false in SQL, which is the right answer for a
             # city no posting names -- an empty list, not an error.
             query = query.filter(JobFacets.city.in_(spellings))

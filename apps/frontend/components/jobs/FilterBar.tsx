@@ -17,7 +17,7 @@ import { EMPLOYERS_HREF } from "@/lib/employers";
 import { detectCountry } from "@/lib/geo";
 import {
   jobFilterCount,
-  toggleCompany,
+  toggleValue,
   type JobFacetOptions,
   type JobQuery,
 } from "@/lib/jobs";
@@ -66,8 +66,8 @@ export default function FilterBar({
    * The current URL with one key replaced; null removes it.
    *
    * A list replaces every copy of that key with one parameter per entry —
-   * `company` is the only facet that takes several, and an empty list removes
-   * it, which is what "no employer chosen" means.
+   * `company`, `city` and `function` are the facets that take several, and an
+   * empty list removes the key, which is what "none chosen" means.
    */
   const hrefWith = useMemo(
     () =>
@@ -92,8 +92,9 @@ export default function FilterBar({
   // so it is visible in the bar, shareable, and undone by one click on
   // "Anywhere". A crawler, which runs no JavaScript, never sees it and is
   // served the whole catalogue, which is what it should index.
+  const cityCount = query.city?.length ?? 0;
   useEffect(() => {
-    if (!detectLocation || query.country || query.city) return;
+    if (!detectLocation || query.country || cityCount) return;
     if (!facets || facets.countries.length === 0) return;
     let seen = false;
     try {
@@ -112,7 +113,7 @@ export default function FilterBar({
     const guess = detectCountry(locale, available);
     if (!guess) return;
     router.replace(hrefWith({ country: guess }), { scroll: false });
-  }, [detectLocation, query.country, query.city, facets, locale, router, hrefWith]);
+  }, [detectLocation, query.country, cityCount, facets, locale, router, hrefWith]);
 
   const isLocked = (key: keyof JobQuery) => locked.includes(key);
   // What the VISITOR narrowed by, not what the board already is: on
@@ -142,15 +143,6 @@ export default function FilterBar({
     count: option.count,
   }));
 
-  // The button cannot hold five employer names, so it holds the first and how
-  // many more — the menu and the chip row are where the full set is readable.
-  const employers = query.company ?? [];
-  const employerLabel =
-    employers.length === 0
-      ? undefined
-      : employers.length === 1
-        ? employers[0]
-        : t("filterEmployerMany", { name: employers[0], count: employers.length - 1 });
 
   const posted: FacetOption[] = [
     { value: "1", label: t("posted1") },
@@ -164,6 +156,27 @@ export default function FilterBar({
 
   const selectedOf = (list: FacetOption[], value?: string) =>
     value ? (list.find((option) => option.value === value)?.label ?? value) : undefined;
+
+  /**
+   * What a multi-select facet's button says.
+   *
+   * It cannot hold five employer names, so it holds the first and how many
+   * more — the menu and the board's chip row are where the full set is
+   * readable. Matched case-blind, because a value arrives from the URL in
+   * whatever case was typed there while the option carries the stored
+   * spelling; the label falls back to the value itself for anything outside
+   * the facet's own top slice.
+   */
+  const selectedOfMany = (list: FacetOption[], values?: string[]) => {
+    const chosen = values ?? [];
+    if (chosen.length === 0) return undefined;
+    const folded = chosen[0].trim().toLowerCase();
+    const name =
+      list.find((option) => option.value.trim().toLowerCase() === folded)?.label ?? chosen[0];
+    return chosen.length === 1
+      ? name
+      : t("filterMany", { name, count: chosen.length - 1 });
+  };
 
   return (
     <div className="jobs-controls">
@@ -212,12 +225,12 @@ export default function FilterBar({
             label={t("filterFunction")}
             anyLabel={t("filterAny")}
             clearLabel={t("filterFunction")}
-            selected={selectedOf(functions, query.function)}
-            value={query.function}
+            selected={selectedOfMany(functions, query.function)}
+            values={query.function ?? []}
             options={functions}
             wide
             clearHref={hrefWith({ function: null })}
-            hrefFor={(value) => hrefWith({ function: value })}
+            hrefFor={(value) => hrefWith({ function: toggleValue(query.function, value) })}
           />
         )}
 
@@ -273,8 +286,8 @@ export default function FilterBar({
             label={t("filterEmployer")}
             anyLabel={t("filterAny")}
             clearLabel={t("filterEmployer")}
-            selected={employerLabel}
-            values={employers}
+            selected={selectedOfMany(companies, query.company)}
+            values={query.company ?? []}
             options={companies}
             findLabel={t("findEmployer")}
             footer={
@@ -287,7 +300,7 @@ export default function FilterBar({
               ) : null
             }
             clearHref={hrefWith({ company: null })}
-            hrefFor={(value) => hrefWith({ company: toggleCompany(query.company, value) })}
+            hrefFor={(value) => hrefWith({ company: toggleValue(query.company, value) })}
           />
         )}
 

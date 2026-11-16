@@ -70,7 +70,7 @@ export const JOB_BOARDS: JobBoard[] = [
     slug: "ai",
     titleKey: "boardAiTitle",
     leadKey: "boardAiLead",
-    query: { function: "ml" },
+    query: { function: ["ml"] },
     locked: ["function"],
     accent: "employers",
   },

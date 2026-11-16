@@ -113,23 +113,29 @@ export type JobQuery = {
   q?: string;
   remote?: string;
   /**
-   * The employers asked for, as an OR: none is "any employer". A list rather
-   * than one value because the board pages' employer row is a multi-select,
-   * and it travels as repeated `company=` parameters -- see
-   * services/jobs/search.py's company_values for why it is not comma-joined
+   * The three multi-select filters, each an OR: an empty list is "any".
+   *
+   * Lists rather than single values because the curated boards' chip rows
+   * are multi-selects -- pick two employers, or Taipei and Hsinchu, and you
+   * want either. They travel as repeated parameters (`?city=A&city=B`); see
+   * services/jobs/search.py's param_values for why they are not comma-joined
    * the way `seniority` is.
+   *
+   * The ones that stayed single are the ones a set would not help: `country`
+   * anchors which cities are on offer, `remote` is a yes/no, and
+   * `postedWithinDays` is a window, not a member of a vocabulary.
    */
   company?: string[];
+  city?: string[];
+  function?: string[];
   country?: string;
   region?: string;
-  city?: string;
   seniority?: string;
-  function?: string;
   postedWithinDays?: string;
 };
 
-/** Whatever the URL said for `company`, as the list JobQuery wants. */
-export function companyList(raw: string | string[] | undefined): string[] {
+/** Whatever the URL said for a multi-select key, as the list JobQuery wants. */
+export function valueList(raw: string | string[] | undefined): string[] {
   const all = Array.isArray(raw) ? raw : raw === undefined ? [] : [raw];
   const seen = new Set<string>();
   const out: string[] = [];
@@ -144,15 +150,15 @@ export function companyList(raw: string | string[] | undefined): string[] {
   return out;
 }
 
-/** The employer list with `name` added, or removed if it was already there. */
-export function toggleCompany(current: string[] | undefined, name: string): string[] {
+/** The list with `name` added, or removed if it was already there. */
+export function toggleValue(current: string[] | undefined, name: string): string[] {
   const list = current ?? [];
   const folded = name.trim().toLowerCase();
   const without = list.filter((item) => item.trim().toLowerCase() !== folded);
   return without.length < list.length ? without : [...list, name];
 }
 
-export function hasCompany(current: string[] | undefined, name: string): boolean {
+export function hasValue(current: string[] | undefined, name: string): boolean {
   const folded = name.trim().toLowerCase();
   return (current ?? []).some((item) => item.trim().toLowerCase() === folded);
 }
@@ -211,11 +217,11 @@ export function hasJobFilters(query: JobQuery): boolean {
       query.remote === "true" ||
       query.remote === "false" ||
       query.company?.length ||
+      query.city?.length ||
+      query.function?.length ||
       query.country ||
       query.region ||
-      query.city ||
       query.seniority ||
-      query.function ||
       query.postedWithinDays,
   );
 }
@@ -225,7 +231,7 @@ export function jobFilterCount(query: JobQuery): number {
   return JOB_QUERY_KEYS.filter((key) => {
     const value = query[key];
     if (key === "remote") return value === "true" || value === "false";
-    // The employer facet counts once however many employers it names: three
+    // A multi-select facet counts once however many values it names: three
     // chips in one row are one filter to clear, not three.
     if (Array.isArray(value)) return value.length > 0;
     return Boolean(value && value.trim());
@@ -238,14 +244,14 @@ export function jobListParams(query: JobQuery, extra?: { cursor?: string; limit?
   if (query.remote === "true" || query.remote === "false") {
     params.set("remote", query.remote);
   }
-  // Repeated, not joined: the backend reads company as a list and a name
-  // with a comma in it must not become two employers.
-  for (const name of companyList(query.company)) params.append("company", name);
-  if (query.city) params.set("city", query.city);
+  // Repeated, not joined: the backend reads these three as lists, and a
+  // value with a comma in it must not become two employers or two cities.
+  for (const name of valueList(query.company)) params.append("company", name);
+  for (const name of valueList(query.city)) params.append("city", name);
+  for (const name of valueList(query.function)) params.append("function", name);
   if (query.country) params.set("country", query.country);
   if (query.region) params.set("region", query.region);
   if (query.seniority) params.set("seniority", query.seniority);
-  if (query.function) params.set("function", query.function);
   if (query.postedWithinDays) params.set("posted_within_days", query.postedWithinDays);
   if (extra?.cursor) params.set("cursor", extra.cursor);
   params.set("limit", String(extra?.limit ?? 20));
@@ -266,7 +272,7 @@ export function jobPageQuery(query: JobQuery): string {
   for (const key of JOB_QUERY_KEYS) {
     const value = query[key];
     if (Array.isArray(value)) {
-      for (const name of companyList(value)) params.append(key, name);
+      for (const name of valueList(value)) params.append(key, name);
     } else if (value && value.trim()) {
       params.set(key, value.trim());
     }

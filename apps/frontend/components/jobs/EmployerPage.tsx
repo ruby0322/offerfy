@@ -7,7 +7,10 @@ import JobResults from "@/components/jobs/JobResults";
 import { FUNCTION_KEYS } from "@/components/jobs/facet-labels";
 import { EMPLOYERS_HREF } from "@/lib/employers";
 import {
+  hasValue,
+  jobPageQuery,
   sourceLabel,
+  toggleValue,
   type JobEmployerProfile,
   type JobFacetOptions,
   type JobList,
@@ -74,6 +77,15 @@ export default async function EmployerPage({
   const functions = profile.functions.slice(0, ACCENT_MAX);
   const sources = profile.sources.map((source) => sourceLabel(source, locale)).join(" · ");
 
+  // Both rows are multi-selects, like a curated board's: a chip toggles one
+  // value and keeps every other filter the visitor had set. These counts are
+  // the employer's own totals, so they do not move as chips go on -- the row
+  // stays a control rather than becoming a readout of the current selection.
+  const hrefWith = (change: Partial<JobQuery>) =>
+    `${EMPLOYERS_HREF}/${profile.slug}${jobPageQuery({ ...visitorQuery, ...change })}`;
+  const chosenCities = visitorQuery.city ?? [];
+  const chosenFunctions = visitorQuery.function ?? [];
+
   return (
     <div className="jobs-index mx-auto max-w-[72rem] px-5">
       <p className="jobs-crumb">
@@ -119,36 +131,58 @@ export default async function EmployerPage({
 
       {cities.length >= ACCENT_MIN ? (
         <section className="jobs-accent">
-          <h2 className="jobs-section-label">{t("employerWhere")}</h2>
+          <h2 className="jobs-section-label">
+            {t("employerWhere")}
+            {chosenCities.length > 0 ? (
+              <span className="jobs-section-note">
+                {t("boardCitiesSelected", { count: chosenCities.length })}
+              </span>
+            ) : null}
+          </h2>
           <div className="jobs-where-pills">
-            {cities.map((option) => (
-              <Link
-                key={option.value}
-                href={`${EMPLOYERS_HREF}/${profile.slug}?city=${encodeURIComponent(option.value)}`}
-                className={`jobs-pill${option.value === visitorQuery.city ? " is-on" : ""}`}
-              >
-                {option.value}
-                <span className="jobs-opt-n">{option.count.toLocaleString()}</span>
-              </Link>
-            ))}
+            {cities.map((option) => {
+              const on = hasValue(chosenCities, option.value);
+              return (
+                <Link
+                  key={option.value}
+                  href={hrefWith({ city: toggleValue(chosenCities, option.value) })}
+                  className={`jobs-pill${on ? " is-on" : ""}`}
+                  aria-current={on ? "true" : undefined}
+                >
+                  {option.value}
+                  <span className="jobs-opt-n">{option.count.toLocaleString()}</span>
+                </Link>
+              );
+            })}
           </div>
         </section>
       ) : null}
 
       {functions.length >= ACCENT_MIN ? (
         <section className="jobs-accent">
-          <h2 className="jobs-section-label">{t("employerWhat")}</h2>
+          <h2 className="jobs-section-label">
+            {t("employerWhat")}
+            {chosenFunctions.length > 0 ? (
+              <span className="jobs-section-note">
+                {t("boardFunctionsSelected", { count: chosenFunctions.length })}
+              </span>
+            ) : null}
+          </h2>
           <div className="jobs-where-pills">
-            {functions.map((option) => (
-              <Link
-                key={option.value}
-                href={`${EMPLOYERS_HREF}/${profile.slug}?function=${encodeURIComponent(option.value)}`}
-                className={`jobs-pill${option.value === visitorQuery.function ? " is-on" : ""}`}
-              >
-                {t(FUNCTION_KEYS[option.value] ?? "functionOther")}
-                <span className="jobs-opt-n">{option.count.toLocaleString()}</span>
-              </Link>
-            ))}
+            {functions.map((option) => {
+              const on = hasValue(chosenFunctions, option.value);
+              return (
+                <Link
+                  key={option.value}
+                  href={hrefWith({ function: toggleValue(chosenFunctions, option.value) })}
+                  className={`jobs-pill${on ? " is-on" : ""}`}
+                  aria-current={on ? "true" : undefined}
+                >
+                  {t(FUNCTION_KEYS[option.value] ?? "functionOther")}
+                  <span className="jobs-opt-n">{option.count.toLocaleString()}</span>
+                </Link>
+              );
+            })}
           </div>
         </section>
       ) : null}

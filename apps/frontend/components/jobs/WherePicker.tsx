@@ -6,16 +6,20 @@ import { Link } from "@/i18n/navigation";
 import { currentTimeZone } from "@/lib/geo";
 import { useHoverMenu } from "@/lib/use-hover-menu";
 import { useIsClient } from "@/lib/use-is-client";
-import { fetchJobCities, type JobFacetOption } from "@/lib/jobs";
+import { fetchJobCities, hasValue, toggleValue, type JobFacetOption } from "@/lib/jobs";
 
 type Props = {
   country?: string;
-  city?: string;
+  /**
+   * The cities chosen, as an OR: none is "anywhere in the country". A list,
+   * like the boards' city row — picking Taipei does not un-pick Hsinchu.
+   */
+  city?: string[];
   /** Countries the catalogue has roles in, with counts. */
   countries: JobFacetOption[];
   countryLabel: (code: string) => string;
   /** Builds a URL with country/city replaced; a null clears that key. */
-  hrefFor: (next: { country: string | null; city: string | null }) => string;
+  hrefFor: (next: { country: string | null; city: string[] | null }) => string;
   /** True once the country came from the device clock rather than a click. */
   detected: boolean;
 };
@@ -54,6 +58,7 @@ export default function WherePicker({
   const isClient = useIsClient();
   const zone = isClient ? currentTimeZone() : null;
   const cities = loaded && loaded.country === country ? loaded.items : null;
+  const chosen = city ?? [];
 
   useEffect(() => {
     if (!open || !country || loaded?.country === country) return;
@@ -66,9 +71,15 @@ export default function WherePicker({
     };
   }, [open, country, loaded]);
 
+  // Two cities will not fit next to a country name, so the caption names the
+  // first and counts the rest — the same shape the facet buttons use.
+  const cityCaption =
+    chosen.length > 1
+      ? t("filterMany", { name: chosen[0], count: chosen.length - 1 })
+      : chosen[0];
   const caption = country
-    ? city
-      ? `${countryLabel(country)} · ${city}`
+    ? cityCaption
+      ? `${countryLabel(country)} · ${cityCaption}`
       : countryLabel(country)
     : t("whereAnywhere");
 
@@ -144,20 +155,21 @@ export default function WherePicker({
               </p>
             ) : (
               <div className="jobs-where-pills">
-                {cities.map((option) => (
-                  <Link
-                    key={option.value}
-                    href={hrefFor({
-                      country,
-                      city: option.value === city ? null : option.value,
-                    })}
-                    className={`jobs-pill${option.value === city ? " is-on" : ""}`}
-                    onClick={close}
-                  >
-                    {option.value}
-                    <span className="jobs-opt-n">{option.count.toLocaleString()}</span>
-                  </Link>
-                ))}
+                {cities.map((option) => {
+                  const on = hasValue(chosen, option.value);
+                  return (
+                    <Link
+                      key={option.value}
+                      href={hrefFor({ country, city: toggleValue(chosen, option.value) })}
+                      className={`jobs-pill${on ? " is-on" : ""}`}
+                      aria-current={on ? "true" : undefined}
+                      onClick={close}
+                    >
+                      {option.value}
+                      <span className="jobs-opt-n">{option.count.toLocaleString()}</span>
+                    </Link>
+                  );
+                })}
               </div>
             )}
           </div>

@@ -25,8 +25,9 @@ type Props = {
   /**
    * For a facet that takes several answers at once: the chosen values, with
    * `hrefFor` toggling one rather than replacing the lot. Set this instead of
-   * `value`, not as well — the employer facet is the one that has it, because
-   * "either of these two employers" is a question people actually ask.
+   * `value`, not as well — employer and function are the facets that have it,
+   * because "either of these two employers" and "backend or ML" are questions
+   * people actually ask. Level, where and the two ranges stay single-valued.
    */
   values?: string[];
   anyLabel: string;
