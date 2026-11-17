@@ -10,9 +10,13 @@ import { ApiError, createTailor, getMe, listResumes } from "@/lib/api";
 import { groupByTrack, STRONG_TIER, type Digest, type DigestItem } from "@/lib/digest";
 
 const ACTION = "rr-btn rr-btn-accent rr-btn-sm disabled:opacity-50";
-// The same action on a card: one per screen rather than one per row, so it
-// takes the full width it is given and keeps the full-size touch target.
-const CARD_ACTION = "rr-btn rr-btn-accent flex-1 disabled:opacity-50";
+// The same action on a card: it takes the full width it is given, and it is
+// the SAME SIZE the list view gives it. Full-size `rr-btn` is 16px type, which
+// at phone width made "See the full posting" wrap to two lines and left the
+// two buttons different heights; `rr-btn-sm` is the variant that already
+// carries `white-space: nowrap` and raises itself to a 40px target under a
+// thumb (globals.css), so one class fixes the size, the wrap and the reach.
+const CARD_ACTION = "rr-btn rr-btn-accent rr-btn-sm flex-1 disabled:opacity-50";
 
 const TRACK_KEYS = {
   strong_fit: "digestTrackStrongFit",
@@ -256,7 +260,7 @@ export default function DigestCard({
             without this the buttons sit at a different height on every swipe. */}
         <div className="mt-auto flex gap-2 pt-3.5">
           {action(item, "card")}
-          <Link href={href} className="rr-btn rr-btn-ghost flex-1">
+          <Link href={href} className="rr-btn rr-btn-ghost rr-btn-sm flex-1">
             {t("deckOpenJob")}
           </Link>
         </div>
@@ -307,10 +311,10 @@ export default function DigestCard({
       </p>
       <p className="mt-1.5 text-xs text-muted-foreground">{t("picksDoneBody")}</p>
       <div className="mt-4 flex w-full flex-col gap-2">
-        <Link href="/jobs" className="rr-btn rr-btn-ghost">
+        <Link href="/jobs" className="rr-btn rr-btn-ghost rr-btn-sm">
           {t("browseRoles")}
         </Link>
-        <Link href="/preferences" className="rr-btn rr-btn-ghost">
+        <Link href="/preferences" className="rr-btn rr-btn-ghost rr-btn-sm">
           {t("editPreferences")}
         </Link>
       </div>

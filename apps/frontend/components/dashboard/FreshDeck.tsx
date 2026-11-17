@@ -109,7 +109,7 @@ export default function FreshDeck({ items, totalCount }: Props) {
             <div className="mt-auto flex gap-2 pt-3.5">
               <Link
                 href={`/jobs/${encodeURIComponent(job.id)}`}
-                className="rr-btn rr-btn-accent flex-1"
+                className="rr-btn rr-btn-accent rr-btn-sm flex-1"
               >
                 {t("deckOpenJob")}
               </Link>
@@ -131,7 +131,7 @@ export default function FreshDeck({ items, totalCount }: Props) {
         </p>
       ) : null}
       <div className="mt-4 flex w-full flex-col gap-2">
-        <Link href="/jobs" className="rr-btn rr-btn-ghost">
+        <Link href="/jobs" className="rr-btn rr-btn-ghost rr-btn-sm">
           {t("browseRoles")}
         </Link>
       </div>

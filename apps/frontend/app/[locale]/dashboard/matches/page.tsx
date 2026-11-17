@@ -142,7 +142,12 @@ export default function MatchesPage() {
                   · {t("picksScoredAgainst")}
                 </span>
               </h2>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              {/* Full width once the heading has taken its own line, which at
+                  phone width it always does: without it this group is sized to
+                  its contents and lands wherever the heading left off, so the
+                  switch floats in the middle of the row instead of sitting at
+                  the gutter where every other control on the page sits. */}
+              <div className="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-2 wide:w-auto wide:justify-end">
                 {dash.digest ? (
                   <p className="text-xs text-muted-foreground">
                     {t("picksBuiltFrom", {
@@ -191,7 +196,14 @@ export default function MatchesPage() {
                   · {t("freshFromIngest")}
                 </span>
               </h2>
-              {hasFresh ? <ViewToggle view={view} choose={chooseView} /> : null}
+              {/* ms-auto, not justify-between alone: once the heading wraps to
+                  its own line the switch is the only thing left on the next
+                  one, and justify-between puts a lone item at the start. */}
+              {hasFresh ? (
+                <span className="ms-auto">
+                  <ViewToggle view={view} choose={chooseView} />
+                </span>
+              ) : null}
             </div>
             {days.length === 0 ? (
               <p className="mt-2 text-sm text-muted-foreground">{t("matchEmpty")}</p>

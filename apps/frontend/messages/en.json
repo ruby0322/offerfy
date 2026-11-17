@@ -543,7 +543,7 @@
     "deckPosition": "{index} / {total}",
     "deckPrev": "Previous role",
     "deckNext": "Next role",
-    "deckOpenJob": "See the full posting",
+    "deckOpenJob": "Full posting",
     "deckScoreOutOf": "/ 100",
     "picksDoneHeading": "{count, plural, =1 {That was this week's only pick} other {That was all # picks}}",
     "picksDoneBody": "The next set is built on Monday.",
