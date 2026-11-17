@@ -31,9 +31,26 @@ type Props = {
   /** Part of the cache key, so an edit invalidates its own thumbnail. */
   revision: string | null;
   title: string;
+  /**
+   * "page" is the whole first page in A4 proportions, which is what a grid
+   * of documents needs: the shape tells seven similar names apart.
+   *
+   * "banner" is the TOP of that same page at full width, clipped to a strip
+   * and faded out. It exists for a phone, where a page-shaped thumbnail
+   * beside a paragraph leaves both too narrow to read and a page-shaped
+   * thumbnail above it is 420px of scrolling before the first word. The top
+   * of a resume is the half worth showing anyway -- name, headline, contact
+   * -- and it is the same fetch and the same cache entry either way.
+   */
+  variant?: "page" | "banner";
 };
 
-export default function ResumeThumb({ resumeId, revision, title }: Props) {
+export default function ResumeThumb({
+  resumeId,
+  revision,
+  title,
+  variant = "page",
+}: Props) {
   const t = useTranslations("dashboard");
   const key = `${resumeId}:${revision ?? ""}`;
   // Read during render rather than synced into state by an effect: the cache
@@ -91,21 +108,41 @@ export default function ResumeThumb({ resumeId, revision, title }: Props) {
     };
   }, [key, resumeId]);
 
+  const banner = variant === "banner";
   return (
     <div
       ref={box}
-      // A4 proportions, so the thumbnail is recognisably the page rather than
-      // a crop of it. White in both themes: paper is paper.
-      className="flex aspect-[1/1.414] items-center justify-center overflow-hidden border-b border-rule bg-white"
+      className={
+        banner
+          ? // A strip of the page, not a scaled-down copy of it: the SVG is
+            // laid out at the full width it is given and simply runs past the
+            // bottom edge, where the gradient below takes it.
+            "relative flex h-[118px] w-full items-center justify-center overflow-hidden rounded border border-rule bg-white"
+          : // A4 proportions, so the thumbnail is recognisably the page rather
+            // than a crop of it. White in both themes: paper is paper.
+            "flex aspect-[1/1.414] items-center justify-center overflow-hidden border-b border-rule bg-white"
+      }
       aria-hidden="true"
     >
       {svg ? (
-        <div
-          className="h-full w-full [&>svg]:h-full [&>svg]:w-full [&>svg]:object-contain"
-          // The API returns SVG it compiled itself from the person's own
-          // Typst; the editor's own preview renders it the same way.
-          dangerouslySetInnerHTML={{ __html: svg }}
-        />
+        <>
+          <div
+            className={
+              banner
+                ? "absolute inset-x-0 top-0 [&>svg]:h-auto [&>svg]:w-full"
+                : "h-full w-full [&>svg]:h-full [&>svg]:w-full [&>svg]:object-contain"
+            }
+            // The API returns SVG it compiled itself from the person's own
+            // Typst; the editor's own preview renders it the same way.
+            dangerouslySetInnerHTML={{ __html: svg }}
+          />
+          {banner ? (
+            // Fades to the page, not to the theme: the crop has to end
+            // without drawing a second line under the one the border already
+            // draws.
+            <span className="pointer-events-none absolute inset-x-0 bottom-0 h-11 bg-gradient-to-b from-transparent to-white" />
+          ) : null}
+        </>
       ) : (
         <span className="px-2 text-center text-[0.68rem] text-neutral-400">
           {failed ? t("thumbFailed") : t("thumbRendering")}

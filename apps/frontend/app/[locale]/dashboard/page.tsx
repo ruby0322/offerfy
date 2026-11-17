@@ -151,13 +151,12 @@ export default function DashboardPage() {
                       {t("sinceStrongFits", { count: strongFits })}
                     </span>
                   ) : null}
-                  {dash.employer_views.disclosure_count > 0 ? (
-                    <span className="font-semibold">
-                      {t("sinceEmployerViews", {
-                        count: dash.employer_views.disclosure_count,
-                      })}
-                    </span>
-                  ) : null}
+                  {/* The employer-view count used to sit here too. It is a
+                      TOTAL, and this line is a list of what changed since you
+                      were last here, so it was the one clause that did not
+                      answer the sentence it was in -- and it now appears a
+                      screen below, against the document that earned it. One
+                      number, one place. */}
                 </>
               ) : (
                 <span className="text-muted-foreground">{t("sinceFirstVisit")}</span>
@@ -186,9 +185,6 @@ export default function DashboardPage() {
             onChanged={replace}
             onRebuilt={() => void load(since.current).catch(() => {})}
           />
-          {/* The document the rest of the page runs on, above the matches it
-              produced and below the one thing to do today. */}
-          <ResumesBlock resumes={resumes} applications={rows} />
           <CreditsStrip />
           <MatchesBlock
             digest={dash.digest}
@@ -216,6 +212,17 @@ export default function DashboardPage() {
             <ApplicationFlow rows={rows} bare />
             <OngoingTable rows={rows} onChanged={replace} />
           </section>
+          {/* Last, under the pipeline it feeds. It opened the page until
+              now, which put the document ahead of everything the document
+              is FOR -- today's one move, the matches, the applications --
+              and made a page about what to do next begin with housekeeping.
+              Read bottom-up it is the closing note instead: this is the
+              thing all of the above came out of. */}
+          <ResumesBlock
+            resumes={resumes}
+            applications={rows}
+            employerViews={dash.employer_views.disclosure_count}
+          />
         </div>
       ) : null}
     </main>
