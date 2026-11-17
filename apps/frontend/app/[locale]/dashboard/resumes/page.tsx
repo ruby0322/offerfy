@@ -163,18 +163,13 @@ export default function ResumesPage() {
           ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex overflow-hidden rounded-lg border border-rule">
+          <span className="rr-switch">
             {VIEWS.map((option) => (
               <button
                 key={option}
                 type="button"
                 aria-pressed={view === option}
                 onClick={() => choose(option)}
-                className={
-                  view === option
-                    ? "whitespace-nowrap bg-foreground px-3 py-1.5 text-xs font-semibold coarse:py-2.5 text-background"
-                    : "whitespace-nowrap bg-sheet px-3 py-1.5 text-xs font-semibold coarse:py-2.5 text-muted-foreground"
-                }
               >
                 {t(option === "list" ? "viewList" : "viewBlocks")}
               </button>

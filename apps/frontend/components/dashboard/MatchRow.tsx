@@ -53,8 +53,12 @@ export type MatchRowProps = {
   action: ReactNode;
 };
 
-/** A strong fit earns the only colour in the column. */
-const STRONG = 0.8;
+/**
+ * A strong fit earns the only colour in the column. Exported because the card
+ * deck colours the same number by the same threshold, and two copies of it
+ * would let a row and a card disagree about the same posting.
+ */
+export const STRONG = 0.8;
 
 export default function MatchRow({
   jobId,

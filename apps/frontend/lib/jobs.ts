@@ -597,3 +597,43 @@ export function preferenceSummary(
   } else if (pref.remote_required === false) parts.push(labels.onsite);
   return parts.join(" · ");
 }
+
+// --- The daily ingest, by day ------------------------------------------------
+
+/**
+ * The calendar day a posting belongs to, as `YYYY-MM-DD`, or `"unknown"`.
+ *
+ * posted_at is absent for most of Workday, whose boards publish "Posted
+ * Yesterday" as a phrase rather than a date; those fall back to last_seen_at,
+ * which is when the catalogue last confirmed them. That fallback is the
+ * reason this is a function and not an inline `.slice(0, 10)`: the dashboard
+ * groups by it and the card deck labels each card with it, and the two must
+ * never disagree about which day a posting arrived on.
+ */
+export function postingDay(job: Pick<JobListItem, "posted_at" | "last_seen_at">): string {
+  const parsed = Date.parse(job.posted_at ?? job.last_seen_at);
+  return Number.isNaN(parsed) ? "unknown" : new Date(parsed).toISOString().slice(0, 10);
+}
+
+export type PostingDay = { day: string; items: JobListItem[] };
+
+/**
+ * Postings arriving on the same calendar day, newest day first, each day in
+ * the order given.
+ *
+ * `"unknown"` sorts ahead of every real day, because the sort is a plain
+ * string comparison and `"u"` outranks any digit. That is the behaviour the
+ * Matches tab has shipped with since the day-grouping landed, so it is kept
+ * deliberately rather than quietly corrected: the list and the deck read this
+ * one function, and a change here moves the undated group on both at once.
+ */
+export function groupByDay(items: JobListItem[]): PostingDay[] {
+  const by = new Map<string, JobListItem[]>();
+  for (const job of items) {
+    const day = postingDay(job);
+    by.set(day, [...(by.get(day) ?? []), job]);
+  }
+  return [...by.entries()]
+    .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+    .map(([day, rows]) => ({ day, items: rows }));
+}

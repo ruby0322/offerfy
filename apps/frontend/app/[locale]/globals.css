@@ -2351,6 +2351,74 @@ textarea {
   opacity: 1;
 }
 
+/* A row of choices with exactly one of them on: list-or-cards over a list.
+
+   ON IS MARKED THE WAY THE TABS MARK IT: the label goes to --ink while the
+   others stay --muted, and clay is the mark around it, not the label colour.
+   This used to fill the chosen option with solid --ink, which put the
+   heaviest block of colour on a warm paper page onto its smallest control --
+   a 12px label reading as a bar of black. The border-radius is deliberately
+   `--radius` inside a `--radius + 2px` track, so the inner corner follows the
+   outer one instead of sitting square inside a rounded box.
+
+   The ON rule keys off `aria-pressed="true"`, which is the attribute that
+   already has to be there for a screen reader. One source of truth for "this
+   one is chosen": a button that looks on but does not say so is a bug this
+   stylesheet cannot express.
+
+   Not every pick-one control wants this. The applications table's filter row
+   keeps its own solid pills: they sit above a table whose rows already carry
+   outlined stage pills in clay and green, and a third outlined thing there
+   reads as a fourth status rather than as the filter that is on. */
+.rr-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--rule);
+  border-radius: calc(var(--radius) + 2px);
+  background: var(--hover);
+}
+
+.rr-switch > button {
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.3rem 0.75rem;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.rr-switch > button:hover {
+  color: var(--ink);
+}
+
+.rr-switch > button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--clay) 10%, var(--sheet));
+  color: var(--ink);
+  /* An inset ring rather than a border: a real border on the inner option
+     would shift every label by a pixel as the choice moves. */
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--clay) 38%, var(--rule));
+}
+
+.rr-switch > button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--clay) 35%, transparent);
+  outline-offset: 1px;
+}
+
+/* A thumb, not a narrow window -- the same test .rr-btn-sm makes. 28px is
+   right under a mouse and too small to hit. */
+@media (pointer: coarse) {
+  .rr-switch > button {
+    min-height: 40px;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.8125rem;
+  }
+}
+
 .rr-input {
   width: 100%;
   border: 1px solid var(--rule);

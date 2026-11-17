@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  groupByDay,
   hasJobFilters,
   hasValue,
   jobFilterCount,
   jobListParams,
   jobPageQuery,
   jobQueryString,
+  postingDay,
   toggleValue,
   valueList,
+  type JobListItem,
 } from "./jobs";
 
 test("jobListParams carries every facet", () => {
@@ -212,4 +215,65 @@ test("remote tri-state maps to select values and back without loss", async () =>
   }
   assert.equal(remoteToValue(false), "false");
   assert.strictEqual(valueToRemote(""), null);
+});
+
+// --- The daily ingest, by day ------------------------------------------------
+
+function posting(over: Partial<JobListItem> & { id: string }): JobListItem {
+  return {
+    source: "greenhouse",
+    company: "Acme",
+    title: "Engineer",
+    location: null,
+    remote: null,
+    apply_url: "https://example.test/apply",
+    source_url: "https://example.test/job",
+    posted_at: null,
+    last_seen_at: "2026-11-17T06:00:00Z",
+    is_active: true,
+    ...over,
+  };
+}
+
+test("postingDay prefers posted_at and falls back to last_seen_at", () => {
+  assert.equal(
+    postingDay(posting({ id: "a", posted_at: "2026-11-15T23:00:00Z" })),
+    "2026-11-15",
+  );
+  // Most of Workday publishes "Posted Yesterday" as a phrase and no date, so
+  // the day has to come from when the catalogue last confirmed the posting.
+  assert.equal(postingDay(posting({ id: "b", last_seen_at: "2026-11-16T01:00:00Z" })), "2026-11-16");
+  assert.equal(postingDay(posting({ id: "c", posted_at: "not a date" })), "unknown");
+});
+
+test("groupByDay puts the newest day first and keeps the API order inside a day", () => {
+  const days = groupByDay([
+    posting({ id: "old", posted_at: "2026-11-15T09:00:00Z" }),
+    posting({ id: "new-1", posted_at: "2026-11-17T09:00:00Z" }),
+    posting({ id: "new-2", posted_at: "2026-11-17T02:00:00Z" }),
+  ]);
+  assert.deepEqual(
+    days.map((d) => d.day),
+    ["2026-11-17", "2026-11-15"],
+  );
+  // Not re-sorted within the day: the API already ordered them, and the card
+  // deck flattens this list, so a second ordering here would make the deck
+  // and the rows disagree about which posting comes next.
+  assert.deepEqual(days[0].items.map((j) => j.id), ["new-1", "new-2"]);
+});
+
+test("groupByDay files an undated posting under one group, ahead of the dated ones", () => {
+  // Documented behaviour, not an accident: "unknown" outranks any digit in a
+  // string comparison. Both the rows and the deck read this one function, so
+  // the undated group leads on both or on neither.
+  const days = groupByDay([
+    posting({ id: "dated", posted_at: "2026-11-17T09:00:00Z" }),
+    posting({ id: "undated-1", posted_at: "whenever", last_seen_at: "nope" }),
+    posting({ id: "undated-2", posted_at: null, last_seen_at: "nope" }),
+  ]);
+  assert.deepEqual(
+    days.map((d) => d.day),
+    ["unknown", "2026-11-17"],
+  );
+  assert.deepEqual(days[0].items.map((j) => j.id), ["undated-1", "undated-2"]);
 });
