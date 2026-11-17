@@ -17,7 +17,7 @@ const ROW_CLASS = ["landing-rail-a", "landing-rail-b", "landing-rail-c"];
  * employers those are changes with every ingest pass. So a chip only points
  * at the page when the live set says that page exists, and otherwise at the
  * filtered catalogue, which renders whatever is there, including nothing.
- * Today that is one chip of 91 (Eventbrite); tomorrow it is a different one.
+ * Today that is one chip of 95 (Eventbrite); tomorrow it is a different one.
  *
  * `pages` empty means the catalog could not be reached, not that no employer
  * has a page, so every chip falls back rather than every chip 404ing.
@@ -46,7 +46,7 @@ function Chip({
       className={`landing-chip${dup ? " landing-chip-dup" : ""}`}
       // The second copy of the row exists only so the loop has no seam. It is
       // the same link twice, so it is hidden from assistive tech and taken out
-      // of the tab order -- otherwise tabbing the wall visits all 90 employers
+      // of the tab order -- otherwise tabbing the wall visits all 95 employers
       // twice. Same pattern as the jobs marquee.
       tabIndex={dup ? -1 : undefined}
       aria-hidden={dup || undefined}
@@ -87,7 +87,7 @@ export default async function CompanyWall() {
           page, and hiding interactive content from assistive tech while
           leaving it clickable is the worst of both. The note below still
           states the same fact in prose for anyone who does not want to walk
-          88 links. */}
+          95 links. */}
       <div className="landing-rail">
         {wallRows(ROWS).map((row, index) => (
           <div key={index} className={`landing-rail-row ${ROW_CLASS[index % ROWS]}`}>
