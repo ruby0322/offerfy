@@ -435,6 +435,31 @@ export async function fetchJobEmployerCount(): Promise<number | null> {
   return typeof raw?.total === "number" ? raw.total : null;
 }
 
+/**
+ * The slug of every employer with something open.
+ *
+ * Same request `fetchJobEmployerCount` makes -- same path, same revalidate --
+ * so a page that wants both the count and the set pays for one fetch, not
+ * two. It exists because an employer page is a 404 when that employer has
+ * nothing open, so a static list of names (the landing wall) cannot know
+ * which of its own links are real without asking.
+ *
+ * Empty when the catalog cannot be reached, which callers must read as "no
+ * link is known to be good" rather than "no employer has a page".
+ */
+export async function fetchJobEmployerSlugs(): Promise<Set<string>> {
+  const raw = await backendJsonCached<Partial<JobEmployerList>>(
+    "/v1/jobs/employers",
+    EMPLOYER_COUNT_TTL,
+  );
+  if (!raw || !Array.isArray(raw.items)) return new Set();
+  return new Set(
+    raw.items
+      .map((item) => item?.slug)
+      .filter((slug): slug is string => typeof slug === "string" && slug.length > 0),
+  );
+}
+
 /** One employer, or null when no live employer claims that slug (a 404). */
 export async function fetchJobEmployer(slug: string): Promise<JobEmployerProfile | null> {
   const raw = await backendJson<Partial<JobEmployerProfile>>(
