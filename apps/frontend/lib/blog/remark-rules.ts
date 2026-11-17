@@ -45,6 +45,23 @@ export function remarkBlogRules() {
           const alt = attr(jsx, "alt");
           const src = attr(jsx, "src");
           const variant = attr(jsx, "variant");
+          const width = attr(jsx, "width");
+          const ratio = attr(jsx, "ratio");
+          // Both land in a CSS custom property, where a bad value is not an
+          // error -- the declaration is simply dropped and the figure
+          // silently keeps the default. Checked here so that shows up as a
+          // failed build rather than as a figure that ignored its own props.
+          if (width != null && !/^\d+(\.\d+)?(rem|em|px|%|ch)$/.test(width)) {
+            throw new Error(`Figure width must be a CSS length (e.g. 18rem): ${width}`);
+          }
+          if (ratio != null) {
+            if (variant !== "peek") {
+              throw new Error("Figure ratio only applies to variant=\"peek\"");
+            }
+            if (!/^\d+(\.\d+)?(\s*\/\s*\d+(\.\d+)?)?$/.test(ratio)) {
+              throw new Error(`Figure ratio must look like "16 / 9" or "1.5": ${ratio}`);
+            }
+          }
           // Checked here rather than left to default: a typo in the variant
           // would otherwise render the full image and look like the crop was
           // never asked for.

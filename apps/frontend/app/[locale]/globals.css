@@ -921,6 +921,12 @@ textarea {
 
 .blog-figure {
   margin: 1.25rem 0 0;
+  /* Narrowable by the caller (Figure's `width`). At the default it fills the
+     column and the auto margins below do nothing, so every existing figure
+     keeps the layout it had. Declared after the shorthand, which would
+     otherwise reset the inline margins to 0. */
+  max-width: var(--blog-figure-width, 100%);
+  margin-inline: auto;
 }
 
 .blog-figure img {
@@ -939,9 +945,12 @@ textarea {
    taller, which is what makes this a crop rather than a letterbox. */
 .blog-figure-peek {
   position: relative;
-  max-width: 40rem;
+  max-width: var(--blog-figure-width, 40rem);
   margin-inline: auto;
-  aspect-ratio: 1664 / 600;
+  /* The crop is the box. The ratio has to be chosen against the image's own
+     proportions, so the caller sets it (Figure's `ratio`); the default is
+     the one the OpenAI credits email was cropped to. */
+  aspect-ratio: var(--blog-figure-ratio, 1664 / 600);
   min-height: 0;
   overflow: hidden;
   border: 1px solid var(--rule);
