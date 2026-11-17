@@ -35,6 +35,17 @@
   /* Text selection. One formula for both themes -- --clay and --sheet both
      flip in .dark -- and it has to stay readable under --ink either way. */
   --selection: color-mix(in srgb, var(--clay) 32%, var(--sheet));
+  /* The hero's OpenAI for Startups pill. --badge-glass is the one cool accent
+     in a warm palette, on purpose: glass reads cool, and tinting the pill with
+     --clay would have made it a fourth terracotta chip rather than a different
+     material. The two sheen values are literal white alphas rather than a
+     color-mix formula because the specular highlight on glass is white light,
+     not a lighter version of the surface -- and it has to all but vanish on a
+     dark sheet, which .dark does below. */
+  --badge-glass: #3d5a80;
+  --badge-sheen: rgba(255, 255, 255, 0.72);
+  --badge-sheen-soft: rgba(255, 255, 255, 0.14);
+  --badge-rim: rgba(255, 255, 255, 0.55);
   --success: #2f6f5e;
   /* The state between "fine" and --destructive: something is waiting on the
      person, and nothing is broken. An application quiet for 18 days and a
@@ -90,6 +101,12 @@
   --success: #7dba9a;
   /* Lifted and desaturated for the dark sheet, the same move --success makes. */
   --warn: #d9a85a;
+  /* Lifted for the dark sheet, and the sheen drops to a trace: a 0.72 white
+     highlight on --sheet #221e1a reads as a grey bar, not as glass. */
+  --badge-glass: #8aa4c8;
+  --badge-sheen: rgba(255, 255, 255, 0.1);
+  --badge-sheen-soft: rgba(255, 255, 255, 0.025);
+  --badge-rim: rgba(255, 255, 255, 0.08);
   --destructive: #ef4444;
   --destructive-foreground: #161411;
   --chart-1: #c47854;
@@ -913,6 +930,42 @@ textarea {
   border: 1px solid var(--rule);
 }
 
+/* A cropped peek at an image rather than the whole of it -- see Figure's
+   `peek` variant. Narrower than the text column, because at full width a
+   screenshot of someone else's UI competes with the post for the page.
+
+   The box takes its height from the ratio and the image overflows it: for a
+   block box `min-height: auto` is 0, so the content cannot push the box
+   taller, which is what makes this a crop rather than a letterbox. */
+.blog-figure-peek {
+  position: relative;
+  max-width: 40rem;
+  margin-inline: auto;
+  aspect-ratio: 1664 / 600;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  /* The screenshot is white in both themes, so the frame and the fade below
+     are white in both too. Paper is paper -- the same call ResumeThumb makes. */
+  background: #fff;
+}
+
+.blog-figure-peek img {
+  /* The frame draws the border; a second one inside it would show as a rule
+     along the top and sides. */
+  border: 0;
+}
+
+.blog-figure-fade {
+  pointer-events: none;
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 4.5rem;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0), #fff);
+}
+
 .blog-cta {
   display: flex;
   flex-wrap: wrap;
@@ -1153,6 +1206,115 @@ textarea {
   display: inline-block;
   flex-shrink: 0;
 }
+
+/* The hero eyebrow row: the programme badge and the kicker on one line, and
+   stacked once they stop fitting. Both hold a label, so neither gets a fixed
+   width -- 「為拚頂尖公司的工程師而做」 is half again as wide as the English
+   kicker and would wrap inside the slot instead of pushing it out. */
+.landing-eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 0.85rem;
+}
+
+/* The OpenAI for Startups credential. The landing page is a flat --paper
+   field, so there is nothing behind this pill for a blur to bend: the glass
+   has to come out of its own layers, and backdrop-filter is only doing real
+   work on the narrow layout where the pill can sit over the editor mock.
+   Three background layers, top down -- a specular sheen across the upper
+   half, a translucent --sheet fill on the diagonal, and a cool tint in the
+   top-left corner -- then a hairline border and an inset top highlight to
+   catch the edge.
+
+   --badge-glass is the one deliberately cool accent in a warm system. Glass
+   reads cool, and a clay-tinted pill would have come out as one more
+   terracotta chip among the CTAs rather than as a different material. */
+.landing-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  /* The label is a proper noun in every locale, so it must not break across
+     lines; the row above wraps instead. */
+  white-space: nowrap;
+  padding: 0.36rem 0.72rem;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+  text-decoration: none;
+  background:
+    /* Specular highlight: a narrow band at the very top edge. A wash over the
+       whole upper half -- the first attempt -- bleached the tints below it and
+       the pill came out as a plain white chip. */
+    linear-gradient(
+      180deg,
+      var(--badge-sheen) 0%,
+      var(--badge-sheen-soft) 20%,
+      transparent 46%
+    ),
+    /* Body: a translucent --sheet, thinning along the diagonal. */
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--sheet) 80%, transparent),
+      color-mix(in srgb, var(--sheet) 32%, transparent)
+    ),
+    /* Refraction: cool entering top-left, the palette's own warm answering at
+       bottom-right. Two tints rather than one is what stops it reading as a
+       flat tinted pill -- real glass does not hold one colour end to end. */
+    radial-gradient(
+      120% 155% at 6% 0%,
+      color-mix(in srgb, var(--badge-glass) 42%, transparent),
+      transparent 66%
+    ),
+    radial-gradient(
+      110% 140% at 100% 100%,
+      color-mix(in srgb, var(--clay) 20%, transparent),
+      transparent 62%
+    );
+  border: 1px solid color-mix(in srgb, var(--badge-glass) 28%, transparent);
+  box-shadow:
+    /* The glass edge is two lines, not one: a lit inner rim inside a tinted
+       outer border. One line alone reads as a button. */
+    inset 0 0 0 1px var(--badge-rim),
+    inset 0 1px 0 var(--badge-sheen),
+    /* The colour pooling at the bottom of a curved body. */
+    inset 0 -7px 14px -9px color-mix(in srgb, var(--badge-glass) 48%, transparent),
+    0 1px 2px color-mix(in srgb, var(--ink) 6%, transparent),
+    0 14px 28px -16px color-mix(in srgb, var(--badge-glass) 75%, transparent);
+  backdrop-filter: blur(10px) saturate(1.25);
+  -webkit-backdrop-filter: blur(10px) saturate(1.25);
+  transition:
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+
+.landing-badge:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 0 0 1px var(--badge-rim),
+    inset 0 1px 0 var(--badge-sheen),
+    inset 0 -7px 14px -9px color-mix(in srgb, var(--badge-glass) 48%, transparent),
+    0 1px 2px color-mix(in srgb, var(--ink) 6%, transparent),
+    0 18px 32px -16px color-mix(in srgb, var(--badge-glass) 90%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-badge,
+  .landing-badge:hover {
+    transform: none;
+    transition: none;
+  }
+}
+
+.landing-badge-mark {
+  width: 0.95rem;
+  height: 0.95rem;
+  flex-shrink: 0;
+  fill: var(--ink);
+}
+
 
 .landing-cta,
 .rr-btn {

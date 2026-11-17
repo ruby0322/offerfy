@@ -260,6 +260,8 @@
   "landing": {
     "hero": {
       "kicker": "为冲顶尖公司的工程师而做",
+      "badge": "OpenAI for Startups",
+      "badgeTitle": "读这则公告",
       "headline": "拿下梦想中的工作",
       "sub": "从找到来自 Stripe、OpenAI、NVIDIA 等 80 多家顶尖公司的合适职位，到改出一份让雇主信服的简历，再到投递与面试进度，Offerfy 全程都在。",
       "ctaJobs": "看看有哪些职位",

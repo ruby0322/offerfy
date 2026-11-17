@@ -44,6 +44,13 @@ export function remarkBlogRules() {
         if (name === "Figure") {
           const alt = attr(jsx, "alt");
           const src = attr(jsx, "src");
+          const variant = attr(jsx, "variant");
+          // Checked here rather than left to default: a typo in the variant
+          // would otherwise render the full image and look like the crop was
+          // never asked for.
+          if (variant != null && variant !== "full" && variant !== "peek") {
+            throw new Error(`Figure variant must be full or peek: ${variant}`);
+          }
           if (!alt?.trim()) {
             throw new Error("Figure requires a non-empty alt");
           }
