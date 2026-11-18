@@ -79,7 +79,13 @@ async def _run(user_id: str) -> None:
         if user is None:
             return
         # Commits its own scores; rolls back and re-raises on a fault.
-        await sweep_user(session, user=user, cap=SWEEP_CAP)
+        bought = await sweep_user(session, user=user, cap=SWEEP_CAP)
+        if bought is None:
+            # Progress has no "running" to say so, so this line is the only
+            # signal behind a person sitting at "0 of N" forever.
+            logger.warning(
+                "first run bought nothing, facts unbuildable: user=%s", user_id
+            )
     except Exception:
         logger.exception("first run failed: user=%s", user_id)
         session.rollback()

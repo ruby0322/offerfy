@@ -157,12 +157,57 @@ def test_over_the_ceiling_it_says_paused_and_promises_no_time(client, db_session
 
 
 @pytest.mark.anyio
-async def test_two_runs_racing_for_the_same_pairs_leave_one_row_each(db_session, client, monkeypatch):
+async def test_a_run_that_cannot_build_facts_logs_the_user(db_session, client, monkeypatch, caplog):
+    user = _user(db_session)
+    _pref(db_session, user)
+    _posting(db_session)
+
+    async def no_facts(db, user, **kw):
+        return None
+
+    monkeypatch.setattr(matches, "sweep_user", no_facts)
+    with caplog.at_level("WARNING"):
+        await matches._run(user.id)
+    assert any(user.id in r.getMessage() and r.levelname == "WARNING" for r in caplog.records)
+    assert _count(user.id) == 0
+
+
+@pytest.mark.anyio
+async def test_two_runs_racing_for_the_same_pairs_leave_one_row_each(
+    db_session, client, monkeypatch, caplog
+):
+    """Both runs must classify every pair as stale BEFORE either writes back.
+
+    With a scorer that never yields, gather() runs them one after the other and
+    the second finds the cache full, so the upsert's conflict path is never
+    reached. The barrier holds each scorer until both have arrived; both have
+    then already classified, and both write the same pairs.
+    """
+    from app.services.jobs import score_cache
+
     user = _user(db_session)
     _pref(db_session, user)
     _facts(db_session, user)
     for i in range(3):
         _posting(db_session, age_minutes=i)
-    Seams(monkeypatch)
+    seams = Seams(monkeypatch)
+    inner = score_cache.score_candidates
+    arrived = 0
+    both_here = asyncio.Event()
+
+    async def barrier(db, **kw):
+        nonlocal arrived
+        arrived += 1
+        if arrived == 2:
+            both_here.set()
+        await asyncio.wait_for(both_here.wait(), timeout=5)
+        return await inner(db, **kw)
+
+    monkeypatch.setattr(score_cache, "score_candidates", barrier)
     await asyncio.gather(matches._run(user.id), matches._run(user.id))
+    # _run swallows a fault into a log line, so a conflict that raised would
+    # still leave the winner's rows behind. Neither run may have failed.
+    assert not [r for r in caplog.records if "first run failed" in r.getMessage()]
+    # Both really bought, rather than the second finding the first's rows.
+    assert len(seams.scored_jobs) == 2
     assert _count(user.id) == 3
