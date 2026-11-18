@@ -2,7 +2,6 @@ from sqlalchemy import event
 
 from app.config import get_settings
 from app.deps import SESSION_COOKIE, _sign
-from app.jobs.match_sweep import freshness_cutoff
 from app.models import Application, DisclosureEvent, JobPreference, Resume, User
 from app.services.jobs import applications as service
 from app.services.revisions import pin_current_draft, set_draft_source

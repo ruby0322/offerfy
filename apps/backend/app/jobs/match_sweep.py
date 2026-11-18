@@ -48,14 +48,14 @@ built: see `_exclusions` for why neither digest track wants it.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import json
 
-from sqlalchemy import false, func, nulls_last, or_, select
+from sqlalchemy import and_, exists, false, func, nulls_last, or_, select
 from sqlalchemy.orm import Query, Session
 
-from app.models import Application, Job, JobFacets, JobPreference
+from app.models import Application, Job, JobFacets, JobPreference, JobScore
 from app.services.jobs.enrich import (
     default_taxonomy,
     taxonomy_path,
@@ -281,26 +281,13 @@ def prefilter_query(db: Session, pref: JobPreference) -> Query:
     return _exclusions(q, pref)
 
 
-def count_matches(
-    db: Session, pref: JobPreference, *, since: datetime | None = None
-) -> int:
-    """How many live postings this preference matches.
-
-    `since` narrows to postings the catalogue first saw after that moment, for
-    the dashboard's "new since your last visit" line. It keys on
-    `first_seen_at` rather than `posted_at` deliberately: most of Workday
-    publishes "Posted Yesterday" as a phrase and carries no date at all, so a
-    posted_at window would silently drop a whole provider. first_seen_at is
-    when *we* learned of it, which is also the honest reading of "new to you".
-    """
+def count_matches(db: Session, pref: JobPreference) -> int:
+    """How many live postings this preference matches."""
     # Harmlessly redundant since the guard moved into prefilter_query; kept so
     # the cheap answer costs no round trip.
     if constrains_nothing(pref):
         return 0
-    q = prefilter_query(db, pref)
-    if since is not None:
-        q = q.filter(Job.first_seen_at > since)
-    return q.count()
+    return prefilter_query(db, pref).count()
 
 
 def match_preview(db: Session, pref: JobPreference, limit: int) -> list[Job]:
@@ -321,3 +308,73 @@ def match_preview(db: Session, pref: JobPreference, limit: int) -> list[Job]:
         .limit(limit)
         .all()
     )
+
+
+def arrival_rows(
+    db: Session,
+    user_id: str,
+    pref: JobPreference,
+    since: datetime | None,
+    limit: int,
+) -> list[tuple[Job, JobScore | None]]:
+    """What is new to this person: (posting, score-or-None) pairs, newest first.
+
+    An arrival is one of two things, and they come from different places.
+
+    1. A score row for this person whose scored_at is after `since`. No
+       preference filter and no is_active filter: we scored it because it
+       matched at the time, which is a fact about what happened to them, and
+       editing the preference later does not un-happen it. The posting travels
+       as it is now, so one that closed since being scored comes back with
+       is_active False for the page to say so -- the inactive case is not an
+       exception, it is just what the row says.
+    2. A posting the CURRENT preference matches (the prefilter, the only place
+       the current preference belongs) that this person has no score row for
+       yet. A broad preference fills in over several sweep passes, so for up to
+       a day the prefilter holds postings job_scores has not reached; hiding
+       them would make match_count disagree with the list under it, and
+       showing them unlabelled would read as "poor match" rather than "not
+       looked at yet". They come back with score None. They are windowed on
+       first_seen_at, so a posting already seen unscored is not "new" again
+       until it has a score (when it becomes kind 1).
+
+    `since=None` is a first visit: everything, up to `limit`.
+    """
+    scored = (
+        db.query(Job, JobScore)
+        .join(JobScore, and_(JobScore.job_id == Job.id, JobScore.user_id == user_id))
+    )
+    if since is not None:
+        scored = scored.filter(JobScore.scored_at > since)
+    rows: list[tuple[Job, JobScore | None]] = [
+        (job, score)
+        for job, score in scored.order_by(JobScore.scored_at.desc(), Job.id.desc())
+        .limit(limit)
+        .all()
+    ]
+
+    matching = prefilter_query(db, pref).with_entities(Job.id).subquery()
+    waiting = db.query(Job).filter(
+        Job.id.in_(select(matching.c.id)),
+        ~exists().where(
+            and_(JobScore.job_id == Job.id, JobScore.user_id == user_id)
+        ),
+    )
+    if since is not None:
+        waiting = waiting.filter(Job.first_seen_at > since)
+    rows.extend(
+        (job, None)
+        for job in waiting.order_by(Job.first_seen_at.desc(), Job.id.desc())
+        .limit(limit)
+        .all()
+    )
+
+    def recency(pair):
+        job, score = pair
+        return score.scored_at if score is not None else job.first_seen_at
+
+    def aware(dt):
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+    rows.sort(key=lambda pair: (aware(recency(pair)), pair[0].id), reverse=True)
+    return rows[:limit]

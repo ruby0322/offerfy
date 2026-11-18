@@ -191,18 +191,56 @@ def test_the_client_since_parameter_is_gone(client, db_session):
     assert [a["job_id"] for a in body["arrivals"]] == [job.id]
 
 
+def test_the_clamp_itself(client):
+    # Pinned directly: the stamp writes `now` regardless, so no response-level
+    # assertion can tell a clamped marker from an unclamped one.
+    from app.routers.dashboard import _window_start
+
+    now = datetime.now(timezone.utc)
+    assert _window_start(now + timedelta(days=30), now) == now
+    assert _window_start(now - timedelta(days=1), now) == now - timedelta(days=1)
+    assert _window_start(None, now) is None
+
+
 def test_a_failed_stamp_does_not_take_down_the_page(client, db_session, monkeypatch):
-    from app.routers import dashboard
+    from sqlalchemy.orm import Session
 
     user = _ready(client, db_session, "sub-arr-stampfail")
+    job = _posting(db_session)
+    real_commit = Session.commit
 
-    def boom(*a, **k):
-        raise RuntimeError("db hiccup")
+    def failing_commit(self):
+        # Fail the commit with the stamp pending, so the rollback path runs
+        # against a genuinely dirty session.
+        if any(isinstance(o, User) for o in self.dirty):
+            raise RuntimeError("db hiccup")
+        return real_commit(self)
 
-    monkeypatch.setattr(dashboard, "stamp_matches_seen", boom)
-    body = _get(client)
+    monkeypatch.setattr(Session, "commit", failing_commit)
+    res = client.get("/v1/dashboard")
+    monkeypatch.undo()
+    assert res.status_code == 200
+    body = res.json()
     assert body["first_visit"] is True
+    assert [a["job_id"] for a in body["arrivals"]] == [job.id]
+    assert body["preference"] is not None and body["match_count"] == 1
     assert _seen_at(db_session, user) is None
+
+
+def test_a_score_outlives_the_preference_that_produced_it(client, db_session):
+    # An arrival is a score row after the marker, whatever the preference says
+    # now: it was scored because it matched then.
+    user = _ready(client, db_session, "sub-arr-pref-edit")
+    job = _posting(db_session)
+    _score(db_session, user, job, _ago(hours=1))
+    user.matches_seen_at = _ago(hours=5)
+    db_session.query(JobPreference).filter_by(user_id=user.id).update(
+        {"target_functions": "|design|"}
+    )
+    db_session.commit()
+
+    (arrival,) = _get(client)["arrivals"]
+    assert arrival["job_id"] == job.id and arrival["tier"] == "Strong fit"
 
 
 def test_the_digest_still_travels_and_is_still_stamped_opened(client, db_session):

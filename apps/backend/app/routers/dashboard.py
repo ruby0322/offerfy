@@ -4,9 +4,10 @@ Composition only: every number comes from a reader that already exists and is
 projected by the same function the single-purpose route uses. Nothing here
 calls a model or rebuilds resume facts; a page visit must not spend someone's
 credits. The writes a GET makes are two stamps. The first is the digest's
-opened_at, once: the digest build's eligibility gate reads it, so without the stamp nobody ever
-counts as engaged and the digest stops being built for everyone. The second
-is users.matches_seen_at, every visit, after the arrivals it bounds are read.
+opened_at, once: the digest build's eligibility gate reads it, so without the
+stamp nobody ever counts as engaged and the digest stops being built for
+everyone. The second is users.matches_seen_at, every visit, written last, after
+the response is built.
 """
 
 from __future__ import annotations
@@ -17,12 +18,11 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import require_user
-from app.jobs.match_sweep import count_matches, match_preview, prefilter_query
+from app.jobs.match_sweep import arrival_rows, count_matches, match_preview
 from app.models import Job, JobScore, User
 from app.routers.applications import application_out
 from app.services.jobs.search import iso, list_item
@@ -111,74 +111,21 @@ def _window_start(marker: datetime | None, now: datetime) -> datetime | None:
     return min(marker, now)
 
 
-def arrivals(
-    db: Session, user: User, pref, since: datetime | None
-) -> list[MatchArrivalOut]:
-    """What is new to this person: scored since `since`, plus not-yet-scored.
-
-    A LEFT JOIN from the postings to this person's score rows, not an inner
-    join over scores. A broad preference fills in over several sweep passes, so
-    for up to a day the prefilter holds postings job_scores has no row for;
-    dropping them would make match_count disagree with the list under it, and
-    showing them unlabelled would read as "poor match" rather than "not looked
-    at yet". Those rows carry tier=None and scored_at=None.
-
-    The window keys on scored_at for a scored posting (the moment the answer
-    arrived, which is what is new to the reader) and on first_seen_at for an
-    unscored one (so a posting they already saw unscored is not "new" again
-    until it has a score). `since=None` is a first visit: everything.
-
-    Visible means in the prefilter, or scored-and-since-closed. The prefilter
-    requires is_active, so a posting that closed after being scored would
-    otherwise vanish; it travels with job_is_active=False instead, and the
-    page can say it closed. A score for a posting the current preference no
-    longer matches stays out, so editing the preference does not resurrect the
-    old one's arrivals.
-    """
-    matching = prefilter_query(db, pref).with_entities(Job.id).subquery()
-    q = (
-        db.query(Job, JobScore)
-        .outerjoin(
-            JobScore,
-            and_(JobScore.job_id == Job.id, JobScore.user_id == user.id),
-        )
-        .filter(
-            or_(
-                Job.id.in_(select(matching.c.id)),
-                and_(JobScore.id.isnot(None), Job.is_active.is_(False)),
-            )
-        )
+def arrival_out(job: Job, score: JobScore | None) -> MatchArrivalOut:
+    """Project one arrival; score is None for a posting not yet scored."""
+    return MatchArrivalOut(
+        job_id=job.id,
+        job_title=job.title,
+        company=job.company,
+        apply_url=job.apply_url,
+        job_is_active=job.is_active,
+        location=job.location,
+        tier=score.tier if score else None,
+        fit_score=score.fit_score if score else None,
+        reason=score.reason if score else None,
+        gap=score.gap if score else None,
+        scored_at=iso(score.scored_at) if score else None,
     )
-    if since is not None:
-        q = q.filter(
-            or_(
-                and_(JobScore.id.isnot(None), JobScore.scored_at > since),
-                and_(JobScore.id.is_(None), Job.first_seen_at > since),
-            )
-        )
-    rows = (
-        q.order_by(
-            func.coalesce(JobScore.scored_at, Job.first_seen_at).desc(), Job.id.desc()
-        )
-        .limit(ARRIVALS_CAP)
-        .all()
-    )
-    return [
-        MatchArrivalOut(
-            job_id=job.id,
-            job_title=job.title,
-            company=job.company,
-            apply_url=job.apply_url,
-            job_is_active=job.is_active,
-            location=job.location,
-            tier=score.tier if score else None,
-            fit_score=score.fit_score if score else None,
-            reason=score.reason if score else None,
-            gap=score.gap if score else None,
-            scored_at=iso(score.scored_at) if score else None,
-        )
-        for job, score in rows
-    ]
 
 
 def stamp_matches_seen(db: Session, user: User, now: datetime) -> None:
@@ -199,7 +146,10 @@ def get_dashboard(
     previous = user.matches_seen_at
     first_visit = previous is None
     window = _window_start(previous, now)
-    new_arrivals = arrivals(db, user, pref, window)
+    new_arrivals = [
+        arrival_out(job, score)
+        for job, score in arrival_rows(db, user.id, pref, window, ARRIVALS_CAP)
+    ]
     last = last_disclosed_at(db, user)
     digest = digest_service.latest_for_user(db, user=user)
     if digest is not None:
@@ -222,20 +172,7 @@ def get_dashboard(
             )
             db.rollback()
             digest = digest_service.latest_for_user(db, user=user)
-    user_id = user.id
-    try:
-        stamp_matches_seen(db, user, now)
-    except Exception:
-        # Same treatment as the digest stamp above, same reason: a lost stamp
-        # must not take down the page, but it silently leaves the marker
-        # behind, so the same arrivals would be called new again next visit.
-        logger.exception(
-            "dashboard: matches_seen_at could not be stamped for user %s; "
-            "serving the dashboard anyway (arrivals will repeat)",
-            user_id,
-        )
-        db.rollback()
-    return DashboardOut(
+    out = DashboardOut(
         preference=preference_out(db, user, pref),
         match_count=count_matches(db, pref),
         arrivals=new_arrivals,
@@ -251,3 +188,22 @@ def get_dashboard(
         ),
         digest=digest_out(digest) if digest is not None else None,
     )
+    # Stamped last, after the whole response is built. A failed stamp then has
+    # nothing left to take down: no reader is still ahead of the rollback with
+    # an expired session, and the commit's expire-everything does not make each
+    # reader re-SELECT on every visit. Read-before-stamp still holds -- the
+    # previous marker was read at the top.
+    user_id = user.id
+    try:
+        stamp_matches_seen(db, user, now)
+    except Exception:
+        # Same treatment as the digest stamp above, same reason: a lost stamp
+        # must not take down the page, but it silently leaves the marker
+        # behind, so the same arrivals would be called new again next visit.
+        logger.exception(
+            "dashboard: matches_seen_at could not be stamped for user %s; "
+            "serving the dashboard anyway (arrivals will repeat)",
+            user_id,
+        )
+        db.rollback()
+    return out
