@@ -427,6 +427,33 @@ class DigestItemOut(BaseModel):
     gap: str | None
 
 
+class MatchArrivalOut(BaseModel):
+    """One posting that arrived since the person last looked.
+
+    Shaped like DigestItemOut (and job_is_active travels for the same reason:
+    a posting can close between being scored and being shown, and a dead role
+    drawn as a live match wastes the click this list exists to earn), but with
+    no track or rank -- an arrival is ordered by recency, not picked.
+
+    tier, fit_score, reason, gap and scored_at are None for a matching posting
+    the sweep has not scored yet, and tier/fit_score/reason/gap are also None
+    on a refused score. A None tier reads as "not looked at yet", never as a
+    poor match; the page must say so rather than draw a blank.
+    """
+
+    job_id: str
+    job_title: str
+    company: str
+    apply_url: str
+    job_is_active: bool
+    location: str | None
+    tier: str | None
+    fit_score: float | None
+    reason: str | None
+    gap: str | None
+    scored_at: str | None
+
+
 class DigestOut(BaseModel):
     status: str
     built_at: str
@@ -438,10 +465,16 @@ class DigestOut(BaseModel):
 class DashboardOut(BaseModel):
     preference: JobPreferenceOut
     match_count: int
-    # How many of those the catalogue first saw since the `since` the caller
-    # passed. None when it passed none -- a first visit has no window, and 0
-    # would claim "nothing new" where the truth is "we were not asked".
-    new_match_count: int | None = None
+    # What was scored for this person since they last looked, plus matching
+    # postings the sweep has not reached yet (tier and score None). Measured by
+    # the server from users.matches_seen_at, never from a caller-supplied
+    # marker: two sources for one number is how they disagree.
+    arrivals: list[MatchArrivalOut]
+    # True exactly when matches_seen_at was NULL, i.e. this is the first time
+    # the person has looked. Distinct from an empty `arrivals`, which is what a
+    # returning person with nothing new gets; the page must not greet them the
+    # same way.
+    first_visit: bool
     # The first few of those matches, in the same shape /v1/jobs returns, so
     # the dashboard can render them with the jobs page's own row. Required, and
     # it must stay required: a writer exists (routers/dashboard.py fills it).

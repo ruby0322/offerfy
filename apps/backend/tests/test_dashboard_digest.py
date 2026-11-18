@@ -153,12 +153,17 @@ def test_marking_opened_is_the_only_write_a_dashboard_GET_makes(client, db_sessi
     _item(db_session, digest, _job(db_session, "w"))
     res, writes = _writes(db_session, lambda: client.get("/v1/dashboard"))
     assert res.status_code == 200
-    assert len(writes) == 1, writes
-    stmt = writes[0].lstrip().upper()
-    assert stmt.startswith("UPDATE DIGESTS SET OPENED_AT"), writes
-    # Once opened, a visit is back to writing nothing at all.
+    # The digest stamp, plus the one every visit makes: users.matches_seen_at.
+    assert len(writes) == 2, writes
+    stmts = sorted(w.lstrip().upper() for w in writes)
+    assert stmts[0].startswith("UPDATE DIGESTS SET OPENED_AT"), writes
+    assert stmts[1].startswith("UPDATE USERS SET MATCHES_SEEN_AT"), writes
+    # Once opened, a visit writes only the seen-stamp.
     res, writes = _writes(db_session, lambda: client.get("/v1/dashboard"))
-    assert res.status_code == 200 and writes == []
+    assert res.status_code == 200
+    assert len(writes) == 1 and writes[0].lstrip().upper().startswith(
+        "UPDATE USERS SET MATCHES_SEEN_AT"
+    ), writes
 
 
 def test_the_query_count_stays_flat_as_items_grow(client, db_session):

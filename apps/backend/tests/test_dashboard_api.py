@@ -12,7 +12,7 @@ from tests.test_match_sweep import _posting
 from tests.test_talent_api import LIST, _bearer, _candidate, _key
 
 TOP_LEVEL = {
-    "preference", "match_count", "new_match_count", "matches", "applications",
+    "preference", "match_count", "arrivals", "first_visit", "matches", "applications",
     "resume_health", "employer_views", "digest",
 }
 HEALTH_KEYS = {
@@ -100,11 +100,21 @@ def _writes(db_session, call):
     return response, writes
 
 
+def _minus_the_seen_stamp(writes):
+    """Drop the one write every dashboard GET makes -- users.matches_seen_at --
+    asserting it is exactly one, so the exception cannot quietly grow."""
+    stamps = [w for w in writes if w.lstrip().upper().startswith("UPDATE USERS SET MATCHES_SEEN_AT")]
+    assert len(stamps) == 1, writes
+    return [w for w in writes if w not in stamps]
+
+
 def test_a_get_writes_nothing(client, db_session):
     # Pins "the transient seed stays transient" and "a visit spends no
     # credits" (a facts rebuild or a metered call would have to write).
     #
-    # One exception, named: with a digest present, the GET stamps that digest's
+    # Two exceptions, named. Every GET stamps users.matches_seen_at (the
+    # server-side "since you last looked"; filtered out below). And with a
+    # digest present, the GET stamps that digest's
     # opened_at (the build's eligibility gate reads it). Nothing else may be
     # written; test_marking_opened_is_the_only_write_a_dashboard_GET_makes in
     # test_dashboard_digest.py pins that exception's exact shape. This test
@@ -113,7 +123,7 @@ def test_a_get_writes_nothing(client, db_session):
     user = _signed_in(client, db_session)
     res, writes = _writes(db_session, lambda: client.get("/v1/dashboard"))
     assert res.status_code == 200
-    assert writes == []
+    assert _minus_the_seen_stamp(writes) == []
     db_session.expire_all()
     assert db_session.query(JobPreference).filter_by(user_id=user.id).count() == 0
 
@@ -131,7 +141,7 @@ def test_a_get_writes_nothing(client, db_session):
     db_session.commit()
     res, writes = _writes(db_session, lambda: client.get("/v1/dashboard"))
     assert res.status_code == 200 and res.json()["digest"] is not None
-    assert writes == []
+    assert _minus_the_seen_stamp(writes) == []
 
 
 def test_a_populated_person_gets_their_own_non_default_numbers(client, db_session):
@@ -264,53 +274,3 @@ def test_applications_are_unreachable_from_the_employer_path(client, db_session)
         assert job.id not in res.text and job.apply_url not in res.text
         names = {k.lower() for k in keys(res.json())}
         assert not {n for n in names if "applic" in n or "apply" in n or n == "notes"}
-
-
-def test_new_match_count_is_none_until_a_since_is_given(client, db_session):
-    # A first visit has no window. 0 would claim "nothing new" where the truth
-    # is "we were not asked", and the line that reads it would then lie.
-    _signed_in(client, db_session, "sub-since-none")
-    body = client.get("/v1/dashboard").json()
-    assert body["new_match_count"] is None
-
-
-def test_a_malformed_since_is_ignored_rather_than_a_422(client, db_session):
-    # The line it feeds is a nicety; refusing the whole dashboard because a
-    # stale tab sent a bad timestamp would be the wrong trade.
-    _signed_in(client, db_session, "sub-since-bad")
-    res = client.get("/v1/dashboard", params={"since": "not-a-timestamp"})
-    assert res.status_code == 200
-    assert res.json()["new_match_count"] is None
-
-
-def test_since_counts_only_postings_first_seen_after_it(client, db_session):
-    """The window keys on when the catalogue first saw a posting.
-
-    Not on posted_at: most of Workday publishes "Posted Yesterday" as a phrase
-    and carries no date, so a posted_at window would drop a whole provider
-    from "new to you".
-    """
-    from datetime import timedelta
-
-    from tests.test_build_digests import _posting
-
-    user = _signed_in(client, db_session, "sub-since-window")
-    db_session.add(
-        JobPreference(
-            user_id=user.id,
-            target_functions="|backend|",
-            target_locations="|tw|",
-            target_seniority=None,
-            remote_required=None,
-        )
-    )
-    db_session.commit()
-
-    held = _posting(db_session, first_seen=freshness_cutoff() + timedelta(days=1))
-    fresh = _posting(db_session, first_seen=freshness_cutoff() + timedelta(days=5))
-    assert held.id != fresh.id
-
-    cutoff = (freshness_cutoff() + timedelta(days=3)).isoformat()
-    body = client.get("/v1/dashboard", params={"since": cutoff}).json()
-    assert body["match_count"] == 2, "both postings match the preference"
-    assert body["new_match_count"] == 1, "only the one first seen inside the window"
