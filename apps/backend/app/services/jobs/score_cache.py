@@ -1,0 +1,325 @@
+"""A read-through cache over `score.score_candidates`: a score is bought once.
+
+Before this module, every weekly digest build paid a provider for every
+(resume, posting) pair, including the pairs it scored the week before, and
+`strong_fit` deliberately re-shows a posting until the person acts on it, so
+repeat scoring is the normal case. `JobScore` holds one judgement per
+(user, posting); `cached_scores` answers from it and buys only what it lacks.
+That is what makes scoring a new posting four times a day affordable later:
+a pass over an unchanged pool costs nothing. See section 2 of
+docs/superpowers/specs/2026-11-19-onboarding-first-run-design.md.
+
+WHAT "STALE" COMPARES TO. This is the one thing in the module a reader will be
+tempted to "simplify", so it is spelled out.
+
+A cached row is stale when `JobScore.facts_input_hash` differs from the
+`input_hash` on the person's STORED `ResumeFacts` row (the `facts` argument),
+or when `JobScore.description_hash` differs from the posting's current
+`JobFacets.description_hash`. It is NEVER compared against
+`resume_facts.input_hash(...)` recomputed from the live resume.
+`resume_facts.facts_are_stale()` answers a different question -- "has the
+resume moved since the facts were extracted?" -- and it is the natural thing to
+reach for here. Do not. For anyone who has edited their resume since the last
+extraction, the live hash differs from the stored row's, so every pass would
+see every pair as stale, rescore it against the unchanged stored facts, write
+that same stored hash back, and see it as stale again six hours later: 30 pairs
+x 4 passes a day, forever, buying the same answer. The two questions are kept
+apart on purpose. A later task repairs the facts row first, and only then is a
+score's hash compared against a row that has stopped moving. A row scored
+against the old facts is then stale exactly once.
+
+ERROR IS A FAULT, NOT AN ANSWER. `ScoreRun.error` is set only when a miss could
+not be bought: the provider was unreachable, answered with something
+unparseable, or `score_candidates` gave up after a fault. A refusal is an
+answer. `score_candidates` files a declined pair under `refused` and leaves
+`error` None; this module preserves that, because setting `error` for a refusal
+would make one permanently refused posting degrade a person's digest every week
+forever. A refusal is stored (`outcome="refused"`, no tier) and not retried
+while both hashes hold; a changed resume or a rewritten posting makes it a new
+question.
+
+`cap` bounds PURCHASES, not the pool returned. Cached rows come back whatever
+the cap is, and they come back after a provider fault too: 29 real judgements
+plus one posting that could not be bought is a pool the digest can still rank.
+On a fault `score_candidates` returns nothing it bought (a half-scored pool
+would rank survivors against postings never judged), so nothing is written.
+
+One writer. `write_back` and `record_prose` are the only code that writes
+`job_scores`, so the rules below live in one place: an upsert on
+(user_id, job_id) that survives two runs racing for the same pair, and a
+rescore that clears the prose, since a sentence about the old score describes
+a judgement that no longer stands.
+
+A posting with no `JobFacets` row. Staleness needs the posting's hash and
+enrichment may not have reached it yet. Its hash is recorded as "" so it can be
+scored and cached now; when enrichment arrives the hash differs and the pair is
+rescored once, which is the correct answer (the text really was not the text
+that was scored).
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+
+from app.models import JobFacets, JobScore
+from app.services.jobs.score import Scored, ScoreRun, score_candidates
+
+COMPONENTS = ("requirements_met", "seniority_fit", "location_fit", "direction_fit")
+# What ScoreRun.model reads when the rows it carries were scored by more than one
+# model. Digest.model uses the same literal for the same reason.
+MIXED = "mixed"
+NO_FACETS_HASH = ""
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _description_hashes(db, jobs: list[Any]) -> dict[str, str]:
+    ids = [str(j.id) for j in jobs]
+    if not ids:
+        return {}
+    rows = db.execute(
+        select(JobFacets.job_id, JobFacets.description_hash).where(JobFacets.job_id.in_(ids))
+    ).all()
+    return {job_id: digest for job_id, digest in rows}
+
+
+def _existing(db, user_id: str, job_ids: list[str]) -> dict[str, JobScore]:
+    if not job_ids:
+        return {}
+    rows = db.scalars(
+        select(JobScore).where(JobScore.user_id == user_id, JobScore.job_id.in_(job_ids))
+    ).all()
+    return {r.job_id: r for r in rows}
+
+
+def _usable(row: JobScore) -> bool:
+    """A row we can answer from. A scored row that lost its number is not one."""
+    if row.outcome == "refused":
+        return True
+    return row.tier is not None and row.fit_score is not None
+
+
+def _is_fresh(row: JobScore | None, *, facts_hash: str, description_hash: str) -> bool:
+    return (
+        row is not None
+        and row.facts_input_hash == facts_hash
+        and row.description_hash == description_hash
+        and _usable(row)
+    )
+
+
+def _distinct(jobs: list[Any]) -> list[Any]:
+    """Drop a job without an id, or a repeat of one, as score_candidates does."""
+    seen: set[str] = set()
+    out = []
+    for job in jobs:
+        job_id = getattr(job, "id", None)
+        if not job_id or job_id in seen:
+            continue
+        seen.add(job_id)
+        out.append(job)
+    return out
+
+
+def _classify(db, *, user, facts, jobs) -> tuple[list[Any], dict[str, JobScore]]:
+    """(stale jobs in the caller's order, fresh rows by job id)."""
+    hashes = _description_hashes(db, jobs)
+    rows = _existing(db, user.id, [str(j.id) for j in jobs])
+    stale = []
+    fresh: dict[str, JobScore] = {}
+    for job in jobs:
+        job_id = str(job.id)
+        row = rows.get(job_id)
+        current = hashes.get(job_id, NO_FACETS_HASH)
+        if _is_fresh(row, facts_hash=facts.input_hash, description_hash=current):
+            fresh[job_id] = row
+        else:
+            stale.append(job)
+    return stale, fresh
+
+
+def stale_pairs(db, *, user, facts, jobs) -> list[Any]:
+    """The jobs that would have to be bought: no row, a stale row, or a lost number.
+
+    The sweep and the progress read both count with this, so they agree with
+    `cached_scores` about what a purchase is. Order is the caller's.
+    """
+    return _classify(db, user=user, facts=facts, jobs=_distinct(list(jobs)))[0]
+
+
+def _find(db, user_id: str, job_id: str) -> JobScore | None:
+    return db.scalars(
+        select(JobScore).where(JobScore.user_id == user_id, JobScore.job_id == job_id)
+    ).first()
+
+
+def _fill(
+    row: JobScore, *, facts, description_hash: str, model: str, scored: Scored | None
+) -> None:
+    row.facts_input_hash = facts.input_hash
+    row.description_hash = description_hash
+    row.model = model
+    row.scored_at = _now()
+    # Prose written about the previous judgement does not describe this one.
+    row.reason = None
+    row.gap = None
+    row.prose_model = None
+    if scored is None:
+        row.outcome = "refused"
+        row.tier = None
+        row.fit_score = None
+        for name in COMPONENTS:
+            setattr(row, name, None)
+    else:
+        row.outcome = "scored"
+        row.tier = scored.tier
+        row.fit_score = scored.fit_score
+        for name in COMPONENTS:
+            setattr(row, name, scored.components.get(name))
+
+
+def write_back(
+    db, *, user, facts, job, model: str, scored: Scored | None = None, refused: bool = False
+) -> JobScore:
+    """Upsert the answer for one (user, posting). Flushes; the caller commits.
+
+    `scored` records a score; `refused=True` records a refusal (a null tier, so
+    nobody can read a number off it). Exactly one must be given. `model` is the
+    model that gave the answer, which `Scored` does not carry.
+
+    Two runs racing for the same pair is not an error. The insert is wrapped in
+    a savepoint, and if the unique constraint fires the winner's row is updated
+    with this run's answer. Both ran the same question against the same hashes,
+    so either answer is a fair one to keep; one row remains.
+    """
+    if (scored is None) == (not refused):
+        raise ValueError("write_back takes exactly one of scored= or refused=True")
+    job_id = str(job.id)
+    facets = db.get(JobFacets, job_id)
+    description_hash = facets.description_hash if facets is not None else NO_FACETS_HASH
+    fields = dict(facts=facts, description_hash=description_hash, model=model, scored=scored)
+    row = _find(db, user.id, job_id)
+    if row is None:
+        row = JobScore(user_id=user.id, job_id=job_id)
+        _fill(row, **fields)
+        try:
+            with db.begin_nested():
+                db.add(row)
+        except IntegrityError:
+            # The savepoint rollback already dropped the pending row.
+            row = _find(db, user.id, job_id)
+            if row is None:  # the winner vanished between the two statements
+                raise
+            _fill(row, **fields)
+    else:
+        _fill(row, **fields)
+    db.flush()
+    return row
+
+
+def record_prose(
+    db,
+    *,
+    user,
+    job,
+    reason: str | None = None,
+    gap: str | None = None,
+    model: str | None = None,
+    rejected: bool = False,
+) -> JobScore:
+    """Record bought prose, or the fact that its validator rejected it.
+
+    The score stands either way. `rejected=True` marks the row
+    `prose_rejected` and leaves no sentence, so the prose is not re-bought on
+    every pass (the same bargain a refusal makes one level down). Otherwise
+    `reason`, `gap` and the model that wrote them are stored and the outcome
+    stays "scored". `scored_at` is untouched: it dates the score, not the
+    sentence. Flushes; the caller commits.
+
+    The row must already exist and hold a score. Prose without a judgement to
+    be about, or about a refusal, is a caller bug, so it raises rather than
+    quietly inventing a row.
+    """
+    row = _find(db, user.id, str(job.id))
+    if row is None:
+        raise LookupError("no job_scores row to attach prose to")
+    if row.outcome == "refused":
+        raise ValueError("a refused pair has no score to write prose about")
+    if rejected:
+        row.outcome = "prose_rejected"
+        row.reason = None
+        row.gap = None
+    else:
+        row.outcome = "scored"
+        row.reason = reason
+        row.gap = gap
+    row.prose_model = model
+    db.flush()
+    return row
+
+
+def _as_scored(row: JobScore) -> Scored:
+    components = {n: getattr(row, n) for n in COMPONENTS if getattr(row, n) is not None}
+    return Scored(
+        job_id=row.job_id, tier=row.tier, fit_score=row.fit_score, components=components
+    )
+
+
+def _models(rows: list[JobScore], bought: str) -> str:
+    names = {r.model for r in rows}
+    if bought:
+        names.add(bought)
+    if len(names) > 1:
+        return MIXED
+    return next(iter(names), "")
+
+
+async def cached_scores(db, *, user, facts, jobs, cap: int) -> ScoreRun:
+    """Fresh cache rows plus whatever had to be bought, as one `ScoreRun`.
+
+    At most `cap` of the stale pairs, in the caller's order, are bought; the
+    rest are simply absent from the result, to be picked up by a later pass.
+    `usage` is the purchase's alone, since cached rows cost nothing.
+    `model` is the one model behind everything returned, or "mixed".
+    """
+    jobs = _distinct(list(jobs))
+    stale, fresh = _classify(db, user=user, facts=facts, jobs=jobs)
+    to_buy = stale[: max(0, cap)]
+
+    run = ScoreRun()
+    bought_model = ""
+    bought_scored: list[Scored] = []
+    bought_refused: list[str] = []
+    if to_buy:
+        bought = await score_candidates(db, user=user, facts=facts, jobs=to_buy)
+        run.usage = bought.usage
+        run.error = bought.error
+        bought_model = bought.model
+        if bought.error is None:
+            by_id = {str(j.id): j for j in to_buy}
+            for item in bought.scored:
+                write_back(
+                    db, user=user, facts=facts, job=by_id[item.job_id],
+                    model=bought.model, scored=item,
+                )
+                bought_scored.append(item)
+            for job_id in bought.refused:
+                write_back(
+                    db, user=user, facts=facts, job=by_id[job_id],
+                    model=bought.model, refused=True,
+                )
+                bought_refused.append(job_id)
+            # Paid for, so durable before anything the caller does next can fail.
+            db.commit()
+
+    rows = [fresh[str(j.id)] for j in jobs if str(j.id) in fresh]
+    run.scored = [_as_scored(r) for r in rows if r.outcome != "refused"] + bought_scored
+    run.refused = [r.job_id for r in rows if r.outcome == "refused"] + bought_refused
+    run.model = _models(rows, bought_model if bought_scored or bought_refused else "")
+    return run
