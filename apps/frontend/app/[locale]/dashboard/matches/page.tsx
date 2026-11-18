@@ -206,7 +206,9 @@ export default function MatchesPage() {
               ) : null}
             </div>
             {days.length === 0 ? (
-              <p className="mt-2 text-sm text-muted-foreground">{t("matchEmpty")}</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {dash.preference.updated_at !== null ? t("matchNone") : t("matchEmpty")}
+              </p>
             ) : view === "cards" ? (
               <FreshDeck items={dash.matches} totalCount={dash.match_count} />
             ) : (

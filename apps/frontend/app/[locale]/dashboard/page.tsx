@@ -199,7 +199,9 @@ export default function DashboardPage() {
           <MatchesBlock
             digest={dash.digest}
             matches={dash.matches}
-            matchCount={dash.match_count} />
+            matchCount={dash.match_count}
+            hasPreference={dash.preference.updated_at !== null}
+          />
           <section className="rr-card px-5 py-4">
             <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
               <h2 className="text-[0.9375rem] font-semibold tracking-tight">

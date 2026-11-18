@@ -412,6 +412,7 @@
     "tailorExplainer": "主简历是你持续打磨的那一份；定制版是针对单一职位的副本。",
     "matchCount": "{count, plural, other {# 个匹配的职位}}",
     "matchEmpty": "告诉我们你下一步想做什么，就能看到匹配的职位。",
+    "matchNone": "目前没有符合你条件的职位。",
     "editPreferences": "编辑偏好",
     "browseRoles": "浏览所有职位",
     "headingMatches": "匹配的职位",

@@ -31,12 +31,14 @@ type Props = {
   /** The current match set, newest first (dash.matches). */
   matches: JobListItem[];
   matchCount: number;
+  /** A saved preference exists; before that the empty list points at the card. */
+  hasPreference: boolean;
 };
 
 const PICKS = 3;
 const STANDING = 3;
 
-export default function MatchesBlock({ digest, matches, matchCount }: Props) {
+export default function MatchesBlock({ digest, matches, matchCount, hasPreference }: Props) {
   const t = useTranslations("dashboard");
   const format = useFormatter();
 
@@ -118,7 +120,11 @@ export default function MatchesBlock({ digest, matches, matchCount }: Props) {
       <div className="mt-4 min-w-0 border-t border-rule pt-3">
         <p className="text-[0.8125rem] font-bold">{t("standingHeading")}</p>
         {standing.length === 0 ? (
-          <p className="mt-2 text-sm text-muted-foreground">{t("matchEmpty")}</p>
+          // Someone who has already said what they want is not asked to say it
+          // again: with a saved preference an empty list means nothing matches.
+          <p className="mt-2 text-sm text-muted-foreground">
+            {hasPreference ? t("matchNone") : t("matchEmpty")}
+          </p>
         ) : (
           <ul className="mt-1">
             {standing.map((job) => (

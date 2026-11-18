@@ -412,6 +412,7 @@
     "tailorExplainer": "Your master resume is the one you keep improving. A tailored version is a copy aimed at a single job.",
     "matchCount": "{count, plural, one {# match} other {# matches}}",
     "matchEmpty": "Tell us what you want next to see matching roles.",
+    "matchNone": "No live roles match your search right now.",
     "editPreferences": "Edit preferences",
     "browseRoles": "Browse all roles",
     "headingMatches": "Matches",
