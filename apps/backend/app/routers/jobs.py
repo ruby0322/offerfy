@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qsl
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, case, func
@@ -12,6 +13,8 @@ from app.db import get_db
 from app.models import Job, JobFacets
 from app.schemas_jobs import (
     JobCityOptions,
+    JobCountItem,
+    JobCountList,
     JobDetail,
     JobEmployer,
     JobEmployerList,
@@ -54,6 +57,24 @@ PULSE_NEWEST = 5
 PULSE_EMPLOYERS = 5
 FACET_COMPANIES = 24
 CITY_OPTIONS = 12
+# How many filters one /v1/jobs/counts request may ask about.
+#
+# The frontend asks for exactly the six curated boards, so this is slack, not a
+# budget. It is a hard cap because the endpoint is the one place where a single
+# request does N counts: without it, `?spec=` repeated a thousand times is a
+# load amplifier pointed at the database by anyone who can type a URL -- the
+# same shape of problem as the crawler that walked the job filters.
+COUNT_SPECS_MAX = 12
+# Exactly what a board's own query can say. Narrow on purpose: this endpoint
+# takes a filter string from the caller, so anything not listed here is a 422
+# rather than a parameter quietly ignored.
+_COUNT_SCALARS = frozenset({"q", "remote", "country", "region", "seniority", "posted_within_days"})
+_COUNT_LISTS = frozenset({"company", "city", "function"})
+# Accepted and ignored: the frontend builds each spec with the same serializer
+# it uses for /v1/jobs, which always sets a limit and may carry a cursor.
+# Neither means anything to a count, and rejecting them would make the caller
+# keep a second serializer in step with the first.
+_COUNT_IGNORED = frozenset({"limit", "cursor"})
 # Cities named on one employer's page. Their other breakdowns come from closed
 # vocabularies and need no cap; the city fold has a long tail.
 EMPLOYER_CITIES = 8
@@ -157,6 +178,103 @@ def list_jobs(
         next_cursor = _encode_cursor(last.posted_at, last.id)
         rows = rows[:limit]
     return JobList(items=[list_item(row) for row in rows], next_cursor=next_cursor, total=total)
+
+
+def _count_filters(spec: str) -> dict:
+    """One board's filter string, as `filtered_query` keyword arguments.
+
+    The spec is a querystring fragment in exactly the vocabulary /v1/jobs
+    accepts (`seniority=new_grad,junior`, `remote=true`, `function=ml`), which
+    is what lets a board's chip count and that board's own page agree: both
+    numbers come from the same filters through the same builder.
+    """
+    pairs = parse_qsl(spec, keep_blank_values=True)
+    names = {name for name, _ in pairs}
+    unknown = names - _COUNT_SCALARS - _COUNT_LISTS - _COUNT_IGNORED
+    if unknown:
+        raise HTTPException(
+            status_code=422, detail=f"Unknown filter in spec: {', '.join(sorted(unknown))}"
+        )
+    scalars: dict[str, str] = {}
+    lists: dict[str, list[str]] = {}
+    for name, value in pairs:
+        if name in _COUNT_LISTS:
+            lists.setdefault(name, []).append(value)
+        elif name in _COUNT_SCALARS:
+            # Last wins, which is what a scalar query parameter does elsewhere.
+            scalars[name] = value
+
+    remote: bool | None = None
+    raw_remote = scalars.get("remote")
+    if raw_remote in ("true", "false"):
+        remote = raw_remote == "true"
+    elif raw_remote not in (None, ""):
+        raise HTTPException(status_code=422, detail="remote must be true or false")
+
+    within: int | None = None
+    raw_within = scalars.get("posted_within_days")
+    if raw_within:
+        try:
+            within = int(raw_within)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422, detail="posted_within_days must be an integer"
+            ) from exc
+        # Mirrors the ge/le the list endpoint declares, so the two surfaces
+        # cannot disagree about what a sane window is.
+        if not 1 <= within <= 90:
+            raise HTTPException(
+                status_code=422, detail="posted_within_days must be between 1 and 90"
+            )
+
+    return dict(
+        q=scalars.get("q") or None,
+        source=None,
+        remote=remote,
+        # A count of a curated board is a count of what the board shows, and
+        # every board shows live postings only.
+        active=True,
+        company=lists.get("company"),
+        country=scalars.get("country") or None,
+        region=scalars.get("region") or None,
+        city=lists.get("city"),
+        seniority=scalars.get("seniority") or None,
+        function=lists.get("function"),
+        posted_within_days=within,
+    )
+
+
+@router.get("/v1/jobs/counts", response_model=JobCountList)
+def jobs_counts(
+    spec: list[str] | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """Several filters counted in one request, on one connection.
+
+    This exists for the curated board chips. Asked one at a time they were six
+    requests fired *in parallel* from a single page render, so one view checked
+    out six connections to answer six numbers -- and with three web instances
+    revalidating on the same hour boundary, eighteen. Each count is cheap; the
+    concurrency was the problem, and the API's own /healthz went down with the
+    pool when it ran dry.
+
+    Specs are de-duplicated, so asking twice costs one count.
+    """
+    specs = spec or []
+    if len(specs) > COUNT_SPECS_MAX:
+        raise HTTPException(
+            status_code=422, detail=f"At most {COUNT_SPECS_MAX} specs per request"
+        )
+    seen: list[str] = []
+    for raw in specs:
+        if raw not in seen:
+            seen.append(raw)
+    items: list[JobCountItem] = []
+    for raw in seen:
+        query = _filtered_query(db, **_count_filters(raw))
+        total = query.with_entities(func.count(Job.id)).scalar() or 0
+        items.append(JobCountItem(spec=raw, total=int(total)))
+    return JobCountList(items=items)
 
 
 @router.get("/v1/jobs/sitemap", response_model=JobSitemapPage)

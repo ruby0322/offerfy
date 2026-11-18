@@ -9,7 +9,7 @@ import { resolveLocale } from "@/lib/locale";
 import {
   valueList,
   fetchJobCitiesServer,
-  fetchJobCount,
+  fetchJobCounts,
   fetchJobFacets,
   fetchJobList,
   fetchJobPulse,
@@ -52,11 +52,17 @@ export function visitorQueryFrom(
   return query;
 }
 
+/**
+ * Every curated board's open-role count, for the chips at the foot of the
+ * jobs index and of each board page.
+ *
+ * One request for all six, not one each: six parallel counts per render was
+ * the largest part of a single page view's fan-out, and the connection pool
+ * running dry on it took the API down whole.
+ */
 export async function boardCounts(): Promise<Record<string, number | undefined>> {
-  const counts = await Promise.all(
-    JOB_BOARDS.map(async (board) => [board.slug, await fetchJobCount(board.query)] as const),
-  );
-  return Object.fromEntries(counts);
+  const totals = await fetchJobCounts(JOB_BOARDS.map((board) => board.query));
+  return Object.fromEntries(JOB_BOARDS.map((board, at) => [board.slug, totals[at]]));
 }
 
 /**

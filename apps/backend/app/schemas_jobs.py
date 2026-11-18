@@ -42,6 +42,19 @@ class JobList(BaseModel):
     total: int = 0
 
 
+class JobCountItem(BaseModel):
+    # The spec echoed back verbatim, so the caller maps counts by the filter it
+    # asked about rather than by position. A response that arrived reordered
+    # would otherwise relabel one board with another board's number, which is
+    # the kind of wrong that looks plausible on the page.
+    spec: str
+    total: int
+
+
+class JobCountList(BaseModel):
+    items: list[JobCountItem]
+
+
 class JobFacetOption(BaseModel):
     value: str
     count: int

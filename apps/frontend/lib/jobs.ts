@@ -37,6 +37,16 @@ export type JobList = {
   total: number;
 };
 
+export type JobCount = {
+  /** The filter string this total answers, echoed by the backend. */
+  spec: string;
+  total: number;
+};
+
+export type JobCountList = {
+  items: JobCount[];
+};
+
 export type JobFacetOption = {
   value: string;
   count: number;
@@ -370,20 +380,44 @@ export async function fetchJobPulse(query: JobQuery = {}): Promise<JobPulse | nu
 }
 
 /**
- * How many roles a query matches, and nothing else. Used for the curated
+ * How many roles each query matches, in one request. Used for the curated
  * board counts, where six numbers are wanted and none of the postings are.
  *
- * Cached for an hour. `boardCounts()` is the only caller, and it asks for all
- * six boards on every board page view using each board's own fixed query -- so
- * these six URLs are byte-identical across every request, visitor filters
- * included. Uncached they were six of the ~ten calls a single view checked out
- * *in parallel*, which is what exhausted the connection pool under crawler
- * load. The figure moves a few times a day; an hour old is fine.
+ * `boardCounts()` is the only caller, and it asks for all six boards on every
+ * board page view using each board's own fixed query -- so this URL is
+ * byte-identical across every request, visitor filters included, and an hour
+ * of cache serves nearly all of them.
+ *
+ * It is one request rather than six because the six were fired *in parallel*
+ * from a single render: one page view checked out six connections to collect
+ * six integers, and with three web instances revalidating on the same hour
+ * boundary, eighteen. The pool running dry took the whole API down with it,
+ * /healthz included. The cache made that rare; it did not make it survivable.
+ *
+ * Each count is built from the board's own query through the same serializer
+ * `/v1/jobs` is called with, so a chip's number and the page it links to
+ * cannot drift apart.
  */
-export async function fetchJobCount(query: JobQuery): Promise<number | undefined> {
-  const qs = jobListParams(query, { limit: 1 }).toString();
-  const data = await backendJsonCached<Partial<JobList>>(`/v1/jobs?${qs}`, 3600);
-  return typeof data?.total === "number" ? data.total : undefined;
+export async function fetchJobCounts(queries: JobQuery[]): Promise<(number | undefined)[]> {
+  if (queries.length === 0) return [];
+  const specs = queries.map((query) => jobListParams(query, { limit: 1 }).toString());
+  const params = new URLSearchParams();
+  for (const spec of specs) params.append("spec", spec);
+  const data = await backendJsonCached<Partial<JobCountList>>(
+    `/v1/jobs/counts?${params.toString()}`,
+    3600,
+  );
+  const bySpec = new Map<string, number>();
+  for (const row of Array.isArray(data?.items) ? data.items : []) {
+    if (row && typeof row.spec === "string" && typeof row.total === "number") {
+      bySpec.set(row.spec, row.total);
+    }
+  }
+  // Mapped by spec rather than by position: the endpoint de-duplicates, so two
+  // boards sharing a query come back as one row and the arrays would not line
+  // up. An absent spec stays undefined, which is what CuratedBoards renders as
+  // no count at all -- the shape an older API without this route also gives.
+  return specs.map((spec) => bySpec.get(spec));
 }
 
 /** Cities for one country, from the server (board pages render these). */
