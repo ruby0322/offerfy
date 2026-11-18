@@ -4,6 +4,7 @@ import { useFormatter, useTranslations } from "next-intl";
 import MatchRow from "./MatchRow";
 import { Link } from "@/i18n/navigation";
 import { uniqueByJob, type Digest } from "@/lib/digest";
+import type { JobListItem } from "@/lib/jobs";
 
 /**
  * The weekly picks on the overview, below the arrivals.
@@ -14,9 +15,10 @@ import { uniqueByJob, type Digest } from "@/lib/digest";
  * read by someone. A posting can appear in both. That overlap is accepted.
  *
  * This used to be two columns, scored picks on the left and the daily ingest
- * unscored on the right. The right column drew a distinction the sweep has
- * erased -- everything is scored now, just not instantly -- and what it
- * showed is what the arrivals block now carries, scored or still scoring.
+ * unscored on the right. The columns drew a distinction the sweep has erased
+ * -- everything is scored now, just not instantly. The picks stay; the right
+ * column's list returns below them as "currently matching", a different
+ * question from the arrivals block's "new since you looked".
  *
  * Concise comes from cutting the rows, not the block: the reason and gap
  * paragraphs belong on the Matches tab, so here a role is a mark, a title, an
@@ -25,12 +27,15 @@ import { uniqueByJob, type Digest } from "@/lib/digest";
 
 type Props = {
   digest: Digest | null;
+  /** The current match set, newest first (dash.matches). */
+  matches: JobListItem[];
   matchCount: number;
 };
 
 const PICKS = 3;
+const STANDING = 3;
 
-export default function MatchesBlock({ digest, matchCount }: Props) {
+export default function MatchesBlock({ digest, matches, matchCount }: Props) {
   const t = useTranslations("dashboard");
   const format = useFormatter();
 
@@ -40,6 +45,7 @@ export default function MatchesBlock({ digest, matchCount }: Props) {
   const picks = uniqueByJob(
     [...(digest?.items ?? [])].sort((a, b) => (b.fit_score ?? 0) - (a.fit_score ?? 0)),
   ).slice(0, PICKS);
+  const standing = matches.slice(0, STANDING);
   const built = digest ? new Date(digest.built_at) : null;
   const builtValid = built !== null && !Number.isNaN(built.getTime());
 
@@ -88,6 +94,35 @@ export default function MatchesBlock({ digest, matchCount }: Props) {
                     className="rr-btn rr-btn-accent rr-btn-sm"
                   >
                     {t("digestTailor")}
+                  </Link>
+                }
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Standing matches: what fits you now, newest first, claiming nothing
+          about recency. A posting is new to you once, in the arrivals block;
+          this list is what is left on a second visit an hour later, so the
+          overview never has no roles at all while match_count > 0. */}
+      <div className="mt-4 min-w-0 border-t border-rule pt-3">
+        <p className="text-[0.8125rem] font-bold">{t("standingHeading")}</p>
+        {standing.length === 0 ? (
+          <p className="mt-2 text-sm text-muted-foreground">{t("matchEmpty")}</p>
+        ) : (
+          <ul className="mt-1">
+            {standing.map((job) => (
+              <MatchRow
+                key={job.id}
+                jobId={job.id}
+                title={job.title}
+                company={job.company}
+                meta={job.location}
+                score={null}
+                action={
+                  <Link href={`/jobs/${job.id}`} className="rr-btn rr-btn-ghost rr-btn-sm">
+                    {t("open")}
                   </Link>
                 }
               />

@@ -496,6 +496,7 @@
     "arrivalsStillScoring": "评分中",
     "arrivalsStillScoringNote": "符合你的条件，分数稍后生成。",
     "arrivalsMore": "还有 {count} 个，请到“所有匹配结果”查看",
+    "standingHeading": "当前匹配",
     "sinceFirstArrivals": "{count, plural, =0 {第一批符合的职位评分完成后会显示在这里。} other {已为你找到 # 个职位，作为起点}}",
     "sinceNothingNew": "自上次查看后没有新的职位。",
     "sinceArrivals": "自上次查看后有 {count} 个职位完成评分",

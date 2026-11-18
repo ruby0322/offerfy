@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { MatchArrival } from "@/lib/dashboard";
-import { arrivalHeadline, groupArrivals, strongArrivalCount } from "./arrivals";
+import { arrivalHeadline, arrivalState, groupArrivals, strongArrivalCount } from "./arrivals";
 
 function arrival(over: Partial<MatchArrival> = {}): MatchArrival {
   return {
@@ -93,4 +93,15 @@ test("strong arrivals are counted by tier, once per posting", () => {
     arrival({ job_id: "b", tier: "Good fit", fit_score: 0.95 }),
   ];
   assert.equal(strongArrivalCount(items), 1);
+});
+
+test("three states: scored, still scoring, and judged-without-a-score", () => {
+  const scored = arrival();
+  const pending = arrival({ tier: null, fit_score: null, reason: null, scored_at: null });
+  // A score row exists (scored_at set) but carries no score: a refusal. It is
+  // not "still scoring" -- that promises a score that will never arrive.
+  const refused = arrival({ tier: null, fit_score: null, reason: null });
+  assert.equal(arrivalState(scored), "scored");
+  assert.equal(arrivalState(pending), "pending");
+  assert.equal(arrivalState(refused), "unscored");
 });

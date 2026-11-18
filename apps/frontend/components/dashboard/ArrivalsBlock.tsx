@@ -2,7 +2,7 @@
 
 import { useFormatter, useTranslations } from "next-intl";
 import MatchRow from "./MatchRow";
-import { groupArrivals } from "./arrivals";
+import { arrivalState, groupArrivals } from "./arrivals";
 import { Link } from "@/i18n/navigation";
 import type { MatchArrival } from "@/lib/dashboard";
 
@@ -95,7 +95,9 @@ export default function ArrivalsBlock({ arrivals }: Props) {
                 reason={item.reason}
                 gap={item.gap}
                 gapLabel={t("digestGapLabel")}
-                note={item.fit_score === null ? t("arrivalsStillScoringNote") : null}
+                note={
+                  arrivalState(item) === "pending" ? t("arrivalsStillScoringNote") : null
+                }
                 inactiveLabel={item.job_is_active ? null : t("jobInactive")}
                 action={
                   <Link

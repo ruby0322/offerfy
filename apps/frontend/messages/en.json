@@ -496,6 +496,7 @@
     "arrivalsStillScoring": "Still scoring",
     "arrivalsStillScoringNote": "Matches your filters. Its score is still on the way.",
     "arrivalsMore": "{count} more in All matches",
+    "standingHeading": "Currently matching",
     "sinceFirstArrivals": "{count, plural, =0 {Your first matches will show up here once they are scored.} one {# role found for you to start with} other {# roles found for you to start with}}",
     "sinceNothingNew": "Nothing new since you last looked.",
     "sinceArrivals": "{count, plural, one {# role scored since you last looked} other {# roles scored since you last looked}}",

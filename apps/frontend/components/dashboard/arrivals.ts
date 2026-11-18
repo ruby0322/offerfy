@@ -67,6 +67,24 @@ export function arrivalHeadline(count: number, firstVisit: boolean): ArrivalHead
   return { kind: "arrivals", count };
 }
 
+/**
+ * What to say about this row's score. Three states, three claims:
+ *
+ * - scored: a score is present; show it.
+ * - pending: no score row exists yet (`scored_at` is the row's own timestamp,
+ *   so null means no row). A score is coming: "still scoring".
+ * - unscored: a row exists but carries no score -- the model looked and could
+ *   not judge it. Say nothing about scoring; it is never coming.
+ *
+ * MatchArrivalOut does not carry `outcome`, so every "row exists, no score"
+ * case is one state here. If a prose-rejected row ever needs different
+ * wording, the schema has to carry the outcome; this must not guess further.
+ */
+export function arrivalState(item: MatchArrival): "scored" | "pending" | "unscored" {
+  if (item.fit_score !== null) return "scored";
+  return item.scored_at === null ? "pending" : "unscored";
+}
+
 /** Distinct postings among the arrivals the model rated "Strong fit". */
 export function strongArrivalCount(items: MatchArrival[]): number {
   const ids = new Set<string>();
