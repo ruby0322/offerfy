@@ -85,6 +85,11 @@ def ingest_workday_board(
         db.commit()
         return SourceResult("workday", board.slug, "error", error=str(exc))
 
+    # Only NOT_FOUND_STATUSES reach here now. Every other way a board fails to
+    # read -- a 429 challenge above all -- raises WorkdayUnavailable and is
+    # recorded by the handler above with its real status. Do not widen this
+    # back out to "anything that did not come back": it sends whoever reads the
+    # admin table to the board config, which is the one thing that is right.
     if result is None:
         record_run(
             db,

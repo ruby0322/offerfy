@@ -21,19 +21,25 @@ requests on Workday every time. So two things keep it affordable:
    passes only pay for genuinely new listings. The caller must then touch those
    rows -- see `store.touch_jobs` for why that is not optional.
 
+And a third thing keeps it *permitted*: these boards sit behind Cloudflare, and
+a run that spends its request budget at full speed gets the whole estate to stop
+answering. See DETAIL_DELAY_SECONDS.
+
 Because of (2) this source does not go through `ingest_board`; it has its own
 entry point in `app.jobs.ingest_workday` and its own timer.
 """
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
-from app.services.jobs.http import get_json
+from app.services.jobs.http import RETRY_STATUSES, get_json
 from app.services.jobs.sanitize import sanitize_html
 from app.services.jobs.scope import ScopeRules, title_in_scope
 from app.services.jobs.types import NormalizedJob
@@ -42,6 +48,41 @@ PAGE_SIZE = 20  # Workday rejects anything larger with a 400.
 # A guard so one enormous board cannot monopolise a pass. Boards are sorted
 # newest-first by Workday, so a cap keeps the fresh end.
 MAX_POSTINGS = 4000
+
+# Pacing. This is the one source that pays a request per posting, so it is the
+# one that earns a bot reputation: a cold board is thousands of sequential
+# calls at whatever rate the network allows. Once the edge decides we are a
+# bot it stops serving the board at all (see `_is_security_check`), and the
+# reputation outlives the pass -- it was still refusing most tenants hours
+# later. A pause between detail calls is what keeps a pass under that
+# threshold; it costs a cold 4000-posting board ~27 extra minutes, which is
+# affordable precisely because steady state only fetches genuinely new rows.
+DETAIL_DELAY_SECONDS = 0.4
+
+# The list POST had no retry at all, so one transient 429 on the first page
+# failed the whole board.
+LIST_ATTEMPTS = 3
+LIST_BACKOFF_SECONDS = 1.5
+
+# The statuses that really do mean "this board is not there": 404 for a tenant
+# that has no such site, 422 for a wrong site slug on a real tenant, 406 for a
+# nonsense tenant on the wildcard host. Documented in AGENTS.md section 8c,
+# where adding a board requires a confirmed 200 against these.
+NOT_FOUND_STATUSES = frozenset({404, 406, 422})
+
+
+class WorkdayUnavailable(RuntimeError):
+    """The board could not be read, for a reason other than not existing.
+
+    Raised rather than returned as None so that the status reaches the ingest
+    row. Collapsing every non-200 into None reported a throttled board as
+    `board not found`, which points at the board config -- the one thing that
+    is not wrong when the edge is challenging us.
+    """
+
+    def __init__(self, reason: str, *, url: str) -> None:
+        self.reason = reason
+        super().__init__(f"workday list: {reason} ({url})")
 
 
 @dataclass(frozen=True)
@@ -85,10 +126,20 @@ def fetch_workday(
     *,
     known_ids: set[str] | None = None,
     rules: ScopeRules | None = None,
+    detail_delay: float | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> WorkdayFetch | None:
-    """None means the board itself could not be read, never "nothing found"."""
+    """None means the board is not there, never "nothing found".
+
+    Any other reason the board could not be read raises `WorkdayUnavailable`,
+    so the caller records the status rather than a guess at the cause.
+
+    `detail_delay` defaults to DETAIL_DELAY_SECONDS; `sleep` is injected only so
+    tests can run the pacing without waiting for it.
+    """
     known = known_ids or set()
-    summaries = _list_postings(client, board)
+    delay = DETAIL_DELAY_SECONDS if detail_delay is None else detail_delay
+    summaries = _list_postings(client, board, sleep=sleep)
     if summaries is None:
         return None
 
@@ -99,6 +150,7 @@ def fetch_workday(
     # inside one batch violates the unique constraint before it ever reaches a
     # second pass.
     batch_ids: set[str] = set()
+    details = 0  # detail calls actually made, which is what needs pacing
     for raw in summaries:
         title = str(raw.get("title") or "").strip()
         path = str(raw.get("externalPath") or "").strip()
@@ -114,45 +166,117 @@ def fetch_workday(
         if source_id in known:
             still_live.add(source_id)
             continue
+        # Between calls, not before the first: a steady-state pass that finds
+        # one new posting should not pay a pause for it.
+        if details and delay > 0:
+            sleep(delay)
+        details += 1
         job = _fetch_detail(client, board, raw, source_id, title, path)
         if job is not None:
             new.append(job)
     return WorkdayFetch(new=new, still_live=still_live, fetched=len(summaries))
 
 
-def _list_postings(client: httpx.Client, board: WorkdayBoard) -> list[dict[str, Any]] | None:
-    first = _post(client, board.api("/jobs"), 0)
+def _list_postings(
+    client: httpx.Client,
+    board: WorkdayBoard,
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+) -> list[dict[str, Any]] | None:
+    url = board.api("/jobs")
+    first = _post(client, url, 0, sleep=sleep)
     if first is None:
         return None
     total = int(first.get("total") or 0)
     rows = _postings(first)
     offset = PAGE_SIZE
     while offset < min(total, MAX_POSTINGS):
-        page = _post(client, board.api("/jobs"), offset)
+        page = _post(client, url, offset, sleep=sleep)
         if page is None:
-            break
+            # Only offset 0 may legitimately say "not there". Past that the
+            # board has already answered, so a missing page is a short read --
+            # and a short read must not be returned: the caller hands these ids
+            # to expire_missing, so one unreadable page in the middle of a
+            # 145-page board would deactivate the entire tail of it. Failing
+            # the board leaves the rows alone instead.
+            raise WorkdayUnavailable(
+                f"answered offset 0 then went missing at offset {offset}", url=url
+            )
         batch = _postings(page)
         if not batch:
+            # A real end, not a short read: `total` can run ahead of the pages.
             break
         rows.extend(batch)
         offset += PAGE_SIZE
     return rows
 
 
-def _post(client: httpx.Client, url: str, offset: int) -> dict[str, Any] | None:
-    """Workday's search is POST-only, so this cannot reuse http.get_json."""
+def _post(
+    client: httpx.Client,
+    url: str,
+    offset: int,
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, Any] | None:
+    """Workday's search is POST-only, so this cannot reuse http.get_json.
+
+    None means one of NOT_FOUND_STATUSES -- the board is not there. Every other
+    failure raises, because the status is the whole diagnosis.
+    """
     body = {"appliedFacets": {}, "limit": PAGE_SIZE, "offset": offset, "searchText": ""}
+    last: httpx.Response | None = None
+    for attempt in range(LIST_ATTEMPTS):
+        try:
+            response = client.post(url, json=body, headers={"Accept": "application/json"})
+        except httpx.HTTPError as exc:
+            raise WorkdayUnavailable(f"{type(exc).__name__}: {exc}", url=url) from exc
+        last = response
+        if response.status_code == 200:
+            try:
+                payload = response.json()
+            except ValueError:
+                raise WorkdayUnavailable(
+                    "200 with a body that is not JSON", url=url
+                ) from None
+            if not isinstance(payload, dict):
+                raise WorkdayUnavailable(
+                    "200 with a JSON body that is not an object", url=url
+                )
+            return payload
+        if response.status_code in NOT_FOUND_STATUSES:
+            return None
+        if response.status_code in RETRY_STATUSES and attempt + 1 < LIST_ATTEMPTS:
+            sleep(LIST_BACKOFF_SECONDS * (attempt + 1))
+            continue
+        break
+    assert last is not None
+    raise WorkdayUnavailable(_status_reason(last), url=url)
+
+
+def _status_reason(response: httpx.Response) -> str:
+    if _is_security_check(response):
+        # The shape seen on 2026-11-19: every tenant but one answering the list
+        # POST with a Cloudflare interstitial under a 429, naming this host's
+        # IP. Worth saying in the ingest row, because the fix is pacing and
+        # patience, not a board config change.
+        return f"HTTP {response.status_code}: edge served a security check, not the board"
+    return f"HTTP {response.status_code}"
+
+
+def _is_security_check(response: httpx.Response) -> bool:
+    """A challenge page rather than an API response.
+
+    Workday fronts these boards with Cloudflare, which answers a client it has
+    decided is a bot with an HTML "Security Check" page -- and sends it under a
+    429, so the status alone does not distinguish it from ordinary throttling.
+    """
+    if "html" not in response.headers.get("content-type", "").casefold():
+        return False
     try:
-        response = client.post(url, json=body, headers={"Accept": "application/json"})
-    except httpx.HTTPError:
-        return None
-    if response.status_code != 200:
-        return None
-    try:
-        payload = response.json()
-    except ValueError:
-        return None
-    return payload if isinstance(payload, dict) else None
+        body = response.text.casefold()
+    except (UnicodeDecodeError, httpx.HTTPError):
+        return False
+    return "security check" in body or "enable javascript" in body
 
 
 def _postings(payload: dict[str, Any]) -> list[dict[str, Any]]:

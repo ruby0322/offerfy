@@ -495,6 +495,37 @@ Applied Materials, Intel, NXP, Marvell — plus CrowdStrike, Zendesk, Red Hat, S
 Adobe and Workday itself, plus Trend Micro and Logitech. **15 boards, ~12k postings**, in
 `apps/backend/data/workday_boards.json`.
 
+**These boards sit behind Cloudflare, and `board not found` used to be how that looked.**
+On 2026-11-19 all 15 boards failed with `board not found`, which reads as a config problem.
+It was not one: the edge was answering this host's IP with an HTML *"Security Check — Enable
+JavaScript and cookies to continue"* page under status **429**, naming the IP in the body.
+httpx cannot solve a JS challenge, so every request failed. `workday._post` collapsed every
+non-200 into `None` and `ingest_workday` labelled `None` as `board not found`, so the one
+diagnosis the table offered pointed at the only thing that was right.
+
+Fixed the same day: only `404/406/422` — the statuses that genuinely mean no such board, per
+"Adding a board" below — still return `None`. Everything else raises `WorkdayUnavailable`
+and the ingest row carries the real status. Mid-pagination failures raise too, which also
+closes a data-loss hole: a short read used to be returned as if complete, and the caller
+hands those ids to `expire_missing`, so one throttled page in a 145-page board deactivated
+the whole tail of it.
+
+**How little it takes to trip, measured.** During that investigation `micron` was the one
+tenant still answering 200 with real data. Roughly **15 diagnostic requests later it was
+challenged as well**, and the other tenants stayed challenged for hours. The reputation is
+per-IP, it spans the whole `myworkdayjobs.com` estate, it decays slowly, and it is not
+UA-dependent — a Chrome UA gets the same 429. So:
+
+* **Do not probe these boards in a loop.** A handful of requests is a real cost. If you are
+  checking whether a board is alive, check one, and know that a 429 tells you nothing about
+  that board's config.
+* `workday.DETAIL_DELAY_SECONDS` (0.4s) paces the detail calls, which is where the volume
+  is — one request per new posting. It costs a cold 4000-posting board ~27 extra minutes and
+  costs steady state almost nothing, since only genuinely new rows are fetched. Do not set
+  it to 0 to make a backfill finish faster; that is what buys the outage.
+* A `429` in the ingest table means **wait**, not **fix the board**. There is nothing to
+  repair; the next daily pass recovers once the reputation decays.
+
 **Trend Micro joined 2026-11-15 and brings two sites on one tenant.**
 `trendmicro.wd3` serves `External` (180 postings, global, Taipei included) and
 `External_TrendLife` (19, mostly Taipei and Tokyo, and where the Applied AI roles live).

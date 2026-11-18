@@ -1,12 +1,28 @@
 from datetime import datetime, timedelta, timezone
 
 import httpx
+import pytest
 
 from app.models import Job
+from app.services.jobs import workday as workday_mod
 from app.services.jobs.ingest_workday import ingest_workday_board
 from app.services.jobs.store import known_source_ids, touch_jobs, upsert_jobs
 from app.services.jobs.types import NormalizedJob
-from app.services.jobs.workday import WorkdayBoard, fetch_workday
+from app.services.jobs.workday import (
+    WorkdayBoard,
+    WorkdayUnavailable,
+    fetch_workday,
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_pacing(monkeypatch):
+    """Real pacing would add ~0.4s per detail call to every test in this file.
+
+    The pacing itself is covered by `test_detail_calls_are_paced`, which injects
+    a recorder instead of waiting.
+    """
+    monkeypatch.setattr(workday_mod, "DETAIL_DELAY_SECONDS", 0.0)
 
 BOARD = WorkdayBoard(
     host="nvidia.wd5.myworkdayjobs.com",
@@ -267,3 +283,189 @@ def test_an_intel_style_board_survives_a_real_upsert(db_session):
     rows = db_session.query(Job).filter(Job.source == "workday").all()
     assert len(rows) == 3  # 4 listed, two of which are one requisition
     assert len({r.source_id for r in rows}) == 3
+
+
+# --- the edge refusing to serve a board -------------------------------------
+#
+# Every one of the 15 boards failed on 2026-11-19 with the error `board not
+# found`, which reads as a board config problem. It was not: Workday fronts
+# these hosts with Cloudflare, and it was answering this host's IP with a
+# "Security Check" interstitial under a 429. The tests below pin the
+# distinction, because the label is what someone debugging at 03:40 acts on.
+
+CHALLENGE_BODY = (
+    "<!DOCTYPE html><html><head><style>body{}</style></head><body>"
+    "<div>Security Check</div><div>Enable JavaScript and cookies to continue</div>"
+    "<div>Support ID: a5c9f94abdeba386</div></body></html>"
+)
+
+
+def _status_client(status: int, **kwargs) -> httpx.Client:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, **kwargs)
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def test_a_security_check_is_reported_as_one_not_as_a_missing_board():
+    client = _status_client(429, html=CHALLENGE_BODY)
+    with pytest.raises(WorkdayUnavailable) as caught:
+        fetch_workday(client, BOARD, sleep=lambda _: None)
+    message = str(caught.value)
+    assert "429" in message
+    assert "security check" in message
+    # The old behaviour, and the whole point of the change.
+    assert "not found" not in message
+
+
+def test_a_throttled_board_without_a_challenge_page_still_names_its_status():
+    client = _status_client(503, json={})
+    with pytest.raises(WorkdayUnavailable) as caught:
+        fetch_workday(client, BOARD, sleep=lambda _: None)
+    assert "HTTP 503" in str(caught.value)
+    assert "security check" not in str(caught.value)
+
+
+@pytest.mark.parametrize("status", [404, 406, 422])
+def test_the_statuses_that_really_mean_the_board_is_not_there(status):
+    """404 no such site, 422 wrong site slug, 406 nonsense tenant on the
+    wildcard host -- see AGENTS.md 8c. These, and only these, stay None."""
+    assert fetch_workday(_status_client(status, json={}), BOARD) is None
+
+
+def test_the_list_post_retries_a_transient_429():
+    """It had no retry at all, so one bad first page failed the whole board."""
+    attempts = []
+    slept: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/jobs") and request.method == "POST":
+            attempts.append(1)
+            if len(attempts) < 3:
+                return httpx.Response(429, html=CHALLENGE_BODY)
+            return httpx.Response(200, json=LISTING)
+        for req in ("JR1", "JR2", "JR3"):
+            if req in request.url.path:
+                return httpx.Response(200, json=_detail(req))
+        return httpx.Response(404, json={})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result = fetch_workday(client, BOARD, sleep=slept.append)
+    assert result is not None
+    assert len(attempts) == 3
+    assert result.fetched == 3
+    # Backoff grows, and it is the list retry doing the sleeping.
+    assert slept == [1.5, 3.0]
+
+
+def test_a_board_gives_up_after_the_retries_rather_than_hanging_on():
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(429, html=CHALLENGE_BODY)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(WorkdayUnavailable):
+        fetch_workday(client, BOARD, sleep=lambda _: None)
+    assert len(calls) == 3
+
+
+def test_detail_calls_are_paced():
+    """Unpaced, a cold board is thousands of sequential requests at full speed,
+    which is what earns the challenge in the first place."""
+    client, seen = _client()
+    slept: list[float] = []
+    result = fetch_workday(client, BOARD, detail_delay=0.25, sleep=slept.append)
+    assert result is not None
+    assert len(result.new) == 2
+    # Between the two detail calls, not before the first: a steady-state pass
+    # that finds one new posting must not pay a pause for it.
+    assert slept == [0.25]
+
+
+def test_a_posting_already_held_costs_no_pause():
+    client, _ = _client()
+    slept: list[float] = []
+    known = {
+        "nvidia-nvidiaexternalcareersite:JR1",
+        "nvidia-nvidiaexternalcareersite:JR3",
+    }
+    result = fetch_workday(client, BOARD, known_ids=known, detail_delay=0.25, sleep=slept.append)
+    assert result is not None
+    assert result.new == []
+    assert slept == []
+
+
+# --- a short read must not look like a shrunken board -----------------------
+
+PAGED_LISTING = {"total": 40, "jobPostings": LISTING["jobPostings"]}
+
+
+def test_an_unreadable_later_page_fails_the_board_instead_of_truncating_it():
+    """The data-loss case behind this change.
+
+    `seen_ids` from a truncated listing goes to expire_missing, so one
+    throttled page in the middle of a 145-page board would have deactivated
+    every posting below it. Failing the board leaves the rows alone.
+    """
+    posts = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/jobs") and request.method == "POST":
+            posts.append(request)
+            if len(posts) == 1:
+                return httpx.Response(200, json=PAGED_LISTING)
+            return httpx.Response(404, json={})
+        return httpx.Response(200, json=_detail("JR1"))
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(WorkdayUnavailable) as caught:
+        fetch_workday(client, BOARD, sleep=lambda _: None)
+    assert "offset 20" in str(caught.value)
+
+
+def test_a_total_that_runs_ahead_of_the_pages_is_a_clean_end():
+    """The legitimate short page: `total` is not always honest, and an empty
+    batch means the end, not a failure."""
+    posts = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/jobs") and request.method == "POST":
+            posts.append(request)
+            if len(posts) == 1:
+                return httpx.Response(200, json=PAGED_LISTING)
+            return httpx.Response(200, json={"total": 40, "jobPostings": []})
+        for req in ("JR1", "JR2", "JR3"):
+            if req in request.url.path:
+                return httpx.Response(200, json=_detail(req))
+        return httpx.Response(404, json={})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result = fetch_workday(client, BOARD, sleep=lambda _: None)
+    assert result is not None
+    assert result.fetched == 3
+
+
+# --- what the admin table ends up showing ------------------------------------
+
+
+def test_a_challenged_board_records_its_status_and_expires_nothing(db_session):
+    """End to end: the row an operator reads, and the rows that must survive."""
+    client, _ = _client()
+    first = ingest_workday_board(db_session, client, BOARD)
+    assert first.status == "ok"
+    assert first.upserted == 2
+
+    challenged = ingest_workday_board(
+        db_session, _status_client(429, html=CHALLENGE_BODY), BOARD
+    )
+    assert challenged.status == "error"
+    assert challenged.error is not None
+    assert "429" in challenged.error
+    assert "security check" in challenged.error
+    assert "board not found" not in challenged.error
+
+    rows = db_session.query(Job).filter(Job.source == "workday").all()
+    assert len(rows) == 2
+    assert all(r.is_active for r in rows), "a challenged board deactivated its postings"
