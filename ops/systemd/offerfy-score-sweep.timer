@@ -1,0 +1,22 @@
+# systemd **user** unit — see offerfy-score-sweep.service for why.
+# SHIPS DISABLED. Enable only after a --dry-run has shown the pass size.
+[Unit]
+Description=Score new Offerfy postings four times a day
+Documentation=file:///home/ruby0322/offerfy/docs/deploy.md
+
+[Timer]
+# 00, 06, 12 and 18 at :40 Taipei. The ingest runs at :10 (+ up to 10min), so
+# :40 reads a catalogue that just settled, and a posting is scored within about
+# half an hour of entering it.
+OnCalendar=*-*-* 00,06,12,18:40:00 Asia/Taipei
+
+# A host that was down at :40 still sweeps on boot rather than skipping a pass.
+Persistent=true
+
+RandomizedDelaySec=5min
+AccuracySec=1min
+
+Unit=offerfy-score-sweep.service
+
+[Install]
+WantedBy=timers.target

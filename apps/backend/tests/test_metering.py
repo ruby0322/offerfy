@@ -68,6 +68,7 @@ EXPECTED_CALL_SITES = {
     # the build is a third spender -- system_guard(purpose="profile"), the same
     # purpose and the same wrap as the two callers above it in this list.
     ("jobs/build_digests.py", "build_facts"),
+    ("jobs/score_sweep.py", "build_facts"),
 }
 
 
