@@ -316,6 +316,23 @@ class JobPreferenceOut(BaseModel):
     updated_at: str | None
     # "missing" | "stale" | "fresh": whether the editor should offer a rebuild.
     facts_state: str
+    # True only on the PUT that created the row. A GET never says so.
+    first_save: bool = False
+
+
+class FirstRunOut(BaseModel):
+    started: bool
+    # None when started. Otherwise "already_scored", "no_preference",
+    # "no_resume" or "budget_paused". The last promises no time: the sweep
+    # shares the ceiling that stopped it.
+    reason: str | None = None
+
+
+class MatchProgressOut(BaseModel):
+    scored: int
+    expected: int
+    # Inferred from the rows (scored < expected), not known: see routers/matches.
+    running: bool
 
 
 class ResumeFactsRefreshOut(BaseModel):
