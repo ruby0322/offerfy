@@ -10,7 +10,9 @@ import { useTranslations } from "next-intl";
  * it is not built from MatchRow (no logo lookup, no link, no action), the
  * employer is the literal words "Example company" rather than a plausible
  * name, the whole block is dashed and greyed with no success colour on the
- * score, and an "Example" badge and a sentence both say what it is. Nothing in
+ * score, and an "Example" badge and a sentence both say what it is. It also says nothing about
+ * the reader: the reason is impersonal and there is no tier word, because
+ * "Strong fit" beside a placeholder number would assert a verdict nobody made. Nothing in
  * it is a control: a greyed thing that looks clickable is a broken button.
  */
 export default function SamplePick() {
@@ -41,9 +43,6 @@ export default function SamplePick() {
         <span className="min-w-8 shrink-0 text-right">
           <span className="block font-display text-[1.05rem] font-medium leading-none text-muted-foreground [font-variant-numeric:tabular-nums]">
             {t("sampleScore")}
-          </span>
-          <span className="mt-0.5 block text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-            {t("digestTierStrongFit")}
           </span>
         </span>
       </div>

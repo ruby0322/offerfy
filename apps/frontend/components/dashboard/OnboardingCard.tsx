@@ -56,8 +56,8 @@ import {
 type Props = {
   /** The seed, before a first save. */
   pref: JobPreference;
-  /** Called when the card is finished and the dashboard should reload. */
-  onDone: () => void;
+  /** Reloads the dashboard. Must reject when it fails, so the card can say so. */
+  onDone: () => Promise<void>;
 };
 
 type Phase =
@@ -106,6 +106,22 @@ export default function OnboardingCard({ pref, onDone }: Props) {
   const seniorityOptions = Object.keys(SENIORITY_KEYS).filter((v) => v !== "unknown");
   if (seniority && !seniorityOptions.includes(seniority)) seniorityOptions.push(seniority);
 
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Every way out ends here. A refetch that fails must not leave a spinner
+  // (or a Continue that does nothing) on the first screen a person sees after
+  // typing their first answer: it lands in `stopped`, whose button retries.
+  async function finish() {
+    setRefreshing(true);
+    try {
+      await onDone();
+    } catch {
+      if (alive.current) setPhase({ kind: "stopped", notice: "onboardRefreshFailed" });
+    } finally {
+      if (alive.current) setRefreshing(false);
+    }
+  }
+
   async function submit() {
     setError(null);
     setPhase({ kind: "saving" });
@@ -127,7 +143,7 @@ export default function OnboardingCard({ pref, onDone }: Props) {
     }
     // Saved before anyone else: nothing to start. Reload and be done.
     if (!firstSave) {
-      onDone();
+      await finish();
       return;
     }
     setPhase({ kind: "scoring" });
@@ -135,7 +151,7 @@ export default function OnboardingCard({ pref, onDone }: Props) {
       const run = await startFirstRun();
       if (!run.started) {
         const notice = firstRunNotice(run.reason);
-        if (notice === null) onDone();
+        if (notice === null) await finish();
         else if (alive.current) setPhase({ kind: "stopped", notice });
         return;
       }
@@ -147,7 +163,7 @@ export default function OnboardingCard({ pref, onDone }: Props) {
         const progress = await fetchMatchProgress().catch(() => ({ scored: 0, expected: 1 }));
         const verdict = pollVerdict({ ...progress, polls });
         if (verdict === "done") {
-          onDone();
+          await finish();
           return;
         }
         if (verdict === "stop") {
@@ -208,7 +224,12 @@ export default function OnboardingCard({ pref, onDone }: Props) {
           <p className="text-sm" role="status">
             {t(phase.notice)}
           </p>
-          <button type="button" className="rr-btn mt-3 whitespace-nowrap" onClick={onDone}>
+          <button
+            type="button"
+            className="rr-btn mt-3 whitespace-nowrap"
+            disabled={refreshing}
+            onClick={() => void finish()}
+          >
             {t("onboardContinue")}
           </button>
         </div>
@@ -281,6 +302,12 @@ export default function OnboardingCard({ pref, onDone }: Props) {
               </div>
             </div>
           </div>
+
+          {/* A thin or unparseable resume seeds nothing; a disabled button with
+              no reason is a dead end for exactly the person this card is for. */}
+          {!canSave({ functions, locations, seniority }) ? (
+            <p className="mt-3 text-sm text-muted-foreground">{t("onboardEmptyHint")}</p>
+          ) : null}
 
           {error ? (
             <p className="mt-3 text-sm text-destructive" role="alert">

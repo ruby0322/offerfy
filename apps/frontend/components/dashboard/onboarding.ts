@@ -40,11 +40,15 @@ export function pollVerdict(p: {
   expected: number;
   polls: number;
 }): PollVerdict {
-  if (p.expected === 0 || p.scored >= p.expected) return "done";
+  if (p.scored >= p.expected) return "done";
   return p.polls >= MAX_POLLS ? "stop" : "wait";
 }
 
-export type OnboardNotice = "onboardNoResume" | "onboardPaused" | "onboardGeneric";
+export type OnboardNotice =
+  | "onboardNoResume"
+  | "onboardPaused"
+  | "onboardGeneric"
+  | "onboardRefreshFailed";
 
 /**
  * The sentence for a first run that did not start, or null when saying

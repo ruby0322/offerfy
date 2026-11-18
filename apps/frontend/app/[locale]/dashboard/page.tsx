@@ -180,7 +180,8 @@ export default function DashboardPage() {
           {showCard ? (
             <OnboardingCard
               pref={dash.preference}
-              onDone={() => void fetchDashboard().then(apply).catch(() => {})}
+              // Returns the promise: the card must learn that the refetch failed.
+              onDone={() => fetchDashboard().then(apply)}
             />
           ) : null}
           {/* "Nothing to do" under a card that is asking for something would
