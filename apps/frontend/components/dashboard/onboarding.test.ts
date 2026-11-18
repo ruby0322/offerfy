@@ -19,6 +19,7 @@ test("the card shows only before a first save, and only with a resume to seed fr
   // No readable resume: the seed would be empty and the first run refused.
   assert.equal(cardVisible({ updated_at: null }, { has_master: false, published: false }), false);
   assert.equal(cardVisible({ updated_at: null }, { has_master: true, published: false }), false);
+  assert.equal(cardVisible({ updated_at: null }, { has_master: false, published: true }), false);
 });
 
 test("polling waits while nothing is scored, finishes when the count is in", () => {
@@ -59,4 +60,5 @@ test("saving needs at least one answer", () => {
   assert.equal(canSave({ functions: [], locations: [], seniority: "" }), false);
   assert.equal(canSave({ functions: ["backend"], locations: [], seniority: "" }), true);
   assert.equal(canSave({ functions: [], locations: [], seniority: "senior" }), true);
+  assert.equal(canSave({ functions: [], locations: ["tw"], seniority: "" }), true);
 });
