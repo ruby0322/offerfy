@@ -48,8 +48,6 @@ export type MatchRowProps = {
   gapLabel?: string;
   /** Rendered when the posting has closed since it was listed. */
   inactiveLabel?: string | null;
-  /** A muted line under the row: a state of the posting, not the model's words. */
-  note?: string | null;
   /** An action that just failed, as a message under the row. */
   error?: string | null;
   action: ReactNode;
@@ -73,7 +71,6 @@ export default function MatchRow({
   gap,
   gapLabel,
   inactiveLabel,
-  note,
   error,
   action,
 }: MatchRowProps) {
@@ -107,9 +104,6 @@ export default function MatchRow({
         ) : null}
         {inactiveLabel ? (
           <span className="mt-0.5 block text-xs text-muted-foreground">{inactiveLabel}</span>
-        ) : null}
-        {note ? (
-          <span className="mt-0.5 block text-xs text-muted-foreground">{note}</span>
         ) : null}
         {error ? (
           <span className="mt-0.5 block text-xs text-destructive" role="alert">

@@ -53,7 +53,6 @@ test("an unscored arrival renders without a score, not as a poor match", () => {
   ]);
   assert.equal(groups.length, 1);
   assert.equal(groups[0].day, null);
-  assert.equal(groups[0].items[0].fit_score, null);
   assert.equal(strongArrivalCount(groups.flatMap((g) => g.items)), 0);
 });
 
@@ -104,4 +103,9 @@ test("three states: scored, still scoring, and judged-without-a-score", () => {
   assert.equal(arrivalState(scored), "scored");
   assert.equal(arrivalState(pending), "pending");
   assert.equal(arrivalState(refused), "unscored");
+});
+
+test("a score of exactly zero is scored, not pending", () => {
+  // 0 is falsy; a truthiness check would call a real zero "still scoring".
+  assert.equal(arrivalState(arrival({ fit_score: 0, tier: "Worth a look" })), "scored");
 });

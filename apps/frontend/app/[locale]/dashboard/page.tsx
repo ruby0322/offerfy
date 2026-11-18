@@ -21,12 +21,12 @@ import { preferenceSummary } from "@/lib/jobs";
 /**
  * The overview: what changed, the one thing to do, and the shape of the search.
  *
- * Four blocks and no free-floating numbers. Every figure that wants studying
+ * A few blocks and no free-floating numbers. Every figure that wants studying
  * has moved to the tab that owns it -- the application metrics to
  * Applications, employer views and resume state to Profile, credits to Usage
  * -- because a row of numbers with no subject beside it is something you have
  * to hold in your head on the way down the page. What is left is a line
- * saying what is new, one action, the matches, and the pipeline as a shape
+ * saying what is new, one action, what landed and what matches, and the pipeline as a shape
  * with the few rows that need you.
  */
 export default function DashboardPage() {

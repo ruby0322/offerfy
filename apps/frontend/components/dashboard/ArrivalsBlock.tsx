@@ -95,18 +95,15 @@ export default function ArrivalsBlock({ arrivals }: Props) {
                 reason={item.reason}
                 gap={item.gap}
                 gapLabel={t("digestGapLabel")}
-                note={
-                  arrivalState(item) === "pending" ? t("arrivalsStillScoringNote") : null
-                }
                 inactiveLabel={item.job_is_active ? null : t("jobInactive")}
                 action={
                   <Link
                     href={`/jobs/${encodeURIComponent(item.job_id)}`}
                     className={`rr-btn rr-btn-sm ${
-                      item.fit_score === null ? "rr-btn-ghost" : "rr-btn-accent"
+                      arrivalState(item) !== "scored" ? "rr-btn-ghost" : "rr-btn-accent"
                     }`}
                   >
-                    {item.fit_score === null ? t("open") : t("digestTailor")}
+                    {arrivalState(item) !== "scored" ? t("open") : t("digestTailor")}
                   </Link>
                 }
               />
