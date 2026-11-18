@@ -502,6 +502,9 @@ def _wire(job_id, **kw):
 class StubResponse:
     def __init__(self, payload, status_code=200):
         self.status_code, self._payload = status_code, payload
+        # A real response carries headers, and the credential pool reads
+        # `Retry-After` off an error to size a key's cooldown.
+        self.headers: dict = {}
 
     def json(self):
         if isinstance(self._payload, Exception):

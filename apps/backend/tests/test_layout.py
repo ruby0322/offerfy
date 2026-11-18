@@ -215,6 +215,9 @@ def test_findings_are_capped_so_the_report_stays_small():
 class StubResponse:
     def __init__(self, payload, status_code=200):
         self.status_code = status_code
+        # A real response carries headers, and the credential pool reads
+        # `Retry-After` off an error to size a key's cooldown.
+        self.headers: dict = {}
         self._payload = payload
 
     def json(self):

@@ -128,6 +128,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from app.config import get_settings
+from app.services import api_keys
 from app.services.jobs.score import (
     ScoreFailed,
     Scored,
@@ -840,7 +841,13 @@ async def _write_call(*, url: str, headers: dict, body: dict) -> tuple[dict, dic
     """
     try:
         async with httpx.AsyncClient(timeout=PROFILE_TIMEOUT) as client:
-            resp = await client.post(url, headers=headers, json=body)
+            resp = await api_keys.post(
+                client,
+                url,
+                provider=api_keys.OPENAI,
+                headers=headers,
+                json=body,
+            )
             try:
                 data = resp.json()
             except ValueError:
@@ -916,7 +923,7 @@ async def write_reasons(
     if not survivors:
         return run
     settings = get_settings()
-    if not (settings.openai_api_key or "").strip():
+    if not api_keys.configured(api_keys.OPENAI):
         run.error = "llm_not_configured"
         return run
     try:
@@ -930,10 +937,7 @@ async def write_reasons(
     limit = len(survivors) if max_items is None else max_items
     body = _request_body(REASON_MODEL, resume_text, blocks, limit)
     url = responses_url(settings.openai_base_url or "https://api.openai.com/v1")
-    headers = {
-        "Authorization": f"Bearer {settings.openai_api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = {"Content-Type": "application/json"}
     guard = system_guard(
         user=user,
         purpose="digest",

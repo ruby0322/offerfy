@@ -38,11 +38,13 @@ import httpx
 from fastapi import HTTPException
 
 from app.config import get_settings
+from app.services import api_keys
 from app.services.llm.providers.base import (
     DELTA,
     REASONING,
     ROUND,
     Conversation,
+    RotateCredential,
     RoundResult,
     ToolCall,
     ToolResult,
@@ -310,7 +312,7 @@ class AnthropicProvider:
     name = NAME
 
     def configured(self) -> bool:
-        return bool((get_settings().anthropic_api_key or "").strip())
+        return api_keys.configured(api_keys.ANTHROPIC)
 
     def url(self) -> str:
         base = (
@@ -318,11 +320,13 @@ class AnthropicProvider:
         ).strip()
         return messages_url(base)
 
-    def headers(self) -> dict[str, str]:
+    def headers(self, credential: api_keys.Credential) -> dict[str, str]:
         # `x-api-key`, not a bearer token: that is this API's scheme, and an
         # Authorization header is only correct for an OAuth access token.
+        # Which header carries which vendor's key lives with the pool, in
+        # `api_keys._SCHEME`, so a key cannot be presented two ways.
         return {
-            "x-api-key": get_settings().anthropic_api_key or "",
+            **credential.header(),
             "anthropic-version": API_VERSION,
             "Content-Type": "application/json",
         }
@@ -342,7 +346,38 @@ class AnthropicProvider:
         tools: list[dict],
         wrap_up: bool,
     ) -> AsyncIterator[dict]:
+        """One round, on the first key in the pool that will serve it.
+
+        The same loop as the OpenAI adapter's, and for the same reason: see
+        `RotateCredential` for why a retry here can never replay output.
+        """
         body = conversation.body(system=system, tools=tools, wrap_up=wrap_up)
+        pool = api_keys.rotation(api_keys.ANTHROPIC)
+        if not pool:
+            raise HTTPException(status_code=503, detail="Chat is not configured")
+        for index, credential in enumerate(pool):
+            try:
+                async for event in self._round(client, credential, body):
+                    yield event
+            except RotateCredential as exc:
+                api_keys.penalize(
+                    credential, status=exc.status, retry_after=exc.retry_after
+                )
+                if index + 1 >= len(pool):
+                    raise HTTPException(status_code=502, detail=exc.detail) from None
+                logger.info(
+                    "anthropic chat retrying on the next key after status=%s",
+                    exc.status,
+                )
+                continue
+            return
+
+    async def _round(
+        self,
+        client: httpx.AsyncClient,
+        credential: api_keys.Credential,
+        body: dict,
+    ) -> AsyncIterator[dict]:
         # Accumulated as the stream arrives, because this API does not restate
         # the message at the end. `blocks` is keyed by content-block index,
         # which is the only thing tying an `input_json_delta` to the
@@ -354,7 +389,7 @@ class AnthropicProvider:
         stopped = False
         try:
             async with client.stream(
-                "POST", self.url(), headers=self.headers(), json=body
+                "POST", self.url(), headers=self.headers(credential), json=body
             ) as resp:
                 if resp.status_code >= 400:
                     await resp.aread()
@@ -364,6 +399,12 @@ class AnthropicProvider:
                         resp.status_code,
                         detail,
                     )
+                    if api_keys.should_rotate(resp.status_code):
+                        raise RotateCredential(
+                            resp.status_code,
+                            detail,
+                            resp.headers.get("retry-after"),
+                        )
                     raise HTTPException(status_code=502, detail=detail)
                 async for event in aiter_sse_payloads(resp):
                     etype = event.get("type")

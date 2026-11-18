@@ -42,6 +42,7 @@ from pdfminer.high_level import extract_pages
 from pdfminer.layout import LTChar, LTTextContainer, LTTextLine
 
 from app.config import get_settings
+from app.services import api_keys
 
 # Thresholds shared with the ATS check so "substantial text" means one thing in
 # this codebase. The horizontal gap is NOT shared: `ats.py` asks for a gap of
@@ -795,7 +796,7 @@ async def vision_report(
     """Ask gpt-6-luna about the rendered pages. Never raises: the geometry half
     of the report is still worth returning when the beta endpoint is not there."""
     settings = get_settings()
-    if not (settings.openai_api_key or "").strip():
+    if not api_keys.configured(api_keys.OPENAI):
         return {"skipped": "llm_not_configured"}
     try:
         rendered = await asyncio.to_thread(_render_pages, typst_source)
@@ -809,13 +810,18 @@ async def vision_report(
     model = (settings.openai_decisions_model or DEFAULT_DECISIONS_MODEL).strip()
     url = decisions_url(settings.openai_base_url or "https://api.openai.com/v1")
     body = _vision_body(model, shown, len(rendered), questions, rubrics)
-    headers = {
-        "Authorization": f"Bearer {settings.openai_api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = {"Content-Type": "application/json"}
     try:
         async with httpx.AsyncClient(timeout=VISION_TIMEOUT) as client:
-            resp = await client.post(url, headers=headers, json=body)
+            # The credential is the pool's to choose, and a throttled key
+            # is retried on the next one before this returns.
+            resp = await api_keys.post(
+                client,
+                url,
+                provider=api_keys.OPENAI,
+                headers=headers,
+                json=body,
+            )
             if resp.status_code >= 400:
                 detail = _error_detail(resp)
                 logger.warning(

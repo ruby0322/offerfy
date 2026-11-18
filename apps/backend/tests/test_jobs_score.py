@@ -55,6 +55,9 @@ def _answers(top="Strong fit", predicate=0.8, probs=None):
 class StubResponse:
     def __init__(self, payload, status_code=200):
         self.status_code = status_code
+        # A real response carries headers, and the credential pool reads
+        # `Retry-After` off an error to size a key's cooldown.
+        self.headers: dict = {}
         self._payload = payload
 
     def json(self):

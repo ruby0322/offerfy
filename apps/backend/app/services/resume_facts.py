@@ -68,6 +68,7 @@ from app.schemas import (
     TALENT_YEARS_MAX,
     TalentProfilePayload,
 )
+from app.services import api_keys
 from app.services.account import display_name_of
 from app.services.family import family_master
 from app.services.llm.providers.openai import output_text, responses_url
@@ -496,10 +497,7 @@ async def extract_facts(
         return Extraction(error="llm_not_configured", resume_id=resume.id)
     model = spec.id
     url = responses_url(settings.openai_base_url or "https://api.openai.com/v1")
-    headers = {
-        "Authorization": f"Bearer {settings.openai_api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = {"Content-Type": "application/json"}
     result = Extraction(
         model=model,
         source_chars=len(source),
@@ -509,8 +507,12 @@ async def extract_facts(
     )
     try:
         async with httpx.AsyncClient(timeout=PROFILE_TIMEOUT) as client:
-            response = await client.post(
-                url, headers=headers, json=request_body(model, source, facts)
+            response = await api_keys.post(
+                client,
+                url,
+                provider=api_keys.OPENAI,
+                headers=headers,
+                json=request_body(model, source, facts),
             )
             if response.status_code >= 400:
                 logger.warning("profile build failed status=%s", response.status_code)

@@ -51,6 +51,7 @@ import httpx
 
 from app.config import get_settings
 from app.db import get_session_factory
+from app.services import api_keys
 from app.services.chat_messages import persist_usage
 from app.services.layout import (
     DEFAULT_DECISIONS_MODEL,
@@ -278,7 +279,13 @@ async def _score_pair(
     response arrived carries it.
     """
     try:
-        resp = await client.post(url, headers=headers, json=_body(model, facts_text, job))
+        resp = await api_keys.post(
+            client,
+            url,
+            provider=api_keys.OPENAI,
+            headers=headers,
+            json=_body(model, facts_text, job),
+        )
         try:
             data = resp.json()
         except ValueError:
@@ -311,7 +318,7 @@ async def score_candidates(db, *, user, facts, jobs, concurrency: int = 4) -> Sc
     settings = get_settings()
     model = (settings.openai_decisions_model or DEFAULT_DECISIONS_MODEL).strip()
     run = ScoreRun(model=model)
-    if not (settings.openai_api_key or "").strip():
+    if not api_keys.configured(api_keys.OPENAI):
         run.error = "llm_not_configured"
         return run
 
@@ -333,10 +340,7 @@ async def score_candidates(db, *, user, facts, jobs, concurrency: int = 4) -> Sc
         return run
 
     url = decisions_url(settings.openai_base_url or "https://api.openai.com/v1")
-    headers = {
-        "Authorization": f"Bearer {settings.openai_api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = {"Content-Type": "application/json"}
     semaphore = asyncio.Semaphore(max(1, concurrency))
     failure: list[str] = []
     results: dict[str, Scored | str] = {}

@@ -26,6 +26,9 @@ class StubProfileLlm:
         self.payload = payload
         self.status_code = status_code
         self.text = text
+        # A real response carries headers, and the credential pool reads
+        # `Retry-After` off an error to size a key's cooldown.
+        self.headers: dict = {}
         self.calls: list[dict] = []
 
     def __call__(self, *args, **kwargs):

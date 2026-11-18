@@ -42,6 +42,7 @@ from sqlalchemy.orm import Session
 from app import models
 from app.config import get_settings
 from app.models import GuestSession, LlmCall, Resume, User
+from app.services import api_keys
 from app.services.llm.providers.openai import output_text, responses_url
 from app.services.llm.prompts import EXTRACT_PROMPT
 from app.services.llm.providers import openai as openai_provider
@@ -421,15 +422,16 @@ async def extract_content(source: str) -> ExtractResult:
         return ExtractResult(error="llm_not_configured", source_chars=len(source))
     model = spec.id
     url = responses_url(settings.openai_base_url or "https://api.openai.com/v1")
-    headers = {
-        "Authorization": f"Bearer {settings.openai_api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = {"Content-Type": "application/json"}
     result = ExtractResult(model=model, source_chars=len(source))
     try:
         async with httpx.AsyncClient(timeout=EXTRACT_TIMEOUT) as client:
-            response = await client.post(
-                url, headers=headers, json=_request_body(model, source)
+            response = await api_keys.post(
+                client,
+                url,
+                provider=api_keys.OPENAI,
+                headers=headers,
+                json=_request_body(model, source),
             )
             if response.status_code >= 400:
                 logger.warning(

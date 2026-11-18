@@ -25,13 +25,20 @@ class Settings(BaseSettings):
     s3_region: str = "us-east-1"
     google_client_id: str | None = None
     google_client_secret: str | None = None
+    # Both key settings hold a *list*: one key, or several separated by commas
+    # or whitespace. Nothing reads these two fields except
+    # app.services.api_keys, which parses them into a pool and decides which
+    # key a given call carries -- so read them through `api_keys.keys()` /
+    # `api_keys.configured()` rather than from here, or a second key will be
+    # configured and never used.
     openai_api_key: str | None = None
     openai_base_url: str | None = None
     # Anthropic is the second provider; see app.services.llm.providers. Both
     # keys are optional and independent: a deployment with only one set gets a
     # working picker with a shorter list, because
     # services.model_choice.offered() filters out models whose provider has no
-    # credential rather than offering one that would 502.
+    # credential rather than offering one that would 502. Also a list -- see
+    # the note above openai_api_key.
     anthropic_api_key: str | None = None
     anthropic_base_url: str | None = None
     # The fallback model, for a caller who has chosen nothing. Normally left

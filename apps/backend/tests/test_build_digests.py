@@ -848,6 +848,9 @@ async def test_a_database_fault_before_scoring_does_not_cost_everyone_else(
 class StubResponse:
     def __init__(self, payload, status_code):
         self.status_code = status_code
+        # A real response carries headers, and the credential pool reads
+        # `Retry-After` off an error to size a key's cooldown.
+        self.headers: dict = {}
         self._payload = payload
 
     def json(self):

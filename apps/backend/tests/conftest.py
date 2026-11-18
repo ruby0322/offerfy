@@ -30,13 +30,19 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import Base, get_engine, get_session_factory, reset_engine
 from app.main import app
+from app.services import api_keys
 
 
 @pytest.fixture(autouse=True)
 def _clear_settings_cache():
     get_settings.cache_clear()
+    api_keys.reset()
     yield
     get_settings.cache_clear()
+    # The key-cooldown table is module state in one process, so a test that
+    # throttles a key would otherwise make the next test's first attempt start
+    # on the second key -- or, with one key configured, look cooled down.
+    api_keys.reset()
 
 
 @pytest.fixture

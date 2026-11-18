@@ -143,8 +143,17 @@ def sse_lines(payload: dict, chunk: int = 7) -> list[str]:
 class ScriptedStream:
     """Stands in for the object httpx.AsyncClient.stream yields."""
 
-    def __init__(self, payload: dict, status_code: int = 200, lines: list[str] | None = None):
+    def __init__(
+        self,
+        payload: dict,
+        status_code: int = 200,
+        lines: list[str] | None = None,
+        headers: dict | None = None,
+    ):
         self.status_code = status_code
+        # A real response always has these, and the credential pool reads
+        # `Retry-After` off an error to decide how long to skip a key.
+        self.headers = headers or {}
         self._payload = payload
         self._lines = sse_lines(payload) if lines is None else lines
 

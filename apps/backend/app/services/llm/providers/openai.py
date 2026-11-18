@@ -21,11 +21,13 @@ import httpx
 from fastapi import HTTPException
 
 from app.config import get_settings
+from app.services import api_keys
 from app.services.llm.providers.base import (
     DELTA,
     REASONING,
     ROUND,
     Conversation,
+    RotateCredential,
     RoundResult,
     ToolCall,
     ToolResult,
@@ -238,17 +240,14 @@ class OpenAIProvider:
     name = NAME
 
     def configured(self) -> bool:
-        return bool((get_settings().openai_api_key or "").strip())
+        return api_keys.configured(api_keys.OPENAI)
 
     def url(self) -> str:
         base = (get_settings().openai_base_url or "https://api.openai.com/v1").strip()
         return responses_url(base)
 
-    def headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {get_settings().openai_api_key}",
-            "Content-Type": "application/json",
-        }
+    def headers(self, credential: api_keys.Credential) -> dict[str, str]:
+        return {**credential.header(), "Content-Type": "application/json"}
 
     def conversation(self, spec: Any, messages: list[dict]) -> OpenAIConversation:
         return OpenAIConversation(spec, messages)
@@ -266,16 +265,50 @@ class OpenAIProvider:
         tools: list[dict],
         wrap_up: bool,
     ) -> AsyncIterator[dict]:
+        """One round, on the first key in the pool that will serve it.
+
+        The loop here is the only thing this adapter does about several keys:
+        `_round` either streams the round or raises `RotateCredential`, which
+        it only does before it has yielded anything, so a retry cannot replay
+        output the user has already seen.
+        """
         body = conversation.body(
             system=system, tools=self.tool_specs(tools), wrap_up=wrap_up
         )
+        pool = api_keys.rotation(api_keys.OPENAI)
+        if not pool:
+            # turn.py checks `configured` before it gets here, so this is a
+            # guard against a future caller rather than a reachable state.
+            raise HTTPException(status_code=503, detail="Chat is not configured")
+        for index, credential in enumerate(pool):
+            try:
+                async for event in self._round(client, credential, body):
+                    yield event
+            except RotateCredential as exc:
+                api_keys.penalize(
+                    credential, status=exc.status, retry_after=exc.retry_after
+                )
+                if index + 1 >= len(pool):
+                    raise HTTPException(status_code=502, detail=exc.detail) from None
+                logger.info(
+                    "openai chat retrying on the next key after status=%s", exc.status
+                )
+                continue
+            return
+
+    async def _round(
+        self,
+        client: httpx.AsyncClient,
+        credential: api_keys.Credential,
+        body: dict,
+    ) -> AsyncIterator[dict]:
         # Text deltas are a side channel: every decision below still runs on
         # the terminal response.completed object, so the round logic does not
         # depend on having seen them.
         data: dict | None = None
         try:
             async with client.stream(
-                "POST", self.url(), headers=self.headers(), json=body
+                "POST", self.url(), headers=self.headers(credential), json=body
             ) as resp:
                 if resp.status_code >= 400:
                     # client.stream does not read the body for us, and
@@ -287,6 +320,12 @@ class OpenAIProvider:
                         resp.status_code,
                         detail,
                     )
+                    if api_keys.should_rotate(resp.status_code):
+                        raise RotateCredential(
+                            resp.status_code,
+                            detail,
+                            resp.headers.get("retry-after"),
+                        )
                     raise HTTPException(status_code=502, detail=detail)
                 async for event in aiter_sse_payloads(resp):
                     etype = event.get("type")

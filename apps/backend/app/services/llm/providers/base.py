@@ -163,7 +163,13 @@ class Provider(Protocol):
 
     def url(self) -> str: ...
 
-    def headers(self) -> dict[str, str]: ...
+    def headers(self, credential: Any) -> dict[str, str]:
+        """The request headers, carrying one key out of the provider's pool.
+
+        Takes the credential rather than reading the setting, because which
+        key this attempt uses is `app.services.api_keys`' decision and may
+        differ from the one the attempt before it used.
+        """
 
     def conversation(self, spec: Any, messages: list[dict]) -> Conversation:
         """Start a transcript from the bounded chat history."""
@@ -185,7 +191,41 @@ class Provider(Protocol):
         an empty answer: this turn applies edits to the user's document, and
         acting on a knowingly incomplete response risks writing a
         half-rewritten resume.
+
+        Before raising, an adapter retries the round on the provider's next
+        key when the status says the fault is the credential's -- see
+        `RotateCredential` and `app.services.api_keys`.
         """
+
+
+# --------------------------------------------------------------------------
+# Failing over to the provider's next key
+# --------------------------------------------------------------------------
+
+
+class RotateCredential(Exception):
+    """This round failed in a way that the next key might not.
+
+    Raised inside an adapter's per-attempt round and caught by its `stream`,
+    which either retries on the next credential or converts this into the
+    HTTPException(502) the turn loop expects. An exception rather than a
+    return value because the retry has to unwind the `client.stream` context
+    manager the failed attempt is still holding open.
+
+    **Only raised before the round has yielded anything.** Both adapters check
+    the response status before the first display event, so a rotation can
+    never replay text the user has already seen -- and anything that goes
+    wrong mid-stream stays a 502, because by then the attempt is no longer
+    repeatable.
+    """
+
+    def __init__(
+        self, status: int, detail: str, retry_after: str | None = None
+    ) -> None:
+        super().__init__(detail)
+        self.status = status
+        self.detail = detail
+        self.retry_after = retry_after
 
 
 # --------------------------------------------------------------------------
