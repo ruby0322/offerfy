@@ -2,6 +2,7 @@
 
 import { useFormatter, useTranslations } from "next-intl";
 import MatchRow from "./MatchRow";
+import SamplePick from "./SamplePick";
 import { Link } from "@/i18n/navigation";
 import { uniqueByJob, type Digest } from "@/lib/digest";
 import type { JobListItem } from "@/lib/jobs";
@@ -78,7 +79,15 @@ export default function MatchesBlock({ digest, matches, matchCount }: Props) {
           ) : null}
         </div>
         {picks.length === 0 ? (
-          <p className="mt-2 text-sm text-muted-foreground">{t("picksEmpty")}</p>
+          // No digest has ever been built: this account has not had a week
+          // yet, so show the shape of one. A real quiet week (a digest
+          // exists, with no items) keeps the plain sentence -- an example
+          // there would read as a pick that went missing.
+          digest === null ? (
+            <SamplePick />
+          ) : (
+            <p className="mt-2 text-sm text-muted-foreground">{t("picksEmpty")}</p>
+          )
         ) : (
           <ul className="mt-1">
             {picks.map((item) => (

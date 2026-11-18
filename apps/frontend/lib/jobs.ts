@@ -553,7 +553,10 @@ export async function fetchJobPreferences(): Promise<JobPreference> {
   };
 }
 
-export async function saveJobPreferences(input: JobPreferenceInput): Promise<JobPreference> {
+/** What the PUT answers: the saved row, plus whether this was the first one. */
+export type SavedJobPreference = JobPreference & { first_save: boolean };
+
+export async function saveJobPreferences(input: JobPreferenceInput): Promise<SavedJobPreference> {
   // Built field by field so nothing but the five known keys can reach the
   // wire, and remote_required stays a boolean or null (StrictBool: "true" is a 422).
   const body: JobPreferenceInput = {
@@ -563,10 +566,32 @@ export async function saveJobPreferences(input: JobPreferenceInput): Promise<Job
     remote_required: input.remote_required,
     activity: input.activity,
   };
-  return apiJson<JobPreference>("/api/v1/me/job-preferences", {
-    method: "PUT",
-    body: JSON.stringify(body),
+  const out = await apiJson<JobPreference & { first_save?: boolean }>(
+    "/api/v1/me/job-preferences",
+    { method: "PUT", body: JSON.stringify(body) },
+  );
+  return { ...out, first_save: out.first_save === true };
+}
+
+export type FirstRun = { started: boolean; reason: string | null };
+
+/** Start scoring a new account's matches now, or learn why it did not start. */
+export async function startFirstRun(): Promise<FirstRun> {
+  const raw = await apiJson<Partial<FirstRun>>("/api/v1/me/matches/first-run", {
+    method: "POST",
   });
+  return { started: raw.started === true, reason: raw.reason ?? null };
+}
+
+export type MatchProgress = { scored: number; expected: number };
+
+/**
+ * Binary, not gradual: `scored` reads 0 until the pass commits once. There is
+ * deliberately no `running` field, so the caller bounds its own polling.
+ */
+export async function fetchMatchProgress(): Promise<MatchProgress> {
+  const raw = await apiJson<Partial<MatchProgress>>("/api/v1/me/matches/progress");
+  return { scored: raw.scored ?? 0, expected: raw.expected ?? 0 };
 }
 
 export async function refreshResumeFacts(): Promise<ResumeFactsRefresh> {

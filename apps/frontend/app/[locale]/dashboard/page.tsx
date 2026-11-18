@@ -7,10 +7,12 @@ import ApplicationFlow from "@/components/dashboard/ApplicationFlow";
 import CreditsStrip from "@/components/dashboard/CreditsStrip";
 import MatchesBlock from "@/components/dashboard/MatchesBlock";
 import NextActionBand from "@/components/dashboard/NextActionBand";
+import OnboardingCard from "@/components/dashboard/OnboardingCard";
 import OngoingTable from "@/components/dashboard/OngoingTable";
 import ResumesBlock from "@/components/dashboard/ResumesBlock";
 import { arrivalHeadline, strongArrivalCount } from "@/components/dashboard/arrivals";
 import { nextSteps } from "@/components/dashboard/nextSteps";
+import { cardVisible } from "@/components/dashboard/onboarding";
 import { COUNTRY_KEYS, FUNCTION_KEYS, SENIORITY_KEYS } from "@/components/jobs/facet-labels";
 import { Link, useRouter } from "@/i18n/navigation";
 import { ApiError, listResumes, type Resume } from "@/lib/api";
@@ -91,16 +93,21 @@ export default function DashboardPage() {
     [resumes],
   );
 
+  // Before the first save the preference is a computed seed, so a non-empty
+  // summary no longer means "they said what they want". `updated_at` does.
+  const showCard = dash ? cardVisible(dash.preference, dash.resume_health) : false;
+
   const steps = useMemo(() => {
     if (!dash) return [];
     return nextSteps({
       applications: rows,
       health: dash.resume_health,
       digest: dash.digest,
-      hasPreference: summary !== "",
+      hasPreference: dash.preference.updated_at !== null && summary !== "",
+      cardOnPage: showCard,
       masterId,
     });
-  }, [dash, rows, summary, masterId]);
+  }, [dash, rows, summary, masterId, showCard]);
 
   // The header line and the arrivals block read the same list, so the count
   // up here and the rows below cannot disagree.
@@ -148,12 +155,17 @@ export default function DashboardPage() {
                 <span className="text-muted-foreground">{t("sinceNothingNew")}</span>
               )}
             </p>
-            <p className="mt-2.5 inline-flex flex-wrap items-center gap-2 rounded-full border border-rule bg-sheet px-3 py-1 text-[0.78rem] text-muted-foreground">
-              {summary ? <span>{summary}</span> : <span>{t("matchEmpty")}</span>}
-              <Link href="/preferences" className="underline underline-offset-2">
-                {t("editPreferences")}
-              </Link>
-            </p>
+            {/* Not while the card is up: until the first save `summary` is
+                the resume's guess, and a pill saying "senior · backend" would
+                present a guess as something the person chose. */}
+            {showCard ? null : (
+              <p className="mt-2.5 inline-flex flex-wrap items-center gap-2 rounded-full border border-rule bg-sheet px-3 py-1 text-[0.78rem] text-muted-foreground">
+                {summary ? <span>{summary}</span> : <span>{t("matchEmpty")}</span>}
+                <Link href="/preferences" className="underline underline-offset-2">
+                  {t("editPreferences")}
+                </Link>
+              </p>
+            )}
           </>
         ) : null}
       </div>
@@ -165,12 +177,22 @@ export default function DashboardPage() {
 
       {dash ? (
         <div className="grid min-w-0 gap-4 [&>*]:min-w-0">
-          <NextActionBand
-            steps={steps}
-            applications={rows}
-            onChanged={replace}
-            onRebuilt={() => void fetchDashboard().then(apply).catch(() => {})}
-          />
+          {showCard ? (
+            <OnboardingCard
+              pref={dash.preference}
+              onDone={() => void fetchDashboard().then(apply).catch(() => {})}
+            />
+          ) : null}
+          {/* "Nothing to do" under a card that is asking for something would
+              contradict it. */}
+          {showCard && steps.length === 0 ? null : (
+            <NextActionBand
+              steps={steps}
+              applications={rows}
+              onChanged={replace}
+              onRebuilt={() => void fetchDashboard().then(apply).catch(() => {})}
+            />
+          )}
           <CreditsStrip />
           <ArrivalsBlock arrivals={dash.arrivals} />
           <MatchesBlock

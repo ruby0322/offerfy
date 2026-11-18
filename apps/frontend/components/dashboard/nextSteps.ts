@@ -58,6 +58,13 @@ export type NextStepInput = {
   digest: Digest | null;
   /** False until the person has said what they want next. */
   hasPreference: boolean;
+  /**
+   * True while the onboarding card is on the page. The card is the way to say
+   * what you want, so the `preferences` step has nothing left to add: its
+   * button would walk the person out of three pre-answered questions into the
+   * full editor's unticked ones.
+   */
+  cardOnPage: boolean;
   masterId: string | null;
 };
 
@@ -69,7 +76,7 @@ function byAgeDesc(rows: Application[]): Application[] {
 }
 
 export function nextSteps(input: NextStepInput, now: Date = new Date()): NextStep[] {
-  const { applications, health, digest, hasPreference, masterId } = input;
+  const { applications, health, digest, hasPreference, cardOnPage, masterId } = input;
   const steps: NextStep[] = [];
 
   // 1. Blockers. A resume nothing can read makes every number below it a
@@ -101,7 +108,7 @@ export function nextSteps(input: NextStepInput, now: Date = new Date()): NextSte
       href: masterId ? `/editor/${masterId}` : "/new",
     });
   }
-  if (!hasPreference) {
+  if (!hasPreference && !cardOnPage) {
     steps.push({
       kind: "preferences",
       titleKey: "nextPreferences",

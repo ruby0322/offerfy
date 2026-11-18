@@ -67,6 +67,7 @@ function input(over: Partial<NextStepInput> = {}): NextStepInput {
     health: HEALTHY,
     digest: null,
     hasPreference: true,
+    cardOnPage: false,
     masterId: "r1",
     ...over,
   };
@@ -126,6 +127,26 @@ test("a missing preference is a blocker too", () => {
   const steps = nextSteps(input({ hasPreference: false }), NOW);
   assert.deepEqual(steps.map((s) => s.kind), ["preferences"]);
   assert.equal(steps[0].href, "/preferences");
+});
+
+test("the preferences step yields to the card once a seed exists", () => {
+  // With the onboarding card on the page, "say what you want" is the card
+  // itself. A band whose button navigates away to the full editor would be
+  // telling the person to leave the three pre-answered questions for the
+  // wall of unticked ones the card replaced.
+  const steps = nextSteps(input({ hasPreference: false, cardOnPage: true }), NOW);
+  assert.deepEqual(steps, []);
+  // Blockers above it still lead: the card needs a resume to have a seed.
+  const noResume = nextSteps(
+    input({
+      health: { ...HEALTHY, has_master: false, published: false },
+      hasPreference: false,
+      cardOnPage: true,
+      masterId: null,
+    }),
+    NOW,
+  );
+  assert.deepEqual(noResume.map((s) => s.kind), ["create"]);
 });
 
 test("a rebuild is only offered once the resume is published", () => {
