@@ -44,6 +44,13 @@ plus one posting that could not be bought is a pool the digest can still rank.
 On a fault `score_candidates` returns nothing it bought (a half-scored pool
 would rank survivors against postings never judged), so nothing is written.
 
+TRANSACTIONS. Nothing in this module commits. `write_back`, `record_prose` and
+`cached_scores` all write into the caller's session and leave the commit to the
+caller, who owns the transaction (a digest build rolls back a user's whole
+pass on a crash; an HTTP caller decides when its request is done). The cost is
+that a caller must commit after `cached_scores` for the purchase to be kept; a
+caller that rolls back loses what it paid for, which is its decision to make.
+
 One writer. `write_back` and `record_prose` are the only code that writes
 `job_scores`, so the rules below live in one place: an upsert on
 (user_id, job_id) that survives two runs racing for the same pair, and a
@@ -127,8 +134,15 @@ def _distinct(jobs: list[Any]) -> list[Any]:
     return out
 
 
-def _classify(db, *, user, facts, jobs) -> tuple[list[Any], dict[str, JobScore]]:
-    """(stale jobs in the caller's order, fresh rows by job id)."""
+def _hash_of(hashes: dict[str, str], job_id: str) -> str:
+    """The one place a posting with no JobFacets row becomes NO_FACETS_HASH."""
+    return hashes.get(job_id, NO_FACETS_HASH)
+
+
+def _classify(
+    db, *, user, facts, jobs
+) -> tuple[list[Any], dict[str, JobScore], dict[str, str]]:
+    """(stale jobs in the caller's order, fresh rows by job id, hashes by job id)."""
     hashes = _description_hashes(db, jobs)
     rows = _existing(db, user.id, [str(j.id) for j in jobs])
     stale = []
@@ -136,12 +150,12 @@ def _classify(db, *, user, facts, jobs) -> tuple[list[Any], dict[str, JobScore]]
     for job in jobs:
         job_id = str(job.id)
         row = rows.get(job_id)
-        current = hashes.get(job_id, NO_FACETS_HASH)
+        current = _hash_of(hashes, job_id)
         if _is_fresh(row, facts_hash=facts.input_hash, description_hash=current):
             fresh[job_id] = row
         else:
             stale.append(job)
-    return stale, fresh
+    return stale, fresh, hashes
 
 
 def stale_pairs(db, *, user, facts, jobs) -> list[Any]:
@@ -185,13 +199,27 @@ def _fill(
 
 
 def write_back(
-    db, *, user, facts, job, model: str, scored: Scored | None = None, refused: bool = False
+    db,
+    *,
+    user,
+    facts,
+    job,
+    model: str,
+    scored: Scored | None = None,
+    refused: bool = False,
+    description_hash: str | None = None,
 ) -> JobScore:
-    """Upsert the answer for one (user, posting). Flushes; the caller commits.
+    """Upsert the answer for one (user, posting). Flushes; never commits.
 
     `scored` records a score; `refused=True` records a refusal (a null tier, so
     nobody can read a number off it). Exactly one must be given. `model` is the
     model that gave the answer, which `Scored` does not carry.
+
+    `description_hash` must be the hash the answer was computed against, i.e.
+    the one read before the provider was called. Re-reading it here would race
+    `enrich_jobs`: a posting rewritten during the call would get its NEW hash
+    stamped on a judgement of the OLD text and read as fresh forever. Only a
+    caller with no earlier read in hand omits it, and gets a lookup.
 
     Two runs racing for the same pair is not an error. The insert is wrapped in
     a savepoint, and if the unique constraint fires the winner's row is updated
@@ -201,8 +229,11 @@ def write_back(
     if (scored is None) == (not refused):
         raise ValueError("write_back takes exactly one of scored= or refused=True")
     job_id = str(job.id)
-    facets = db.get(JobFacets, job_id)
-    description_hash = facets.description_hash if facets is not None else NO_FACETS_HASH
+    if description_hash is None:
+        facets = db.get(JobFacets, job_id)
+        description_hash = _hash_of(
+            {job_id: facets.description_hash} if facets is not None else {}, job_id
+        )
     fields = dict(facts=facts, description_hash=description_hash, model=model, scored=scored)
     row = _find(db, user.id, job_id)
     if row is None:
@@ -240,12 +271,16 @@ def record_prose(
     every pass (the same bargain a refusal makes one level down). Otherwise
     `reason`, `gap` and the model that wrote them are stored and the outcome
     stays "scored". `scored_at` is untouched: it dates the score, not the
-    sentence. Flushes; the caller commits.
+    sentence. Flushes; never commits.
 
     The row must already exist and hold a score. Prose without a judgement to
     be about, or about a refusal, is a caller bug, so it raises rather than
     quietly inventing a row.
     """
+    if rejected and (reason is not None or gap is not None):
+        raise ValueError("rejected prose carries no reason or gap")
+    if not rejected and reason is None and gap is None:
+        raise ValueError("record_prose needs a reason, a gap, or rejected=True")
     row = _find(db, user.id, str(job.id))
     if row is None:
         raise LookupError("no job_scores row to attach prose to")
@@ -272,7 +307,8 @@ def _as_scored(row: JobScore) -> Scored:
 
 
 def _models(rows: list[JobScore], bought: str) -> str:
-    names = {r.model for r in rows}
+    # Only what is shown counts; a refusal is never shown (spec section 2).
+    names = {r.model for r in rows if r.outcome != "refused"}
     if bought:
         names.add(bought)
     if len(names) > 1:
@@ -286,10 +322,11 @@ async def cached_scores(db, *, user, facts, jobs, cap: int) -> ScoreRun:
     At most `cap` of the stale pairs, in the caller's order, are bought; the
     rest are simply absent from the result, to be picked up by a later pass.
     `usage` is the purchase's alone, since cached rows cost nothing.
-    `model` is the one model behind everything returned, or "mixed".
+    `model` is the one model behind everything shown, or "mixed". Writes are
+    flushed, not committed: the caller commits (see TRANSACTIONS above).
     """
     jobs = _distinct(list(jobs))
-    stale, fresh = _classify(db, user=user, facts=facts, jobs=jobs)
+    stale, fresh, hashes = _classify(db, user=user, facts=facts, jobs=jobs)
     to_buy = stale[: max(0, cap)]
 
     run = ScoreRun()
@@ -307,19 +344,23 @@ async def cached_scores(db, *, user, facts, jobs, cap: int) -> ScoreRun:
                 write_back(
                     db, user=user, facts=facts, job=by_id[item.job_id],
                     model=bought.model, scored=item,
+                    description_hash=_hash_of(hashes, item.job_id),
                 )
                 bought_scored.append(item)
             for job_id in bought.refused:
                 write_back(
                     db, user=user, facts=facts, job=by_id[job_id],
                     model=bought.model, refused=True,
+                    description_hash=_hash_of(hashes, job_id),
                 )
                 bought_refused.append(job_id)
-            # Paid for, so durable before anything the caller does next can fail.
-            db.commit()
 
     rows = [fresh[str(j.id)] for j in jobs if str(j.id) in fresh]
     run.scored = [_as_scored(r) for r in rows if r.outcome != "refused"] + bought_scored
     run.refused = [r.job_id for r in rows if r.outcome == "refused"] + bought_refused
-    run.model = _models(rows, bought_model if bought_scored or bought_refused else "")
+    # A fault with nothing to show keeps the model that was unreachable, so a
+    # degraded digest and an empty one stay distinguishable; "every shown item
+    # agrees" is vacuous when nothing is shown.
+    kept = bought_model if (bought_scored or bought_refused or not rows) else ""
+    run.model = _models(rows, kept)
     return run

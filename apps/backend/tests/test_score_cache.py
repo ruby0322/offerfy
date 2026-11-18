@@ -174,6 +174,99 @@ async def test_a_changed_resume_hash_rescores_that_pair(db_session, provider):
     assert row.facts_input_hash == "z" * 64
 
 
+async def test_the_pass_after_a_rescore_stops_buying(db_session, provider):
+    user = _user(db_session)
+    facts = _facts(db_session, user)
+    job = _job(db_session)
+    await score_cache.cached_scores(db_session, user=user, facts=facts, jobs=[job], cap=10)
+    facts.input_hash = "z" * 64
+    db_session.commit()
+    for _ in range(3):
+        await score_cache.cached_scores(db_session, user=user, facts=facts, jobs=[job], cap=10)
+    assert provider.bought == 2  # the original purchase and exactly one rescore
+
+
+async def test_a_posting_rewritten_during_the_provider_call_is_rescored(db_session):
+    user = _user(db_session)
+    facts = _facts(db_session, user)
+    job = _job(db_session, description_hash="old" + "0" * 61)
+    inner = Provider()
+
+    async def rewriting(db, **kw):
+        run = await inner(db, **kw)
+        db.get(JobFacets, job.id).description_hash = "new" + "0" * 61
+        db.commit()  # enrich_jobs lands while the provider was thinking
+        return run
+
+    import app.services.jobs.score_cache as sc
+    original = sc.score_candidates
+    sc.score_candidates = rewriting
+    try:
+        await score_cache.cached_scores(db_session, user=user, facts=facts, jobs=[job], cap=10)
+    finally:
+        sc.score_candidates = original
+    (row,) = _rows(db_session, user)
+    assert row.description_hash == "old" + "0" * 61
+    sc.score_candidates = inner
+    try:
+        await score_cache.cached_scores(db_session, user=user, facts=facts, jobs=[job], cap=10)
+    finally:
+        sc.score_candidates = original
+    assert inner.bought == 2
+
+
+async def test_cached_scores_leaves_the_commit_to_the_caller(db_session, provider, monkeypatch):
+    # Spied rather than rolled back: pysqlite's savepoint handling can settle
+    # rows on its own, so a rollback assertion would test the driver, not us.
+    user = _user(db_session)
+    facts = _facts(db_session, user)
+    job = _job(db_session)
+    commits = []
+    monkeypatch.setattr(db_session, "commit", lambda: commits.append(1))
+    await score_cache.cached_scores(db_session, user=user, facts=facts, jobs=[job], cap=10)
+    assert commits == []
+    assert len(_rows(db_session, user)) == 1  # written and flushed, awaiting the caller
+
+
+async def test_a_fault_with_nothing_cached_keeps_the_model_that_failed(db_session, provider):
+    user = _user(db_session)
+    facts = _facts(db_session, user)
+    job = _job(db_session)
+    provider.error = "Decisions request failed"
+    run = await score_cache.cached_scores(db_session, user=user, facts=facts, jobs=[job], cap=10)
+    assert run.error and run.model == "decisions-model"
+
+
+async def test_a_refused_rows_model_does_not_make_the_pool_mixed(db_session, monkeypatch):
+    user = _user(db_session)
+    facts = _facts(db_session, user)
+    declined, good = _job(db_session), _job(db_session)
+    monkeypatch.setattr(score_cache, "score_candidates", Provider(refuse={declined.id}, model="a"))
+    await score_cache.cached_scores(db_session, user=user, facts=facts, jobs=[declined], cap=10)
+    monkeypatch.setattr(score_cache, "score_candidates", Provider(model="b"))
+    run = await score_cache.cached_scores(
+        db_session, user=user, facts=facts, jobs=[declined, good], cap=10
+    )
+    assert run.model == "b"
+
+
+def test_record_prose_with_nothing_to_record_raises_and_keeps_the_prose(db_session):
+    user = _user(db_session)
+    facts = _facts(db_session, user)
+    job = _job(db_session)
+    score_cache.write_back(
+        db_session, user=user, facts=facts, job=job, model="m",
+        scored=Scored(job.id, "strong", 0.8, dict(COMPONENTS)),
+    )
+    score_cache.record_prose(db_session, user=user, job=job, reason="Kept.", model="p")
+    with pytest.raises(ValueError):
+        score_cache.record_prose(db_session, user=user, job=job)
+    with pytest.raises(ValueError):
+        score_cache.record_prose(db_session, user=user, job=job, reason="x", rejected=True)
+    (row,) = _rows(db_session, user)
+    assert (row.reason, row.prose_model, row.outcome) == ("Kept.", "p", "scored")
+
+
 async def test_a_rewritten_posting_rescores_that_pair(db_session, provider):
     user = _user(db_session)
     facts = _facts(db_session, user)
