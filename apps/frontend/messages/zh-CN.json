@@ -721,7 +721,6 @@
     "rebuildFailed": "无法读取你的简历，请稍后再试。",
     "rebuildNoSource": "请先在编辑器保存一版简历，再重试。",
     "rebuildTooOften": "请求过于频繁，请稍候再试。",
-    "rebuildNeedsMatching": "请先开启「匹配推荐」，Offerfy 才能读取你的简历。",
     "rebuildOutOfAllowance": "本周的 AI 额度用完了，{date} 重置。",
     "seePrivacy": "我们如何处理你的简历",
     "locationsIgnoredRemote": "下方选择“远程”时不会应用这里的地点：远程职位无论雇主位于哪里，我们都会匹配。若要再按国家筛选，请把“远程”改回“不限”。",

@@ -721,7 +721,6 @@
     "rebuildFailed": "無法讀取你的履歷，請稍後再試。",
     "rebuildNoSource": "請先在編輯器儲存一版履歷，再試一次。",
     "rebuildTooOften": "請求過於頻繁，請稍候再試。",
-    "rebuildNeedsMatching": "請先開啟「媒合推薦」，Offerfy 才能讀取你的履歷。",
     "rebuildOutOfAllowance": "本週的 AI 額度用完了，{date} 重置。",
     "seePrivacy": "我們如何處理你的履歷",
     "locationsIgnoredRemote": "下方選擇「遠端」時不會套用這裡的地點：遠端職缺不論雇主位在哪裡，我們都會媒合。若要再依國家篩選，請把「遠端」改回「不指定」。",
