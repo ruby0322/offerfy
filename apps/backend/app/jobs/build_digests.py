@@ -77,7 +77,7 @@ from app.services.jobs.digest import (
     classify,
 )
 from app.services.jobs.reasons import write_reasons
-from app.services.jobs.score_cache import cached_scores
+from app.services.jobs.score_cache import cached_scores, models_for
 from app.services.metering import metered, system_guard, window_totals
 from app.services.profile import record_build_spend
 from app.services.resume_facts import (
@@ -419,7 +419,10 @@ async def _judge(db, *, user, facts, pool, period_start, limit):
         # gap. `degraded` therefore means "nothing was scorable"; rows written
         # before this meant "we could not rank these", which still holds.
         # A refusal is not an error, and an all-refused pool lands here too.
-        logger.warning("digest degraded: user=%s %s", user.id, run.error)
+        logger.warning(
+            "digest degraded: user=%s error=%s refused=%d",
+            user.id, run.error or "none (nothing scorable)", len(run.refused),
+        )
         return {UNRANKED_TRACK: list(pool[:limit])}, run.model, "degraded"
     if run.error is not None:
         logger.warning(
@@ -438,6 +441,12 @@ async def _judge(db, *, user, facts, pool, period_start, limit):
         # week from an unmatched preference.
         return {track: [] for track in TRACKS}, run.model, "empty"
 
+    # The model behind what the person will SEE, not behind the pool: a row
+    # scored by another model that fell below the tier cut or past the track cap
+    # is not on the card, and recording "mixed" for it would be a lie in the
+    # other direction. `run.model` is pool-scoped, so it is not used here.
+    model = models_for(db, user=user, job_ids=list(shown))
+
     by_id = {job.id: job for job in pool}
     # Prose is bought only for the items that will be shown: the call is priced
     # per posting it carries, and a candidate that did not make either track
@@ -454,7 +463,7 @@ async def _judge(db, *, user, facts, pool, period_start, limit):
     written = {p.job_id: p for p in prose.prose}
     return (
         {track: [(s, written.get(s.job_id)) for s in items] for track, items in tracks.items()},
-        run.model,
+        model,
         "full",
     )
 

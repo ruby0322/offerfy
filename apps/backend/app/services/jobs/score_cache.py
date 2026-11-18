@@ -67,6 +67,7 @@ that was scored).
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from collections.abc import Iterable
 from typing import Any
 
 from sqlalchemy import select
@@ -307,7 +308,10 @@ def _as_scored(row: JobScore) -> Scored:
 
 
 def _models(rows: list[JobScore], bought: str) -> str:
-    # Only what is shown counts; a refusal is never shown (spec section 2).
+    # Scoped to the rows it is handed, whatever they are: a refusal is never
+    # shown (spec section 2), so it never counts. The cache cannot know what a
+    # digest will end up showing; a caller that needs "the shown items' model"
+    # asks `models_for` with the ids it shows.
     names = {r.model for r in rows if r.outcome != "refused"}
     if bought:
         names.add(bought)
@@ -316,13 +320,27 @@ def _models(rows: list[JobScore], bought: str) -> str:
     return next(iter(names), "")
 
 
+def models_for(db, *, user, job_ids: Iterable[str]) -> str:
+    """The one model behind these postings' scores, or "mixed", or "".
+
+    Reads the cache rows for exactly `job_ids` (flushed rows included), ignoring
+    refusals. This is the shown-scoped answer: the single-or-mixed rule lives
+    here, in one module, and the caller supplies the scope.
+    """
+    ids = [str(i) for i in job_ids]
+    return _models(list(_existing(db, user.id, ids).values()), "")
+
+
 async def cached_scores(db, *, user, facts, jobs, cap: int) -> ScoreRun:
     """Fresh cache rows plus whatever had to be bought, as one `ScoreRun`.
 
     At most `cap` of the stale pairs, in the caller's order, are bought; the
     rest are simply absent from the result, to be picked up by a later pass.
     `usage` is the purchase's alone, since cached rows cost nothing.
-    `model` is the one model behind everything shown, or "mixed". Writes are
+    `model` is the one model behind every non-refused row in the pool this
+    returns, or "mixed" -- pool-scoped, NOT scoped to what a caller later shows.
+    A caller that records "the model behind what the person sees" must ask
+    `models_for` about the postings it shows. Writes are
     flushed, not committed: the caller commits (see TRANSACTIONS above).
     """
     jobs = _distinct(list(jobs))
