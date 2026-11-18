@@ -181,24 +181,13 @@ def _tokens(delimited: str | None) -> list[str]:
     return [t for t in (delimited or "").lower().split("|") if t]
 
 
-def _escape(t: str) -> str:
-    return t.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-
-
 def _any_token(column, tokens: list[str]):
-    # Whole-token match against the pipe-delimited value, never a substring:
-    # '|tw|' must not match 'TWX' and '|ml|' must not match 'html'.
-    #
-    # DEFERRED OPTIMISATION: every column this is called with (JobFacets
-    # .function, .country, .region, .city) holds a SINGLE token, not a pipe
-    # list, so `lower(col).in_(tokens)` would be equivalent, index-usable and
-    # free of the escaping below. It is left as LIKE because the pipe idiom is
-    # the branch-wide convention and the cost is invisible at one query per
-    # page view; revisit when a later slice runs the prefilter once per active
-    # user on a schedule, which is where a sequential scan starts to matter.
-    padded = "|" + func.lower(column) + "|"
-    # _ and % are LIKE wildcards ('north_america' is a real region): escape.
-    return or_(*[padded.like(f"%|{_escape(t)}|%", escape="\\") for t in tokens])
+    # Whole-token match, never a substring: 'tw' must not match 'TWX' and 'ml'
+    # must not match 'html'. Every column this is called with (JobFacets
+    # .function, .country, .region, .city) holds a SINGLE token rather than a
+    # pipe list, so an IN on lower(col) asks the same question the pipe-padded
+    # LIKE did -- it is index-usable and needs no wildcard escaping.
+    return func.lower(column).in_(tokens)
 
 
 def _exclusions(query: Query, pref: JobPreference) -> Query:
