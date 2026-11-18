@@ -416,6 +416,57 @@ def test_write_back_twice_is_an_update(db_session):
     assert row.outcome == "refused" and row.tier is None and row.requirements_met is None
 
 
+def test_a_rescore_moves_scored_at_and_leaves_created_at_alone(db_session):
+    # The pair is new to the reader once. scored_at dates the judgement and
+    # moves; created_at dates the pair and must not, or a resume edit
+    # re-announces the whole match set as arrivals.
+    user = _user(db_session)
+    facts = _facts(db_session, user)
+    job = _job(db_session)
+    first = score_cache.write_back(
+        db_session, user=user, facts=facts, job=job, model="m",
+        scored=Scored(job.id, "strong", 0.8, dict(COMPONENTS)),
+    )
+    db_session.commit()
+    born, judged = first.created_at, first.scored_at
+    assert born == judged, "a pair's first judgement is its creation"
+
+    facts.input_hash = "z" * 64
+    db_session.commit()
+    again = score_cache.write_back(
+        db_session, user=user, facts=facts, job=job, model="m",
+        scored=Scored(job.id, "weak", 0.2, dict(COMPONENTS)),
+    )
+    db_session.commit()
+    assert again.created_at == born
+    assert again.scored_at > judged
+    # And a refusal written over a score is still the same pair.
+    score_cache.write_back(
+        db_session, user=user, facts=facts, job=job, model="m", refused=True
+    )
+    db_session.commit()
+    (row,) = _rows(db_session, user)
+    assert row.created_at == born
+
+
+async def test_a_rescore_through_the_cache_keeps_the_pairs_creation_date(
+    db_session, provider
+):
+    user = _user(db_session)
+    facts = _facts(db_session, user)
+    job = _job(db_session)
+    await score_cache.cached_scores(db_session, user=user, facts=facts, jobs=[job], cap=10)
+    db_session.commit()
+    (row,) = _rows(db_session, user)
+    born = row.created_at
+    facts.input_hash = "z" * 64
+    db_session.commit()
+    await score_cache.cached_scores(db_session, user=user, facts=facts, jobs=[job], cap=10)
+    db_session.commit()
+    (row,) = _rows(db_session, user)
+    assert row.created_at == born and row.scored_at >= born
+
+
 def test_write_back_wants_exactly_one_answer(db_session):
     user = _user(db_session)
     facts = _facts(db_session, user)

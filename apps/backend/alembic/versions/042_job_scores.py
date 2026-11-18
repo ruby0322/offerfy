@@ -18,6 +18,18 @@ tier and fit_score are nullable because a refusal is stored as a row with no
 score. outcome has no CHECK constraint, matching 031_job_preferences.py,
 032_applications.py and 033_digests.py: the vocabulary lives in the model.
 
+scored_at and created_at are both NOT NULL and are different facts: scored_at
+is when the judgement was made and moves on every rescore, created_at is when
+the pair was first judged and never moves. The arrivals window reads
+created_at, so a resume edit cannot re-announce a match set the reader has
+already seen. Both are written by the application (score_cache.write_back) and
+so have no server default; the model carries a Python-side default for
+created_at so no writer can leave it NULL.
+
+created_at was added to this revision rather than a 043 because 042 has not
+been applied anywhere: amending an unapplied revision is the whole point of
+checking before it ships.
+
 Plain create_table with no dialect guard. No test runs alembic; conftest
 builds the schema from the models with create_all, so this migration is
 checked by eye against the models, and against alembic's offline --sql output.
@@ -52,6 +64,7 @@ def upgrade() -> None:
         sa.Column("prose_model", sa.String(length=64), nullable=True),
         sa.Column("outcome", sa.String(length=16), nullable=False),
         sa.Column("scored_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["job_id"], ["jobs.id"], ondelete="CASCADE"),
         sa.UniqueConstraint("user_id", "job_id", name="job_scores_user_id_job_id_key"),

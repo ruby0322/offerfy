@@ -57,6 +57,15 @@ One writer. `write_back` and `record_prose` are the only code that writes
 rescore that clears the prose, since a sentence about the old score describes
 a judgement that no longer stands.
 
+TWO DATES, TWO QUESTIONS. `scored_at` is when the answer was given and moves
+on every write. `created_at` is when the pair was first judged, is written
+once by `write_back`'s insert, and never moves. The dashboard's arrivals
+window reads `created_at`, so a rescore -- which is what a resume edit causes
+for up to 30 pairs on the next sweep pass -- cannot announce a match set the
+reader has already seen as new. `scored_at` keeps its own jobs: the
+longest-unswept ordering in `score_sweep.sweep_order`, and "when was this
+judged" on the page.
+
 A posting with no `JobFacets` row. Staleness needs the posting's hash and
 enrichment may not have reached it yet. Its hash is recorded as "" so it can be
 scored and cached now; when enrichment arrives the hash differs and the pair is
@@ -177,6 +186,14 @@ def _find(db, user_id: str, job_id: str) -> JobScore | None:
 def _fill(
     row: JobScore, *, facts, description_hash: str, model: str, scored: Scored | None
 ) -> None:
+    """Write this answer onto a row. Never touches `created_at`.
+
+    `created_at` dates the pair, not the answer: it says when this posting
+    became new to this person, and the arrivals window reads it. A rescore is
+    a new answer about an old pair, so it moves `scored_at` and leaves
+    `created_at` where it was. Set it here and a resume edit would announce
+    the reader's whole match set as new again.
+    """
     row.facts_input_hash = facts.input_hash
     row.description_hash = description_hash
     row.model = model
@@ -240,6 +257,11 @@ def write_back(
     if row is None:
         row = JobScore(user_id=user.id, job_id=job_id)
         _fill(row, **fields)
+        # The one place created_at is written: this pair is new to this person
+        # as of its first judgement. The conflict branch below deliberately
+        # does not set it -- the winner's row keeps the date it was created,
+        # which is the date the reader's window should compare against.
+        row.created_at = row.scored_at
         try:
             with db.begin_nested():
                 db.add(row)

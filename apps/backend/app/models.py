@@ -1444,6 +1444,23 @@ class JobScore(Base):
     prose_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     outcome: Mapped[str] = mapped_column(String(16), nullable=False)
     scored_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # When this pair was first judged. Written once, on insert, and never
+    # again -- a rescore moves scored_at and leaves this alone.
+    #
+    # The two dates answer two questions and must not be conflated. scored_at
+    # is "when was this judgement made", which the dashboard shows and
+    # score_sweep.sweep_order sorts by to find the longest-unswept person.
+    # created_at is "when did this posting become new to this person", which
+    # is what match_sweep.arrival_rows windows on. Keyed on scored_at, a
+    # resume edit announced the reader's whole match set as new again: the
+    # sweep rebuilds the facts, every facts_input_hash goes stale, up to 30
+    # pairs are rescored, and all of them get a fresh scored_at -- "15 new
+    # roles for you since you last looked" above fifteen roles they had
+    # already seen. That is the design's first anti-goal, and section 5's "a
+    # posting is new to the reader exactly once".
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
 
 
 class TailorRun(Base):

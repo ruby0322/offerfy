@@ -29,6 +29,8 @@ def _prefer(db_session, user):
 
 
 def _score(db_session, user, job, scored_at, **over):
+    """A cached judgement. created_at defaults to scored_at: a pair's first
+    judgement is its creation, which is what write_back writes."""
     fields = dict(
         user_id=user.id,
         job_id=job.id,
@@ -37,14 +39,17 @@ def _score(db_session, user, job, scored_at, **over):
         model="test-model",
         outcome="scored",
         scored_at=scored_at,
+        created_at=scored_at,
         tier="Strong fit",
         fit_score=0.8,
         reason="Because reasons.",
         gap="A gap.",
     )
     fields.update(over)
-    db_session.add(JobScore(**fields))
+    row = JobScore(**fields)
+    db_session.add(row)
     db_session.commit()
+    return row
 
 
 def _seen_at(db_session, user):
@@ -183,6 +188,59 @@ def test_a_matching_posting_with_no_score_yet_is_present_without_one(
     assert by_id[waiting.id]["fit_score"] is None
     assert by_id[waiting.id]["scored_at"] is None
     assert body["match_count"] == 2, "the list does not disagree with the count"
+
+
+def test_a_rescore_does_not_make_an_old_match_new_again(client, db_session):
+    # The anti-goal, pinned. A resume edit makes the next sweep pass rebuild
+    # the facts and rescore up to 30 pairs, each getting a fresh scored_at.
+    # Windowed on that, the dashboard said "new roles since you last looked"
+    # about roles the reader had already been shown.
+    user = _ready(client, db_session, "sub-arr-rescore")
+    job = _posting(db_session)
+    row = _score(db_session, user, job, _ago(days=3))
+    user.matches_seen_at = _ago(days=2)
+    db_session.commit()
+    assert _get(client)["arrivals"] == [], "already seen before the marker"
+
+    # The rescore: a new judgement of the same pair.
+    row.scored_at = _ago(minutes=5)
+    db_session.commit()
+    assert _get(client)["arrivals"] == [], "a rescore is not an arrival"
+    # The page still shows WHEN it was judged; that is scored_at's own job.
+    user.matches_seen_at = _ago(days=4)
+    db_session.commit()
+    (arrival,) = _get(client)["arrivals"]
+    assert arrival["scored_at"].startswith(_aware(row.scored_at).isoformat()[:16])
+
+
+def test_a_pending_posting_already_shown_is_not_new_again(client, db_session):
+    # The unscored branch's window, which nothing pinned. It decides whether
+    # a matching posting with no score row yet reappears on a second visit,
+    # and it is the clause the first-visit NULL marker bypasses entirely.
+    user = _ready(client, db_session, "sub-arr-pending-window")
+    old = _posting(db_session, first_seen=_ago(days=3))
+    fresh = _posting(db_session, first_seen=_ago(hours=1))
+    user.matches_seen_at = _ago(days=1)
+    db_session.commit()
+
+    body = _get(client)
+    assert [a["job_id"] for a in body["arrivals"]] == [fresh.id], (
+        "a posting first seen before the marker was already on the page unscored"
+    )
+    assert body["arrivals"][0]["scored_at"] is None
+    # Both still count as matches: the window is about novelty, not matching.
+    assert body["match_count"] == 2
+
+    # Shown, so the next window starts after it; nothing is new any more.
+    _mark_seen(client)
+    assert _get(client)["arrivals"] == []
+
+    # And a score arriving AFTER that makes the older one new exactly once, as
+    # kind 1 -- the handover the two windows have to agree on. The sweep's
+    # next pass lands a moment after the page was shown, so the row is dated
+    # there rather than before the marker it has to clear.
+    _score(db_session, user, old, datetime.now(timezone.utc) + timedelta(seconds=2))
+    assert [a["job_id"] for a in _get(client)["arrivals"]] == [old.id]
 
 
 def test_a_refused_score_travels_without_a_tier(client, db_session):

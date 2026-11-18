@@ -321,13 +321,24 @@ def arrival_rows(
 
     An arrival is one of two things, and they come from different places.
 
-    1. A score row for this person whose scored_at is after `since`. No
+    1. A score row for this person whose created_at is after `since`. No
        preference filter and no is_active filter: we scored it because it
        matched at the time, which is a fact about what happened to them, and
        editing the preference later does not un-happen it. The posting travels
        as it is now, so one that closed since being scored comes back with
        is_active False for the page to say so -- the inactive case is not an
        exception, it is just what the row says.
+
+       created_at, NOT scored_at, and this is load-bearing. scored_at moves on
+       every rescore, and a rescore is the normal consequence of a resume
+       edit: the next sweep pass rebuilds the facts, every facts_input_hash
+       goes stale, and up to 30 pairs are bought again with a fresh
+       scored_at. Windowed on that, the dashboard announced "15 new roles for
+       you since you last looked" above fifteen roles the reader had already
+       seen -- the design's first anti-goal, and the opposite of section 5's
+       "a posting is new to the reader exactly once". created_at is written
+       once, by score_cache.write_back's insert, so an arrival arrives once.
+       The ordering follows the window for the same reason.
     2. A posting the CURRENT preference matches (the prefilter, the only place
        the current preference belongs) that this person has no score row for
        yet. A broad preference fills in over several sweep passes, so for up to
@@ -345,10 +356,10 @@ def arrival_rows(
         .join(JobScore, and_(JobScore.job_id == Job.id, JobScore.user_id == user_id))
     )
     if since is not None:
-        scored = scored.filter(JobScore.scored_at > since)
+        scored = scored.filter(JobScore.created_at > since)
     rows: list[tuple[Job, JobScore | None]] = [
         (job, score)
-        for job, score in scored.order_by(JobScore.scored_at.desc(), Job.id.desc())
+        for job, score in scored.order_by(JobScore.created_at.desc(), Job.id.desc())
         .limit(limit)
         .all()
     ]
@@ -370,8 +381,11 @@ def arrival_rows(
     )
 
     def recency(pair):
+        # When it became new to this person: the pair's creation for a scored
+        # row (never its last rescore), the posting's arrival for one with no
+        # row yet. Both are the same measure the two windows above use.
         job, score = pair
-        return score.scored_at if score is not None else job.first_seen_at
+        return score.created_at if score is not None else job.first_seen_at
 
     def aware(dt):
         return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
