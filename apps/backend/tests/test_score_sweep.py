@@ -5,7 +5,9 @@ sweep reaches them: `score_candidates` inside `score_cache` (which the sweep
 reads through), and `write_reasons` and `build_facts` on the sweep module. They
 are the three places this job spends money, and each stub records what it was
 asked, so "was not bought" is an assertion on calls rather than on a side
-effect. The clock is passed in everywhere (`now=`), never read.
+effect. `now=` is passed for eligibility and the ceiling only; the clock is still read
+by `score_cache` (which stamps `scored_at`) and by `freshness_cutoff()` (the
+prefilter and the prune's dead-row query).
 """
 
 import itertools
@@ -134,7 +136,8 @@ class Seams:
     """Records what the sweep asked of the paid calls, in order."""
 
     def __init__(self, monkeypatch, *, tier="Strong fit", prose_dropped=(),
-                 prose_error=None, on_score=None, score_raises_for=()):
+                 prose_error=None, on_score=None, score_raises_for=(),
+                 prose_also_dropped=()):
         self.trace: list[str] = []
         self.scored_jobs: list[list[str]] = []
         self.prose_jobs: list[list[str]] = []
@@ -161,6 +164,9 @@ class Seams:
                 run.error = prose_error
                 return run
             run.dropped = [(s.job_id, "uncited") for s in scored if s.job_id in prose_dropped]
+            # Ids that are BOTH kept and dropped, as the real validator yields
+            # for a repeated posting.
+            run.dropped += list(prose_also_dropped)
             run.prose = [
                 Prose(job_id=s.job_id, reason=f"Reason for {s.job_id}.", gap=None)
                 for s in scored if s.job_id not in prose_dropped
@@ -413,6 +419,33 @@ async def test_prose_rejected_by_the_validator_is_recorded_and_not_rebought(
     assert seams.trace == []
 
 
+async def test_a_duplicate_drop_does_not_erase_the_prose_that_was_kept(
+    db_session, monkeypatch
+):
+    user = _ready(db_session)
+    job = _posting(db_session)
+    # The same id is in BOTH run.prose and run.dropped, as reasons.check yields.
+    Seams(monkeypatch, prose_also_dropped=[(job.id, "duplicate")])
+    await sweep_all(db_session, now=NOW)
+    row = _rows(db_session, user)[0]
+    assert row.outcome == "scored" and row.reason == f"Reason for {job.id}."
+
+
+async def test_a_blank_answer_is_not_recorded_as_a_rejection(db_session, monkeypatch):
+    user = _ready(db_session)
+    job = _posting(db_session)
+    Seams(monkeypatch)
+
+    async def blank(db, **kw):
+        return ProseRun(model="m", dropped=[(job.id, "empty")])
+
+    monkeypatch.setattr(score_sweep, "write_reasons", blank)
+    await sweep_all(db_session, now=NOW)
+    row = _rows(db_session, user)[0]
+    # One bad response must not suppress the sentence for good.
+    assert row.outcome == "scored" and row.reason is None
+
+
 async def test_a_failed_prose_call_keeps_the_score(db_session, monkeypatch):
     seams = Seams(monkeypatch, prose_error="invalid_payload")
     user = _ready(db_session)
@@ -608,5 +641,20 @@ def test_main_dry_run_prints_pairs_and_people(db_session, monkeypatch, capsys):
     monkeypatch.setattr(score_sweep, "get_session_factory", lambda: (lambda: db_session))
     monkeypatch.setattr(db_session, "close", lambda: None)
     assert main(["--dry-run"]) == 0
-    assert capsys.readouterr().out.startswith("would buy 1 pairs for 1 people")
+    out = capsys.readouterr().out
+    assert out.startswith("dry run: would buy 1 pairs for 1 people")
+    assert "facts rebuilds" in out and "prose calls" in out and "swept" not in out
     assert db_session.query(JobScore).count() == 0
+
+
+def test_the_real_pass_line_says_only_what_happened(db_session, monkeypatch, capsys):
+    Seams(monkeypatch)
+    _ready(db_session)
+    _posting(db_session)
+    monkeypatch.setattr(score_sweep, "get_engine", lambda: None)
+    monkeypatch.setattr(score_sweep, "get_session_factory", lambda: (lambda: db_session))
+    monkeypatch.setattr(db_session, "close", lambda: None)
+    assert main([]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("bought 1 pairs for 1 people (swept 1)")
+    assert "rebuild" not in out and "would" not in out

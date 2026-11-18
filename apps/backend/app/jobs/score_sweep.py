@@ -74,8 +74,10 @@ never pruned: the unbounded growth pruning exists to prevent, merely relocated.
 Running out of money to score is no reason to stop deleting dead rows. It runs
 first, so that a crash later in the pass does not skip it.
 
-**One transaction per user**, committed at the end of that user's pass, and a
-per-user `except` that rolls back: one person's database fault must not cost
+**One transaction per user for the scores and prose**, committed at the end of
+that user's pass. The facts rebuild and its spend are the exception: they commit
+on their own, mid-user, as `build_digests._facts_for_scoring` does, so a billed
+rebuild survives a later rollback. A per-user `except` rolls back: one person's database fault must not cost
 everyone else the pass. A crash discards that user's purchases, which are
 bought again next pass; the same bargain `build_digests` records.
 
@@ -134,6 +136,9 @@ logger = logging.getLogger(__name__)
 # per-user bill of a pass; a module constant AND a parameter on both entry
 # points, so changing it for one run is a call-site change.
 SWEEP_CAP = 30
+
+# The `reasons.check` drop reasons that mean the validator refused the text.
+_REJECTING = frozenset({"uncited", "undeclared", "narrated"})
 
 
 @dataclass
@@ -222,8 +227,15 @@ async def _buy_prose(db: Session, *, user: User, facts, scored, jobs) -> None:
             db, user=user, job=by_id[item.job_id],
             reason=item.reason, gap=item.gap, model=run.model,
         )
-    for job_id, _why in run.dropped:
-        if job_id in by_id:
+    # `prose_rejected` means "the validator refused this text as unsupported",
+    # and only these reasons say that. "duplicate" is the model repeating a
+    # posting whose first copy was KEPT (the same id is then in both lists, and
+    # rejecting it would erase a sentence just paid for); "empty" is a blank
+    # response, a provider-quality fault that must not suppress the posting's
+    # sentence for good on the strength of one bad answer.
+    written = {item.job_id for item in run.prose}
+    for job_id, why in run.dropped:
+        if job_id in by_id and job_id not in written and why in _REJECTING:
             record_prose(db, user=user, job=by_id[job_id], rejected=True, model=run.model)
 
 
@@ -231,8 +243,8 @@ async def sweep_user(db: Session, *, user: User, cap: int = SWEEP_CAP) -> int | 
     """Score what is new for one person. Returns pairs bought, or None.
 
     None means there were facts to be built and none could be; the caller does
-    not count that person as swept. Commits once, at the end: the scores, the
-    prose and nothing half-done. A real exception propagates after a rollback.
+    not count that person as swept. The scores and prose commit together, once, at
+    the end; the facts rebuild and its spend commit earlier, on their own. A real exception propagates after a rollback.
     """
     try:
         # The candidate set first: it is free, and the rebuild is not.
@@ -246,6 +258,9 @@ async def sweep_user(db: Session, *, user: User, cap: int = SWEEP_CAP) -> int | 
                 return None
         # What a purchase is, by the cache's own definition, in the order the
         # cache will buy it. Bought pairs are the prose candidates.
+        # The cache classifies again inside cached_scores: paid deliberately, as
+        # it is the only way to learn which pairs are arrivals without changing
+        # score_cache's signature. Both classify in the same order.
         arrivals = stale_pairs(db, user=user, facts=facts, jobs=pool)[: max(0, cap)]
         if not arrivals:
             return 0
@@ -382,6 +397,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Report how many pairs a pass would buy, and for how many people; buy nothing",
     )
     args = parser.parse_args(argv)
+    # Without this the INFO lines are dropped at the root default, and they are
+    # the only record of someone who got nothing (they sit in no report list).
+    logging.basicConfig(level=logging.INFO)
 
     now = datetime.now(timezone.utc)
     get_engine()
@@ -394,16 +412,27 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         session.close()
     people = sum(1 for n in report.bought_by_user.values() if n > 0)
-    verb = "would buy" if args.dry_run else "bought"
-    prune_verb = "would prune" if args.dry_run else "pruned"
-    print(
-        f"{verb} {report.bought} pairs for {people} people "
-        f"(swept {len(report.swept)}, facts to rebuild "
-        f"{len(report.would_rebuild_facts)}); {prune_verb} {report.pruned}; "
-        f"skipped: no_preference {len(report.skipped_no_preference)}, "
-        f"not_engaged {len(report.skipped_not_engaged)}, "
-        f"over_ceiling {len(report.skipped_over_ceiling)}"
-    )
+    if args.dry_run:
+        # Nothing was swept: this is the pass a real run would make. Rebuilds
+        # and prose are provider calls the pair count does not include, so they
+        # are stated: one rebuild per stale-facts person, and at most one prose
+        # call per person who buys (only strong-tier arrivals get one).
+        print(
+            f"dry run: would buy {report.bought} pairs for {people} people "
+            f"(would visit {len(report.swept)}); plus "
+            f"{len(report.would_rebuild_facts)} facts rebuilds and up to {people} "
+            f"prose calls; would prune {report.pruned}; skipped: no_preference "
+            f"{len(report.skipped_no_preference)}, not_engaged "
+            f"{len(report.skipped_not_engaged)} (over_ceiling not applied)"
+        )
+    else:
+        print(
+            f"bought {report.bought} pairs for {people} people "
+            f"(swept {len(report.swept)}); pruned {report.pruned}; "
+            f"skipped: no_preference {len(report.skipped_no_preference)}, "
+            f"not_engaged {len(report.skipped_not_engaged)}, "
+            f"over_ceiling {len(report.skipped_over_ceiling)}"
+        )
     return 0
 
 

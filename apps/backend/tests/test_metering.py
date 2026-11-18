@@ -68,6 +68,8 @@ EXPECTED_CALL_SITES = {
     # the build is a third spender -- system_guard(purpose="profile"), the same
     # purpose and the same wrap as the two callers above it in this list.
     ("jobs/build_digests.py", "build_facts"),
+    # The score sweep rebuilds stale facts before scoring, as the digest does:
+    # system_guard(purpose="profile"), no HTTP caller to refuse.
     ("jobs/score_sweep.py", "build_facts"),
 }
 
