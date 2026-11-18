@@ -20,7 +20,7 @@ score. outcome has no CHECK constraint, matching 031_job_preferences.py,
 
 Plain create_table with no dialect guard. No test runs alembic; conftest
 builds the schema from the models with create_all, so this migration is
-checked by eye against the models, and by a throwaway Postgres.
+checked by eye against the models, and against alembic's offline --sql output.
 """
 
 from alembic import op
