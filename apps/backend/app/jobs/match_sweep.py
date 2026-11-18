@@ -186,7 +186,10 @@ def _any_token(column, tokens: list[str]):
     # must not match 'html'. Every column this is called with (JobFacets
     # .function, .country, .region, .city) holds a SINGLE token rather than a
     # pipe list, so an IN on lower(col) asks the same question the pipe-padded
-    # LIKE did -- it is index-usable and needs no wildcard escaping.
+    # LIKE did, without the wildcard escaping or the string concatenation. It is
+    # NOT index-usable as written: the schema indexes only the raw columns, and
+    # a plain btree cannot serve lower(col). A functional index on lower(col)
+    # is what would make it so, and is where the remaining win is.
     return func.lower(column).in_(tokens)
 
 
