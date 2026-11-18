@@ -18,7 +18,7 @@ import { Link, useRouter } from "@/i18n/navigation";
 import { ApiError, listResumes, type Resume } from "@/lib/api";
 import type { Application } from "@/lib/applications";
 import { fetchDashboard, type Dashboard } from "@/lib/dashboard";
-import { preferenceSummary } from "@/lib/jobs";
+import { hasSavedPreference, preferenceSummary } from "@/lib/jobs";
 
 /**
  * The overview: what changed, the one thing to do, and the shape of the search.
@@ -103,11 +103,11 @@ export default function DashboardPage() {
       applications: rows,
       health: dash.resume_health,
       digest: dash.digest,
-      hasPreference: dash.preference.updated_at !== null && summary !== "",
+      hasPreference: hasSavedPreference(dash.preference),
       cardOnPage: showCard,
       masterId,
     });
-  }, [dash, rows, summary, masterId, showCard]);
+  }, [dash, rows, masterId, showCard]);
 
   // The header line and the arrivals block read the same list, so the count
   // up here and the rows below cannot disagree.
@@ -160,7 +160,11 @@ export default function DashboardPage() {
                 present a guess as something the person chose. */}
             {showCard ? null : (
               <p className="mt-2.5 inline-flex flex-wrap items-center gap-2 rounded-full border border-rule bg-sheet px-3 py-1 text-[0.78rem] text-muted-foreground">
-                {summary ? <span>{summary}</span> : <span>{t("matchEmpty")}</span>}
+                {hasSavedPreference(dash.preference) ? (
+                  <span>{summary}</span>
+                ) : (
+                  <span>{t("matchEmpty")}</span>
+                )}
                 <Link href="/preferences" className="underline underline-offset-2">
                   {t("editPreferences")}
                 </Link>
@@ -200,7 +204,7 @@ export default function DashboardPage() {
             digest={dash.digest}
             matches={dash.matches}
             matchCount={dash.match_count}
-            hasPreference={dash.preference.updated_at !== null}
+            hasPreference={hasSavedPreference(dash.preference)}
           />
           <section className="rr-card px-5 py-4">
             <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">

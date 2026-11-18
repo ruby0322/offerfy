@@ -11,7 +11,7 @@ import {
   type Dashboard,
   type DisclosureRecipient,
 } from "@/lib/dashboard";
-import { preferenceSummary } from "@/lib/jobs";
+import { hasSavedPreference, preferenceSummary } from "@/lib/jobs";
 import { NARROW_SCREEN, useMediaQuery } from "@/lib/use-media-query";
 
 /**
@@ -96,7 +96,7 @@ export default function ProfilePage() {
   const checks = health
     ? [
         { ok: health.has_master, key: "checkMaster" },
-        { ok: summary !== "", key: "checkPreference" },
+        { ok: hasSavedPreference(dash.preference), key: "checkPreference" },
         { ok: health.facts_state === "fresh", key: "checkFacts" },
         { ok: !health.needs_rebuild, key: "checkCurrent" },
       ]
@@ -138,7 +138,9 @@ export default function ProfilePage() {
               <dl className="mt-2.5">
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 border-b border-rule py-2 text-sm">
                   <dt className="w-28 shrink-0 text-muted-foreground">{t("wantSummary")}</dt>
-                  <dd className="min-w-0 flex-1">{summary || t("matchEmpty")}</dd>
+                  <dd className="min-w-0 flex-1">
+                    {hasSavedPreference(dash.preference) ? summary : t("matchEmpty")}
+                  </dd>
                 </div>
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-2 text-sm">
                   <dt className="w-28 shrink-0 text-muted-foreground">{t("wantMatching")}</dt>

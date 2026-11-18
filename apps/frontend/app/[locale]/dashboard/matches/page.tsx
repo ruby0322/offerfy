@@ -13,7 +13,7 @@ import { COUNTRY_KEYS, FUNCTION_KEYS, SENIORITY_KEYS } from "@/components/jobs/f
 import { Link, useRouter } from "@/i18n/navigation";
 import { ApiError } from "@/lib/api";
 import { fetchDashboard, type Dashboard } from "@/lib/dashboard";
-import { groupByDay, preferenceSummary } from "@/lib/jobs";
+import { groupByDay, hasSavedPreference, preferenceSummary } from "@/lib/jobs";
 import { useStoredPreference } from "@/lib/stored-preference";
 import { NARROW_SCREEN, useMediaQuery } from "@/lib/use-media-query";
 
@@ -108,7 +108,11 @@ export default function MatchesPage() {
                 {t("matchesLead", { count: dash.match_count })}
               </p>
               <p className="mt-2.5 inline-flex flex-wrap items-center gap-2 rounded-full border border-rule bg-sheet px-3 py-1 text-[0.78rem] text-muted-foreground">
-                {summary ? <span>{summary}</span> : <span>{t("matchEmpty")}</span>}
+                {hasSavedPreference(dash.preference) ? (
+                  <span>{summary}</span>
+                ) : (
+                  <span>{t("matchEmpty")}</span>
+                )}
                 <Link href="/preferences" className="underline underline-offset-2">
                   {t("editPreferences")}
                 </Link>
@@ -207,7 +211,7 @@ export default function MatchesPage() {
             </div>
             {days.length === 0 ? (
               <p className="mt-2 text-sm text-muted-foreground">
-                {dash.preference.updated_at !== null ? t("matchNone") : t("matchEmpty")}
+                {hasSavedPreference(dash.preference) ? t("matchNone") : t("matchEmpty")}
               </p>
             ) : view === "cards" ? (
               <FreshDeck items={dash.matches} totalCount={dash.match_count} />

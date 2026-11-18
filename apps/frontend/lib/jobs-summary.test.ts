@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { preferenceSummary, type SummaryLabels } from "./jobs";
+import { hasSavedPreference, preferenceSummary, type SummaryLabels } from "./jobs";
 
 const labels: SummaryLabels = {
   seniority: (v) => v,
@@ -34,4 +34,17 @@ test("remote-only replaces the location list", () => {
 
 test("an on-site-only preference is a summary, not nothing", () => {
   assert.equal(preferenceSummary({ ...none, remote_required: false }, labels), "On-site");
+});
+
+test("hasSavedPreference needs a saved row that says something", () => {
+  const saved = "2026-11-19T08:00:00+00:00";
+  // The seed: a guess, never stored, however full it is.
+  assert.equal(hasSavedPreference({ ...none, target_functions: ["backend"], updated_at: null }), false);
+  // Saved but empty says nothing: asked about like a new account.
+  assert.equal(hasSavedPreference({ ...none, updated_at: saved }), false);
+  assert.equal(hasSavedPreference({ ...none, target_functions: ["backend"], updated_at: saved }), true);
+  // Each axis counts on its own, matching what preferenceSummary prints.
+  assert.equal(hasSavedPreference({ ...none, target_seniority: "senior", updated_at: saved }), true);
+  assert.equal(hasSavedPreference({ ...none, remote_required: true, updated_at: saved }), true);
+  assert.equal(hasSavedPreference({ ...none, remote_required: false, updated_at: saved }), true);
 });

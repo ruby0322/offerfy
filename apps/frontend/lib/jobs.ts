@@ -648,6 +648,37 @@ export function preferenceSummary(
   return parts.join(" · ");
 }
 
+/**
+ * Whether this person has said what they want: a saved row, and one that
+ * says something. Before the first save `pref` is the resume's computed seed,
+ * which is a guess and must not be presented as their choice; a saved row
+ * with every field empty says nothing and is asked about like a new one.
+ *
+ * The one definition. The overview, the matches tab, the profile checklist
+ * and `nextSteps` all branch on this, and two inline copies already drifted
+ * once (a saved-but-empty preference read "tell us what you want" in a pill
+ * and "nothing matches your search" in the list beneath it). Emptiness does
+ * not depend on the labels, so identity labels are enough to test it.
+ */
+export function hasSavedPreference(
+  pref: Pick<
+    JobPreference,
+    "updated_at" | "target_functions" | "target_locations" | "target_seniority" | "remote_required"
+  >,
+): boolean {
+  if (pref.updated_at === null) return false;
+  const same = (v: string) => v;
+  return (
+    preferenceSummary(pref, {
+      seniority: same,
+      fn: same,
+      country: same,
+      remote: "remote",
+      onsite: "onsite",
+    }) !== ""
+  );
+}
+
 // --- The daily ingest, by day ------------------------------------------------
 
 /**
