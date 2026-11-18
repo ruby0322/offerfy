@@ -18,7 +18,7 @@ import { Link, useRouter } from "@/i18n/navigation";
 import { ApiError, listResumes, type Resume } from "@/lib/api";
 import type { Application } from "@/lib/applications";
 import { fetchDashboard, type Dashboard } from "@/lib/dashboard";
-import { hasSavedPreference, preferenceSummary } from "@/lib/jobs";
+import { hasSavedPreference, markMatchesSeen, preferenceSummary } from "@/lib/jobs";
 
 /**
  * The overview: what changed, the one thing to do, and the shape of the search.
@@ -46,10 +46,19 @@ export default function DashboardPage() {
 
   // The server decides what is new and when this person last looked, so
   // there is nothing to remember here: a reload asks the same question.
+  //
+  // This page is the one that renders ArrivalsBlock, so it is the one that
+  // says the arrivals were shown -- the dashboard GET deliberately no longer
+  // stamps, because Applications, Matches and Profile fetch it too and show
+  // no arrivals at all. Said here rather than in the effect so that a
+  // refetch which brings NEW arrivals (after the first run, after a rebuild)
+  // marks those too; each call is one UPDATE. Fire-and-forget: the rows are
+  // already on screen, and a lost stamp only repeats one window.
   const apply = useCallback((next: Dashboard) => {
     setDash(next);
     setRows(next.applications);
     setError(null);
+    void markMatchesSeen().catch(() => {});
   }, []);
 
   useEffect(() => {

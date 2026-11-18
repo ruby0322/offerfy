@@ -3,11 +3,19 @@
 Composition only: every number comes from a reader that already exists and is
 projected by the same function the single-purpose route uses. Nothing here
 calls a model or rebuilds resume facts; a page visit must not spend someone's
-credits. The writes a GET makes are two stamps. The first is the digest's
-opened_at, once: the digest build's eligibility gate reads it, so without the
-stamp nobody ever counts as engaged and the digest stops being built for
-everyone. The second is users.matches_seen_at, every visit, written last, after
-the response is built.
+credits. The one write a GET makes is the digest's opened_at, once: the digest
+build's eligibility gate reads it, so without the stamp nobody ever counts as
+engaged and the digest stops being built for everyone.
+
+**This GET does not move the "last looked at matches" marker, and must not.**
+Four pages call it -- the overview, Applications, Matches and Profile -- and
+only the overview renders `arrivals`. A GET that stamped would let someone
+check an application status, close the window, and then read "nothing new
+since you last looked" above fifteen unseen roles. The marker is still the
+server's number, measured from users.matches_seen_at; what moved is who says
+when to advance it. The page that showed the arrivals says so, once, through
+POST /v1/me/matches/seen (routers/matches.py). The client supplies no `since`
+-- that was refused by the design and stays refused -- only "I showed them".
 """
 
 from __future__ import annotations
@@ -128,12 +136,6 @@ def arrival_out(job: Job, score: JobScore | None) -> MatchArrivalOut:
     )
 
 
-def stamp_matches_seen(db: Session, user: User, now: datetime) -> None:
-    """Record that the person looked, so the next visit's window starts here."""
-    user.matches_seen_at = now
-    db.commit()
-
-
 @router.get("/v1/dashboard", response_model=DashboardOut)
 def get_dashboard(
     db: Session = Depends(get_db),
@@ -141,8 +143,8 @@ def get_dashboard(
 ):
     pref = current_or_seeded(db, user)
     now = datetime.now(timezone.utc)
-    # Read the previous marker BEFORE anything stamps the new one: the window
-    # describes the previous visit, so stamping first would empty every one.
+    # The marker as the last page that SHOWED arrivals left it. Nothing in this
+    # handler advances it; see the module docstring.
     previous = user.matches_seen_at
     first_visit = previous is None
     window = _window_start(previous, now)
@@ -188,22 +190,4 @@ def get_dashboard(
         ),
         digest=digest_out(digest) if digest is not None else None,
     )
-    # Stamped last, after the whole response is built. A failed stamp then has
-    # nothing left to take down: no reader is still ahead of the rollback with
-    # an expired session, and the commit's expire-everything does not make each
-    # reader re-SELECT on every visit. Read-before-stamp still holds -- the
-    # previous marker was read at the top.
-    user_id = user.id
-    try:
-        stamp_matches_seen(db, user, now)
-    except Exception:
-        # Same treatment as the digest stamp above, same reason: a lost stamp
-        # must not take down the page, but it silently leaves the marker
-        # behind, so the same arrivals would be called new again next visit.
-        logger.exception(
-            "dashboard: matches_seen_at could not be stamped for user %s; "
-            "serving the dashboard anyway (arrivals will repeat)",
-            user_id,
-        )
-        db.rollback()
     return out

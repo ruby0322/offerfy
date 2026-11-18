@@ -99,30 +99,26 @@ def _writes(db_session, call):
     return response, writes
 
 
-def _minus_the_seen_stamp(writes):
-    """Drop the one write every dashboard GET makes -- users.matches_seen_at --
-    asserting it is exactly one, so the exception cannot quietly grow."""
-    stamps = [w for w in writes if w.lstrip().upper().startswith("UPDATE USERS SET MATCHES_SEEN_AT")]
-    assert len(stamps) == 1, writes
-    return [w for w in writes if w not in stamps]
-
-
 def test_a_get_writes_nothing(client, db_session):
     # Pins "the transient seed stays transient" and "a visit spends no
     # credits" (a facts rebuild or a metered call would have to write).
     #
-    # Two exceptions, named. Every GET stamps users.matches_seen_at (the
-    # server-side "since you last looked"; filtered out below). And with a
-    # digest present, the GET stamps that digest's
+    # One exception, named: with a digest present the GET stamps that digest's
     # opened_at (the build's eligibility gate reads it). Nothing else may be
     # written; test_marking_opened_is_the_only_write_a_dashboard_GET_makes in
     # test_dashboard_digest.py pins that exception's exact shape. This test
     # stays strict for everyone without a digest, and for everyone whose
     # digest is already opened.
+    #
+    # users.matches_seen_at used to be a second exception here. It is not one
+    # any more and must not become one again: four pages call this endpoint
+    # and only the overview renders arrivals, so a stamp here closes the
+    # window for a reader who never saw them. POST /v1/me/matches/seen is the
+    # only writer (tests/test_matches_seen.py).
     user = _signed_in(client, db_session)
     res, writes = _writes(db_session, lambda: client.get("/v1/dashboard"))
     assert res.status_code == 200
-    assert _minus_the_seen_stamp(writes) == []
+    assert writes == []
     db_session.expire_all()
     assert db_session.query(JobPreference).filter_by(user_id=user.id).count() == 0
 
@@ -140,7 +136,7 @@ def test_a_get_writes_nothing(client, db_session):
     db_session.commit()
     res, writes = _writes(db_session, lambda: client.get("/v1/dashboard"))
     assert res.status_code == 200 and res.json()["digest"] is not None
-    assert _minus_the_seen_stamp(writes) == []
+    assert writes == []
 
 
 def test_a_populated_person_gets_their_own_non_default_numbers(client, db_session):

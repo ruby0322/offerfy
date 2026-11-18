@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useFormatter, useTranslations } from "next-intl";
 import MatchRow from "./MatchRow";
 import { arrivalState, groupArrivals } from "./arrivals";
@@ -32,16 +33,24 @@ type Props = {
 };
 
 // The server caps arrivals; a first visit can still be fifteen. Past this the
-// rest are one click away on the Matches tab.
+// rest open HERE, in place.
+//
+// They used to be a link to the Matches tab, which was the one affordance this
+// block could not keep: that tab shows the weekly picks and the ingest, never
+// arrivals, and the window has been marked seen by the time anyone clicks --
+// so "the rest" would have been nowhere. Every arrival the server sent is
+// already in this component's props, so showing the rest costs no request and
+// cannot find an emptied window.
 const VISIBLE = 10;
 
 export default function ArrivalsBlock({ arrivals }: Props) {
   const t = useTranslations("dashboard");
   const format = useFormatter();
+  const [expanded, setExpanded] = useState(false);
 
   if (arrivals.length === 0) return null;
 
-  const shown = arrivals.slice(0, VISIBLE);
+  const shown = expanded ? arrivals : arrivals.slice(0, VISIBLE);
   const hidden = arrivals.length - shown.length;
   const groups = groupArrivals(shown);
 
@@ -114,9 +123,13 @@ export default function ArrivalsBlock({ arrivals }: Props) {
 
       {hidden > 0 ? (
         <p className="mt-2 text-sm">
-          <Link href="/dashboard/matches" className="underline underline-offset-2">
+          <button
+            type="button"
+            className="underline underline-offset-2"
+            onClick={() => setExpanded(true)}
+          >
             {t("arrivalsMore", { count: hidden })}
-          </Link>
+          </button>
         </p>
       ) : null}
     </section>

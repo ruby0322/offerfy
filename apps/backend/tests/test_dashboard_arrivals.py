@@ -1,5 +1,11 @@
 """Scored arrivals on GET /v1/dashboard, and "since you last looked" measured
-by the server (users.matches_seen_at) rather than by the caller's browser."""
+by the server (users.matches_seen_at) rather than by the caller's browser.
+
+The GET reads that marker and never moves it: three of its four callers render
+no arrivals, so a stamp here would close the window for someone who only
+looked at their applications. POST /v1/me/matches/seen is the one advance, and
+every test below that wants a second window says so by calling it.
+"""
 
 from datetime import datetime, timedelta, timezone
 
@@ -56,6 +62,13 @@ def _get(client):
     return res.json()
 
 
+def _mark_seen(client):
+    """What the overview does once it has rendered the arrivals."""
+    res = client.post("/v1/me/matches/seen")
+    assert res.status_code == 200
+    return res.json()
+
+
 def _ago(**kw):
     return datetime.now(timezone.utc) - timedelta(**kw)
 
@@ -66,13 +79,25 @@ def _ready(client, db_session, sub):
     return user
 
 
-def test_the_dashboard_stamps_when_you_last_looked(client, db_session):
+def test_the_dashboard_get_does_not_move_the_marker(client, db_session):
+    # The regression this guards: Applications, Matches and Profile all fetch
+    # this endpoint and none of them shows an arrival. A GET that stamped let
+    # a reader check a status and lose fifteen unseen roles.
+    user = _ready(client, db_session, "sub-arr-nostamp")
+    assert _seen_at(db_session, user) is None
+    _get(client)
+    assert _seen_at(db_session, user) is None, "the GET must not stamp"
+
+
+def test_the_page_that_showed_them_says_so(client, db_session):
     user = _ready(client, db_session, "sub-arr-stamp")
     assert _seen_at(db_session, user) is None
     before = datetime.now(timezone.utc)
-    _get(client)
+    body = _mark_seen(client)
     stamped = _aware(_seen_at(db_session, user))
     assert before <= stamped <= datetime.now(timezone.utc)
+    # Echoed back, and it is the server's clock, not the caller's.
+    assert body["seen_at"].startswith(stamped.isoformat()[:19])
 
 
 def test_arrivals_are_what_was_scored_since_that_stamp(client, db_session):
@@ -90,7 +115,11 @@ def test_arrivals_are_what_was_scored_since_that_stamp(client, db_session):
     assert [a["job_id"] for a in first["arrivals"]] == [new.id]
     assert first["arrivals"][0]["tier"] == "Strong fit"
 
-    # The visit just moved the marker, so the same arrival is not new twice.
+    # Still new until something says it was shown: a second fetch on its own
+    # changes nothing.
+    assert [a["job_id"] for a in _get(client)["arrivals"]] == [new.id]
+    # Shown, and so not new twice.
+    _mark_seen(client)
     assert _get(client)["arrivals"] == []
 
 
@@ -104,6 +133,7 @@ def test_a_first_visit_is_distinguishable_from_an_empty_window(client, db_sessio
     assert first["first_visit"] is True
     assert [a["job_id"] for a in first["arrivals"]] == [job.id]
 
+    _mark_seen(client)
     again = _get(client)
     assert again["first_visit"] is False
     assert again["arrivals"] == []
@@ -121,7 +151,8 @@ def test_a_marker_in_the_future_clamps_instead_of_going_negative(client, db_sess
     # and the posting is not mistaken for a first visit's catalogue-wide dump.
     assert body["first_visit"] is False
     assert body["arrivals"] == []
-    # And the visit repairs the marker rather than preserving the skew.
+    # And the stamp repairs the marker rather than preserving the skew.
+    _mark_seen(client)
     assert _aware(_seen_at(db_session, user)) <= datetime.now(timezone.utc)
 
 
@@ -202,7 +233,11 @@ def test_the_clamp_itself(client):
     assert _window_start(None, now) is None
 
 
-def test_a_failed_stamp_does_not_take_down_the_page(client, db_session, monkeypatch):
+def test_a_failed_stamp_cannot_take_down_the_page(client, db_session, monkeypatch):
+    # It cannot by construction now: the stamp is its own request, made after
+    # the page the person is reading has been served. Pinned anyway, because
+    # the old arrangement needed a try/except to say the same thing and a
+    # later reader must not fold the stamp back into the GET to "save a call".
     from sqlalchemy.orm import Session
 
     user = _ready(client, db_session, "sub-arr-stampfail")
@@ -210,21 +245,27 @@ def test_a_failed_stamp_does_not_take_down_the_page(client, db_session, monkeypa
     real_commit = Session.commit
 
     def failing_commit(self):
-        # Fail the commit with the stamp pending, so the rollback path runs
-        # against a genuinely dirty session.
         if any(isinstance(o, User) for o in self.dirty):
             raise RuntimeError("db hiccup")
         return real_commit(self)
 
-    monkeypatch.setattr(Session, "commit", failing_commit)
     res = client.get("/v1/dashboard")
-    monkeypatch.undo()
     assert res.status_code == 200
     body = res.json()
     assert body["first_visit"] is True
     assert [a["job_id"] for a in body["arrivals"]] == [job.id]
     assert body["preference"] is not None and body["match_count"] == 1
+
+    monkeypatch.setattr(Session, "commit", failing_commit)
+    try:
+        failed = client.post("/v1/me/matches/seen")
+    except RuntimeError:
+        failed = None  # TestClient re-raises; either way the page stood
+    monkeypatch.undo()
+    assert failed is None or failed.status_code >= 500
+    # The marker did not move, so the arrivals come back rather than vanish.
     assert _seen_at(db_session, user) is None
+    assert [a["job_id"] for a in _get(client)["arrivals"]] == [job.id]
 
 
 def test_a_score_outlives_the_preference_that_produced_it(client, db_session):

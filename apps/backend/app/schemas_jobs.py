@@ -328,6 +328,12 @@ class FirstRunOut(BaseModel):
     reason: str | None = None
 
 
+class MatchesSeenOut(BaseModel):
+    # The marker the server wrote, echoed back so a caller can see what it
+    # advanced to. It is the server's clock; nothing in the request sets it.
+    seen_at: str
+
+
 class MatchProgressOut(BaseModel):
     scored: int
     expected: int
@@ -468,7 +474,10 @@ class DashboardOut(BaseModel):
     # What was scored for this person since they last looked, plus matching
     # postings the sweep has not reached yet (tier and score None). Measured by
     # the server from users.matches_seen_at, never from a caller-supplied
-    # marker: two sources for one number is how they disagree.
+    # marker: two sources for one number is how they disagree. This GET only
+    # reads that marker; the page that renders these rows advances it with
+    # POST /v1/me/matches/seen, because three of this endpoint's four callers
+    # show no arrivals at all.
     arrivals: list[MatchArrivalOut]
     # True exactly when matches_seen_at was NULL, i.e. this is the first time
     # the person has looked. Distinct from an empty `arrivals`, which is what a

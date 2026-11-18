@@ -1,4 +1,4 @@
-"""The first run: score a brand-new account's matches while they are still here.
+"""The first run, and the "I showed them" marker the arrivals window turns on.
 
 Scores live in a per-(person, posting) cache that the sweep fills four times a
 day (`jobs.score_sweep`). This is the accelerator for the one moment that
@@ -36,12 +36,29 @@ duplicate costs a little money and corrupts nothing.
 **Over the global ceiling it says matching is paused and promises no time.** The
 sweep, the digest and this endpoint draw on one ceiling, so "the sweep will get
 to you" is the very thing that has run out.
+
+**`POST /v1/me/matches/seen` is the arrivals window's only advance.** The window
+stays server-measured -- `users.matches_seen_at`, no caller-supplied `since`,
+which the design refused and this does not reintroduce. What the client says is
+narrower: "I have rendered the arrivals you gave me." It has to be the client,
+because `GET /v1/dashboard` is called by four pages and only one of them shows
+arrivals; a stamp on the GET closed the window for a reader who went to check
+an application status. The timestamp written is the server's `now`, never a
+value from the request body, so a wrong clock on the caller cannot move it.
+
+It is idempotent in the only sense that matters: calling it twice leaves the
+marker at the second `now`, and anything scored in between is correctly no
+longer new, because the page it was shown on was the one asking. A failure
+cannot take a page down -- the response the person is reading has already been
+served -- so this endpoint lets the fault surface as a 500 rather than
+swallowing it, and the caller treats it as fire-and-forget.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
@@ -53,7 +70,7 @@ from app.jobs.build_digests import _ceiling_uusd, _over_ceiling, saved_preferenc
 from app.jobs.match_sweep import count_matches
 from app.jobs.score_sweep import SWEEP_CAP, sweep_user
 from app.models import JobScore, User
-from app.schemas_jobs import FirstRunOut, MatchProgressOut
+from app.schemas_jobs import FirstRunOut, MatchProgressOut, MatchesSeenOut
 from app.services.resume_facts import bundle
 
 logger = logging.getLogger(__name__)
@@ -121,6 +138,23 @@ async def start_first_run(
         return FirstRunOut(started=False, reason="budget_paused")
     _start(user.id)
     return FirstRunOut(started=True, reason=None)
+
+
+@router.post("/v1/me/matches/seen", response_model=MatchesSeenOut)
+def mark_matches_seen(
+    db: Session = Depends(get_db), user: User = Depends(require_user)
+):
+    """Advance the arrivals window: the caller has shown this person their arrivals.
+
+    The server's own `now` is what is written. The caller says only that it
+    showed them; it does not get to say when, which is what keeps the window
+    one number from one clock. See the module docstring for why this is not a
+    side effect of the dashboard GET.
+    """
+    now = datetime.now(timezone.utc)
+    user.matches_seen_at = now
+    db.commit()
+    return MatchesSeenOut(seen_at=now.isoformat())
 
 
 @router.get("/v1/me/matches/progress", response_model=MatchProgressOut)

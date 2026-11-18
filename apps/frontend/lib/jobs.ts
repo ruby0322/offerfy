@@ -583,6 +583,24 @@ export async function startFirstRun(): Promise<FirstRun> {
   return { started: raw.started === true, reason: raw.reason ?? null };
 }
 
+/**
+ * Tell the server this person has been shown their arrivals, so the next
+ * window starts here.
+ *
+ * The window is still the server's number — `users.matches_seen_at`, no
+ * `since` on the wire. What this says is narrower and is the only thing the
+ * client knows: the rows have been rendered. It has to be said by the page
+ * that rendered them, because `GET /v1/dashboard` is fetched by four pages
+ * and only the overview shows arrivals; the GET used to stamp, which closed
+ * the window for someone who opened Applications to check a status.
+ *
+ * Fire-and-forget: the page is already on screen, so a failure means one
+ * window repeats, not a broken view. Callers ignore the rejection.
+ */
+export async function markMatchesSeen(): Promise<void> {
+  await apiJson<{ seen_at?: string }>("/api/v1/me/matches/seen", { method: "POST" });
+}
+
 export type MatchProgress = { scored: number; expected: number };
 
 /**
