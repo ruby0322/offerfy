@@ -331,8 +331,8 @@ class FirstRunOut(BaseModel):
 class MatchProgressOut(BaseModel):
     scored: int
     expected: int
-    # Inferred from the rows (scored < expected), not known: see routers/matches.
-    running: bool
+    # No `running`: it is not derivable from rows, so the server cannot answer
+    # it truthfully. See the docstring of routers/matches.get_progress.
 
 
 class ResumeFactsRefreshOut(BaseModel):

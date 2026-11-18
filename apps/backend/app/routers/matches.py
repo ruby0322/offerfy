@@ -23,10 +23,10 @@ allowance on something they cannot see being spent.
 **Progress is the `job_scores` rows, counted.** No progress table and no stream:
 the rows are durable and are the thing being produced, so a reload or a second
 tab reads the same number. Nothing about a run is held in this process, because
-`offerfy-api` runs more than one worker and a poll may land on any of them. The
-cost is that `running` is inferred (fewer rows than expected), not known; a run
-that died leaves it true, and the client is the one to stop asking. Rows arrive
-when `sweep_user` commits, once, at the end of the pass.
+`offerfy-api` runs more than one worker and a poll may land on any of them.
+That is also why there is no `running` flag: rows are facts, "still working" is
+not derivable from them, and a response the server cannot answer truthfully is
+worse than a silent one. See `get_progress` for what the client may conclude.
 
 **Only a person with no scores at all may start one.** That is what "first"
 means, and it bounds re-triggering without a rate limit. Two tabs posting at
@@ -101,8 +101,10 @@ async def start_first_run(
     if _scored_count(db, user) > 0:
         return FirstRunOut(started=False, reason="already_scored")
     if saved_preference(db, user) is None:
-        # The sweep reads only a saved row; a seed would start a run that does
-        # nothing while progress waits for rows that never come.
+        # The sweep's audience is SAVED preference rows only (`saved_preference`);
+        # a seed is a guess it deliberately never scores against. So a person
+        # with only a seed would get a run that does nothing and a progress of
+        # 0 out of 0 forever. Do not "simplify" this to `current_or_seeded`.
         return FirstRunOut(started=False, reason="no_preference")
     # Free to ask. build_facts would answer the same with an error, but only
     # after paying for an extraction.
@@ -117,8 +119,21 @@ async def start_first_run(
 
 @router.get("/v1/me/matches/progress", response_model=MatchProgressOut)
 def get_progress(db: Session = Depends(get_db), user: User = Depends(require_user)):
-    """How many matches are scored, out of how many a run will produce."""
+    """How many matches are scored, out of how many a run will produce.
+
+    **The client decides when to stop polling.** `scored < expected` means "not
+    finished as far as we can see", never "still working": a run that died
+    leaves it true forever, and so does a person who never started one. The
+    caller must bound its own polling and not wait on this endpoint to say stop.
+
+    **Progress is binary.** `sweep_user` commits once, at the end of its pass,
+    and that single commit is the transaction boundary the sweep owns. So
+    `scored` reads 0 until the pass finishes and then reads the final count; it
+    does not rise. A caller that wants to show motion should show an
+    indeterminate indicator, not a percentage. A typical first run is about
+    fifteen pairs and a few seconds.
+    """
     pref = saved_preference(db, user)
     expected = min(count_matches(db, pref), SWEEP_CAP) if pref is not None else 0
     scored = _scored_count(db, user)
-    return MatchProgressOut(scored=scored, expected=expected, running=scored < expected)
+    return MatchProgressOut(scored=scored, expected=expected)

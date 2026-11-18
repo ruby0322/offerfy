@@ -97,12 +97,12 @@ def test_the_first_run_is_refused_once_scores_exist(client, db_session, monkeypa
 def test_progress_counts_rows_against_the_expected_pool(client, db_session, monkeypatch):
     user = _ready_user(db_session, client, postings=3)
     before = client.get("/v1/me/matches/progress").json()
-    assert before == {"scored": 0, "expected": 3, "running": True}
+    assert before == {"scored": 0, "expected": 3}
     Seams(monkeypatch)
     client.post("/v1/me/matches/first-run")
     assert _wait_for(user.id, 3)
     assert client.get("/v1/me/matches/progress").json() == {
-        "scored": 3, "expected": 3, "running": False,
+        "scored": 3, "expected": 3,
     }
 
 
