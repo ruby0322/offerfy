@@ -536,8 +536,14 @@ stale as features ship.
 ## What is left to the builder
 
 - Exact `score_cache` return shape for the partial-fault case, within the
-  contract stated in §2 (cached rows returned, `error` set whenever a miss went
-  unscored).
+  contract stated in §2: cached rows are returned, and `error` is set when a miss
+  **could not be bought** — not merely when a miss went unscored.
+
+  (Corrected 2026-11-19, after the Task 2 review caught this line contradicting
+  §2. It read "`error` set whenever a miss went unscored", which would make a
+  refusal and a cap-truncated miss into faults. §2 is the binding text: a refusal
+  is an answer and a cap is a budget, and neither is a provider failure. No
+  consumer may read `error is None` as "the pass is complete".)
 - Whether `cached_scores` takes `cap` as a parameter or reads a module constant
   at each call site. `build_digests` sets the precedent of both — a module
   constant *and* a parameter on both entry points — and that precedent should
