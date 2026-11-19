@@ -104,11 +104,20 @@ class PreviewTextLayer(BaseModel):
     spans: list[PreviewTextSpan]
 
 
+class PreviewBand(BaseModel):
+    page: int  # 0-based, parallel to `pages`
+    y: float
+    height: float
+
+
 class PreviewPages(BaseModel):
     pages: list[str]
     # Parallel to `pages`, and empty when the text could not be recovered — the
     # picture is the preview, the layer only makes it selectable.
     text_layers: list[PreviewTextLayer] = []
+    # Line-unit id -> the rendered lines that unit occupies, in the same coordinate
+    # space as `text_layers`. Only /preview and /edit fill it; empty when unknown.
+    bands: dict[str, list[PreviewBand]] = {}
 
 
 class AtsCheck(BaseModel):
