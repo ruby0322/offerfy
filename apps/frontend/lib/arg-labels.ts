@@ -30,6 +30,13 @@ const ARG_LABEL_IDS = {
   role: "fieldsLabelRole",
   name: "fieldsLabelName",
   url: "fieldsLabelUrl",
+  // `acorn_resume` and `ats_friendly_resume` emitters (apps/backend/app/services/emitters),
+  // which no pinned fixture exercises.
+  organization: "fieldsLabelOrganization",
+  date: "fieldsLabelDate",
+  contacts: "fieldsLabelContacts",
+  technologies: "fieldsLabelTechnologies",
+  "text-color": "fieldsLabelTextColor",
 } as const;
 
 export type ArgLabelId = (typeof ARG_LABEL_IDS)[keyof typeof ARG_LABEL_IDS];

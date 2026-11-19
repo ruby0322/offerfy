@@ -38,6 +38,12 @@ test("every key a pinned fixture projects has a label", () => {
   }
 });
 
+test("the keys of the other registered emitters have labels too", () => {
+  for (const key of ["organization", "date", "contacts", "technologies", "text-color"]) {
+    assert.notEqual(argLabelId(key), null, key);
+  }
+});
+
 test("every mapped id is a message in all three locales, and not the raw id", () => {
   for (const [name, messages] of [
     ["en", en],
