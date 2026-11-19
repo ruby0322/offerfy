@@ -85,11 +85,36 @@ test("a key that is an Object.prototype member is not a label", () => {
   }
 });
 
+/**
+ * Roughly how wide a label renders at `text-xs` (12px), in px. A CJK glyph is full-width
+ * -- one em -- while Latin averages a little over half that, so a flat character count
+ * is the wrong measure for a label like "LinkedIn": 8 characters, narrower than 5 of 字體.
+ */
+function labelWidthPx(text: string): number {
+  let px = 0;
+  for (const ch of text) {
+    // CJK, fullwidth forms, kana and the CJK punctuation that shares their advance
+    px += /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/u.test(ch)
+      ? 12
+      : 6.6;
+  }
+  return px;
+}
+
+test("labelWidthPx charges a CJK glyph a full em and Latin about half", () => {
+  // Pins the measure itself, so the cell test below cannot pass by measuring nothing.
+  assert.equal(labelWidthPx("字體"), 24);
+  assert.equal(labelWidthPx("作品集"), 36);
+  assert.ok(labelWidthPx("LinkedIn") < labelWidthPx("紙張大小五"));
+  assert.ok(labelWidthPx("七個中文字元寬") > 80, "7 CJK characters must overflow 80px");
+});
+
 test("the longest zh-TW label stays within the label cell", () => {
-  // The cell is `min-w-20` (80px) at `text-xs` (12px): 6 CJK characters is the most that
-  // fits without widening it. Latin text is narrower than that per character.
+  // The cell is `min-w-20` -- 80px -- and a label wider than that widens it, pushing the
+  // input along. 6 CJK characters (72px) fit; 7 (84px) do not.
   const editor = zhTW.editor as Record<string, string>;
   for (const id of ARG_LABEL_MESSAGE_IDS) {
-    assert.ok(Array.from(editor[id]).length <= 6, `${id}: ${editor[id]}`);
+    const width = labelWidthPx(editor[id]);
+    assert.ok(width <= 80, `${id}: ${editor[id]} is ~${width}px, over the 80px cell`);
   }
 });

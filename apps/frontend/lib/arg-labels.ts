@@ -44,6 +44,14 @@ const ARG_LABEL_IDS = {
   "repo-url": "fieldsLabelRepoUrl",
   gpa: "fieldsLabelGpa",
   "tech-used": "fieldsLabelTechUsed",
+  // Same two examples, and `font` is a string argument in both -- so it reaches a row
+  // even though `is_style_key` keeps its siblings (`accent-color` aside) out. These
+  // three are the rest of what those examples project; the table now covers every key
+  // an Offerfy emitter writes and every key the examples show, and the fallback owns
+  // the unbounded tail of the other ~93 packages.
+  font: "fieldsLabelFont",
+  linkedin: "fieldsLabelLinkedin",
+  portfolio: "fieldsLabelPortfolio",
 } as const;
 
 export type ArgLabelId = (typeof ARG_LABEL_IDS)[keyof typeof ARG_LABEL_IDS];
