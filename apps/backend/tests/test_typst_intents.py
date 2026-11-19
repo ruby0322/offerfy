@@ -1067,3 +1067,155 @@ def test_each_insert_item_refusal_names_which_one_it_was():
     # the generic sentence with the server's own detail rather than guessing.
     assert refused(src, "insert_bullet", target="nope").reason == ""
     assert refused(src, "insert_item", target="nope").reason == ""
+
+
+# --- the fix-forward batch: five defects cursor[bot] found after the merge --------------
+
+# Every character Typst's lexer breaks a line on. Spelled out here rather than imported
+# so the test fails if `has_line_break`'s set is ever narrowed to match the code again.
+LINE_BREAKS = ("\n", "\r", "\u2028", "\u2029", "\x85", "\x0b", "\x0c")
+
+
+def test_set_line_refuses_a_link_url_whose_scheme_a_viewer_may_execute():
+    """A `javascript:` url compiles into a live URI in a shared PDF, so the refusal has
+    to be on the server: `link-url.ts`'s allow-list is the client's and is bypassable."""
+    src = read("synthetic-en"); p = parse_projection(src)
+    u = unit_by_text(p, CUT)
+
+    def attempt(url: str):
+        return apply_intent(src, p, IntentIn(
+            hash="", kind="set_line", unit=u.id, expect=u.value, text=u.value,
+            marks=[MarkOut(kind="link", start=0, end=3, url=url)]))
+
+    # The four executable schemes, and the spellings that hide them: a reader strips
+    # controls, spaces and zero-width characters before it decides what the scheme is.
+    for url in ("javascript:alert(1)", "JavaScript:alert(1)", "  javascript:alert(1)",
+                "java\tscript:alert(1)", "java\u200bscript:alert(1)", "JAVASCRIPT:x",
+                "data:text/html;base64,PHNjcmlwdD4=", "vbscript:msgbox(1)",
+                "file:///etc/passwd"):
+        with pytest.raises(IntentError) as e:
+            attempt(url)
+        assert e.value.code == "unsupported" and e.value.reason == "link_scheme", url
+
+    # A DENYLIST on purpose, not the client's allow-list: a line someone is editing may
+    # legitimately carry a scheme no viewer executes, and an allow-list here would leave
+    # them unable to edit that line at all.
+    for url in ("https://example.com/a", "http://example.com", "mailto:a@b.co",
+                "tel:+886912345678", "ftp://host/file", "geo:25.03,121.56",
+                "example.com:8080/x"):
+        assert attempt(url) != src, url
+
+
+def test_a_url_already_in_a_document_does_not_become_read_only():
+    """Why the refusal is on the write path and not in `_check_marks`: that one is also
+    reached from `_line_unit`, which decides `editable`. A refusal there would strand the
+    person -- the line holding the bad url would be the one line they could not fix."""
+    src = ('#import "@preview/basic-resume:0.2.10": *\n\n= A\n\n== S\n\n'
+           'Visit #link("javascript:alert(1)")[here] today\n')
+    p = parse_projection(src)
+    unit = next(u for u in p.units.values() if u.kind == "line" and "Visit" in u.value)
+    assert unit.editable, "an existing bad url must stay editable, not become read-only"
+    # And it can be edited into something harmless, marks dropped.
+    out = apply_intent(src, p, IntentIn(hash="", kind="set_line", unit=unit.id,
+                                        expect=unit.value, text="Visit here today",
+                                        marks=[]))
+    assert "javascript:" not in out
+
+
+KEYED_BLOCK_SRC = '''#import "@preview/basic-resume:0.2.10": *
+
+= Ada Lovelace
+
+== Experience
+
+#work(
+  title: "Engineer",
+  company: "Northwind",
+  details: [
+    - Shipped the thing
+  ],
+)
+
+#work(
+  title: "Intern",
+  company: "Acme",
+  details: [
+    - Learned the thing
+  ],
+)
+'''
+
+
+def test_a_keyed_content_block_stops_an_item_copy_like_a_positional_one():
+    """`details: [...]` is content the projection makes no unit of. The guard tested
+    `key == POSITIONAL`, and a keyed block has a key -- so `insert_item` copied the
+    previous entry's bullets into the new entry, where no field could clear them."""
+    p = parse_projection(KEYED_BLOCK_SRC)
+    # The premise: the block's bullets really are unreachable.
+    assert p.report.skipped_args.get("details") == 2
+    assert all(len(b.bullets) == 0 for s in p.sections for b in s.blocks)
+
+    e = refused(KEYED_BLOCK_SRC, "insert_item",
+                target=section_named(p, "Experience").id)
+    # The reason code stays `positional`: the frontend words its sentence from it
+    # (`StructuredPanel.tsx`), and this batch does not touch the frontend.
+    assert e.reason == "positional"
+
+
+def test_every_line_break_typst_knows_is_refused_by_every_intent_string():
+    """`\\n`/`\\r` were the only two checked, so a paste carrying U+2028 wrote a break
+    into the source that the re-parse check never saw."""
+    src = read("synthetic-en"); p = parse_projection(src)
+    arg = title_unit(p)
+    line = unit_by_text(p, CUT)
+    skills = section_named(p, "Skills & Awards").id
+
+    for ch in LINE_BREAKS:
+        name = f"U+{ord(ch):04X}"
+        with pytest.raises(IntentError) as e:
+            apply_intent(src, p, IntentIn(hash="", kind="set_arg", unit=arg.id,
+                                           expect=arg.value, value=f"a{ch}b"))
+        assert e.value.code == "unsupported", name
+        with pytest.raises(IntentError) as e:
+            apply_intent(src, p, IntentIn(hash="", kind="set_line", unit=line.id,
+                                           expect=line.value, text=f"a{ch}b", marks=[]))
+        assert e.value.code == "unsupported", name
+        refused(src, "insert_item", target=skills, placeholder=f"a{ch}b")
+        refused(src, "insert_section", title=f"a{ch}b")
+
+
+def test_a_written_word_is_escaped_for_the_context_it_lands_in():
+    """`_word` validated the placeholder and nothing escaped it, so it reached the source
+    raw -- the one `IntentIn` string that did. Two contexts, two escapes."""
+    src = read("synthetic-en"); p = parse_projection(src)
+
+    # 1. MARKUP: a heading and a paragraph of its own.
+    out = structural(src, "insert_section",
+                     title='#eval("1+1")', placeholder="- *bold* and == heading")
+    added = out[len(src):]
+    assert "\\#eval" in added and "\\- \\*bold\\*" in added
+    p2 = parse_projection(out)
+    fresh = [s for s in p2.sections if s.id not in {x.id for x in p.sections}]
+    assert len(fresh) == 1, "the placeholder must not fabricate a second section"
+    sec = fresh[0]
+    # It round-trips: the person sees their own text in the form and can clear it.
+    assert p2.units[sec.title_unit].value == '#eval("1+1")'
+    bodies = [p2.units[b.unit] for b in sec.blocks if b.unit]
+    assert len(bodies) == 1 and bodies[0].role == "para"
+    assert bodies[0].value == "- *bold* and == heading"
+
+    # 2. MARKUP, bullet line: `- x` must not become a nested list.
+    skills = section_named(p, "Skills & Awards")
+    out = structural(src, "insert_item", target=skills.id, placeholder="- x")
+    p3 = parse_projection(out)
+    added_bullets = [b for b in section_named(p3, "Skills & Awards").blocks]
+    assert len(added_bullets) == len(skills.blocks) + 1
+    assert any(p3.units[b.unit].value == "- x" for b in added_bullets if b.unit)
+
+    # 3. STRING LITERAL: an arg unit's span is inside `"..."`.
+    exp = section_named(p, "Experience")
+    out = structural(src, "insert_item", target=exp.id, placeholder='a "b" \\ c')
+    assert 'a \\"b\\" \\\\ c' in out
+    p4 = parse_projection(out)
+    vals = [u.value for u in p4.units.values() if u.kind == "arg"]
+    assert 'a "b" \\ c' in vals, "the placeholder must round-trip out of the literal"

@@ -11,12 +11,13 @@ from dataclasses import replace
 
 from app.schemas_editing import IntentIn
 from app.services.emitters import emitter_for
+from app.services.typst_escape import has_line_break, markup_value
 from app.services.resume_content import (
     Contact, EducationEntry, ProjectEntry, ResumeContent, Section as ExtraSection,
     WorkEntry)
 from app.services.typst_projection import (
     POSITIONAL, Block, Mark, Projection, Section, Unit, _Arg, _args, _close_of,
-    _HASH_CALL, line_role, line_unit, parse_projection, serialize_unit)
+    _escape, _HASH_CALL, line_role, line_unit, parse_projection, serialize_unit)
 
 # The words a new entry is written with, when the request does not bring its own. Both
 # are *content*, not Typst, so the locale holding the person's own words owns them and an
@@ -79,12 +80,21 @@ def _word(given: str | None, what: str, default: str) -> str:
     """One word this request wants written into the document, or the server's default.
 
     Validated like any other value, because it ends up in the person's source: one line,
-    and something left after a strip. Nothing else is checked -- it is content, and
-    `serialize_unit` owns the escaping of whatever it says.
+    and something left after a strip.
+
+    "One line" means `has_line_break`'s set, not `\\n`/`\\r`: Typst's lexer breaks a line
+    on seven characters, and this used to compare against two of them, so a paste
+    carrying U+2028 wrote a break into the source that the re-parse check never saw.
+
+    Escaping is NOT left to the caller any more. This docstring used to say
+    `serialize_unit` owned it, which was true of every other value and false of this
+    one -- a word reaches the source spliced in raw, so each call site escapes it for
+    the context it writes into (`markup_value` for markup, `_escape` for inside a
+    string literal). See `_blank_item` and `_insert_section`.
     """
     if given is None:
         return default
-    if "\n" in given or "\r" in given:
+    if has_line_break(given):
         raise IntentError("unsupported", f"a {what} is one line")
     if not given.strip():
         raise IntentError("unsupported", f"a {what} cannot be empty")
@@ -140,6 +150,47 @@ def _check_reparse(unit: Unit, text: str, new: str) -> None:
         raise IntentError("unsupported", "the text would re-parse as structure")
 
 
+# Schemes a PDF viewer may *execute* rather than follow. `#link("javascript:...")`
+# compiles, and the résumé it lands in gets shared -- so the hazard is to whoever opens
+# the file, not to the person who typed it.
+#
+# A DENYLIST, deliberately, and not the allow-list `apps/frontend/lib/link-url.ts`
+# applies on the way in. That file is the client's own normalisation (it also turns a
+# bare `example.com` into `https://example.com`); this is the server refusing what it
+# must never write, and the two answer different questions. An allow-list here would
+# refuse a line someone is merely *editing* that legitimately carries `tel:`, `ftp:` or
+# `geo:` -- none of which a viewer executes -- and the person would have no way to fix
+# the line at all. The hazard is specifically "a scheme a viewer may run", which is a
+# closed set worth naming.
+_EXECUTABLE_SCHEMES = frozenset({"javascript", "data", "vbscript", "file"})
+_SCHEME = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.\-]*):")
+# Removed before the scheme is read, never from the url itself: a reader that strips
+# these before deciding what it is looking at must not see a different scheme than this
+# check did. Controls and every flavour of space (`java\tscript:`, ` javascript:`), plus
+# the zero-width and soft-hyphen characters that are invisible in a form field.
+_URL_NOISE = re.compile(r"[\s\x00-\x20\x7f\u00ad\u200b-\u200f\ufeff]+")
+
+
+def _check_link_schemes(marks: tuple[Mark, ...]) -> None:
+    """Refuse a link mark whose url names a scheme a viewer may execute.
+
+    On the write path, NOT in `serialize_unit`/`_check_marks`. Those are reached from
+    `_line_unit` as well, which calls `serialize_unit` to decide whether a unit is
+    `editable` -- so a refusal there would silently turn every line of an existing
+    document that happens to carry such a url READ-ONLY, taking away the one way the
+    person had to remove it. Here it only fires when a client is *introducing* marks.
+    """
+    for m in marks:
+        if m.kind != "link" or not m.url:
+            continue
+        found = _SCHEME.match(_URL_NOISE.sub("", m.url).lower())
+        if found and found.group(1) in _EXECUTABLE_SCHEMES:
+            raise IntentError(
+                "unsupported",
+                f"a link may not carry a {found.group(1)}: url",
+                "link_scheme")
+
+
 def _find_section(projection: Projection, intent: IntentIn) -> Section:
     sec = next((x for x in projection.sections if x.id == intent.target), None)
     if sec is None:
@@ -191,27 +242,35 @@ def _insert_bullet(source: str, projection: Projection, intent: IntentIn) -> str
         raise IntentError("unsupported", "a bullet is added to an item, not to a bullet")
     pos = block.content_end
     lead = "\n" if pos and source[pos - 1] != "\n" else ""
-    new = f"{_marker(source, projection, block.bullets)}{_ph(intent)}\n"
+    new = f"{_marker(source, projection, block.bullets)}{markup_value(_ph(intent))}\n"
     out = source[:pos] + lead + new + source[pos:]
     return normalize_blanks(out, at=pos + len(lead) + len(new))
 
 
-def _has_positional(source: str, block: Block) -> bool:
-    """Whether the call holds a positional string or content block. The projection cannot
-    show it, so a copy would carry the previous entry's text into the new one."""
+def _has_unprojectable_content(source: str, block: Block) -> bool:
+    """Whether the call holds content the projection makes no unit of: a positional value
+    of any shape, or a content block under any key. A copy would carry the previous
+    entry's text into the new one, where nothing can reach it to clear it.
+
+    The old name and docstring over-claimed, which is how this survived review: it said
+    "a positional string or content block" while the body tested `a.key == POSITIONAL`
+    only. A KEYED content block -- `details: [...]` -- has a key, so the guard never
+    fired for it, `insert_item` copied the previous entry's bullets into the new entry,
+    and they printed in the PDF with no field to clear them from.
+    """
     call = _HASH_CALL.match(source, block.outer[0])
     if call is None:
         return False
     open_idx = call.end() - 1
     found: list[_Arg] = []
     _args(source, open_idx, _close_of(source, open_idx), found)
-    return any(a.key == POSITIONAL for a in found)
+    return any(a.key == POSITIONAL or a.kind == "content" for a in found)
 
 
 def _blank_item(source: str, projection: Projection, last: Block, ph: str) -> str:
     """A copy of `last` with its text replaced, without the blank lines that follow it."""
     if last.kind == "comp":
-        if _has_positional(source, last):
+        if _has_unprojectable_content(source, last):
             raise IntentError(
                 "unsupported",
                 "this template's entries carry unnamed values that cannot be blanked",
@@ -220,25 +279,34 @@ def _blank_item(source: str, projection: Projection, last: Block, ph: str) -> st
         end = min([b.outer[0] for b in last.bullets] + [n[0] for n in last.notes]
                   + [last.content_end])
         start = last.outer[0]
-        cuts = []
+        # Each cut carries the text to write, because this one function writes into two
+        # different contexts and a single escape would be wrong in one of them.
+        cuts: list[tuple[int, int, str]] = []
         for uid in last.args:
             unit = projection.units[uid]
             # a name bound by a `#let` outside the call is shared: never rewritten here
             if start <= unit.span[0] and unit.span[1] <= end and not unit.style:
-                cuts.append(unit.span)
+                # An arg unit's span is the INSIDE of a `"..."` literal, so this is
+                # string-literal context -- `_escape` is what `serialize_unit` itself
+                # applies to an arg unit's value, which keeps the round-trip `_splice`
+                # relies on.
+                cuts.append((*unit.span, _escape(ph)))
         if last.body is not None and last.body[1] <= end:
-            cuts.append(last.body)
+            # A `#ident(...)[...]` body is MARKUP, not a literal.
+            cuts.append((*last.body, markup_value(ph)))
         text = source[start:end]
-        for a, b in sorted(set(cuts), reverse=True):
-            text = text[:a - start] + ph + text[b - start:]
+        for a, b, written in sorted(set(cuts), reverse=True):
+            text = text[:a - start] + written + text[b - start:]
         if not text.endswith("\n"):
             text += "\n"
         if last.bullets:
-            text += f"{_marker(source, projection, last.bullets)}{ph}\n"
+            # A bullet line is markup.
+            text += (f"{_marker(source, projection, last.bullets)}"
+                     f"{markup_value(ph)}\n")
     else:
         unit = projection.units[last.unit]
         marker = _fresh_marker(source[last.outer[0]:unit.span[0]])
-        text = marker + ph + "\n"
+        text = marker + markup_value(ph) + "\n"  # a bullet line is markup
     return text
 
 
@@ -410,7 +478,11 @@ def _insert_section(source: str, projection: Projection, intent: IntentIn) -> st
     # in a dead end. A stray `== 新段落` is visible in the preview and can be deleted.
     lead = "" if not source or source.endswith("\n\n") else (
         "\n" if source.endswith("\n") else "\n\n")
-    out = source + lead + f"== {_title(intent)}\n\n{_ph(intent)}\n\n"
+    # Both words land in MARKUP here -- a `== ` heading and a paragraph of its own --
+    # so both are escaped for it. Unescaped, a title of `#eval("...")` or a placeholder
+    # of `- x` compiled and committed: `_word` validated them and nothing escaped them.
+    out = (source + lead
+           + f"== {markup_value(_title(intent))}\n\n{markup_value(_ph(intent))}\n\n")
     return normalize_blanks(out, at=len(source))
 
 
@@ -496,7 +568,7 @@ def apply_intent(source: str, projection: Projection, intent: IntentIn) -> str:
         unit = _unit(projection, intent, "arg")
         if intent.value is None:
             raise IntentError("unsupported", "set_arg needs a value")
-        if "\n" in intent.value or "\r" in intent.value:
+        if has_line_break(intent.value):
             raise IntentError("unsupported", "a value is one line")
         return _splice(source, unit, serialize_unit(replace(unit, value=intent.value)))
     if intent.kind == "set_line":
@@ -507,7 +579,12 @@ def apply_intent(source: str, projection: Projection, intent: IntentIn) -> str:
         if text.strip() == "":
             # An emptied line is not projected, so every later unit id would shift.
             raise IntentError("unsupported", "set_line cannot empty a line; use delete")
+        # `serialize_unit` refuses a `\n`/`\r` here, but only those two; the other five
+        # line breaks Typst's lexer knows would reach the source unseen.
+        if has_line_break(text):
+            raise IntentError("unsupported", "a line unit is one line")
         marks = tuple(Mark(m.kind, m.start, m.end, m.url) for m in intent.marks)
+        _check_link_schemes(marks)
         # `escapes` is carried over from the unit being replaced
         candidate = replace(unit, value=text, marks=marks)
         try:
