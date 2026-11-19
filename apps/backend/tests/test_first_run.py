@@ -6,6 +6,7 @@ The paid seams are stubbed exactly as test_score_sweep stubs them
 
 import asyncio
 import time
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -72,7 +73,10 @@ async def test_the_first_run_scores_the_whole_eligible_pool(db_session, client, 
     Seams(monkeypatch)
     # The detached body, on the session of its own it builds for itself. The
     # test's session is never handed to it.
-    await matches._run(user.id)
+    # `_run` now carries the timestamp it claimed, so it can give the claim
+    # back without clobbering a newer one. These tests drive it directly and
+    # never took a claim, so any timestamp releases nothing.
+    await matches._run(user.id, datetime.now(timezone.utc))
     assert _count(user.id) == 3
 
 
@@ -188,7 +192,7 @@ async def test_a_run_that_cannot_build_facts_logs_the_user(db_session, client, m
 
     monkeypatch.setattr(matches, "sweep_user", no_facts)
     with caplog.at_level("WARNING"):
-        await matches._run(user.id)
+        await matches._run(user.id, datetime.now(timezone.utc))
     assert any(user.id in r.getMessage() and r.levelname == "WARNING" for r in caplog.records)
     assert _count(user.id) == 0
 
@@ -298,9 +302,75 @@ async def test_a_racing_write_back_still_leaves_one_row(
         return await inner(db, **kw)
 
     monkeypatch.setattr(score_cache, "score_candidates", barrier)
-    await asyncio.gather(matches._run(user.id), matches._run(user.id))
+    claimed = datetime.now(timezone.utc)
+    await asyncio.gather(matches._run(user.id, claimed), matches._run(user.id, claimed))
     # _run swallows a fault into a log line, so a conflict that raised would
     # still leave the winner's rows behind. Neither run may have failed.
     assert not [r for r in caplog.records if "first run failed" in r.getMessage()]
     assert len(seams.scored_jobs) == 2, "both really reached the provider"
     assert _count(user.id) == 3, "one row per pair, not two"
+
+
+def test_the_claim_is_released_when_the_pass_ends(db_session, monkeypatch):
+    """A run that bought nothing must not leave the next POST told
+    `already_running` -- a sentence that would be false for ten minutes."""
+    import asyncio
+    from app.routers import matches as mod
+
+    user = _user(db_session)
+    now = datetime.now(timezone.utc)
+    assert mod._claim_first_run(db_session, user, now) is True
+
+    # The pass itself is not what is under test; a run that finds nothing to
+    # build facts from is the case that used to strand the claim.
+    async def nothing(db, *, user, cap):
+        return None
+
+    monkeypatch.setattr(mod, "sweep_user", nothing)
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+        mod._run(user.id, now)
+    )
+    db_session.expire_all()
+    assert db_session.get(User, user.id).first_run_started_at is None
+
+
+def test_a_crashed_pass_still_releases_the_claim(db_session, monkeypatch):
+    import asyncio
+    from app.routers import matches as mod
+
+    user = _user(db_session)
+    now = datetime.now(timezone.utc)
+    assert mod._claim_first_run(db_session, user, now) is True
+
+    async def boom(db, *, user, cap):
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr(mod, "sweep_user", boom)
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+        mod._run(user.id, now)
+    )
+    db_session.expire_all()
+    assert db_session.get(User, user.id).first_run_started_at is None
+
+
+def test_releasing_does_not_clear_a_newer_claim(db_session):
+    """The reason the release carries its timestamp.
+
+    A run that outlived the TTL may have had its claim taken by a newer one.
+    Clearing that would leave the new owner running unclaimed and let a third
+    tab start a duplicate -- worse than the stranded claim this fixes.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.routers.matches import FIRST_RUN_CLAIM_TTL, _claim_first_run, _release_first_run
+
+    user = _user(db_session)
+    old = datetime.now(timezone.utc)
+    assert _claim_first_run(db_session, user, old) is True
+    newer = old + FIRST_RUN_CLAIM_TTL + timedelta(seconds=1)
+    assert _claim_first_run(db_session, user, newer) is True
+
+    # The slow first run finally finishes and tries to tidy up after itself.
+    assert _release_first_run(db_session, user.id, old) is False
+    db_session.expire_all()
+    assert db_session.get(User, user.id).first_run_started_at is not None

@@ -57,7 +57,13 @@ those seconds the worker serves nothing, `/healthz` included. The claim
 removes the contention rather than making the pass safe to block in.
 
 The claim is in the database and not in this process because `offerfy-api`
-runs more than one worker and the two tabs may land on different ones. It
+runs more than one worker and the two tabs may land on different ones. `_run`
+hands it back in its `finally`, whatever happened in the pass, so a run that
+crashed or bought nothing does not leave the next POST told
+`already_running` -- which would be false, and said for ten minutes. The
+release is conditional on the timestamp this run claimed, so it cannot clear a
+newer run's claim. The expiry below is now the backstop for a worker that died
+before reaching that `finally`, not the only way a claim is ever freed. It
 expires (`FIRST_RUN_CLAIM_TTL`) so a run whose worker died does not lock the
 person out for good; and `write_back`'s savepoint upsert stays, because a
 first run can still overlap a `score_sweep` pass for the same person in
@@ -116,6 +122,12 @@ _running: set[asyncio.Task] = set()
 # one and still short enough that a worker killed mid-pass does not lock the
 # person out: they would otherwise sit at "0 of 15" with no way to retry, and
 # the only repair would be the next sweep pass up to six hours later.
+#
+# This is a backstop, not the normal path: `_run` releases the claim in its
+# `finally`, so the TTL only matters when the worker died before getting
+# there. It is deliberately not shortened to match a pass's real duration --
+# a slow provider must not let a second run start while the first is still
+# buying pairs.
 FIRST_RUN_CLAIM_TTL = timedelta(minutes=10)
 
 
@@ -157,8 +169,35 @@ def _claim_first_run(db: Session, user: User, now: datetime) -> bool:
     return bool(result.rowcount)
 
 
-async def _run(user_id: str) -> None:
-    """The detached work, on a session of its own. Never raises."""
+def _release_first_run(db: Session, user_id: str, claimed: datetime) -> bool:
+    """Give the claim back, but only if it is still ours.
+
+    `claimed` is the exact timestamp this run wrote. A run that outlived
+    FIRST_RUN_CLAIM_TTL may have had its claim taken by a newer one, and
+    clearing that would be worse than the bug this function fixes: the new
+    owner would be running with no claim and a third tab could start a
+    duplicate. So the WHERE carries the timestamp and the database decides,
+    exactly as `_claim_first_run` does.
+    """
+    result = db.execute(
+        update(User)
+        .where(User.id == user_id, User.first_run_started_at == claimed)
+        .values(first_run_started_at=None)
+        .execution_options(synchronize_session=False)
+    )
+    db.commit()
+    return bool(result.rowcount)
+
+
+async def _run(user_id: str, claimed: datetime) -> None:
+    """The detached work, on a session of its own. Never raises.
+
+    The claim is released in the `finally`, so a pass that crashed or bought
+    nothing does not leave the next POST answered `already_running` -- a
+    sentence that would be false for up to FIRST_RUN_CLAIM_TTL. The TTL is now
+    the backstop for a worker that died without running this, not the only way
+    a claim is ever freed.
+    """
     session = get_session_factory()()
     try:
         user = session.get(User, user_id)
@@ -176,11 +215,18 @@ async def _run(user_id: str) -> None:
         logger.exception("first run failed: user=%s", user_id)
         session.rollback()
     finally:
+        # Its own try: a failure to release must not replace the real error in
+        # the log, and must not stop the session being closed.
+        try:
+            _release_first_run(session, user_id, claimed)
+        except Exception:
+            logger.exception("first run claim not released: user=%s", user_id)
+            session.rollback()
         session.close()
 
 
-def _start(user_id: str) -> None:
-    task = asyncio.get_running_loop().create_task(_run(user_id))
+def _start(user_id: str, claimed: datetime) -> None:
+    task = asyncio.get_running_loop().create_task(_run(user_id, claimed))
     _running.add(task)
     task.add_done_callback(_running.discard)
 
@@ -216,9 +262,12 @@ async def start_first_run(
     # Last, and immediately before the task is scheduled: a claim taken and
     # then refused for some other reason would block the retry that reason
     # invites. Nothing below here can refuse.
-    if not _claim_first_run(db, user, datetime.now(timezone.utc)):
+    claimed = datetime.now(timezone.utc)
+    if not _claim_first_run(db, user, claimed):
         return FirstRunOut(started=False, reason="already_running")
-    _start(user.id)
+    # The same timestamp travels with the task, which is how it can give the
+    # claim back without clobbering a newer one.
+    _start(user.id, claimed)
     return FirstRunOut(started=True, reason=None)
 
 
