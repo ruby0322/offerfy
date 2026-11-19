@@ -71,6 +71,7 @@ export function pollVerdict(p: {
 export type OnboardNotice =
   | "onboardNoResume"
   | "onboardPaused"
+  | "onboardActivityPaused"
   | "onboardRunning"
   | "onboardGeneric"
   | "onboardRefreshFailed";
@@ -84,6 +85,12 @@ export type OnboardNotice =
  * `already_running` gets its own sentence because the generic one says
  * scoring did not start and will happen in the next regular pass, and for
  * this reason alone a run IS under way -- another tab took the claim.
+ *
+ * `activity_paused` gets one for the opposite reason: the sweep skips a
+ * paused preference, so for that person there is no next regular pass, and
+ * the generic sentence would promise one. It is also a different fact from
+ * `budget_paused` -- their own setting, which they can undo, against the
+ * platform's weekly limit, which they cannot.
  */
 export function firstRunNotice(reason: string | null): OnboardNotice | null {
   switch (reason) {
@@ -93,6 +100,8 @@ export function firstRunNotice(reason: string | null): OnboardNotice | null {
       return "onboardNoResume";
     case "budget_paused":
       return "onboardPaused";
+    case "activity_paused":
+      return "onboardActivityPaused";
     case "already_running":
       return "onboardRunning";
     default:

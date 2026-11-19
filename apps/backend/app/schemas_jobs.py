@@ -323,10 +323,12 @@ class JobPreferenceOut(BaseModel):
 class FirstRunOut(BaseModel):
     started: bool
     # None when started. Otherwise "already_scored", "no_preference",
-    # "no_resume", "budget_paused" or "already_running". "budget_paused"
-    # promises no time: the sweep shares the ceiling that stopped it.
-    # "already_running" is the only one where work IS under way, so a client
-    # must not fold it into a generic "scoring did not start".
+    # "activity_paused", "no_resume", "budget_paused" or "already_running".
+    # "budget_paused" promises no time: the sweep shares the ceiling that
+    # stopped it. "activity_paused" is the person's own setting and is a
+    # different sentence from it. "already_running" is the only one where work
+    # IS under way, so a client must not fold it into a generic "scoring did
+    # not start".
     reason: str | None = None
 
 

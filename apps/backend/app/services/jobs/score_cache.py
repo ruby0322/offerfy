@@ -86,6 +86,13 @@ from app.models import JobFacets, JobScore
 from app.services.jobs.score import Scored, ScoreRun, score_candidates
 
 COMPONENTS = ("requirements_met", "seniority_fit", "location_fit", "direction_fit")
+# JobScore.model and .prose_model are String(64), as Digest.model is, and the
+# model id comes from configuration rather than from this code. Digest.model is
+# deliberately stored as `model[:64]`; these were not, so a configured id over
+# 64 characters would raise on every write, for every user, forever -- the
+# scoring would be bought and then thrown away by the insert. Truncated at the
+# writer, in the one module that writes these columns.
+MODEL_COLUMN = 64
 # What ScoreRun.model reads when the rows it carries were scored by more than one
 # model. Digest.model uses the same literal for the same reason.
 MIXED = "mixed"
@@ -171,8 +178,16 @@ def _classify(
 def stale_pairs(db, *, user, facts, jobs) -> list[Any]:
     """The jobs that would have to be bought: no row, a stale row, or a lost number.
 
-    The sweep and the progress read both count with this, so they agree with
-    `cached_scores` about what a purchase is. Order is the caller's.
+    The sweep counts a purchase with this, so it and `cached_scores` agree
+    about what one is -- they call the same classifier. Order is the caller's.
+
+    `routers.matches.get_progress` does NOT, and the claim that it did was
+    false: it counts rows (`_scored_count`), which answers "how many
+    judgements exist", not "how many are still to buy". That is deliberate on
+    its side -- a progress read must not re-derive staleness, or a resume
+    edited mid-run would make the denominator move under the person -- so the
+    two are not meant to agree and this function must not be described as
+    though they were.
     """
     return _classify(db, user=user, facts=facts, jobs=_distinct(list(jobs)))[0]
 
@@ -196,7 +211,7 @@ def _fill(
     """
     row.facts_input_hash = facts.input_hash
     row.description_hash = description_hash
-    row.model = model
+    row.model = model[:MODEL_COLUMN]
     row.scored_at = _now()
     # Prose written about the previous judgement does not describe this one.
     row.reason = None
@@ -317,7 +332,9 @@ def record_prose(
         row.outcome = "scored"
         row.reason = reason
         row.gap = gap
-    row.prose_model = model
+    # Truncated like `model` above, and for the same reason: prose_model is
+    # String(64) and the id is configuration, not code.
+    row.prose_model = None if model is None else model[:MODEL_COLUMN]
     db.flush()
     return row
 

@@ -140,6 +140,27 @@ def test_a_user_with_no_saved_preference_is_told_why(client, db_session):
     assert resp.json() == {"started": False, "reason": "no_preference"}
 
 
+def test_a_paused_preference_is_honoured_here_too(client, db_session, monkeypatch):
+    # "The person asked for this to stop" holds on every scoring path:
+    # sweep_all skips them through is_eligible, and build_digests refuses even
+    # under --all-users. This endpoint was the one that ignored it.
+    from app.models import JobPreference
+
+    user = _ready_user(db_session, client)
+    db_session.query(JobPreference).filter_by(user_id=user.id).update(
+        {"activity": "paused"}
+    )
+    db_session.commit()
+    seams = Seams(monkeypatch)
+    assert client.post("/v1/me/matches/first-run").json() == {
+        "started": False, "reason": "activity_paused",
+    }
+    assert seams.scored_jobs == [] and _count(user.id) == 0
+    db_session.expire_all()
+    # And the refusal leaves the claim alone, so switching it back on works.
+    assert db_session.get(User, user.id).first_run_started_at is None
+
+
 def test_over_the_ceiling_it_says_paused_and_promises_no_time(client, db_session, monkeypatch):
     user = _ready_user(db_session, client)
     seams = Seams(monkeypatch)

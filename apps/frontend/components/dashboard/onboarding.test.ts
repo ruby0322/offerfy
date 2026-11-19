@@ -57,6 +57,10 @@ test("every refusal reason has its own sentence; an already-scored account has n
   assert.equal(firstRunNotice("already_scored"), null);
   assert.equal(firstRunNotice("no_resume"), "onboardNoResume");
   assert.equal(firstRunNotice("budget_paused"), "onboardPaused");
+  // Their own setting, which they can undo, is not the platform's weekly
+  // limit, which they cannot -- and the sweep skips them, so the generic
+  // "scored in the next regular pass" would be a promise nothing keeps.
+  assert.equal(firstRunNotice("activity_paused"), "onboardActivityPaused");
   // The one reason where work IS under way: it must not read as "did not
   // start, try the next regular pass".
   assert.equal(firstRunNotice("already_running"), "onboardRunning");

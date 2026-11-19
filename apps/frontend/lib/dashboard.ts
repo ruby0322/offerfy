@@ -50,8 +50,28 @@ export type Dashboard = {
   digest: Digest | null;
 };
 
+/**
+ * The two fields added here are defaulted, as the fetchers in lib/jobs.ts
+ * default theirs.
+ *
+ * Web has rolled ahead of the API on this host before -- it is three web
+ * instances and one API, rolled separately -- and `dash.arrivals.length` on
+ * an older API would throw inside the overview's own render and blank the
+ * whole page. Defaulted, the page degrades to "nothing new", which is what an
+ * API that cannot answer the question is actually saying.
+ */
+type DashboardWire = Omit<Dashboard, "arrivals" | "first_visit"> &
+  Partial<Pick<Dashboard, "arrivals" | "first_visit">>;
+
 export async function fetchDashboard(): Promise<Dashboard> {
-  return apiJson<Dashboard>("/api/v1/dashboard");
+  const raw = await apiJson<DashboardWire>("/api/v1/dashboard");
+  return {
+    ...raw,
+    arrivals: raw.arrivals ?? [],
+    // False, not true: an absent answer is not evidence of a first visit, and
+    // "Welcome back" is the wrong thing to tell someone it cannot place.
+    first_visit: raw.first_visit ?? false,
+  };
 }
 
 export type SpendSlice = { purpose: string; credits: number; rounds: number };

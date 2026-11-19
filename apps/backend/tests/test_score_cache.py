@@ -467,6 +467,34 @@ async def test_a_rescore_through_the_cache_keeps_the_pairs_creation_date(
     assert row.created_at == born and row.scored_at >= born
 
 
+def test_a_long_model_id_is_truncated_rather_than_raising(db_session):
+    """JobScore.model and .prose_model are String(64) and the id is config.
+
+    Digest.model is deliberately stored as model[:64]; these were not, so a
+    configured id over 64 characters would raise on every write, for every
+    user, forever -- after the scoring had been paid for.
+    """
+    user = _user(db_session)
+    facts = _facts(db_session, user)
+    job = _job(db_session)
+    long_id = "a-very-long-provider-model-identifier-" + "x" * 80
+    score_cache.write_back(
+        db_session, user=user, facts=facts, job=job, model=long_id,
+        scored=Scored(job.id, "strong", 0.8, dict(COMPONENTS)),
+    )
+    score_cache.record_prose(
+        db_session, user=user, job=job, reason="Because reasons.", model=long_id
+    )
+    db_session.commit()
+    (row,) = _rows(db_session, user)
+    assert row.model == long_id[:64] and len(row.model) == 64
+    assert row.prose_model == long_id[:64]
+    # A rejection records the model too, and it is the same length rule.
+    score_cache.record_prose(db_session, user=user, job=job, rejected=True, model=long_id)
+    db_session.commit()
+    assert db_session.query(JobScore).one().prose_model == long_id[:64]
+
+
 def test_write_back_wants_exactly_one_answer(db_session):
     user = _user(db_session)
     facts = _facts(db_session, user)

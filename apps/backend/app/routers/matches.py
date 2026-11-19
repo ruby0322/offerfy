@@ -192,12 +192,20 @@ async def start_first_run(
     """Start scoring this person's matches, or say why it did not."""
     if _scored_count(db, user) > 0:
         return FirstRunOut(started=False, reason="already_scored")
-    if saved_preference(db, user) is None:
+    pref = saved_preference(db, user)
+    if pref is None:
         # The sweep's audience is SAVED preference rows only (`saved_preference`);
         # a seed is a guess it deliberately never scores against. So a person
         # with only a seed would get a run that does nothing and a progress of
         # 0 out of 0 forever. Do not "simplify" this to `current_or_seeded`.
         return FirstRunOut(started=False, reason="no_preference")
+    if pref.activity == "paused":
+        # "The person asked for this to stop" is honoured here as everywhere
+        # else: `sweep_all` skips a paused preference through `is_eligible`,
+        # and `build_digests` refuses one even under `--all-users`, which
+        # bypasses every other gate. This endpoint was the one scoring path
+        # that ignored it.
+        return FirstRunOut(started=False, reason="activity_paused")
     # Free to ask. build_facts would answer the same with an error, but only
     # after paying for an extraction.
     if bundle(db, user, fall_back=True) is None:
