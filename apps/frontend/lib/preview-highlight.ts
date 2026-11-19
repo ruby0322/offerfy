@@ -103,3 +103,20 @@ export function armedUnitIds(
   }
   return [];
 }
+
+/**
+ * Whether the fields tab should fetch highlight bands for `source`.
+ *
+ * Keyed on provenance: `describes` is the source the bands on screen came from (null when
+ * unknown), not whether there are any. Empty bands are a real answer for a document with
+ * no editable line, and a non-empty set can belong to the document before this one -- an
+ * `/edit` answer without pages leaves the old ones behind. `askedFor` is the source
+ * already fetched for, so an empty answer is not asked again on every render.
+ */
+export function bandsNeedFetch(state: {
+  describes: string | null;
+  askedFor: string | null;
+  source: string;
+}): boolean {
+  return state.describes !== state.source && state.askedFor !== state.source;
+}

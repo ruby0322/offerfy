@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { PreviewBand } from "./api";
-import { armedUnitIds, bandRect, bandsForUnits, bandsOnPage } from "./preview-highlight";
+import {
+  armedUnitIds,
+  bandRect,
+  bandsForUnits,
+  bandsNeedFetch,
+  bandsOnPage,
+} from "./preview-highlight";
 import { blockKey, sectionKey } from "./structural-controls";
 import type {
   Projection,
@@ -200,3 +206,28 @@ test("a block id does not arm a section that happens to share its key text", () 
 function findKeyDiffers(a: Projection, b2: Projection, id: string): boolean {
   return blockKey(a, id) !== blockKey(b2, id);
 }
+
+// --- which source the bands describe ---------------------------------------------------
+
+test("bands of the previous source are fetched again, however many there are", () => {
+  // The defect: `/edit` answered with no pages, `source` moved to "B", and the bands on
+  // screen (non-empty) still described "A". Emptiness said "have some"; provenance says
+  // "not of this one".
+  assert.equal(bandsNeedFetch({ describes: "A", askedFor: null, source: "B" }), true);
+  assert.equal(bandsNeedFetch({ describes: "A", askedFor: "A", source: "B" }), true);
+});
+
+test("bands of unknown provenance are fetched", () => {
+  assert.equal(bandsNeedFetch({ describes: null, askedFor: null, source: "B" }), true);
+});
+
+test("bands that describe this source are kept, empty or not", () => {
+  // `describes` says nothing about how many bands there are: a document with no editable
+  // line has none, and that is the answer for it.
+  assert.equal(bandsNeedFetch({ describes: "B", askedFor: null, source: "B" }), false);
+});
+
+test("a source already asked for is not asked again", () => {
+  assert.equal(bandsNeedFetch({ describes: null, askedFor: "B", source: "B" }), false);
+  assert.equal(bandsNeedFetch({ describes: "A", askedFor: "B", source: "B" }), false);
+});

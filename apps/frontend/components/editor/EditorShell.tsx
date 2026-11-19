@@ -94,7 +94,7 @@ import type { AtsCheckName } from "@/lib/ats-checks";
 import { createEditQueue } from "@/lib/edit-queue";
 import { loadEditorTab, normalizeEditorTab, saveEditorTab } from "@/lib/editor-tab";
 import { mayPutSource, shellShouldPutSource, sourceOwnerFor } from "@/lib/field-ownership";
-import { bandsForUnits } from "@/lib/preview-highlight";
+import { bandsForUnits, bandsNeedFetch } from "@/lib/preview-highlight";
 import type { Projection } from "@/lib/structured-fields";
 import {
   emptyImportCursor,
@@ -467,7 +467,15 @@ export default function EditorShell({ resumeId }: Props) {
     [],
   );
 
-  const setPreviewPages = useCallback((preview: PreviewPages) => {
+  /**
+   * The source the bands on screen describe, or null when that is not known. Provenance,
+   * not emptiness: a document with no editable line has legitimately empty bands, and
+   * a non-empty set can belong to the document before this one.
+   */
+  const bandsSourceRef = useRef<string | null>(null);
+
+  const setPreviewPages = useCallback((preview: PreviewPages, describes: string | null) => {
+    bandsSourceRef.current = describes;
     for (const url of previewObjectUrls.current) URL.revokeObjectURL(url);
     const urls = preview.pages.map((svg) =>
       URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" })),
@@ -493,7 +501,12 @@ export default function EditorShell({ resumeId }: Props) {
   }, [activeTab]);
 
   const refreshPreview = useCallback(async () => {
-    setPreviewPages(await getPreviewPages(resumeId, wantBandsRef.current));
+    // The server holds the document this buffer was saved as, so that is what the
+    // fetched bands describe -- when they were asked for at all, and when nothing typed
+    // since makes the buffer something other than the saved copy.
+    const describes =
+      wantBandsRef.current && sourceRef.current === savedRef.current ? sourceRef.current : null;
+    setPreviewPages(await getPreviewPages(resumeId, wantBandsRef.current), describes);
     setCompileError(null);
   }, [resumeId, setPreviewPages]);
 
@@ -526,13 +539,27 @@ export default function EditorShell({ resumeId }: Props) {
           setStatus(t("fieldsEditCollided"));
           return out;
         }
+        // Adopting is not an edit and must not arm the 2s PDF compile: `/edit` has
+        // just compiled this source, and a second compile can open the error overlay
+        // over a successful edit. The compile effect consumes the flag when `source`
+        // changes, so it is only raised when it will -- an identical source never runs
+        // that effect, and the flag would swallow the next real timer instead.
+        if (out.typstSource !== sourceRef.current) skipTimers.current = true;
         adoptServerSource(out.typstSource);
         setUpdatedAt(new Date().toISOString());
         setUnpublishedChanges(true);
         // The edit compiled -- that is what let it commit -- so an empty page list is
-        // a half-read answer, not a document with no pages. Keeping the preview that
-        // is already on screen beats blanking it.
-        if (out.preview.pages.length > 0) setPreviewPages(out.preview);
+        // a half-read answer, not a document with no pages. Keeping the picture that
+        // is already on screen beats blanking it, but the bands are another matter: they
+        // describe the document before this one, and a band over the wrong text is worse
+        // than none. Dropping them leaves `bandsSourceRef` unequal to `source`, which is
+        // what sends the effect below to fetch the right ones.
+        if (out.preview.pages.length > 0) {
+          setPreviewPages(out.preview, out.typstSource);
+        } else {
+          bandsSourceRef.current = null;
+          setBands({});
+        }
         setCompileError(null);
         return out;
       } finally {
@@ -1127,9 +1154,11 @@ export default function EditorShell({ resumeId }: Props) {
         if (cancelled) return;
         setLoaded(true);
         try {
-          const preview = await getPreviewPages(resumeId, wantBandsRef.current);
+          const withBands = wantBandsRef.current;
+          const preview = await getPreviewPages(resumeId, withBands);
           if (!cancelled) {
-            setPreviewPages(preview);
+            // The source just adopted from this same row is what the bands describe.
+            setPreviewPages(preview, withBands ? resume.typst_source || "" : null);
             setCompileError(null);
           }
         } catch (err) {
@@ -1633,13 +1662,21 @@ export default function EditorShell({ resumeId }: Props) {
   useEffect(() => {
     if (activeTab !== "fields" || !loaded) return;
     if (savedSource !== source) return; // the handover below flushes first
-    if (Object.keys(bands).length > 0 || bandsAskedForRef.current === source) return;
+    if (
+      !bandsNeedFetch({
+        describes: bandsSourceRef.current,
+        askedFor: bandsAskedForRef.current,
+        source,
+      })
+    ) {
+      return;
+    }
     bandsAskedForRef.current = source;
     void refreshPreview().catch(() => {
       /* The picture on screen is still the document; only the highlight is missing,
          and the panel draws nothing rather than drawing it in the wrong place. */
     });
-  }, [activeTab, bands, loaded, refreshPreview, savedSource, source]);
+  }, [activeTab, loaded, refreshPreview, savedSource, source]);
 
   useEffect(() => {
     if (activeTab !== "fields" || !loaded || savedSource === source) return;
