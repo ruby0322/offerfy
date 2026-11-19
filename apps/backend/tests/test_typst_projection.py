@@ -585,3 +585,37 @@ def test_a_stored_empty_link_makes_its_unit_read_only_and_does_not_break_the_par
     hit = [u for u in p.units.values()
            if any(m.kind == "link" and m.url == "" for m in u.marks)]
     assert len(hit) == 1 and hit[0].editable is False
+
+
+def test_a_skipped_non_style_argument_is_not_tier_a():
+    """Only a skipped *positional* argument forced Tier B, so a skipped `details:` was
+    recorded in the report and then ignored by the grade. The document claimed every
+    content unit was editable while the form showed none of that entry's bullets."""
+    src = '''#import "@preview/basic-resume:0.2.10": *
+
+= Ada Lovelace
+
+== Experience
+
+#work(
+  title: "Engineer",
+  company: "Northwind",
+  details: [
+    - Shipped the thing
+  ],
+)
+'''
+    p = parse_projection(src)
+    assert p.report.skipped_args.get("details") == 1
+    # Every unit it DID make is editable, which is why the old condition fell through.
+    assert all(u.editable for u in p.units.values())
+    assert p.tier == "B", "content the form cannot show must not grade A"
+
+
+def test_a_skipped_style_argument_still_grades_a():
+    """The other half of the same rule: a style key is not content and never forced B.
+    `synthetic-en` skips `font` and `author-position` and must stay Tier A."""
+    p = parse_projection(read("synthetic-en"))
+    assert set(p.report.skipped_args) == {"font", "author-position"}
+    assert all(is_style_key(k) for k in p.report.skipped_args)
+    assert p.tier == "A"

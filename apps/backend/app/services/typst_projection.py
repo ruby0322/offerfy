@@ -279,7 +279,7 @@ def _index(src: str) -> list[_Line]:
 @dataclass
 class _Arg:
     key: str
-    kind: str  # literal | ident | other
+    kind: str  # literal | ident | content | other
     start: int = 0  # literal: inner span
     end: int = 0
     ident: str = ""
@@ -340,10 +340,16 @@ def _args(
         raw = src[v:j].strip()
         if not key:
             if src[v] == "[":  # a positional content block, e.g. a grid cell
-                out.append(_Arg(POSITIONAL, "other"))
+                out.append(_Arg(POSITIONAL, "content"))
         else:
             if _BARE_IDENT.fullmatch(raw):
                 out.append(_Arg(key, "ident", ident=raw))
+            elif raw.startswith("["):
+                # A KEYED content block (`details: [- a\n- b]`, how several templates
+                # carry an entry's bullets). It is content the projection makes no unit
+                # of, exactly like a positional one -- but it has a key, so the key
+                # alone cannot tell it from a number or a style value. `kind` can.
+                out.append(_Arg(key, "content"))
             else:
                 out.append(_Arg(key, "other"))
         i = max(j, v + 1)
@@ -916,9 +922,16 @@ def _build(src, raw_sections, lets, structures, skipped) -> Projection:
     editable = [u for u in units.values() if u.editable]
     if not editable:
         tier = "C"
-    elif len(editable) < len(units) or skipped.get(POSITIONAL):
+    elif len(editable) < len(units) or any(
+            n and not is_style_key(key) for key, n in skipped.items()):
         # Content the form cannot show is as much a Tier B reason as a unit it cannot
         # write: "A" must mean every content unit is editable.
+        #
+        # EVERY non-style skipped argument, not just `(positional)`. A skipped `details:`
+        # was recorded in the report and then ignored here, so a document hiding a whole
+        # entry's bullets still graded "A" -- the grade claimed full coverage while the
+        # form showed half a résumé, and nothing failed. A style key (`font`, `margin`,
+        # `accent-color`) is not content and never forced B; that part is unchanged.
         tier = "B"
     else:
         tier = "A"
