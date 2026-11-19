@@ -2604,6 +2604,122 @@ textarea {
   border-color: var(--clay);
 }
 
+/* A line unit's editing surface in the fields tab. The link style is here, not a
+   Tailwind utility on the element: `a { color: inherit; text-decoration: none }` near
+   the top of this file is unlayered, and an unlayered rule beats anything in
+   @layer utilities whatever its specificity -- so the utility silently does nothing and
+   a link in a bullet reads as plain text. */
+.rich-line a {
+  color: var(--clay);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 0.15em;
+}
+
+/* An opaque run -- math, a label, a comment: source the form cannot take apart, so it
+   is shown verbatim and is not editable. */
+.rich-line [data-r="op"] {
+  border-radius: 0.2rem;
+  background: var(--hover);
+  padding: 0 0.25rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+}
+
+/* The popover that formats a selection in a line unit. Plain CSS rather than utilities
+   for the same reason as `.rich-line` above: the unlayered base rules for `button` and
+   `input` would beat them. It is `position: fixed`, set inline by FormatPopover. */
+.format-popover {
+  z-index: 60;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--sheet);
+  color: var(--ink);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--ink) 18%, transparent);
+  padding: 0.25rem;
+  width: max-content;
+  max-width: min(20rem, calc(100vw - 1rem));
+}
+
+.format-popover[data-row="true"] {
+  width: min(20rem, calc(100vw - 1rem));
+}
+
+.format-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* 16px on a focusable control, or iOS zooms in and never zooms back. This is here and
+   not a `text-base md:text-sm` utility because the unlayered `button, input { font:
+   inherit }` near the top of this file would beat the utility. */
+.format-popover button,
+.format-popover input {
+  font-size: 1rem;
+}
+
+@media (min-width: 768px) {
+  .format-popover button,
+  .format-popover input {
+    font-size: 0.875rem;
+  }
+}
+
+.format-popover button {
+  flex: none;
+  min-height: 2rem;
+  min-width: 2rem;
+  border-radius: calc(var(--radius) - 2px);
+  padding: 0 0.5rem;
+  white-space: nowrap;
+}
+
+.format-popover button:hover,
+.format-popover button[aria-pressed="true"] {
+  background: var(--hover);
+}
+
+.format-popover button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.format-popover input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 2rem;
+  border: 1px solid var(--rule);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--paper);
+  padding: 0 0.5rem;
+}
+
+.format-popover input:focus {
+  outline: 2px solid color-mix(in srgb, var(--clay) 35%, transparent);
+  border-color: var(--clay);
+}
+
+/* The link's address, as text only. */
+.format-popover-url {
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 0.25rem;
+  font-size: 0.75rem;
+  color: var(--ink);
+  opacity: 0.7;
+}
+
+.format-popover-error {
+  margin: 0.25rem 0.25rem 0.125rem;
+  font-size: 0.75rem;
+  line-height: 1.25;
+  color: var(--clay);
+  overflow-wrap: anywhere;
+}
+
 .rr-dropzone {
   border: 2px dashed var(--rule);
   border-radius: var(--radius);
@@ -3493,6 +3609,36 @@ textarea {
    editor uses. */
 .preview-text-layer ::selection {
   background: color-mix(in srgb, var(--clay) 30%, transparent);
+}
+
+/* The lines of the page a field in the fields tab owns, drawn in the same page box as
+   the text layer above and in the same `cqw` lengths (see PreviewHighlight). All of it
+   is here rather than in utilities, because the unlayered rules in this file beat
+   anything in @layer utilities. `pointer-events: none` is load-bearing: the text layer
+   beside it is what makes the preview selectable, and an overlay that took the click
+   would break that without anything failing. Translucent, so the glyphs under it still
+   read; a band is a full-width row, so on a line with a right-hand date it covers that
+   too -- that is what the data says. */
+.preview-highlight {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.preview-highlight-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+.preview-highlight[data-kind="edit"] .preview-highlight-band {
+  background: color-mix(in srgb, var(--clay) 18%, transparent);
+  box-shadow: inset 0.3cqw 0 0 var(--clay);
+}
+
+.preview-highlight[data-kind="delete"] .preview-highlight-band {
+  background: color-mix(in srgb, var(--destructive) 20%, transparent);
+  box-shadow: inset 0.3cqw 0 0 var(--destructive);
 }
 
 /* --- Jobs: live board, filter bar, result rows -------------------------- */

@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import logging
 from collections.abc import Callable
 from pathlib import Path
@@ -37,6 +38,7 @@ from app.schemas import (
     TemplateSwitchOut,
     TemplateSwitchRequest,
 )
+from app.schemas_editing import EditOut, IntentIn, ProjectionOut
 from app.services.ats import analyze_pdf
 from app.services.chat_messages import persist_template_switch
 from app.services.emitters import emitter_for
@@ -49,6 +51,9 @@ from app.services.extract import (
 from app.services.import_run import ImportAlreadyRunning, snapshot as import_snapshot, start_run
 from app.services.import_runner import run_import
 from app.services.tailor_run import TailorRunAlreadyRunning
+from app.services.typst_intents import IntentError, apply_intent
+from app.services.typst_anchors import anchor_bands
+from app.services.typst_projection import parse_projection
 from app.services.tailor_run import snapshot as tailor_snapshot
 from app.services.tailor_run import start_run as start_tailor_run
 from app.services.tailor_runner import job_id_for_tailor, run_tailor
@@ -754,8 +759,20 @@ def compile_resume(
     return RawResponse(content=data, media_type="application/pdf")
 
 
-def _preview_pages(source: str) -> PreviewPages:
-    return PreviewPages(**compile_preview_pages(source))
+def _preview_pages(source: str, with_bands: bool = False) -> PreviewPages:
+    pages = compile_preview_pages(source)
+    if with_bands and pages["text_layers"]:
+        # Where each line unit sits, for the editor to highlight. Best effort like the
+        # text layer: a preview without bands is still a preview, and the eval is a
+        # second subprocess that must not turn a good compile into a failed request.
+        try:
+            bands = anchor_bands(
+                source, parse_projection(source), layers=pages["text_layers"])
+            pages["bands"] = {
+                uid: [dataclasses.asdict(b) for b in rows] for uid, rows in bands.items()}
+        except Exception:
+            logger.warning("anchor bands unavailable", exc_info=True)
+    return PreviewPages(**pages)
 
 
 @router.get("/v1/resumes/{resume_id}/preview", response_model=PreviewPages)
@@ -763,11 +780,121 @@ def preview(
     resume_id: str,
     request: Request,
     response: Response,
+    # Only the fields tab draws bands, and they cost a third typst subprocess plus two
+    # projection parses. The design says so (「只在欄位分頁開著的時候跑」), and this
+    # endpoint is what the shell's 400ms autosave calls after every keystroke burst in
+    # the *Typst* tab -- where the band cache always misses, the source having just
+    # changed. Off unless the caller says it is showing them.
+    bands: bool = False,
     db: Session = Depends(get_db),
     user: User | None = Depends(get_current_user),
 ):
     resume = _owned_resume(resume_id, request, response, db, user)
-    return _preview_pages(resume.typst_source)
+    source = resume.typst_source
+    # Two typst subprocesses follow (SVG, PDF), three with the bands' eval, up to 30s
+    # each. The SELECT above opened a transaction; commit so it does not pin a pool slot
+    # for the whole of them.
+    db.commit()
+    return _preview_pages(source, with_bands=bands)
+
+
+@router.get("/v1/resumes/{resume_id}/projection", response_model=ProjectionOut)
+def projection(
+    resume_id: str,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+):
+    resume = _owned_resume(resume_id, request, response, db, user)
+    return ProjectionOut.model_validate(
+        dataclasses.asdict(parse_projection(resume.typst_source))
+    )
+
+
+@router.post("/v1/resumes/{resume_id}/edit", response_model=EditOut)
+async def edit(
+    resume_id: str,
+    body: IntentIn,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+):
+    """Apply one field edit. Every guard runs before anything is written.
+
+    The projection is parsed here, from the resume's current source -- never
+    taken from the client -- so the offsets `apply_intent` writes at are the
+    ones the stored text actually has.
+    """
+    resume = _owned_resume(resume_id, request, response, db, user, ensure=True)
+    current = resume.typst_source
+    if body.hash != source_hash(current):
+        raise _edit_error(409, "stale_hash", "The document changed; reload it.")
+    try:
+        candidate = apply_intent(current, parse_projection(current), body)
+    except IntentError as exc:
+        raise _edit_error(400, exc.code, exc.detail, exc.reason)
+
+    # Release the pool connection before the compile: the SELECT above opened a
+    # transaction, and three 30s subprocess timeouts (SVG, PDF and the anchor eval; 90s
+    # worst case) must not hold a slot (a starved pool takes down even /healthz). Everything needed is already in
+    # plain strings; the object is only re-read after the compile, below.
+    db.commit()
+
+    # The compile is the gate and the preview in one: `compile_preview_pages`
+    # (via `_preview_pages`) raises HTTPException on a source typst rejects. Off
+    # the event loop for the same reason `switch_template` does it.
+    try:
+        preview = await asyncio.to_thread(_preview_pages, candidate, True)
+    except HTTPException as exc:
+        if exc.status_code != 400:
+            # Typst missing (503), timed out (504) or silent (500): not the
+            # person's edit breaking the document.
+            raise
+        first = str(exc.detail).strip().splitlines()[:1]
+        raise _edit_error(400, "compile_failed", first[0] if first else "")
+
+    # A chat edit or a second tab can land while the compile runs; re-read and
+    # re-check rather than overwrite it. This is what makes releasing the
+    # connection above safe.
+    db.refresh(resume)
+    if source_hash(resume.typst_source) != body.hash:
+        raise _edit_error(409, "stale_hash", "The document changed; reload it.")
+
+    # Never coalesced. `set_draft_source` merges into the latest revision inside
+    # its window whoever wrote it, and the request's hash cannot say whose that
+    # was: it equals the latest revision's hash whenever the draft is in sync.
+    # So "coalesce only when hash == latest.content_hash" always coalesces, and
+    # a field edit right after a chat reply would rewrite the reply's revision.
+    # No `restamp_content`: the snapshot did not change, the Typst did, so
+    # re-keying it would make a snapshot without this edit claim to describe the
+    # edited document, and the next template switch would emit the old text. Left
+    # alone it is stale, and that switch re-extracts.
+    set_draft_source(db, resume, candidate, coalesce=False)
+    db.commit()
+    return EditOut(
+        hash=source_hash(candidate),
+        typst_source=candidate,
+        projection=ProjectionOut.model_validate(
+            dataclasses.asdict(parse_projection(candidate))
+        ),
+        preview=preview,
+    )
+
+
+def _edit_error(status: int, code: str, detail: str, reason: str = "") -> HTTPException:
+    """A refusal the client can word for itself.
+
+    `detail` is one English sentence from the service; `reason` is the machine-readable
+    half, present where a code covers several quite different refusals (`unsupported`
+    covers four for `insert_item` alone) and the client has to pick the sentence in the
+    person's own language. Absent when there is nothing to distinguish.
+    """
+    body = {"code": code, "detail": detail}
+    if reason:
+        body["reason"] = reason
+    return HTTPException(status_code=status, detail=body)
 
 
 @router.get("/v1/resumes/{resume_id}/preview.svg", response_model=PreviewPages)

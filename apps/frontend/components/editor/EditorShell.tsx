@@ -2,7 +2,15 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { AlignLeft, ArrowLeft, History, LayoutTemplate, MessageCircle, Settings } from "lucide-react";
+import {
+  AlignLeft,
+  ArrowLeft,
+  History,
+  LayoutTemplate,
+  MessageCircle,
+  Settings,
+  SlidersHorizontal,
+} from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import AccountMenu from "@/components/AccountMenu";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
@@ -23,6 +31,7 @@ import EditorTemplatePanel, {
 } from "@/components/editor/EditorTemplatePanel";
 import MemoryPanel from "@/components/editor/MemoryPanel";
 import ResumeFamilyMenu from "@/components/editor/ResumeFamilyMenu";
+import StructuredPanel from "@/components/editor/StructuredPanel";
 import type { FamilyCardActions } from "@/components/editor/ChatMessageCard";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -51,6 +60,7 @@ import {
   getResumeFamily,
   listMemory,
   getResumeShare,
+  postEdit,
   publishResume,
   putResumeSource,
   putSelectedModel,
@@ -63,8 +73,11 @@ import {
   switchTemplate,
   type AtsReport,
   type ChatMessage,
+  type EditResult,
   type ImportStatus,
+  type IntentBody,
   type MemoryItem,
+  type PreviewBand,
   type PreviewPages,
   type PreviewTextLayer,
   type Resume,
@@ -78,7 +91,11 @@ import {
 import type { AuthUser, ModelRow, ModelTable, Usage, UsageRefusal } from "@/lib/api";
 import { formatUserAttachmentMessage, parseToolPayload } from "@/lib/chat-tools";
 import type { AtsCheckName } from "@/lib/ats-checks";
-import { loadEditorTab, saveEditorTab } from "@/lib/editor-tab";
+import { createEditQueue } from "@/lib/edit-queue";
+import { loadEditorTab, normalizeEditorTab, saveEditorTab } from "@/lib/editor-tab";
+import { mayPutSource, shellShouldPutSource, sourceOwnerFor } from "@/lib/field-ownership";
+import { bandsForUnits } from "@/lib/preview-highlight";
+import type { Projection } from "@/lib/structured-fields";
 import {
   emptyImportCursor,
   importBlocksSave,
@@ -148,6 +165,17 @@ function saveComposerDraft(id: string, value: string) {
   }
 }
 
+/** How long a whole-document write waits for a field commit to land before refusing. */
+const EDIT_DRAIN_TIMEOUT_MS = 15_000;
+const EDIT_DRAIN_POLL_MS = 50;
+/**
+ * How long one `/edit` may take before the request is abandoned. Its own worst case is
+ * about 90s (three 30s typst subprocess timeouts), so this is that plus room; what it
+ * is really for is the request that never answers at all, which would otherwise hold
+ * the source -- and so the autosave -- for the life of the page.
+ */
+const EDIT_TIMEOUT_MS = 120_000;
+
 const editorTabClassName =
   "editor-tab h-auto flex-none rounded-none border-0 bg-transparent shadow-none data-[state=active]:bg-transparent data-[state=active]:shadow-none";
 
@@ -173,6 +201,16 @@ export default function EditorShell({ resumeId }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
   const [textLayers, setTextLayers] = useState<PreviewTextLayer[]>([]);
+  /** Line-unit id -> its rendered lines; `{}` when the server could not say. */
+  const [bands, setBands] = useState<Record<string, PreviewBand[]>>({});
+  /** The line unit the fields tab has focus in, and what its armed delete would take. */
+  const [focusedUnit, setFocusedUnit] = useState<string | null>(null);
+  const [armedUnits, setArmedUnits] = useState<string[]>([]);
+  const editBands = useMemo(
+    () => (focusedUnit ? bandsForUnits(bands, [focusedUnit]) : []),
+    [bands, focusedUnit],
+  );
+  const deleteBands = useMemo(() => bandsForUnits(bands, armedUnits), [bands, armedUnits]);
   const [ats, setAts] = useState<AtsReport | null>(null);
   const [status, setStatus] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -213,8 +251,64 @@ export default function EditorShell({ resumeId }: Props) {
   // picker and not the turn.
   const [models, setModels] = useState<ModelTable | null>(null);
   const [leftTab, setLeftTab] = useState(() =>
-    peekPendingCreate(resumeId) ? "chat" : (loadEditorTab(resumeId) ?? "typst"),
+    peekPendingCreate(resumeId) ? "chat" : normalizeEditorTab(loadEditorTab(resumeId)),
   );
+  // The preview keeps its own pane in both layouts and is never a tab, and a tab name
+  // this build does not have (a rollback, an older session) would select nothing at
+  // all, so what sessionStorage returns is normalised before it reaches the strip.
+  const activeTab = normalizeEditorTab(leftTab);
+  // The bytes the server is known to hold: the answer to the last PUT, or the source
+  // an `/edit` or a restore returned. Only ever set from such an answer, so the worst
+  // it can be is out of date in the direction that saves anyway.
+  const [savedSource, setSavedSource] = useState<string | null>(null);
+  /** Adopt source the server already holds: the buffer and that record move together. */
+  const adoptServerSource = useCallback((next: string) => {
+    setSavedSource(next);
+    setSource(next);
+  }, []);
+  // Whether the fields tab is on screen holding a projection, and how many of its
+  // edits are still in flight. Together they say who owns `source`; see
+  // `sourceOwnerFor`.
+  //
+  // `fieldsOpen` is derived, never stored, and the panel mounts on the same condition:
+  // the fields tab is up **and** the server is known to hold what this mount holds.
+  // That is the handover in one line -- the panel cannot be on screen reading a
+  // projection of a document older than this buffer -- and it means no code path can
+  // leave the flag up after the tab is gone, which would silence the autosave for the
+  // rest of the session.
+  const fieldsOpen = activeTab === "fields" && savedSource === source;
+  const [editsInFlight, setEditsInFlight] = useState(0);
+  // Mirrored for the save paths that are not effects: `flushSave` and the pre-turn PUT
+  // have to read ownership at call time, because a commit starts inside the blur that
+  // a click on another tab fires -- one event before the click handler that leaves the
+  // editor. `editsInFlightRef` is written before `postEdit`'s first await, so it is
+  // already up when a handler later in that same event reads it.
+  const fieldsOpenRef = useRef(false);
+  const editsInFlightRef = useRef(0);
+  const sourceOwner = sourceOwnerFor({ fieldsOpen, editsInFlight });
+  const currentOwner = useCallback(
+    () =>
+      sourceOwnerFor({
+        fieldsOpen: fieldsOpenRef.current,
+        editsInFlight: editsInFlightRef.current,
+      }),
+    [],
+  );
+  useEffect(() => {
+    // One commit behind `fieldsOpen` at worst, and only ever on the way up -- where
+    // the two differ exactly when `savedSource === source`, so there is nothing a save
+    // path could overwrite anyway.
+    fieldsOpenRef.current = fieldsOpen;
+  }, [fieldsOpen]);
+  // The buffer and the server's copy, for the paths that read them outside a render.
+  // A commit's answer lands seconds after it was sent -- `/edit` compiles -- and by
+  // then its closure's `source` is whatever it was when the person typed.
+  const sourceRef = useRef("");
+  const savedRef = useRef<string | null>(null);
+  useEffect(() => {
+    sourceRef.current = source;
+    savedRef.current = savedSource;
+  }, [savedSource, source]);
   // A phone cannot hold the source and the preview side by side. There the
   // resume is the page and the tools ride in a sheet pulled up over it.
   const narrow = useMediaQuery(NARROW_SCREEN);
@@ -381,12 +475,132 @@ export default function EditorShell({ resumeId }: Props) {
     previewObjectUrls.current = urls;
     setPreviewUrls(urls);
     setTextLayers(preview.textLayers);
+    setBands(preview.bands);
   }, []);
 
+  /**
+   * Whether a preview fetch should ask for the highlight bands.
+   *
+   * Only the fields tab draws them, and they cost the server a third typst subprocess
+   * (`typst eval`) plus two projection parses -- on an endpoint the autosave calls
+   * 400ms after every keystroke burst in the Typst tab, where the band cache misses
+   * every time because the source just changed. Read through a ref so `refreshPreview`
+   * keeps one identity: half the save paths depend on it.
+   */
+  const wantBandsRef = useRef(false);
+  useEffect(() => {
+    wantBandsRef.current = activeTab === "fields";
+  }, [activeTab]);
+
   const refreshPreview = useCallback(async () => {
-    setPreviewPages(await getPreviewPages(resumeId));
+    setPreviewPages(await getPreviewPages(resumeId, wantBandsRef.current));
     setCompileError(null);
   }, [resumeId, setPreviewPages]);
+
+  /**
+   * One field edit.
+   *
+   * `/edit` is the compile gate too: it answers with the new source, projection and
+   * preview, or refuses and changes nothing. Nothing is PUT here -- the server has
+   * already written it. Which projection the intent was built from, and when, is
+   * `createEditQueue`'s business.
+   */
+  const sendEdit = useCallback(
+    async (body: IntentBody): Promise<EditResult> => {
+      const controller = new AbortController();
+      // A legitimate `/edit` can take ~90s -- three 30s typst timeouts -- but a request
+      // that never answers must not hold the source for the life of the page: while
+      // one is outstanding, `mayPutSource` refuses the autosave and `flushSave` both,
+      // and the handover sits on its loading line. Bounded, so the worst case is one
+      // lost commit instead of an editor that never saves again.
+      const bail = window.setTimeout(() => controller.abort(), EDIT_TIMEOUT_MS);
+      try {
+        const out = await postEdit(resumeId, body, controller.signal);
+        // The guard runs both ways. A commit starts on blur, so the person can be
+        // typing in the Typst tab by the time it answers -- and the autosave is held
+        // off while fields owns the source, so that typing is in this buffer and
+        // nowhere else. Adopting would delete it from under the caret with no notice.
+        // Their typing is in no other copy; the field edit is in a revision either
+        // way, so the buffer wins and the collision is said out loud.
+        if (sourceRef.current !== savedRef.current) {
+          setStatus(t("fieldsEditCollided"));
+          return out;
+        }
+        adoptServerSource(out.typstSource);
+        setUpdatedAt(new Date().toISOString());
+        setUnpublishedChanges(true);
+        // The edit compiled -- that is what let it commit -- so an empty page list is
+        // a half-read answer, not a document with no pages. Keeping the preview that
+        // is already on screen beats blanking it.
+        if (out.preview.pages.length > 0) setPreviewPages(out.preview);
+        setCompileError(null);
+        return out;
+      } finally {
+        window.clearTimeout(bail);
+      }
+    },
+    [adoptServerSource, resumeId, setPreviewPages, t],
+  );
+
+  // Read through a ref so the queue below never has to be rebuilt when this closure
+  // changes identity -- it is created once per editor mount and holds the projection
+  // the next commit is built from.
+  const sendEditRef = useRef(sendEdit);
+  useEffect(() => {
+    sendEditRef.current = sendEdit;
+  }, [sendEdit]);
+
+  const raiseEdits = useCallback(() => {
+    editsInFlightRef.current += 1;
+    setEditsInFlight(editsInFlightRef.current);
+  }, []);
+
+  const releaseEdits = useCallback(() => {
+    editsInFlightRef.current -= 1;
+    setEditsInFlight(editsInFlightRef.current);
+  }, []);
+
+  /**
+   * The field edit queue: one commit at a time, each built from the answer to the one
+   * before it. `createEditQueue` holds that projection and publishes it itself, which
+   * is the part that has to be true (see its docstring and `edit-queue.test.ts`).
+   *
+   * It lives in the shell for the same reason the counter does: both have to outlive a
+   * tab switch. A queue that died with the panel would let a remount race the commit
+   * still settling from the mount before it, and the counter is what keeps the shell's
+   * autosave quiet for the whole queued span.
+   */
+  // `useState` with a lazy initialiser, not `useMemo`: this holds the projection the
+  // next commit is built from, and "created exactly once per mount" has to be a
+  // guarantee rather than a cache hint. The setter is deliberately unused.
+  const [editQueue] = useState(() =>
+    createEditQueue<Projection, IntentBody, EditResult>(
+      (intent) => sendEditRef.current(intent),
+      { onStart: raiseEdits, onSettle: releaseEdits },
+    ),
+  );
+
+  /**
+   * Wait until no field commit is in flight. False if one is still going.
+   *
+   * For the writers that are neither the autosave nor `/edit` and cannot be refused --
+   * restoring a revision is an explicit act on the whole document and should win over a
+   * field edit, but it must not land *while* one is being applied, or the two writes
+   * arrive in an order nobody chose and the result is neither the restored revision nor
+   * the edited one.
+   *
+   * Bounded on purpose. `/edit` compiles, and a hung request would otherwise leave the
+   * caller waiting forever; a refusal the person can retry beats a button that never
+   * comes back.
+   */
+  const drainEdits = useCallback(async (): Promise<boolean> => {
+    const until = Date.now() + EDIT_DRAIN_TIMEOUT_MS;
+    while (editsInFlightRef.current > 0) {
+      if (Date.now() >= until) return false;
+      await new Promise((resolve) => window.setTimeout(resolve, EDIT_DRAIN_POLL_MS));
+    }
+    return true;
+  }, []);
 
   const refreshMemory = useCallback(async () => {
     try {
@@ -466,6 +680,43 @@ export default function EditorShell({ resumeId }: Props) {
     refreshAfterSourceChangeRef.current = refreshAfterSourceChange;
   }, [refreshAfterSourceChange]);
 
+  /**
+   * Re-read the résumé and adopt what the server actually holds.
+   *
+   * The fields tab asks for this when it cannot tell whether its own edit landed (the
+   * request timed out) or when the document was written from outside this page. The
+   * panel refetches its own projection either way, but nothing moved `source` or
+   * `savedSource` -- so the Typst tab still showed the **pre-edit** document, and the
+   * first keystroke there armed a `PUT` of it. `put_resume` carries no base hash and
+   * sets the source unconditionally, so an applied edit went with no error anywhere.
+   *
+   * `skipTimers` while the buffer moves, like the import and chat adopts: adopting is
+   * not an edit and must not arm the autosave. Typing already in the buffer wins, as it
+   * does in `sendEdit` -- it exists in no other copy, while the edit is in a revision.
+   */
+  const resyncSource = useCallback(async () => {
+    try {
+      const fresh = await getResume(resumeId);
+      if (sourceRef.current !== savedRef.current) {
+        setStatus(t("fieldsEditCollided"));
+        return;
+      }
+      skipTimers.current = true;
+      adoptServerSource(fresh.typst_source || "");
+      setUpdatedAt(fresh.updated_at || "");
+      setUnpublishedChanges(fresh.unpublished_changes ?? true);
+      try {
+        await refreshAfterSourceChangeRef.current();
+      } finally {
+        skipTimers.current = false;
+      }
+    } catch {
+      /* The panel has already said what happened and refetched its projection. A
+         failed re-read leaves the buffer where it was, which is the state this is
+         trying to improve on, not a worse one. */
+    }
+  }, [adoptServerSource, resumeId, t]);
+
   // One import snapshot, applied to the editor.
   //
   // A snapshot whose `source_hash` differs from the one this editor adopted
@@ -512,7 +763,7 @@ export default function EditorShell({ resumeId }: Props) {
         try {
           const fresh = await getResume(resumeId);
           skipTimers.current = true;
-          setSource(fresh.typst_source || "");
+          adoptServerSource(fresh.typst_source || "");
           setUpdatedAt(fresh.updated_at || "");
           setUnpublishedChanges(fresh.unpublished_changes ?? true);
           adopted = true;
@@ -545,7 +796,7 @@ export default function EditorShell({ resumeId }: Props) {
       // persist those rows.
       if (plan.readTranscript) await refreshMessages();
     },
-    [refreshMessages, resumeId],
+    [adoptServerSource, refreshMessages, resumeId],
   );
 
   // Opens the live stream for a running import and feeds every snapshot
@@ -613,7 +864,7 @@ export default function EditorShell({ resumeId }: Props) {
         try {
           const fresh = await getResume(resumeId);
           skipTimers.current = true;
-          setSource(fresh.typst_source || "");
+          adoptServerSource(fresh.typst_source || "");
           setUpdatedAt(fresh.updated_at || "");
           setUnpublishedChanges(fresh.unpublished_changes ?? true);
           adopted = true;
@@ -638,7 +889,7 @@ export default function EditorShell({ resumeId }: Props) {
       }
       if (plan.readTranscript) await refreshMessages();
     },
-    [refreshMessages, resumeId],
+    [adoptServerSource, refreshMessages, resumeId],
   );
 
   const attachTailorStream = useCallback(() => {
@@ -845,7 +1096,7 @@ export default function EditorShell({ resumeId }: Props) {
         setResumeSource(resume.source);
         setResumeLocale(resume.locale);
         setImportStatus(resume.import_status);
-        setSource(resume.typst_source || "");
+        adoptServerSource(resume.typst_source || "");
         setUpdatedAt(resume.updated_at || "");
         setUnpublishedChanges(resume.unpublished_changes ?? true);
         void getResumeFamily(resumeId)
@@ -876,7 +1127,7 @@ export default function EditorShell({ resumeId }: Props) {
         if (cancelled) return;
         setLoaded(true);
         try {
-          const preview = await getPreviewPages(resumeId);
+          const preview = await getPreviewPages(resumeId, wantBandsRef.current);
           if (!cancelled) {
             setPreviewPages(preview);
             setCompileError(null);
@@ -897,7 +1148,7 @@ export default function EditorShell({ resumeId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [failCompile, resumeId, setPreviewPages, t]);
+  }, [adoptServerSource, failCompile, resumeId, setPreviewPages, t]);
 
   useEffect(() => {
     return () => {
@@ -929,10 +1180,29 @@ export default function EditorShell({ resumeId }: Props) {
     // stops a typed turn, but this timer is not a turn and it PUTs whatever
     // buffer this mount holds.
     if (tailorBlocksSave(tailorRunView?.mode, tailorCursorRef.current)) return;
+    // The fourth save path, and the one that loses a person's writing without an error
+    // of any kind: while the fields tab owns the source, this PUT would put this
+    // mount's copy of `source` over the field edit the server has already applied, and
+    // `/edit` has no way to notice. `sourceOwner` is in the deps, so a debounce armed
+    // by the Typst tab is cancelled the moment the handover happens rather than firing
+    // 400ms into the fields tab's turn.
+    //
+    // The second half is the handover back: ownership returns to the shell holding the
+    // very bytes `/edit` answered with, and PUTting those again would cost a write and
+    // a compile to change nothing -- and would do it at the one moment a commit may
+    // still be settling.
+    // While the fields tab is up, writing is the handover's job: either its flush is
+    // in flight or fields owns the source outright. Without this, the 400ms timer the
+    // last keystroke in the Typst tab armed survives the switch -- `sourceOwner` is
+    // still "shell" until the flush lands -- and PUTs the very buffer the handover is
+    // PUTting. Two writes, and two preview rounds of three typst subprocesses each.
+    if (activeTab === "fields") return;
+    if (!shellShouldPutSource({ owner: sourceOwner, source, savedSource })) return;
     const handle = window.setTimeout(async () => {
       try {
         setStatus(t("saving"));
         const saved = await putResumeSource(resumeId, { typst_source: source });
+        setSavedSource(source);
         if (saved.updated_at) setUpdatedAt(saved.updated_at);
         if (typeof saved.unpublished_changes === "boolean") {
           setUnpublishedChanges(saved.unpublished_changes);
@@ -950,6 +1220,7 @@ export default function EditorShell({ resumeId }: Props) {
     }, 400);
     return () => window.clearTimeout(handle);
   }, [
+    activeTab,
     failCompile,
     importView,
     tailorRunView,
@@ -957,7 +1228,9 @@ export default function EditorShell({ resumeId }: Props) {
     refreshAts,
     refreshPreview,
     resumeId,
+    savedSource,
     source,
+    sourceOwner,
     t,
   ]);
 
@@ -1059,12 +1332,17 @@ export default function EditorShell({ resumeId }: Props) {
       // like it covers this, but that is `mode === "running"` only: a pass
       // that has finished with its adopt still outstanding walks straight
       // through it, and `source` is then known to be the older document.
+      // And not while the fields tab owns the source: on a phone the tools sheet puts
+      // the tab strip and "Ask AI" side by side, so a turn can start with a field
+      // commit still settling, and this PUT would answer it with the older document.
       if (
         !importBlocksSave(importView?.mode, importCursorRef.current) &&
-        !tailorBlocksSave(tailorRunView?.mode, tailorCursorRef.current)
+        !tailorBlocksSave(tailorRunView?.mode, tailorCursorRef.current) &&
+        mayPutSource(currentOwner())
       ) {
         skipTimers.current = true;
         const saved = await putResumeSource(resumeId, { typst_source: source });
+        setSavedSource(source);
         if (saved.updated_at) setUpdatedAt(saved.updated_at);
       }
     } catch (err) {
@@ -1164,7 +1442,7 @@ export default function EditorShell({ resumeId }: Props) {
         }
         if (event.type === "source") {
           skipTimers.current = true;
-          setSource(event.typst_source);
+          adoptServerSource(event.typst_source);
           setUpdatedAt(new Date().toISOString());
           setUnpublishedChanges(true);
           try {
@@ -1235,8 +1513,10 @@ export default function EditorShell({ resumeId }: Props) {
     }
     },
     [
+      adoptServerSource,
       clearReasoning,
       clearStream,
+      currentOwner,
       importRunning,
       tailorRunning,
       importView,
@@ -1270,22 +1550,39 @@ export default function EditorShell({ resumeId }: Props) {
     saveComposerDraft(resumeId, value);
   }
 
+  /**
+   * Why `flushSave` would write nothing, or null when it would write.
+   *
+   * `flushSave` answers `true` for three different outcomes -- wrote it, refused
+   * because a run owns the source, refused because the fields tab does -- because
+   * "nothing to flush" is not a failure for a caller that only wants to leave. The
+   * handover does need the difference: it waits for `savedSource === source`, which a
+   * refusal never reaches, so without this it would wait for ever.
+   *
+   * The refusals themselves: while an import or tailor run is live there is nothing of
+   * the person's to flush, and writing our copy of `source` back would overwrite the
+   * sections the agent has applied since the last snapshot we adopted -- and while an
+   * adopt is outstanding our copy is known to be the older document, which outlasts the
+   * run by however long the adopt takes to land (or forever, if it failed on the
+   * terminal frame). The fields tab is the same shape: it writes through `/edit`, so
+   * the server already has everything there is to flush, and this mount's `source` is
+   * the older document for as long as a commit is in flight. Ownership is read from the
+   * refs, not from a render's state: a click on Back blurs the field first, and that
+   * blur starts a commit one event before the click handler runs.
+   */
+  const flushBlockedBy = useCallback((): "run" | "fields" | null => {
+    if (importBlocksSave(importView?.mode, importCursorRef.current)) return "run";
+    if (tailorBlocksSave(tailorRunView?.mode, tailorCursorRef.current)) return "run";
+    if (!mayPutSource(currentOwner())) return "fields";
+    return null;
+  }, [currentOwner, importView, tailorRunView]);
+
   async function flushSave(): Promise<boolean> {
-    // The clobber `onImportSnapshot` fixes at the source, refused here as
-    // well: while the run is live there is nothing of the person's to flush
-    // and writing our copy of `source` back would overwrite the sections the
-    // agent has applied since the last snapshot we adopted -- and while an
-    // adopt is outstanding our copy is known to be the older document, which
-    // outlasts the run by however long the adopt takes to land (or forever,
-    // if it failed on the terminal frame). "Nothing to flush" is not a
-    // failure, so the caller still leaves, switches or creates its tailor --
-    // the same way a chat send in flight blocks those callers rather than
-    // letting them write a half-streamed source.
-    if (importBlocksSave(importView?.mode, importCursorRef.current)) return true;
-    if (tailorBlocksSave(tailorRunView?.mode, tailorCursorRef.current)) return true;
+    if (flushBlockedBy()) return true;
     skipTimers.current = true;
     try {
       const saved = await putResumeSource(resumeId, { typst_source: source });
+      setSavedSource(source);
       if (saved.updated_at) setUpdatedAt(saved.updated_at);
       return true;
     } catch {
@@ -1295,8 +1592,106 @@ export default function EditorShell({ resumeId }: Props) {
     }
   }
 
+  // `flushSave` is a new function every render; the handover effect below must not
+  // re-run (and re-flush) for that, so it reads the latest one from here.
+  const flushSaveRef = useRef(flushSave);
+  useEffect(() => {
+    flushSaveRef.current = flushSave;
+  });
+
+  /**
+   * Handing the source over to the fields tab.
+   *
+   * Anything typed into the Typst tab in the last 400ms has not been PUT yet, and the
+   * projection the panel is about to fetch is of the source the *server* holds. So the
+   * buffer is flushed first and `fieldsOpen` -- which is both the ownership flag and
+   * the panel's mount condition -- only becomes true once the PUT has landed, because
+   * it is `savedSource === source`. A panel mounted before that would offer a form
+   * built from a document missing the person's last sentence, and their next field
+   * edit would be written on top of it.
+   *
+   * If the flush fails the tab does not open at all, and says so: the only thing worse
+   * than not opening it is opening it over writing that is still only in this browser.
+   *
+   * Nothing is flushed before `loaded`, where `source` is still "" -- a stored tab
+   * puts us here on the very first render.
+   *
+   * Taking ownership back needs no code: leaving the tab makes `fieldsOpen` false by
+   * itself, and `editsInFlight` holds the handover open until the last commit lands.
+   */
+  /**
+   * Fetch the highlight bands once the fields tab is the one on screen.
+   *
+   * `refreshPreview` asks for them only while this tab is up, so the preview a page
+   * load or a Typst-tab save left behind carries none and the panel would have nothing
+   * to highlight with. Asked for once per source: an empty answer is a real answer -- a
+   * document with no editable line, an eval that failed -- and must not be retried on
+   * every render. An `/edit` answer always carries bands, so this is the open, not the
+   * steady state.
+   */
+  const bandsAskedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (activeTab !== "fields" || !loaded) return;
+    if (savedSource !== source) return; // the handover below flushes first
+    if (Object.keys(bands).length > 0 || bandsAskedForRef.current === source) return;
+    bandsAskedForRef.current = source;
+    void refreshPreview().catch(() => {
+      /* The picture on screen is still the document; only the highlight is missing,
+         and the panel draws nothing rather than drawing it in the wrong place. */
+    });
+  }, [activeTab, bands, loaded, refreshPreview, savedSource, source]);
+
+  useEffect(() => {
+    if (activeTab !== "fields" || !loaded || savedSource === source) return;
+    const stayOnSource = () => {
+      setStatus(t("switchSaveError"));
+      setLeftTab("typst");
+      saveEditorTab(resumeId, "typst");
+    };
+    // A flush that would write nothing never reaches `savedSource === source`, so the
+    // tab would sit on its loading line forever. A field commit still settling comes
+    // back here when it lands (`editsInFlight` is in the deps); an import or a tailor
+    // pass owns the source for far longer than a tab switch should wait, so that one
+    // is told, not waited on.
+    const blocked = flushBlockedBy();
+    if (blocked === "fields") return;
+    if (blocked === "run") {
+      stayOnSource();
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const flushed = await flushSaveRef.current();
+      if (cancelled) return;
+      if (!flushed) {
+        stayOnSource();
+        return;
+      }
+      // Unlike the autosave, the chat and the restore paths, `flushSave` does not
+      // repaint the preview -- its other callers are navigating away. Here the panel is
+      // about to mount on a projection of the source this PUT just wrote, while the
+      // SVGs and the bands on screen are of the one before it: if the Typst edit changed
+      // the unit set, focusing a field would highlight the band an id used to name.
+      await refreshPreview().catch(() => {
+        /* The document is saved either way; `failCompile` is the autosave's job and the
+           picture on screen is at worst one edit old. */
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, editsInFlight, flushBlockedBy, loaded, refreshPreview, resumeId,
+      savedSource, source, t]);
+
   async function onLeaveEditor() {
-    if (leaving || sendingRef.current) return;
+    if (leaving) return;
+    if (sendingRef.current) {
+      // A turn, or a restore waiting for a field commit to land: both hold this flag,
+      // and a Back button that does nothing at all for up to fifteen seconds reads as
+      // a broken button rather than a busy one.
+      setStatus(t("leaveBusy"));
+      return;
+    }
     setLeaving(true);
     try {
       // Leaving unmounts the 400ms autosave debounce, so anything typed inside
@@ -1483,9 +1878,19 @@ export default function EditorShell({ resumeId }: Props) {
     }
   }
 
+  /**
+   * A revision restored from the history panel, which has already written it.
+   *
+   * No `drainEdits` here, unlike `onRestoreEdit` two hundred lines down: that one is a
+   * PUT this component makes, carrying no hash, so an interleave there is the one case
+   * nothing downstream would catch. This one is a server-side write that has already
+   * happened by the time we hear about it, and `/edit` re-reads the source and
+   * re-checks `body.hash` *after* its compile, so a field commit that loses the race
+   * is refused with `stale_hash` rather than merged into the restored revision.
+   */
   async function onRestoreHistory(saved: Resume) {
     skipTimers.current = true;
-    setSource(saved.typst_source || "");
+    adoptServerSource(saved.typst_source || "");
     if (saved.updated_at) setUpdatedAt(saved.updated_at);
     if (typeof saved.unpublished_changes === "boolean") {
       setUnpublishedChanges(saved.unpublished_changes);
@@ -1593,12 +1998,25 @@ export default function EditorShell({ resumeId }: Props) {
 
   async function onRestoreEdit(previousSource: string) {
     if (sendingRef.current || previousSource === source) return;
+    // `sending` is up for the whole of this, so the card's Restore button is already
+    // inert while the wait below happens -- the restore reads as pending, which is what
+    // a one-request wait should look like.
     sendingRef.current = true;
     setSending(true);
-    skipTimers.current = true;
-    setSource(previousSource);
     try {
+      // This is the one `putResumeSource` the fields tab cannot be allowed to block:
+      // restoring a revision is deliberate and about the whole document, so it wins.
+      // But it waits for the commit in flight first -- this PUT has no hash to check,
+      // unlike `/edit`, so interleaving here is the one case nothing downstream would
+      // catch.
+      if (!(await drainEdits())) {
+        setStatus(t("fieldsEditPending"));
+        return;
+      }
+      skipTimers.current = true;
+      setSource(previousSource);
       const saved = await putResumeSource(resumeId, { typst_source: previousSource });
+      setSavedSource(previousSource);
       if (saved.updated_at) setUpdatedAt(saved.updated_at);
       if (typeof saved.unpublished_changes === "boolean") {
         setUnpublishedChanges(saved.unpublished_changes);
@@ -1932,14 +2350,12 @@ export default function EditorShell({ resumeId }: Props) {
     family && family.master.id !== resumeId ? family.master.title : title;
   const tailorCount = family && family.master.id === resumeId ? family.tailors.length : 0;
 
-  // The preview keeps its own pane in both layouts and is never a tab; a
-  // "preview" left in storage by an older session would select nothing.
-  const activeTab = leftTab === "preview" ? "typst" : leftTab;
-
   const previewPane = (
     <EditorPreview
       previewUrls={previewUrls}
       textLayers={textLayers}
+      editBands={editBands}
+      deleteBands={deleteBands}
       previewAlt={t("preview")}
       previewError={t("previewError")}
       report={ats}
@@ -1969,8 +2385,9 @@ export default function EditorShell({ resumeId }: Props) {
     <Tabs
       value={activeTab}
       onValueChange={(tab) => {
-        setLeftTab(tab);
-        saveEditorTab(resumeId, tab);
+        const next = normalizeEditorTab(tab);
+        setLeftTab(next);
+        saveEditorTab(resumeId, next);
       }}
       className="flex h-full min-h-0 min-w-0 flex-col gap-0"
     >
@@ -1979,6 +2396,10 @@ export default function EditorShell({ resumeId }: Props) {
           <TabsTrigger value="typst" className={editorTabClassName}>
             <AlignLeft aria-hidden="true" />
             {t("tabTypst")}
+          </TabsTrigger>
+          <TabsTrigger value="fields" className={editorTabClassName}>
+            <SlidersHorizontal aria-hidden="true" />
+            {t("tabFields")}
           </TabsTrigger>
           <TabsTrigger value="chat" className={editorTabClassName}>
             <MessageCircle aria-hidden="true" />
@@ -2009,6 +2430,27 @@ export default function EditorShell({ resumeId }: Props) {
           ariaLabel={t("tabTypst")}
           lang={locale}
         />
+      </TabsContent>
+      <TabsContent
+        value="fields"
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
+      >
+        {/* Mounted only once the handover above has flushed and taken ownership, so
+            the projection it fetches can never be of a document older than the
+            buffer this mount holds. */}
+        {fieldsOpen ? (
+          <StructuredPanel
+            resumeId={resumeId}
+            source={source}
+            applyEdit={editQueue.push}
+            publishProjection={editQueue.publish}
+            onFocusUnit={setFocusedUnit}
+            onArmedUnits={setArmedUnits}
+            onResyncSource={resyncSource}
+          />
+        ) : (
+          <p className="p-3 text-sm text-muted-foreground sm:p-4">{t("fieldsLoading")}</p>
+        )}
       </TabsContent>
       <TabsContent
         value="chat"

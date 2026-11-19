@@ -51,7 +51,7 @@ export default function ShareView({ token }: Props) {
       setStatus("loading");
       setPreviewError(false);
       setTitle("");
-      setPreviewPages({ pages: [], textLayers: [] });
+      setPreviewPages({ pages: [], textLayers: [], bands: {} });
       try {
         const meta = await getPublicShare(token);
         if (cancelled) return;

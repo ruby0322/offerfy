@@ -3,15 +3,21 @@
 import { ReactNode, useState } from "react";
 import ZoomToolbar from "@/components/editor/ZoomToolbar";
 import PreviewTextLayer from "@/components/editor/PreviewTextLayer";
+import PreviewHighlight from "@/components/editor/PreviewHighlight";
 import AtsStrip from "@/components/editor/AtsStrip";
 import { Button } from "@/components/ui/button";
 import type { AtsCheckName } from "@/lib/ats-checks";
-import type { AtsReport, PreviewTextLayer as TextLayer } from "@/lib/api";
+import type { AtsReport, PreviewBand, PreviewTextLayer as TextLayer } from "@/lib/api";
+import { bandsOnPage } from "@/lib/preview-highlight";
 
 type Props = {
   previewUrls: string[];
   /** Parallel to `previewUrls` where it is known; short or empty otherwise. */
   textLayers?: TextLayer[];
+  /** The lines of the focused field, across every page; drawn in the accent. */
+  editBands?: PreviewBand[];
+  /** The lines an armed delete would take, across every page; drawn as danger. */
+  deleteBands?: PreviewBand[];
   previewAlt: string;
   previewError: string;
   report: AtsReport | null;
@@ -27,6 +33,8 @@ type Props = {
 export default function EditorPreview({
   previewUrls,
   textLayers,
+  editBands,
+  deleteBands,
   previewAlt,
   previewError,
   report,
@@ -81,6 +89,24 @@ export default function EditorPreview({
                         className="block h-auto w-full select-none"
                         draggable={false}
                       />
+                      {/* Under the text layer, not over it: both ignore the pointer, but
+                          the layer that makes the page selectable stays on top. Bands
+                          are measured in the text layer's units, so a page without one
+                          has nothing to draw them against. */}
+                      {textLayers?.[index] ? (
+                        <>
+                          <PreviewHighlight
+                            kind="edit"
+                            bands={bandsOnPage(editBands ?? [], index)}
+                            pageWidth={textLayers[index].width}
+                          />
+                          <PreviewHighlight
+                            kind="delete"
+                            bands={bandsOnPage(deleteBands ?? [], index)}
+                            pageWidth={textLayers[index].width}
+                          />
+                        </>
+                      ) : null}
                       {textLayers?.[index] ? (
                         <PreviewTextLayer layer={textLayers[index]} />
                       ) : null}
