@@ -164,6 +164,51 @@ test("an arrival the sweep has not reached is tagged, not numbered", () => {
   assert.ok(!html.includes(SCORE_NUMBER), html);
 });
 
+test("a refused arrival gets no score and no scoring tag", () => {
+  // `scored_at` set with no score means the model declined this pair: a score
+  // is never coming, so "scoring" would promise something that will not
+  // arrive. This is the distinction `arrivalState` exists to draw, and keying
+  // on `fit_score === null` alone gets it wrong.
+  const html = render(
+    createElement(MatchesBlock, {
+      ...base,
+      digest: quietWeek,
+      arrivals: [arrival({ fit_score: null, tier: null })],
+      matches: [],
+    }),
+  );
+  assert.ok(html.includes("Backend Engineer"), html);
+  assert.ok(!html.includes(d.matchesScoringTag), html);
+  assert.ok(!html.includes(SCORE_NUMBER), html);
+});
+
+test("a score of exactly zero shows the number, not the tag", () => {
+  // 0 is falsy; a truthiness check would call a real zero "still scoring".
+  const html = render(
+    createElement(MatchesBlock, {
+      ...base,
+      digest: quietWeek,
+      arrivals: [arrival({ fit_score: 0, tier: "Worth a look" })],
+      matches: [],
+    }),
+  );
+  assert.ok(html.includes(SCORE_NUMBER), html);
+  assert.ok(!html.includes(d.matchesScoringTag), html);
+});
+
+test("a posting that closed since it was listed says so", () => {
+  // Sending someone to a dead posting wastes the one click this card is for.
+  const html = render(
+    createElement(MatchesBlock, {
+      ...base,
+      digest: quietWeek,
+      arrivals: [arrival({ job_is_active: false })],
+      matches: [],
+    }),
+  );
+  assert.ok(html.includes(d.jobInactive), html);
+});
+
 test("the standing fallback gets no score and no scoring tag", () => {
   // Those rows are blank because `JobListItem` has no score field, not
   // because anyone is working on them -- many have been scored already, so

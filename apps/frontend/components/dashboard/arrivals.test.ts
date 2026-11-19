@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { MatchArrival } from "@/lib/dashboard";
-import { arrivalHeadline, arrivalState, groupArrivals, strongArrivalCount } from "./arrivals";
+import { arrivalHeadline, arrivalState, strongArrivalCount } from "./arrivals";
 
 function arrival(over: Partial<MatchArrival> = {}): MatchArrival {
   return {
@@ -40,50 +40,14 @@ test("the headline counts arrivals, not the removed new_match_count", () => {
   assert.deepEqual(arrivalHeadline(4, false), { kind: "arrivals", count: 4 });
 });
 
-test("an unscored arrival renders without a score, not as a poor match", () => {
-  const groups = groupArrivals([
-    arrival({
-      job_id: "u",
-      tier: null,
-      fit_score: null,
-      reason: null,
-      gap: null,
-      scored_at: null,
-    }),
-  ]);
-  assert.equal(groups.length, 1);
-  assert.equal(groups[0].day, null);
-  assert.equal(strongArrivalCount(groups.flatMap((g) => g.items)), 0);
+test("an arrival with no score counts as no strong fit", () => {
+  // Not a poor match -- nobody has judged it, so it is simply not counted.
+  const unscored = arrival({ tier: null, fit_score: null, reason: null, scored_at: null });
+  assert.equal(strongArrivalCount([unscored]), 0);
 });
 
-test("an inactive posting is marked rather than hidden", () => {
-  const groups = groupArrivals([arrival({ job_id: "closed", job_is_active: false })]);
-  assert.equal(groups[0].items.length, 1);
-  assert.equal(groups[0].items[0].job_is_active, false);
-});
 
-test("arrivals group by the day they were scored, newest first, unscored last", () => {
-  const groups = groupArrivals([
-    arrival({ job_id: "old", scored_at: "2026-11-17T03:00:00Z" }),
-    arrival({ job_id: "unscored", tier: null, fit_score: null, scored_at: null }),
-    arrival({ job_id: "new1", scored_at: "2026-11-18T03:00:00Z" }),
-    arrival({ job_id: "new2", scored_at: "2026-11-18T05:00:00Z" }),
-  ]);
-  assert.deepEqual(
-    groups.map((g) => [g.day, g.items.map((i) => i.job_id)]),
-    [
-      ["2026-11-18", ["new1", "new2"]],
-      ["2026-11-17", ["old"]],
-      [null, ["unscored"]],
-    ],
-  );
-});
 
-test("the day is a Taipei calendar day, not a UTC one", () => {
-  // 17:00Z is already the next morning in Taipei.
-  const groups = groupArrivals([arrival({ scored_at: "2026-11-17T17:00:00Z" })]);
-  assert.equal(groups[0].day, "2026-11-18");
-});
 
 test("strong arrivals are counted by tier, once per posting", () => {
   const items = [

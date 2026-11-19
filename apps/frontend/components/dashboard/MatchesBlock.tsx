@@ -4,6 +4,7 @@ import { useFormatter, useTranslations } from "next-intl";
 import MatchRow from "./MatchRow";
 import SamplePick from "./SamplePick";
 import { Link } from "@/i18n/navigation";
+import { arrivalState } from "./arrivals";
 import { uniqueByJob, type Digest } from "@/lib/digest";
 import type { MatchArrival } from "@/lib/dashboard";
 import type { JobListItem } from "@/lib/jobs";
@@ -43,9 +44,14 @@ import type { JobListItem } from "@/lib/jobs";
  * A row the sweep has not reached shows no number -- inventing one would be
  * worse than a gap -- but it does carry a "scoring" tag in the slot under the
  * number, which keeps the column from going ragged and says a number really is
- * coming. The standing-match fallback gets no tag: those rows are blank
- * because `JobListItem` has no score field, not because anyone is working on
- * them, and many of them have been scored already.
+ * coming. A REFUSED row gets neither: a score for it is never coming, so the
+ * tag would be a promise. `arrivalState` is what tells those two apart. The
+ * standing-match fallback gets no tag either, because its blank means "no
+ * score field in this list" rather than "being scored".
+ *
+ * A posting that closed after it was listed is labelled rather than dropped,
+ * the way DigestCard does it: sending someone to a dead posting wastes the one
+ * click this whole card exists to earn.
  */
 
 type Props = {
@@ -75,13 +81,20 @@ type Role = {
    * "scoring" tag, which fills the gap a missing number leaves and tells the
    * reader a number is genuinely coming.
    *
+   * `arrivalState` decides it, and the reason to go through that function
+   * rather than testing `fit_score === null` is the third state it knows
+   * about: a row whose `scored_at` is set but which carries no score is a
+   * REFUSAL, and a score for it is never coming. Tagging that "scoring"
+   * promises something that will not arrive.
+   *
    * False for the standing fallback even though those rows also show no
    * number: `JobListItem` carries no score field, so its blank means "not
    * available in this list", not "being scored". Many of those postings have
-   * been scored already. Tagging them would be a claim about work that is not
-   * happening.
+   * been scored already. Tagging them would claim work that is not happening.
    */
   pending: boolean;
+  /** The posting closed after it was listed; the row has to say so. */
+  inactive: boolean;
 };
 
 export default function MatchesBlock({
@@ -112,7 +125,8 @@ export default function MatchesBlock({
           company: a.company,
           location: a.location,
           score: a.fit_score,
-          pending: a.fit_score === null,
+          pending: arrivalState(a) === "pending",
+          inactive: !a.job_is_active,
         }))
       : matches.map((j) => ({
           id: j.id,
@@ -123,6 +137,7 @@ export default function MatchesBlock({
           // score to carry, so this column is uniformly unscored in fallback.
           score: null,
           pending: false,
+          inactive: !j.is_active,
         }))
   ).slice(0, FRESH);
 
@@ -226,6 +241,7 @@ export default function MatchesBlock({
                   meta={role.location}
                   score={role.score}
                   tier={role.pending ? t("matchesScoringTag") : null}
+                  inactiveLabel={role.inactive ? t("jobInactive") : null}
                   action={
                     <Link
                       href={`/jobs/${encodeURIComponent(role.id)}`}

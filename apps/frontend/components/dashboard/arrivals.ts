@@ -6,51 +6,11 @@ import { STRONG_TIER } from "@/lib/digest";
  *
  * An arrival is a posting scored for this person since they last looked,
  * measured by the server. Nothing here asks the browser what it remembers.
+ *
+ * `groupArrivals` and its Taipei-day helper lived here too, for the separate
+ * arrivals card. That card is gone -- the overview is one card with two
+ * columns again -- and nothing groups by day any more, so they went with it.
  */
-
-export type ArrivalGroup = {
-  /** Taipei calendar day, YYYY-MM-DD. Null: not scored yet. */
-  day: string | null;
-  items: MatchArrival[];
-};
-
-// The product's calendar day, as the usage breakdown uses. `en-CA` formats
-// as YYYY-MM-DD, which sorts as text.
-function dayOf(iso: string, timeZone: string): string | null {
-  const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return null;
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(at);
-}
-
-/**
- * Arrivals grouped by the day they were scored: newest day first, the
- * postings with no score yet last in a group of their own (day null). Within
- * a day the server's order is kept. A closed posting stays in its group; the
- * row marks it.
- */
-export function groupArrivals(
-  items: MatchArrival[],
-  timeZone = "Asia/Taipei",
-): ArrivalGroup[] {
-  const byDay = new Map<string | null, MatchArrival[]>();
-  for (const item of items) {
-    const day = item.scored_at ? dayOf(item.scored_at, timeZone) : null;
-    const bucket = byDay.get(day);
-    if (bucket) bucket.push(item);
-    else byDay.set(day, [item]);
-  }
-  const days = [...byDay.keys()]
-    .filter((d): d is string => d !== null)
-    .sort()
-    .reverse();
-  const order: (string | null)[] = byDay.has(null) ? [...days, null] : days;
-  return order.map((day) => ({ day, items: byDay.get(day) ?? [] }));
-}
 
 export type ArrivalHeadline = {
   /**
