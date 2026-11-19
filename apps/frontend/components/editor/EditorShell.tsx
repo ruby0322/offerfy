@@ -263,6 +263,12 @@ export default function EditorShell({ resumeId }: Props) {
   const [savedSource, setSavedSource] = useState<string | null>(null);
   /** Adopt source the server already holds: the buffer and that record move together. */
   const adoptServerSource = useCallback((next: string) => {
+    // The refs below catch up in an effect after the render; an async caller that
+    // captured a source before its await and compares it after (`setPreviewPages`) must
+    // already see this one, or its own answer would look like it came from another
+    // document.
+    sourceRef.current = next;
+    savedRef.current = next;
     setSavedSource(next);
     setSource(next);
   }, []);
@@ -470,12 +476,22 @@ export default function EditorShell({ resumeId }: Props) {
   /**
    * The source the bands on screen describe, or null when that is not known. Provenance,
    * not emptiness: a document with no editable line has legitimately empty bands, and
-   * a non-empty set can belong to the document before this one.
+   * a non-empty set can belong to the document before this one. State, not a ref: the
+   * effect that fetches bands has to wake when this changes without `source` changing --
+   * a slow fetch for an older source landing after a newer edit is exactly that.
    */
-  const bandsSourceRef = useRef<string | null>(null);
+  const [bandsSource, setBandsSource] = useState<string | null>(null);
 
+  /**
+   * Show a preview. `describes` is the source it was made from, captured by the caller
+   * *before* its await (after it, a late answer could claim the newer source and
+   * suppress the refetch for good), or null when that is not known. An answer for a
+   * source that is no longer the buffer's is dropped: last-write-wins would put the
+   * previous document's picture and bands over the new one.
+   */
   const setPreviewPages = useCallback((preview: PreviewPages, describes: string | null) => {
-    bandsSourceRef.current = describes;
+    if (describes !== null && describes !== sourceRef.current) return;
+    setBandsSource(describes);
     for (const url of previewObjectUrls.current) URL.revokeObjectURL(url);
     const urls = preview.pages.map((svg) =>
       URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" })),
@@ -557,12 +573,12 @@ export default function EditorShell({ resumeId }: Props) {
         // a half-read answer, not a document with no pages. Keeping the picture that
         // is already on screen beats blanking it, but the bands are another matter: they
         // describe the document before this one, and a band over the wrong text is worse
-        // than none. Dropping them leaves `bandsSourceRef` unequal to `source`, which is
+        // than none. Dropping them leaves `bandsSource` unequal to `source`, which is
         // what sends the effect below to fetch the right ones.
         if (out.preview.pages.length > 0) {
           setPreviewPages(out.preview, out.typstSource);
         } else {
-          bandsSourceRef.current = null;
+          setBandsSource(null);
           setBands({});
         }
         setCompileError(null);
@@ -1669,7 +1685,7 @@ export default function EditorShell({ resumeId }: Props) {
     if (savedSource !== source) return; // the handover below flushes first
     if (
       !bandsNeedFetch({
-        describes: bandsSourceRef.current,
+        describes: bandsSource,
         askedFor: bandsAskedForRef.current,
         source,
       })
@@ -1681,7 +1697,7 @@ export default function EditorShell({ resumeId }: Props) {
       /* The picture on screen is still the document; only the highlight is missing,
          and the panel draws nothing rather than drawing it in the wrong place. */
     });
-  }, [activeTab, loaded, refreshPreview, savedSource, source]);
+  }, [activeTab, bandsSource, loaded, refreshPreview, savedSource, source]);
 
   useEffect(() => {
     if (activeTab !== "fields" || !loaded || savedSource === source) return;
