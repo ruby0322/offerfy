@@ -394,10 +394,28 @@ about editing at all.
 `starter.resolve_package_path()` reads before falling back to the local tree.
 That directory is **gitignored** (`.gitignore:36`,
 `apps/backend/typst/packages/preview/*`), and `git ls-files` returns zero files
-for acorn-resume. So the ~95 packages production compiles against exist only on
-that host: no commit pins their versions, a clean clone cannot reproduce what
-prod renders, and a worktree sees only `basic-resume` and `scienceicons` — which
-is why this session could not find acorn-resume's source and had to be shown it.
+for acorn-resume.
+
+**Corrected after a sibling session checked the number I asserted here.** I first
+wrote that *no* commit pins any of these packages. Two are pinned: `git ls-files`
+returns 27 paths under `typst/packages`, one of them a `.gitkeep`, so **26 files
+across exactly `basic-resume` and `scienceicons`** — and `scienceicons` is there
+because it is `basic-resume`'s transitive dependency, so what is committed is
+precisely the closure needed to compile the default template from a clean clone.
+The other ~93 are untracked.
+
+My own sentence carried the refutation and I did not see it: I wrote that a
+worktree sees `basic-resume` and `scienceicons`, which is only possible if those
+two are *tracked*, since a worktree materialises tracked files and would show
+nothing of an ignored, untracked directory. The error was inferring from a
+`.gitignore` line that nothing beneath it is committed — but `.gitignore` does not
+untrack what is already in the index, which is exactly how a repository ends up
+with two pinned packages inside an ignored path.
+
+So the accurate claim is narrower and still worth recording: production compiles
+against ~95 packages of which 2 are pinned, a clean clone reproduces only the
+default template, and a worktree sees only those two — which is why this session
+could not find acorn-resume's source and had to be shown it.
 
 Consequences that bite in order of likelihood: a template's behaviour can change
 under the product with no diff to review; a hazard that lives in a package (like
