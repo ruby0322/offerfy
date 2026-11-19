@@ -1,6 +1,11 @@
 import type { ModelRow, ModelTable, UsageTierRow, UsageTiers } from "@/lib/usage-tiers";
 import type { ImportSnapshot, ImportStepStatus } from "@/lib/import-progress";
 import { isTailorRunSnapshot, type TailorRunSnapshot } from "@/lib/tailor-run";
+import {
+  parseProjection,
+  type EditIntent,
+  type Projection,
+} from "@/lib/structured-fields";
 
 export class ApiError extends Error {
   status: number;
@@ -317,11 +322,27 @@ export type PreviewTextLayer = {
   spans: PreviewTextSpan[];
 };
 
+/**
+ * One rendered line a unit occupies, in the text layer's own coordinates. There is no
+ * `x`: a band is a full-width row, whatever else shares the line.
+ */
+export type PreviewBand = {
+  /** 0-based, parallel to `pages`. */
+  page: number;
+  y: number;
+  height: number;
+};
+
 export type PreviewPages = {
   /** One SVG document per page. */
   pages: string[];
   /** Parallel to `pages`, or empty when the text could not be recovered. */
   textLayers: PreviewTextLayer[];
+  /**
+   * Line-unit id -> the lines it occupies. `{}` whenever the server could not say, and
+   * on every route that does not compute them (the public preview).
+   */
+  bands: Record<string, PreviewBand[]>;
 };
 
 function finiteNumber(record: Record<string, unknown>, key: string): number {
@@ -354,8 +375,34 @@ function parseTextLayer(value: unknown): PreviewTextLayer | null {
   };
 }
 
-function parsePreviewPages(data: unknown): PreviewPages {
-  const empty: PreviewPages = { pages: [], textLayers: [] };
+function parseBands(value: unknown): Record<string, PreviewBand[]> {
+  const out: Record<string, PreviewBand[]> = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+  for (const [id, rows] of Object.entries(value)) {
+    if (!Array.isArray(rows)) continue;
+    const kept: PreviewBand[] = [];
+    for (const row of rows) {
+      if (!row || typeof row !== "object") continue;
+      const band = row as Record<string, unknown>;
+      // A band that does not say where it is would be drawn at the top of page 0.
+      if (
+        typeof band.page !== "number" ||
+        !Number.isInteger(band.page) ||
+        band.page < 0 ||
+        typeof band.y !== "number" ||
+        typeof band.height !== "number"
+      ) {
+        continue;
+      }
+      kept.push({ page: band.page, y: band.y, height: band.height });
+    }
+    if (kept.length > 0) out[id] = kept;
+  }
+  return out;
+}
+
+export function parsePreviewPages(data: unknown): PreviewPages {
+  const empty: PreviewPages = { pages: [], textLayers: [], bands: {} };
   if (!data || typeof data !== "object") return empty;
   const record = data as Record<string, unknown>;
   if (!Array.isArray(record.pages)) return empty;
@@ -367,11 +414,97 @@ function parsePreviewPages(data: unknown): PreviewPages {
   const aligned =
     layers.length === pages.length &&
     layers.every((layer): layer is PreviewTextLayer => layer !== null);
-  return { pages, textLayers: aligned ? (layers as PreviewTextLayer[]) : [] };
+  return {
+    pages,
+    textLayers: aligned ? (layers as PreviewTextLayer[]) : [],
+    bands: parseBands(record.bands),
+  };
 }
 
-export async function getPreviewPages(id: string): Promise<PreviewPages> {
-  return parsePreviewPages(await apiJson<unknown>(`/api/v1/resumes/${id}/preview`));
+/**
+ * The preview's pages, text layers and -- only when asked for -- the highlight bands.
+ *
+ * Bands cost the server a third typst subprocess and two projection parses, and only
+ * the fields tab draws them, so they are off by default: this is the endpoint the
+ * shell's autosave calls after every keystroke burst in the Typst tab.
+ */
+export async function getPreviewPages(
+  id: string,
+  withBands = false,
+): Promise<PreviewPages> {
+  const query = withBands ? "?bands=1" : "";
+  return parsePreviewPages(
+    await apiJson<unknown>(`/api/v1/resumes/${id}/preview${query}`),
+  );
+}
+
+/**
+ * A 2xx whose body is not the shape the caller needs: an API older than this build,
+ * a proxy answering with its own page, a field renamed on the wire.
+ *
+ * It exists so the fields tab can tell that apart from a document that genuinely has
+ * nothing to edit. `parsePreviewPages` answers a malformed body with an empty preview
+ * and that is right for a picture, but the same move on the projection tells the person
+ * their resume is empty when the truth is that the server is older than the page.
+ */
+export class MalformedResponseError extends Error {
+  path: string;
+
+  constructor(path: string) {
+    super(`Malformed response from ${path}`);
+    this.name = "MalformedResponseError";
+    this.path = path;
+  }
+}
+
+export async function getProjection(id: string): Promise<Projection> {
+  const path = `/api/v1/resumes/${id}/projection`;
+  const projection = parseProjection(await apiJson<unknown>(path));
+  if (!projection) throw new MalformedResponseError(path);
+  return projection;
+}
+
+/**
+ * One edit intent. Defined with the projection it is built from -- `lineIntent` and
+ * `argIntent` are the only things that make one, and they are pure and tested.
+ */
+export type IntentBody = EditIntent;
+
+export type EditResult = {
+  hash: string;
+  typstSource: string;
+  projection: Projection;
+  preview: PreviewPages;
+};
+
+/**
+ * Apply one intent. Throws `ApiError` on a refusal; `editRefusalOf(err.body)` reads the
+ * code (`stale_hash`, `expect_mismatch`, `compile_failed`, `unsupported`) out of it.
+ */
+export async function postEdit(
+  id: string,
+  body: IntentBody,
+  signal?: AbortSignal,
+): Promise<EditResult> {
+  const path = `/api/v1/resumes/${id}/edit`;
+  const data = await apiJson<unknown>(path, {
+    method: "POST",
+    body: JSON.stringify(body),
+    signal,
+  });
+  const record = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  const projection = parseProjection(record.projection);
+  // The source is the point of the response: adopting a half-read one would put the
+  // editor out of step with the document it just changed.
+  if (typeof record.hash !== "string" || typeof record.typst_source !== "string" || !projection) {
+    throw new MalformedResponseError(path);
+  }
+  return {
+    hash: record.hash,
+    typstSource: record.typst_source,
+    projection,
+    preview: parsePreviewPages(record.preview),
+  };
 }
 
 export async function compileResume(
