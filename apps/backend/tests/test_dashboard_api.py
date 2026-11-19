@@ -114,7 +114,9 @@ def test_a_get_writes_nothing(client, db_session):
     # any more and must not become one again: four pages call this endpoint
     # and only the overview renders arrivals, so a stamp here closes the
     # window for a reader who never saw them. POST /v1/me/matches/seen is the
-    # only writer (tests/test_matches_seen.py).
+    # only writer: test_the_dashboard_get_does_not_move_the_marker and
+    # test_the_page_that_showed_them_says_so in test_dashboard_arrivals.py pin
+    # the two halves of that.
     user = _signed_in(client, db_session)
     res, writes = _writes(db_session, lambda: client.get("/v1/dashboard"))
     assert res.status_code == 200

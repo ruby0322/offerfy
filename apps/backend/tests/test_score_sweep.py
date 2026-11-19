@@ -363,6 +363,50 @@ async def test_stale_facts_are_rebuilt_before_scoring(db_session, monkeypatch):
     assert seams.facts_seen[0].input_hash == REBUILT_HASH
 
 
+async def test_a_rebuild_does_not_reload_the_whole_pool(db_session, monkeypatch):
+    """The pool's deferred shape has to survive the facts rebuild.
+
+    `_pool` loads `_POOL_COLUMNS` and leaves both description columns behind,
+    which is what keeps a 910-posting pool off the wire. The rebuild then
+    commits -- the build's own transaction and the spend record, separately --
+    and a commit expires every instance in the session. An expired instance
+    reloads ALL of its columns on the next attribute access, one statement
+    each, so from there on `stale_pairs` walked the pool pulling a description
+    per posting: exactly the cost `_POOL_COLUMNS` exists to avoid, and on the
+    API's event loop, since the first-run endpoint calls this.
+
+    Counted as statements rather than as instance state because that is where
+    the cost actually lands, and because the lazy load is what makes the
+    deferral void -- not the shape of any one instance afterwards.
+    """
+    from sqlalchemy import event
+
+    reads: list[str] = []
+
+    def record(conn, cursor, statement, params, context, executemany):
+        if "description_text" in statement and statement.lstrip()[:6].upper() == "SELECT":
+            reads.append(statement)
+
+    seams = Seams(monkeypatch, tier="Worth a look")
+    _stale_until_rebuilt(monkeypatch, seams)
+    _ready(db_session)
+    for i in range(5):
+        _posting(db_session, age_minutes=i)
+
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        report = await sweep_all(db_session, now=NOW, cap=2)
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    assert seams.rebuilds == 1
+    assert report.bought == 2
+    # One statement: `_prime_descriptions`, for the two pairs being bought.
+    # Not one per posting in the pool.
+    assert len(reads) == 1, reads
+
+
 async def test_the_rebuilt_facts_hash_is_what_gets_recorded(db_session, monkeypatch):
     """The row carries the REBUILT hash, so the next pass sees its work as fresh."""
     seams = Seams(monkeypatch)

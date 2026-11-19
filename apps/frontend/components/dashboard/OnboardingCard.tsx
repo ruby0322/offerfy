@@ -21,12 +21,14 @@ import {
 } from "@/lib/jobs";
 import {
   POLL_MS,
+  READ_TIMEOUT_MS,
   addValue,
   canSave,
   firstRunNotice,
   needsFactsBuild,
   pollVerdict,
   removeValue,
+  withDeadline,
   type OnboardNotice,
 } from "./onboarding";
 
@@ -74,7 +76,9 @@ import {
  *
  * A 429 or an extraction fault leaves the three questions answerable by hand,
  * and the lead sentence is conditional on whether a seed actually resulted --
- * it must never claim a resume was read when it was not.
+ * it must never claim a resume was read when it was not. Running out of time
+ * ends the same way: that read is bounded too (`READ_TIMEOUT_MS`), because a
+ * request that never settles was otherwise a spinner with no route past it.
  */
 
 type Props = {
@@ -134,13 +138,36 @@ export default function OnboardingCard({ pref, onDone }: Props) {
     if (!needsFactsBuild(pref) || asked.current) return;
     asked.current = true;
     void (async () => {
+      // Bounded, because the wait used to be open-ended and the three
+      // questions are behind it. A request that fails settles this at once; a
+      // request that never settles -- a sleeping laptop, a dropped
+      // connection, a socket a proxy holds open -- used to leave the spinner
+      // up and the card unusable for as long as the tab stayed open. That is
+      // the first screen of the product. `READ_TIMEOUT_MS` is longer than the
+      // server's own ceiling on this call, so nothing a working server was
+      // going to answer is thrown away.
+      let fresh: JobPreference | null = null;
       try {
-        const built = await refreshResumeFacts();
-        // The endpoint reports an extraction fault in the body rather than as
-        // a status, so a 200 is not yet a success.
-        if (built.error !== null) throw new Error(built.error);
-        const fresh = await fetchJobPreferences();
-        if (!alive.current) return;
+        fresh = await withDeadline(
+          (async () => {
+            const built = await refreshResumeFacts();
+            // The endpoint reports an extraction fault in the body rather
+            // than as a status, so a 200 is not yet a success.
+            if (built.error !== null) throw new Error(built.error);
+            return await fetchJobPreferences();
+          })(),
+          READ_TIMEOUT_MS,
+        );
+      } catch {
+        // A 429, an extraction fault, a dropped connection: `fresh` stays
+        // null, which is the same ending as running out of time. Both leave
+        // the three questions answerable by hand, under a lead that says
+        // nothing was filled in rather than claiming the resume was read.
+      }
+      if (!alive.current) return;
+      if (fresh === null) {
+        setSeeded(false);
+      } else {
         setFunctions(fresh.target_functions);
         setLocations(fresh.target_locations);
         setSeniority(fresh.target_seniority ?? "");
@@ -149,16 +176,8 @@ export default function OnboardingCard({ pref, onDone }: Props) {
             fresh.target_locations.length > 0 ||
             (fresh.target_seniority ?? "") !== "",
         );
-      } catch {
-        // A 429, an extraction fault, a dropped connection: the three
-        // questions are still answerable by hand, and the lead below says
-        // nothing was filled in rather than claiming the resume was read.
-        if (alive.current) setSeeded(false);
-      } finally {
-        if (alive.current) {
-          setPhase((p) => (p.kind === "reading" ? { kind: "edit" } : p));
-        }
       }
+      setPhase((p) => (p.kind === "reading" ? { kind: "edit" } : p));
     })();
     // The seed is handed in once per mount; a re-render with the same prop
     // must not ask again.

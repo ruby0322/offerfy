@@ -362,6 +362,18 @@ async def sweep_user(db: Session, *, user: User, cap: int = SWEEP_CAP) -> int | 
             facts = await _rebuild_facts(db, user)
             if facts is None:
                 return None
+            # Pool again, because the rebuild committed and a commit expires
+            # every instance in the session. An expired instance reloads ALL
+            # of its columns on the next attribute access, one statement each,
+            # so `_pool`'s deferral would be void from here on and the walk
+            # below would pull a description per posting -- up to about 910 of
+            # them, on the API's event loop, which is the whole cost
+            # `_POOL_COLUMNS` exists to avoid. One statement restores the
+            # deferred shape, and a pool that moved in the meantime is the
+            # fresher answer anyway.
+            pool = _pool(db, user)
+            if not pool:
+                return 0
         # What a purchase is, by the cache's own definition, in the order the
         # cache will buy it. Bought pairs are the prose candidates.
         # The cache classifies again inside cached_scores: paid deliberately, as

@@ -48,6 +48,57 @@ export function needsFactsBuild(pref: Pick<JobPreference, "facts_state">): boole
 export const POLL_MS = 2000;
 export const MAX_POLLS = 20;
 
+/**
+ * How long the card waits for the resume read before showing the questions
+ * anyway.
+ *
+ * Longer than the server's own ceiling on that call -- `resume_facts`
+ * `PROFILE_TIMEOUT` is 90 s -- on purpose. Giving up sooner would throw away
+ * a seed the provider was still going to send and the platform had already
+ * paid for, and the person would answer by hand three questions we knew the
+ * answers to.
+ *
+ * So this is not a latency budget. It exists because the read had no bound at
+ * all: the request can fail to settle in ways no server timeout covers -- a
+ * sleeping laptop, a dropped connection, a proxy that holds the socket open --
+ * and the card then showed a spinner where the three questions go, with no
+ * route to them for as long as the tab stayed open. That is the first screen
+ * of the product, so a slow worst case beats an unreachable one.
+ */
+export const READ_TIMEOUT_MS = 100_000;
+
+/**
+ * `work`'s answer, or null once `ms` have passed.
+ *
+ * A rejection is passed through rather than reported as a timeout: a refusal
+ * (a 429, an extraction fault) is known at once, and the caller says something
+ * different about it than it says about a read still in flight.
+ *
+ * Resolving null and leaving `work` running is the whole point, in two ways.
+ * The request is not cancelled, so the facts row is still written server-side
+ * and the seed is waiting on the next load -- the answer is deferred, not
+ * lost. And because this promise has already settled, a value arriving
+ * afterwards has nowhere to go, so it cannot seed the chips underneath
+ * someone who has started answering by hand. A late rejection is swallowed
+ * for the same reason, which is also what keeps it from being an unhandled
+ * one.
+ */
+export function withDeadline<T>(work: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise<T | null>((resolve, reject) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 export type PollVerdict = "wait" | "done" | "stop";
 
 /**
