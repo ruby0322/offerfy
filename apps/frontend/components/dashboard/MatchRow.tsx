@@ -24,8 +24,15 @@ import { Link } from "@/i18n/navigation";
  * posting in it is ever scored depends on a different ordering and a cap it
  * knows nothing about (see build_digests.candidates). A blank where a number
  * goes was making a promise. The slot's width is a floor, not a fixed width,
- * so dropping it shortens the row rather than leaving a hole; every row in a
- * given list is scored or unscored together, so none of them lose alignment.
+ * so dropping it shortens the row rather than leaving a hole.
+ *
+ * A list used to be scored or unscored throughout, so no row lost alignment
+ * against its neighbours. That stopped being true when the sweep landed: the
+ * overview's right column holds arrivals, and the sweep may have reached some
+ * and not others, so a scored row and a pending one can sit side by side with
+ * slightly different widths. That is the honest rendering -- a posting nobody
+ * has judged has no number and must not be handed one -- but alignment down a
+ * column is no longer something this component can promise.
  *
  * Items are top-aligned, not centred: a scored row carries a reason and a gap
  * and is three times the height of an unscored one, and centring would leave

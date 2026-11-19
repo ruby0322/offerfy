@@ -33,6 +33,22 @@ function render(node: ReactElement): string {
 
 const d = en.dashboard;
 
+// MatchRow renders this wrapper only when there is a score or a tier to show,
+// so its absence is how "no score slot at all" is asserted. Checking for a
+// bare number instead would catch the card's own match count.
+const SCORE_SLOT = "min-w-8 shrink-0 text-right";
+
+// A quiet week: the left column renders its plain sentence rather than
+// SamplePick, which carries a score slot of its own and would otherwise be
+// what the SCORE_SLOT assertions below are measuring.
+const quietWeek = {
+  status: "empty" as const,
+  built_at: "2026-11-17T05:00:00Z",
+  opened_at: null,
+  candidate_count: 0,
+  items: [],
+};
+
 function arrival(over: Partial<MatchArrival> = {}): MatchArrival {
   return {
     job_id: "a1",
@@ -115,9 +131,10 @@ test("with nothing new the standing set fills it, under its own heading", () => 
   assert.ok(!html.includes(d.freshHeading), html);
 });
 
-test("the right column shows no score, even for a scored arrival", () => {
-  // It never did: a pending arrival has no score to show, and mixing the two
-  // would make the column claim a judgement for some rows and not others.
+test("a scored arrival shows its score in the right column", () => {
+  // The columns no longer mean "scored left, unscored right" -- the sweep
+  // scores everything -- so hiding a number we already hold would throw a
+  // real signal away.
   const html = render(
     createElement(MatchesBlock, {
       ...base,
@@ -125,5 +142,34 @@ test("the right column shows no score, even for a scored arrival", () => {
       matches: [],
     }),
   );
-  assert.ok(!html.includes("90"), html);
+  assert.ok(html.includes("90"), html);
+});
+
+test("an arrival the sweep has not reached shows no score", () => {
+  // A blank is the honest answer for a posting nobody has judged; handing it
+  // a number would be inventing one.
+  const html = render(
+    createElement(MatchesBlock, {
+      ...base,
+      digest: quietWeek,
+      arrivals: [arrival({ fit_score: null, tier: null, scored_at: null })],
+      matches: [],
+    }),
+  );
+  assert.ok(html.includes("Backend Engineer"), html);
+  assert.ok(!html.includes(SCORE_SLOT), html);
+});
+
+test("the standing fallback carries no score at all", () => {
+  // `JobListItem` is a posting list, not a judgement: there is nothing to show.
+  const html = render(
+    createElement(MatchesBlock, {
+      ...base,
+      digest: quietWeek,
+      arrivals: [],
+      matches: [listing()],
+    }),
+  );
+  assert.ok(html.includes("Platform Engineer"), html);
+  assert.ok(!html.includes(SCORE_SLOT), html);
 });

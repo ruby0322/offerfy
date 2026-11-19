@@ -30,8 +30,20 @@ import type { JobListItem } from "@/lib/jobs";
  *
  * Concise comes from cutting the rows, not the block: the reason and gap
  * paragraphs belong on the Matches tab, so here a role is a mark, a title, an
- * employer and one button. The right column carries no score on purpose --
- * it never did, and a pending arrival has none to show.
+ * employer, a score and one button.
+ *
+ * The right column shows its score, which is a change from the layout this
+ * restores. Back then the two columns meant "scored on the left, unscored on
+ * the right", because the right one was the daily ingest and nothing had read
+ * it. The sweep scores everything now, so that distinction is gone and hiding
+ * a number we already hold would be throwing away a real signal. What the
+ * columns separate instead is why a role is here at all: picked for you this
+ * week, against new to you since you looked.
+ *
+ * A row with no score still shows none -- that is a posting the sweep has not
+ * reached, and a blank is the honest answer. So this column can be mixed,
+ * which the standing-match fallback never is: `JobListItem` carries no score
+ * to show.
  */
 
 type Props = {
@@ -49,7 +61,14 @@ const PICKS = 3;
 const FRESH = 3;
 
 /** The two sources the right column can draw on, in one shape. */
-type Role = { id: string; title: string; company: string; location: string | null };
+type Role = {
+  id: string;
+  title: string;
+  company: string;
+  location: string | null;
+  /** 0..1, or null for a posting the sweep has not scored yet. */
+  score: number | null;
+};
 
 export default function MatchesBlock({
   digest,
@@ -78,12 +97,16 @@ export default function MatchesBlock({
           title: a.job_title,
           company: a.company,
           location: a.location,
+          score: a.fit_score,
         }))
       : matches.map((j) => ({
           id: j.id,
           title: j.title,
           company: j.company,
           location: j.location ?? null,
+          // The standing set is a posting list, not a judgement: it has no
+          // score to carry, so this column is uniformly unscored in fallback.
+          score: null,
         }))
   ).slice(0, FRESH);
 
@@ -185,7 +208,7 @@ export default function MatchesBlock({
                   title={role.title}
                   company={role.company}
                   meta={role.location}
-                  score={null}
+                  score={role.score}
                   action={
                     <Link
                       href={`/jobs/${encodeURIComponent(role.id)}`}
