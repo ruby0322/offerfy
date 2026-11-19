@@ -93,6 +93,25 @@ _IMPORT = re.compile(r"^\s*#import\s")
 _LINE_BREAK_RE = re.compile("[\r\n\x0b\x0c\x85  ]+")
 
 
+def has_line_break(text: str) -> bool:
+    """Whether `text` holds any character Typst's lexer treats as a line break.
+
+    The *refusal* counterpart to the normalisation `typst_value`/`markup_value` apply
+    to the same set (`_LINE_BREAK_RE`, defined once above and shared with both). Those
+    two are handed data to render and collapse a break to a space; an edit intent is
+    handed a value a person typed into one field, where a break is not something to
+    quietly rewrite -- it means the request does not describe one line, and the honest
+    answer is to refuse it.
+
+    It exists so the intent layer cannot carry a narrower idea of "a line break" than
+    the emitters do. `app.services.typst_intents` checked only `\\n` and `\\r`, so a
+    paste carrying U+2028 (a line break to Typst, and to Python's `str.splitlines`,
+    but not to either of those two comparisons) reached the source as a break the
+    re-parse check never saw.
+    """
+    return _LINE_BREAK_RE.search(text) is not None
+
+
 def escape_typst_string(value: str) -> str:
     """Escape text for a Typst `"..."` literal without double-escaping."""
     out: list[str] = []
