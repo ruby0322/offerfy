@@ -143,6 +143,12 @@ UNEXPECTED = "unexpected"
 # automatic repair attempts -- see the gate at the end of `run_import`.
 RENDER_CHECK_FAILED = "render_check_failed"
 
+# The ordering clause in here is load-bearing, not padding. The source the
+# agent edits starts life as `app.services.starter`'s template, which hard-codes
+# `== Education` before `== Experience`; an agent that fills placeholders in
+# place therefore publishes the template's order, not the person's, and the
+# symptom the person sees is their own sections swapped. Saying the uploaded
+# document's order wins -- in the plan and in the output -- is what keeps it.
 IMPORT_INSTRUCTION = (
     "Import this uploaded resume into the Typst document.\n\n"
     "First, call declare_import_plan with the sections you actually found in "
@@ -150,6 +156,13 @@ IMPORT_INSTRUCTION = (
     "yourself how many sections there are and what to call each one -- "
     "nothing is fixed, and you must not assume any particular resume has "
     "any particular section.\n\n"
+    "List the sections in the same top-to-bottom order they appear in the "
+    "attached document, and keep that order in the Typst document you "
+    "produce. The source you are editing starts from a placeholder template "
+    "whose own section order means nothing -- move or replace its sections to "
+    "match the person's rather than fitting their content into the order it "
+    "happens to be in. Do not reorder sections into a more conventional "
+    "resume layout, even if the person's order is an unusual one.\n\n"
     "Then call read_typst to see the current source.\n\n"
     "Then work through your declared plan one section at a time: for each "
     "section, make exactly one apply_typst_edit call that fills it in from "

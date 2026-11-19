@@ -41,8 +41,10 @@ _DECLARE_PLAN = {
     "description": (
         "Declare your plan for importing this resume, before making any "
         "edits. Look at the uploaded document and list the sections you "
-        "actually found, in the order you intend to work through them. You "
-        "decide how many sections there are and what to call each one -- "
+        "actually found, in the order they appear in it, top to bottom -- "
+        "that is also the order you will work through them, and the order "
+        "they must end up in. You decide how many sections there are and "
+        "what to call each one -- "
         "nothing here is fixed: one resume might have publications, "
         "military service, or certifications, another might have no "
         "education section at all. Give each step a short, stable `key` "
@@ -71,6 +73,7 @@ _DECLARE_PLAN = {
                 },
                 "description": (
                     "The sections you found in the uploaded resume, in the "
+                    "order they appear in that document -- which is also the "
                     "order you will edit them. You name them and decide how "
                     "many there are."
                 ),
