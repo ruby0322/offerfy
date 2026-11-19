@@ -290,8 +290,13 @@ test("a band taller than the viewport is still centred, not top-aligned", () => 
 });
 
 test("a fractional position stays fractional", () => {
-  // 700.5 - 100 + 0 = 600.5; centre 600.5 + 7/2 = 604; target 404.
-  assert.equal(scrollTopToCenter({ ...view, bandTop: 700.5, bandHeight: 7 }), 404);
+  // 700.5 - 100 + 0 = 600.5; centre 600.5 + 7/2 = 604; target 604 - 401/2 = 403.5, which
+  // is inside [0, 2000 - 401] = [0, 1599], so no clamp. The result is not an integer, so
+  // a floor, round or trunc on the return changes it.
+  assert.equal(
+    scrollTopToCenter({ ...view, clientHeight: 401, bandTop: 700.5, bandHeight: 7 }),
+    403.5,
+  );
 });
 
 test("a container that has been laid out can be centred in", () => {
