@@ -2393,6 +2393,8 @@ export default function EditorShell({ resumeId }: Props) {
       textLayers={textLayers}
       editBands={editBands}
       deleteBands={deleteBands}
+      editKey={focusedUnit}
+      deleteKey={armedUnits.length > 0 ? armedUnits.join(",") : null}
       previewAlt={t("preview")}
       previewError={t("previewError")}
       report={ats}

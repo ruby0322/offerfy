@@ -120,3 +120,50 @@ export function bandsNeedFetch(state: {
 }): boolean {
   return state.describes !== state.source && state.askedFor !== state.source;
 }
+
+/**
+ * What the preview's scroll container measures, in the DOM's own pixels. The `cqw`
+ * lengths are already resolved by the browser, so nothing here knows a page width.
+ */
+export type ScrollMeasure = {
+  /** The band's `getBoundingClientRect().top`. */
+  bandTop: number;
+  /** The band's `getBoundingClientRect().height`. */
+  bandHeight: number;
+  /** The container's `getBoundingClientRect().top`. */
+  containerTop: number;
+  /** The container's current `scrollTop`. */
+  scrollTop: number;
+  clientHeight: number;
+  scrollHeight: number;
+};
+
+/**
+ * Whether the container has been laid out enough to say where to scroll. A container
+ * with no height (not yet laid out, or display:none) or a band with none yields no
+ * scroll: nothing beats a scroll to the wrong place.
+ */
+export function canCenter(m: ScrollMeasure): boolean {
+  return (
+    Object.values(m).every(Number.isFinite) &&
+    m.clientHeight > 0 &&
+    m.scrollHeight > 0 &&
+    m.bandHeight > 0
+  );
+}
+
+/**
+ * The `scrollTop` that puts the band's centre in the middle of the container, clamped to
+ * what the container can actually scroll to -- at the top or bottom of the document the
+ * band cannot be centred, and the container stops rather than showing blank gutter.
+ *
+ * The band's place in *content* coordinates is its distance below the container's top
+ * edge plus how far the container is already scrolled. Always a number: whether to
+ * scroll at all is `canCenter`'s question, not this one's.
+ */
+export function scrollTopToCenter(m: ScrollMeasure): number {
+  const contentTop = m.bandTop - m.containerTop + m.scrollTop;
+  const target = contentTop + m.bandHeight / 2 - m.clientHeight / 2;
+  const max = Math.max(0, m.scrollHeight - m.clientHeight);
+  return Math.min(Math.max(target, 0), max);
+}

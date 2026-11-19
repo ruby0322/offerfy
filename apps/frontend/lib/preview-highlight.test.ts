@@ -8,6 +8,8 @@ import {
   bandsForUnits,
   bandsNeedFetch,
   bandsOnPage,
+  canCenter,
+  scrollTopToCenter,
 } from "./preview-highlight";
 import { blockKey, sectionKey } from "./structural-controls";
 import type {
@@ -230,4 +232,79 @@ test("bands that describe this source are kept, empty or not", () => {
 test("a source already asked for is not asked again", () => {
   assert.equal(bandsNeedFetch({ describes: null, askedFor: "B", source: "B" }), false);
   assert.equal(bandsNeedFetch({ describes: "A", askedFor: "B", source: "B" }), false);
+});
+
+// --- centring the highlight in the scroll container -------------------------------------
+
+// A 400px-high viewport over 2000px of content, whose top edge sits at 100px on screen.
+// Its scrollable range is therefore [0, 2000 - 400] = [0, 1600], and the middle of the
+// viewport is 200px below its top.
+const view = {
+  containerTop: 100,
+  scrollTop: 0,
+  clientHeight: 400,
+  scrollHeight: 2000,
+};
+
+test("a band in the middle of the document is centred, with no clamp involved", () => {
+  // on screen at 700 -> 700 - 100 + 0 = 600 into the content; centre 600 + 20/2 = 610;
+  // target 610 - 400/2 = 410, inside [0, 1600], so neither clamp fires.
+  assert.equal(scrollTopToCenter({ ...view, bandTop: 700, bandHeight: 20 }), 410);
+});
+
+test("the container's own scroll is added back: the same band gives the same target", () => {
+  // scrolled by 300, the same band sits 300px higher on screen: 400 - 100 + 300 = 600
+  // into the content, so target 410 again. Leaving scrollTop out gives 110.
+  assert.equal(
+    scrollTopToCenter({ ...view, scrollTop: 300, bandTop: 400, bandHeight: 20 }),
+    410,
+  );
+});
+
+test("a band near the top clamps to 0 instead of a negative scroll", () => {
+  // 150 - 100 + 0 = 50 into the content; centre 60; target 60 - 200 = -140 < 0, so the
+  // lower clamp fires and the answer is 0.
+  assert.equal(scrollTopToCenter({ ...view, bandTop: 150, bandHeight: 20 }), 0);
+});
+
+test("a band near the bottom clamps to the last scrollable position", () => {
+  // 2000 - 100 + 0 = 1900 into the content; centre 1910; target 1910 - 200 = 1710 > 1600,
+  // so the upper clamp fires and the answer is 2000 - 400 = 1600.
+  assert.equal(scrollTopToCenter({ ...view, bandTop: 2000, bandHeight: 20 }), 1600);
+});
+
+test("content shorter than the viewport cannot scroll at all", () => {
+  // scrollHeight 350 < clientHeight 400, so the range is [0, max(0, -50)] = [0, 0]. The
+  // band is at 380 -> 380 - 100 = 280 into the content; centre 290; target 290 - 200 = 90,
+  // which is > 0 and so passes the lower clamp, and is only brought to 0 by the
+  // `Math.max(0, ...)` on the range. Without it the answer would be -50.
+  assert.equal(
+    scrollTopToCenter({ ...view, scrollHeight: 350, bandTop: 380, bandHeight: 20 }),
+    0,
+  );
+});
+
+test("a band taller than the viewport is still centred, not top-aligned", () => {
+  // 700 -> 600 into the content; centre 600 + 800/2 = 1000; target 1000 - 200 = 800.
+  assert.equal(scrollTopToCenter({ ...view, bandTop: 700, bandHeight: 800 }), 800);
+});
+
+test("a fractional position stays fractional", () => {
+  // 700.5 - 100 + 0 = 600.5; centre 600.5 + 7/2 = 604; target 404.
+  assert.equal(scrollTopToCenter({ ...view, bandTop: 700.5, bandHeight: 7 }), 404);
+});
+
+test("a container that has been laid out can be centred in", () => {
+  assert.equal(canCenter({ ...view, bandTop: 700, bandHeight: 20 }), true);
+});
+
+test("a container with no height has nothing to centre in", () => {
+  assert.equal(canCenter({ ...view, clientHeight: 0, bandTop: 700, bandHeight: 20 }), false);
+  assert.equal(canCenter({ ...view, scrollHeight: 0, bandTop: 700, bandHeight: 20 }), false);
+});
+
+test("a band with no height, or a measurement that is not a number, is not centred on", () => {
+  assert.equal(canCenter({ ...view, bandTop: 700, bandHeight: 0 }), false);
+  assert.equal(canCenter({ ...view, bandTop: Number.NaN, bandHeight: 20 }), false);
+  assert.equal(canCenter({ ...view, bandTop: 700, bandHeight: Infinity }), false);
 });
