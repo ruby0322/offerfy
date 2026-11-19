@@ -13,6 +13,10 @@ concurrent first runs a no-op instead of a duplicate that races on the
 job_scores unique key. NULL means no run has been claimed, same reasoning: a
 server default would make every account look like it had already had one.
 
+users.facts_build_failed_at is the score sweep's failure memory for the resume
+facts build, so a persistently failing extraction is not re-bought every six
+hours forever. NULL means no failure to remember.
+
 One revision for the pair, because they land in the same release and a
 half-applied pair has no useful meaning.
 
@@ -85,9 +89,14 @@ def upgrade() -> None:
         "users",
         sa.Column("first_run_started_at", sa.DateTime(timezone=True), nullable=True),
     )
+    op.add_column(
+        "users",
+        sa.Column("facts_build_failed_at", sa.DateTime(timezone=True), nullable=True),
+    )
 
 
 def downgrade() -> None:
+    op.drop_column("users", "facts_build_failed_at")
     op.drop_column("users", "first_run_started_at")
     op.drop_column("users", "matches_seen_at")
     op.drop_index("ix_job_scores_job_id", table_name="job_scores")

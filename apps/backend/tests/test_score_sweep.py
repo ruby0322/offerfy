@@ -403,6 +403,77 @@ async def test_a_failed_rebuild_means_that_user_is_not_swept(db_session, monkeyp
     assert seams.trace == ["facts"] and report.swept == [] and db_session.query(JobScore).count() == 0
 
 
+async def test_a_failing_rebuild_is_not_re_bought_every_pass(db_session, monkeypatch):
+    """A refusal one level down is remembered; so is a build that cannot be made.
+
+    Without this, a person whose extraction persistently fails was retried on
+    every pass, billed each time, and never scored -- out of the same ceiling
+    the weekly digest draws on.
+    """
+    seams = Seams(monkeypatch)
+    monkeypatch.setattr(score_sweep, "facts_are_stale", lambda db, user, facts: True)
+
+    async def failing(db, user):
+        seams.rebuilds += 1
+        return FactsBuildResult(error="extraction_invalid")
+
+    monkeypatch.setattr(score_sweep, "build_facts", failing)
+    user = _ready(db_session)
+    _posting(db_session)
+
+    for _ in range(4):
+        await sweep_all(db_session, now=NOW)
+    assert seams.rebuilds == 1, "four passes, one extraction"
+    db_session.expire_all()
+    assert db_session.get(User, user.id).facts_build_failed_at is not None
+
+    # And it is a backoff, not a ban: once the window is past, it tries again.
+    stamp = datetime.now(timezone.utc) - score_sweep.REBUILD_BACKOFF - timedelta(minutes=1)
+    db_session.get(User, user.id).facts_build_failed_at = stamp
+    db_session.commit()
+    await sweep_all(db_session, now=NOW)
+    assert seams.rebuilds == 2
+
+
+async def test_a_rebuild_that_works_forgets_the_last_failure(db_session, monkeypatch):
+    # Otherwise one transient provider fault would suppress the repair of a
+    # genuinely stale row for the whole window after it.
+    seams = Seams(monkeypatch)
+    _stale_until_rebuilt(monkeypatch, seams)
+    user = _ready(db_session)
+    db_session.get(User, user.id).facts_build_failed_at = datetime.now(timezone.utc)
+    db_session.commit()
+    _posting(db_session)
+
+    # Still inside the window, so this pass buys nothing.
+    assert (await sweep_all(db_session, now=NOW)).bought == 0
+    assert seams.rebuilds == 0
+
+    db_session.get(User, user.id).facts_build_failed_at = (
+        datetime.now(timezone.utc) - score_sweep.REBUILD_BACKOFF - timedelta(minutes=1)
+    )
+    db_session.commit()
+    assert (await sweep_all(db_session, now=NOW)).bought == 1
+    db_session.expire_all()
+    assert db_session.get(User, user.id).facts_build_failed_at is None
+
+
+async def test_the_dry_run_does_not_promise_a_pass_it_would_skip(db_session, monkeypatch):
+    # The pass size is the one number a dry run exists to produce, so a person
+    # whose rebuild is on backoff must not be counted at their whole pool.
+    seams = Seams(monkeypatch)
+    _stale_until_rebuilt(monkeypatch, seams)
+    user = _ready(db_session)
+    for i in range(3):
+        _posting(db_session, age_minutes=i)
+    db_session.get(User, user.id).facts_build_failed_at = datetime.now(timezone.utc)
+    db_session.commit()
+
+    report = await sweep_all(db_session, now=NOW, dry_run=True)
+    assert report.bought == 0 and report.would_rebuild_facts == []
+    assert seams.rebuilds == 0
+
+
 # --------------------------------------------------------------------------
 # prose
 # --------------------------------------------------------------------------

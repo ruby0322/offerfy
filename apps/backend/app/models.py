@@ -92,6 +92,21 @@ class User(Base):
     first_run_started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # When a platform-paid resume-facts build last failed for this person, or
+    # NULL. The score sweep's failure memory: without it, a person whose
+    # extraction persistently fails -- a provider fault, or output that will
+    # not validate -- was retried on every pass, billed each time, and never
+    # scored. The cache's doctrine is that a refusal is remembered so it is not
+    # re-bought, and this path remembered nothing while drawing on the same
+    # ceiling as the weekly digest.
+    #
+    # Written only by score_sweep's own rebuild (system_guard, platform
+    # spend). The asked-for build, POST /v1/me/resume-facts/refresh, neither
+    # reads nor writes it: a person pressing Rebuild has asked, and must not be
+    # told to come back later because a cron job failed.
+    facts_build_failed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Which model this person's chat turns run on. NULL means "whatever the
     # tier default is", which is the honest representation of never having

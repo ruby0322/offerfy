@@ -42,6 +42,22 @@ not one per pass, because afterwards the facts are fresh and scores are
 compared against the rebuilt row's hash. A rebuild that fails means that person
 is skipped this pass, never scored against the old resume.
 
+**A failed rebuild is remembered (`REBUILD_BACKOFF`).** "One extraction per
+resume edit" was true of a build that succeeds and false of one that does not:
+a person whose extraction persistently fails -- a provider fault, or output
+that will not validate -- was retried on every pass, billed each time, and
+never scored, out of the same ceiling the digest draws on. The cache's whole
+doctrine one level down is that an answer that could not be bought is
+remembered rather than re-bought; this path remembered nothing.
+`users.facts_build_failed_at` is that memory, and it is cleared on success so
+a transient fault does not suppress a real repair for the rest of the window.
+Remembered by TIME and not by the resume's hash, because unlike a refusal an
+extraction fault is usually about the provider, and a content-keyed memory
+would strand the person until they happened to edit their resume. The
+asked-for build (`POST /v1/me/resume-facts/refresh`) is not subject to it: a
+person pressing Rebuild has asked, and must not be told to come back later
+because a cron job failed.
+
 **Prose only for arrivals that land in `STRONG_TIERS`.** About one new posting a
 week for a typical preference, so one or two calls per user per week, and a
 fresh role that fits arrives explained instead of waiting for Monday. "Arrival"
@@ -105,7 +121,7 @@ import asyncio
 import logging
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session, load_only, undefer
@@ -139,6 +155,14 @@ logger = logging.getLogger(__name__)
 # per-user bill of a pass; a module constant AND a parameter on both entry
 # points, so changing it for one run is a call-site change.
 SWEEP_CAP = 30
+
+# How long a failed facts build is remembered before the sweep pays to try
+# again. It has to exceed the six hours between passes or it would skip
+# nothing; twelve halves the bill for a persistently failing extraction while
+# still retrying twice a day, so a provider outage costs at most half a day of
+# staleness. The asked-for build (POST /v1/me/resume-facts/refresh) is not
+# subject to it: a person who presses Rebuild has asked, and gets an answer.
+REBUILD_BACKOFF = timedelta(hours=12)
 
 # The `reasons.check` drop reasons that mean the validator refused the text.
 _REJECTING = frozenset({"uncited", "undeclared", "narrated"})
@@ -223,6 +247,37 @@ def _prime_descriptions(db: Session, jobs: list[Job]) -> None:
     ).all()
 
 
+def _in_rebuild_backoff(user: User, now: datetime | None = None) -> bool:
+    """Whether this person's last platform-paid facts build failed too recently.
+
+    The cache's doctrine applied one level up: an answer that could not be
+    bought is remembered so it is not bought again immediately. Without it a
+    person whose extraction persistently fails was retried on every pass,
+    billed each time, and never scored -- out of the same ceiling the weekly
+    digest draws on.
+
+    Time and not the resume's hash, deliberately. A refusal one level down is
+    about the content of the pair, so it stands until the content changes. An
+    extraction fault is usually about the provider, so a content-keyed memory
+    would strand the person until they happened to edit their resume.
+    """
+    failed = user.facts_build_failed_at
+    if failed is None:
+        return False
+    now = datetime.now(timezone.utc) if now is None else now
+    return _naive(failed) > _naive(now - REBUILD_BACKOFF)
+
+
+def _remember_rebuild(db: Session, user: User, *, failed: bool) -> None:
+    """Record whether the last platform-paid build failed. Commits.
+
+    Cleared on success, or a transient fault would suppress the repair of a
+    genuinely stale row for the whole window afterwards.
+    """
+    user.facts_build_failed_at = datetime.now(timezone.utc) if failed else None
+    db.commit()
+
+
 async def _rebuild_facts(db: Session, user: User):
     """Rebuild this person's facts under `system_guard`; None if that fails."""
     guard = system_guard(
@@ -243,6 +298,9 @@ async def _rebuild_facts(db: Session, user: User):
         else:
             db.rollback()
         record_build_spend(db, user, result, meter)
+    # After record_build_spend, which commits on its own: the stamp is the
+    # sweep's own bookkeeping and has nothing to roll back with the build.
+    _remember_rebuild(db, user, failed=result.facts is None)
     if result.facts is None:
         logger.info("sweep skipped, facts unbuildable: user=%s %s", user.id, result.error)
     return result.facts
@@ -293,6 +351,14 @@ async def sweep_user(db: Session, *, user: User, cap: int = SWEEP_CAP) -> int | 
             return 0
         facts = facts_for_user(db, user)
         if facts is None or facts_are_stale(db, user, facts):
+            if _in_rebuild_backoff(user):
+                # Not scored against the old resume either: the rule that a
+                # judgement is never written against a resume we know has been
+                # replaced is not relaxed because the repair is on backoff.
+                logger.info(
+                    "sweep skipped, facts build failed recently: user=%s", user.id
+                )
+                return None
             facts = await _rebuild_facts(db, user)
             if facts is None:
                 return None
@@ -363,6 +429,12 @@ def _preview(db: Session, user: User, cap: int, report: SweepReport) -> int:
         return 0
     facts = facts_for_user(db, user)
     if facts is None or facts_are_stale(db, user, facts):
+        if _in_rebuild_backoff(user):
+            # A real pass would buy nothing for them: the rebuild is on
+            # backoff and nothing is scored against a resume known to be
+            # superseded. Saying otherwise would overstate the pass size,
+            # which is the one number this run exists to produce.
+            return 0
         # The rebuild invalidates every score they hold, so the whole pool is
         # stale by then. (With no facts at all it may yet fail to build; the
         # dry run cannot know without paying to find out.)
