@@ -39,7 +39,17 @@ test("every key a pinned fixture projects has a label", () => {
 });
 
 test("the keys of the other registered emitters have labels too", () => {
-  for (const key of ["organization", "date", "contacts", "technologies", "text-color"]) {
+  for (const key of [
+    "organization",
+    "date",
+    "contacts",
+    "technologies",
+    "text-color",
+    "live-url",
+    "repo-url",
+    "gpa",
+    "tech-used",
+  ]) {
     assert.notEqual(argLabelId(key), null, key);
   }
 });

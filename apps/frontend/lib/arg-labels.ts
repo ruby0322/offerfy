@@ -37,6 +37,13 @@ const ARG_LABEL_IDS = {
   contacts: "fieldsLabelContacts",
   technologies: "fieldsLabelTechnologies",
   "text-color": "fieldsLabelTextColor",
+  // Keys the packages' own `template/main.typ` examples show the model (chat.py inlines
+  // them), and that the projection surfaces as rows: acorn-resume 0.1.0 and
+  // ats-friendly-resume 0.1.1.
+  "live-url": "fieldsLabelLiveUrl",
+  "repo-url": "fieldsLabelRepoUrl",
+  gpa: "fieldsLabelGpa",
+  "tech-used": "fieldsLabelTechUsed",
 } as const;
 
 export type ArgLabelId = (typeof ARG_LABEL_IDS)[keyof typeof ARG_LABEL_IDS];
