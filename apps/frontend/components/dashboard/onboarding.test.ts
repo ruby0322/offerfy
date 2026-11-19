@@ -6,6 +6,7 @@ import {
   canSave,
   cardVisible,
   firstRunNotice,
+  needsFactsBuild,
   pollVerdict,
   removeValue,
 } from "./onboarding";
@@ -20,6 +21,18 @@ test("the card shows only before a first save, and only with a resume to seed fr
   assert.equal(cardVisible({ updated_at: null }, { has_master: false, published: false }), false);
   assert.equal(cardVisible({ updated_at: null }, { has_master: true, published: false }), false);
   assert.equal(cardVisible({ updated_at: null }, { has_master: false, published: true }), false);
+});
+
+test("a new account's card builds the facts its own chips come from", () => {
+  // The default new account: a published resume, and nothing has built the
+  // ResumeFacts row the seed is computed from. Without this the card showed
+  // no chips under "we read your resume and filled these in".
+  assert.equal(needsFactsBuild({ facts_state: "missing" }), true);
+  // Stale still yields a real seed, and the sweep repairs the row for free
+  // on its next pass; paying to refine an answer about to be confirmed by
+  // hand is not worth a credit.
+  assert.equal(needsFactsBuild({ facts_state: "stale" }), false);
+  assert.equal(needsFactsBuild({ facts_state: "fresh" }), false);
 });
 
 test("polling waits while nothing is scored, finishes when the count is in", () => {

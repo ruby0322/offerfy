@@ -20,6 +20,30 @@ export function cardVisible(
   return pref.updated_at === null && health.has_master && health.published;
 }
 
+/**
+ * Whether the card has to build the resume facts before it has anything to
+ * show.
+ *
+ * "missing" means no `ResumeFacts` row exists, and the seed is computed from
+ * that row -- so the chips are empty and Save is disabled, under a sentence
+ * saying the resume was read. Nothing else builds it for this person: the
+ * sweep, which is the durable backstop for everything else here, skips
+ * anyone with no SAVED preference, which is exactly who this card is for.
+ *
+ * "stale" is deliberately not included. A stale row still yields a real seed,
+ * from the resume as it was at the last extraction, and the sweep repairs it
+ * on its next pass. Rebuilding it here would spend a credit to refine an
+ * answer the person is about to confirm or correct by hand.
+ *
+ * Read off the preference because `JobPreferenceOut.facts_state` and
+ * `ResumeHealthOut.facts_state` are the same call to
+ * `resume_facts.facts_state` in the same response, so they cannot disagree,
+ * and this way the card needs one prop rather than two.
+ */
+export function needsFactsBuild(pref: Pick<JobPreference, "facts_state">): boolean {
+  return pref.facts_state === "missing";
+}
+
 /** Two seconds a poll, twenty polls: forty seconds against a run of a few. */
 export const POLL_MS = 2000;
 export const MAX_POLLS = 20;

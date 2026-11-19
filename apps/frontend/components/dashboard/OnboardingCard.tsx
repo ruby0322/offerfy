@@ -12,7 +12,9 @@ import {
 import { Link } from "@/i18n/navigation";
 import { ApiError } from "@/lib/api";
 import {
+  fetchJobPreferences,
   fetchMatchProgress,
+  refreshResumeFacts,
   saveJobPreferences,
   startFirstRun,
   type JobPreference,
@@ -22,6 +24,7 @@ import {
   addValue,
   canSave,
   firstRunNotice,
+  needsFactsBuild,
   pollVerdict,
   removeValue,
   type OnboardNotice,
@@ -51,6 +54,27 @@ import {
  * the server commits once, so progress reads 0 until the pass is over and then
  * jumps to the final count. Polling is bounded here (see `pollVerdict`)
  * because the server has no "running" answer to stop on.
+ *
+ * THE CARD BUILDS THE FACTS IT NEEDS. The seed comes from `ResumeFacts`, and
+ * for a brand-new account nothing has built that row: the three callers of
+ * `build_facts` are the Rebuild button, the weekly digest and the sweep, and
+ * the sweep skips anyone with no SAVED preference, which is precisely the
+ * person this card is for. So the card read "We read your resume and filled
+ * these in" over no chips and a disabled Save -- the first screen of the
+ * feature, with a false sentence on it.
+ *
+ * So when the facts are `missing` the card asks for them itself, through the
+ * same `POST /v1/me/resume-facts/refresh` the Rebuild button uses, and then
+ * re-reads the preference seed. That endpoint is metered through `preflight`
+ * with purpose `profile` -- an asked-for action, which slice 1 unblocked for
+ * the registered tier precisely so a person could do this, and someone
+ * opening this card is asking. The anti-goal about not spending a person's
+ * allowance is about MATCHING spend the platform decided to do; the first run
+ * itself still goes through `system_guard` for exactly that reason.
+ *
+ * A 429 or an extraction fault leaves the three questions answerable by hand,
+ * and the lead sentence is conditional on whether a seed actually resulted --
+ * it must never claim a resume was read when it was not.
  */
 
 type Props = {
@@ -62,6 +86,9 @@ type Props = {
 
 type Phase =
   | { kind: "edit" }
+  // Building the resume facts the seed comes from. Mount-time only, and only
+  // when there are none; it is a provider call, so it is made once.
+  | { kind: "reading" }
   | { kind: "saving" }
   | { kind: "scoring" }
   // Saved, but scoring did not finish or did not start. The preference is
@@ -77,8 +104,19 @@ export default function OnboardingCard({ pref, onDone }: Props) {
   const [functions, setFunctions] = useState<string[]>(pref.target_functions);
   const [locations, setLocations] = useState<string[]>(pref.target_locations);
   const [seniority, setSeniority] = useState<string>(pref.target_seniority ?? "");
-  const [phase, setPhase] = useState<Phase>({ kind: "edit" });
+  const [phase, setPhase] = useState<Phase>(
+    needsFactsBuild(pref) ? { kind: "reading" } : { kind: "edit" },
+  );
   const [error, setError] = useState<string | null>(null);
+  // Whether a seed actually resulted, which is what the lead may claim. It
+  // tracks the SERVER's answers, not the edits: a person clearing a chip has
+  // not made the resume unread. False covers both a failed build and a resume
+  // too thin to yield anything.
+  const [seeded, setSeeded] = useState(
+    pref.target_functions.length > 0 ||
+      pref.target_locations.length > 0 ||
+      (pref.target_seniority ?? "") !== "",
+  );
 
   // The run outlives a click, not the card: leaving the page ends the loop.
   const alive = useRef(true);
@@ -88,6 +126,43 @@ export default function OnboardingCard({ pref, onDone }: Props) {
       alive.current = false;
     };
   }, []);
+
+  // One build per mount, not one per render and not one per effect pass: it
+  // is a metered provider call.
+  const asked = useRef(false);
+  useEffect(() => {
+    if (!needsFactsBuild(pref) || asked.current) return;
+    asked.current = true;
+    void (async () => {
+      try {
+        const built = await refreshResumeFacts();
+        // The endpoint reports an extraction fault in the body rather than as
+        // a status, so a 200 is not yet a success.
+        if (built.error !== null) throw new Error(built.error);
+        const fresh = await fetchJobPreferences();
+        if (!alive.current) return;
+        setFunctions(fresh.target_functions);
+        setLocations(fresh.target_locations);
+        setSeniority(fresh.target_seniority ?? "");
+        setSeeded(
+          fresh.target_functions.length > 0 ||
+            fresh.target_locations.length > 0 ||
+            (fresh.target_seniority ?? "") !== "",
+        );
+      } catch {
+        // A 429, an extraction fault, a dropped connection: the three
+        // questions are still answerable by hand, and the lead below says
+        // nothing was filled in rather than claiming the resume was read.
+        if (alive.current) setSeeded(false);
+      } finally {
+        if (alive.current) {
+          setPhase((p) => (p.kind === "reading" ? { kind: "edit" } : p));
+        }
+      }
+    })();
+    // The seed is handed in once per mount; a re-render with the same prop
+    // must not ask again.
+  }, [pref]);
 
   function label(keys: Record<string, JobsMessageKey>, value: string): string {
     const key = keys[value] ?? keys[value.toUpperCase()];
@@ -209,15 +284,26 @@ export default function OnboardingCard({ pref, onDone }: Props) {
       >
         {t("onboardTitle")}
       </h2>
-      <p className="mt-1 text-sm text-muted-foreground">{t("onboardLead")}</p>
+      {/* Conditional, because the unconditional sentence was false for the
+          default new account: nothing had built the facts, so there was no
+          seed to have been filled in from. And silent while the resume is
+          being read, because neither answer is known yet -- "could not fill
+          these in" is as wrong then as "we read your resume" was. */}
+      {phase.kind === "reading" ? null : (
+        <p className="mt-1 text-sm text-muted-foreground">
+          {seeded ? t("onboardLead") : t("onboardLeadBlank")}
+        </p>
+      )}
 
-      {phase.kind === "scoring" ? (
+      {phase.kind === "reading" || phase.kind === "scoring" ? (
         <p className="mt-4 flex items-start gap-2.5 text-sm" role="status">
           <Loader2
             className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-clay motion-reduce:animate-none"
             aria-hidden="true"
           />
-          <span>{t("onboardScoring")}</span>
+          <span>
+            {phase.kind === "reading" ? t("onboardReading") : t("onboardScoring")}
+          </span>
         </p>
       ) : phase.kind === "stopped" ? (
         <div className="mt-4">

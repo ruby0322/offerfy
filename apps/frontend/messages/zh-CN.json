@@ -542,6 +542,8 @@
     "picksEmpty": "本周没有推荐。",
     "onboardTitle": "告诉我们你想找什么，我们就开始评分",
     "onboardLead": "我们读了你的简历并先填好这些。不对的地方可以直接改。",
+    "onboardLeadBlank": "我们没能从你的简历填好这些。选择符合的项目，我们就开始评分。",
+    "onboardReading": "正在读取你的简历，为你先填好这些。",
     "onboardQFunction": "想做哪一类工作？",
     "onboardQLocation": "在哪里？",
     "onboardQSeniority": "哪个资历？",

@@ -542,6 +542,8 @@
     "picksEmpty": "No picks this week.",
     "onboardTitle": "Tell us what you want, and we start scoring",
     "onboardLead": "We read your resume and filled these in. Change anything that is off.",
+    "onboardLeadBlank": "We could not fill these in from your resume. Choose what fits and we will start scoring.",
+    "onboardReading": "Reading your resume, to fill these in for you.",
     "onboardQFunction": "What kind of work?",
     "onboardQLocation": "Where?",
     "onboardQSeniority": "What level?",

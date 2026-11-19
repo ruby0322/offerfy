@@ -542,6 +542,8 @@
     "picksEmpty": "本週沒有推薦。",
     "onboardTitle": "告訴我們你想找什麼，我們就開始評分",
     "onboardLead": "我們讀了你的履歷並先填好這些。不對的地方可以直接改。",
+    "onboardLeadBlank": "我們沒能從你的履歷填好這些。選擇符合的項目，我們就開始評分。",
+    "onboardReading": "正在讀取你的履歷，為你先填好這些。",
     "onboardQFunction": "想做哪一類工作？",
     "onboardQLocation": "在哪裡？",
     "onboardQSeniority": "哪個資歷？",
