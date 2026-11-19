@@ -1,16 +1,35 @@
 # systemd **user** unit — see offerfy-score-sweep.service for why.
 # SHIPS DISABLED. Enable only after a --dry-run has shown the pass size.
 [Unit]
-Description=Score new Offerfy postings four times a day
+Description=Score new Offerfy postings four times a day (three on Monday: the digest claims the week first)
 Documentation=file:///home/ruby0322/offerfy/docs/deploy.md
 
 [Timer]
 # 00, 06, 12 and 18 at :40 Taipei. The ingest runs at :10 (+ up to 10min), so
 # :40 reads a catalogue that just settled, and a posting is scored within about
 # half an hour of entering it.
-OnCalendar=*-*-* 00,06,12,18:40:00 Asia/Taipei
+#
+# Monday 00:40 is deliberately missing, and this is the whole reason there are
+# two lines. The sweep, the weekly digest and first runs share one
+# global_weekly_ceiling_uusd with no reserve -- a decision, with its
+# consequence recorded in the design -- and the spend window opens Monday 00:00
+# Taipei. So Monday 00:40 would be the week's first spender every week, and it
+# is the pass most likely to be expensive: everything whose resume facts or
+# posting descriptions moved over the weekend is rescored in it. The digest
+# runs Monday 05:00, and it is the frozen record and the engagement signal that
+# the whole eligibility system -- including this sweep's own audience -- reads.
+# Letting the sweep take first claim on the week put the cheap, load-bearing
+# job behind the expensive, best-effort one. Giving up one pass a week costs at
+# most six hours of scoring latency for postings that arrived overnight on a
+# Sunday, and those are picked up at 06:40.
+OnCalendar=Mon *-*-* 06,12,18:40:00 Asia/Taipei
+OnCalendar=Tue-Sun *-*-* 00,06,12,18:40:00 Asia/Taipei
 
 # A host that was down at :40 still sweeps on boot rather than skipping a pass.
+# Note the limit of the ordering above: the digest timer is Persistent=true
+# too, so a host that boots on a Monday morning after being down may run both
+# catch-ups in whatever order the manager reaches them. The schedule here is
+# about the normal week, which is every week the host stays up.
 Persistent=true
 
 RandomizedDelaySec=5min

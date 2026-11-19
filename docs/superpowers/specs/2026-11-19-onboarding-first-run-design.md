@@ -326,6 +326,15 @@ and a failure unit, following `offerfy-ingest-failure.service`'s pattern.
   therefore scored within about 30 minutes of entering the catalogue. Its own
   unit, not a step inside `ingest_catalog`, for the three reasons under
   **Constraints**.
+
+  (Corrected 2026-11-19, in the final review of this branch: Monday 00:40 is
+  dropped, so Monday runs `06,12,18:40`. This schedule plus the shared ceiling
+  below made the week's first spender the Monday 00:40 pass — the pass most
+  likely to be expensive, because everything whose facts or descriptions moved
+  over the weekend is rescored in it — while the digest that the whole
+  eligibility system depends on runs at Monday 05:00. The ceiling decision
+  stands; the schedule gives the digest first claim. The reasoning lives in
+  `ops/systemd/offerfy-score-sweep.timer`.)
 - **Audience: `is_eligible`, reused unchanged.** The weekly digest still exists
   in A′, so the signal it feeds still works, and reusing it means there is one
   answer to "is this person still looking" rather than two. Paused preferences

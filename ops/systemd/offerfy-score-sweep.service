@@ -3,7 +3,8 @@
 # `loginctl enable-linger ruby0322` needs none. See docs/deploy.md.
 #
 # This job SPENDS MONEY (LLM scoring and prose on users' behalf, unattended,
-# four times a day) against the production database. It SHIPS DISABLED: do not
+# four times a day, three on Monday -- see the timer) against the production
+# database. It SHIPS DISABLED: do not
 # enable the timer until `python -m app.jobs.score_sweep --dry-run` has shown
 # what a pass costs; see docs/deploy.md.
 #

@@ -1,5 +1,8 @@
 """Score new postings four times a day, and buy prose for the ones that fit.
 
+(Three times on Monday: the week's first pass is given up so the weekly digest
+claims the shared ceiling first. The timer unit carries the reasoning.)
+
 Usage (compose):
   docker compose run --rm backend python -m app.jobs.score_sweep
   docker compose run --rm backend python -m app.jobs.score_sweep --dry-run
