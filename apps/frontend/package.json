@@ -8,6 +8,7 @@
     "build:public": "BACKEND_INTERNAL_URL=http://127.0.0.1:8001 next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "node --import tsx --test \"lib/*.test.ts\" \"components/**/*.test.ts\"",
     "blog:validate": "tsx scripts/validate-blog.ts"
   },
   "dependencies": {

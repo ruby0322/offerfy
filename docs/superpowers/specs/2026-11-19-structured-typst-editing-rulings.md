@@ -218,3 +218,113 @@ left, each with the cheapest known fix:
   2346 collected**; **frontend 483 passed / 0 failed across 46 files**; `tsc --noEmit` exit 0.
   The fix wave's own report claimed 2368, which exceeds the number of backend tests that
   exist — so if you compare notes with that file, mine are the measured ones.
+
+## Post-merge rulings (2026-11-20, after PR #4 merged and deployed)
+
+An automated reviewer raised 8 findings on the merged PR. Three were fixed in
+phase 1 (`8e6bd25`, `cf5bc23`, `7404ce8`), three go in phase 2, and **three got
+no fix**. The three that got none are recorded here, because a finding closed
+without a code change leaves nothing behind to explain itself, and the next
+person to read the review will otherwise assume it was missed.
+
+### 56. Finding 7 (a late PUT overwriting a field edit) is not a defect — no fix
+
+**The claim:** switching to the fields tab cancels only the *armed* autosave
+debounce, so a PUT already in flight is not aborted, and a late PUT of the
+pre-edit buffer can overwrite a field edit the server has already applied. The
+suggested fix was an `AbortController` on the autosave PUT.
+
+**Why it cannot happen.** `fieldsOpen` is
+`activeTab === "fields" && savedSource === source`, and **every** assignment to
+`savedSource` happens after an `await putResumeSource(...)` resolves, or adopts
+bytes the server already holds (`EditorShell.tsx` lines 266, 1205, 1345, 1585,
+2019 — all five checked). The declaration's own comment states the invariant:
+"Only ever set from such an answer."
+
+So `savedSource === source` cannot become true while a PUT carrying `source` is
+outstanding, because the only thing that makes it true is that PUT's completion.
+The panel therefore cannot mount — and cannot send an `/edit` — until the server
+has already processed the outstanding PUT. Server-side ordering is PUT-then-edit
+by construction, and a PUT whose buffer already equals `savedSource` is refused
+by `shellShouldPutSource` anyway.
+
+The gate is not "a save was requested" but "a save completed and the server holds
+exactly these bytes," which is strictly stronger than the review assumed. The
+`AbortController` would have been dead code guarding a window that does not
+exist.
+
+**Cost if wrong:** a field edit silently replaced by the pre-edit document — the
+worst outcome this feature can produce. That is why this one was verified by
+reading all five call sites rather than reasoned from the mitigation, after two
+earlier fixes on this branch were right about the reported case and wrong one
+shape further out.
+
+**Residual, not worth fixing:** two autosave PUTs can overlap if typing continues
+through a slow save, and if they resolve out of order `savedSource` ends up
+describing the older buffer. That is a Typst-tab staleness, not a field-edit
+overwrite, and it self-heals — `savedSource !== source` simply makes the next
+debounce save again.
+
+### 57. Finding 5's scheme check belongs on mark urls and argument values, not everywhere — fixed in phase 1 for marks, `set_arg` deferred
+
+Phase 1 closed the `set_line` path: a link mark may not carry a `javascript:`,
+`data:`, `vbscript:` or `file:` url. The review named only that path. It is worth
+recording that **`set_arg` is a second door**, which the original ruling missed:
+
+- `basic-resume` is safe by construction, not by luck. `src/resume.typ:76-83`'s
+  `contact-item` calls `link()` only when `link-type != ""`, and every caller
+  passes a literal prefix (`"mailto:"`, `"https://"`, `"https://orcid.org/"`);
+  with an empty `link-type` it emits plain text and no link at all. `project()`
+  concatenates `"https://" + url`. So `javascript:alert(1)` in a field becomes an
+  inert `https://javascript:alert(1)`.
+- `acorn-resume` is the counterexample: its `project()` takes `live-url` and
+  `repo-url` **raw** into `link()`, as
+  `app/services/emitters/acorn_resume.py:42-48` already documents while
+  explaining why the emitter uses neither slot (for an unrelated reason — the
+  body shows a fixed "Live"/"GitHub" label, so the url text would fail the
+  content-survival checks).
+
+So nothing Offerfy generates today contains a raw-url argument, but a
+`typst_source` is user-editable text and the hazard is one template choice away.
+The fix is a leading-scheme check on any argument value — **not** a key-name
+allowlist, since `live-url` and `repo-url` are not spellings anyone would have
+predicted, and a key allowlist is the same whack-a-mole one level up.
+
+**Cost if wrong:** an executable url in a résumé PDF a person sends to an
+employer. Low likelihood, and the author could already write it by hand in the
+Typst tab, so the exposure this adds is to the *reader* of a shared document, not
+to the author.
+
+### 58. Finding 8 named a field that was never built — the labels fix is frontend-only
+
+The review asked to "plumb `label_key` through `parseProjection`". `label_key`
+appears **nowhere** in this repository, backend or frontend. There is no such
+field to plumb; the projection sends `key`, the Typst argument identifier, and
+`StructuredPanel.tsx:242` renders it raw.
+
+So the fix is a frontend mapping from `key` to a localised label with a raw-key
+fallback — no API change, which keeps phase 2 to one web deploy instead of two.
+Taking the review's wording literally would have added a field to the wire format
+to carry information the wire format already carries.
+
+**Cost if wrong:** none to correctness; the cost of getting it wrong the other
+way was an unnecessary API deploy and a redundant field in a contract this branch
+worked hard to keep narrow.
+
+### 59. The frontend suite had no entry point — added one
+
+Phase 2 measured **503 passed / 0 failed** across 47 files (up from 483/46), and
+finding out *how* to measure it took longer than the measurement. There is no
+vitest, no jest, no runner config and no `test` script anywhere in this repo; the
+47 `*.test.ts` files use Node's built-in runner (`node:test` plus
+`node:assert/strict`), which a `vitest run` cannot even collect — it reports "No
+test suite found" for all 47 files and exits as if the suite were broken.
+
+So the only way to run the frontend's tests was an invocation recorded nowhere,
+which means CI cannot have been running them and every agent that touches this
+code has to rediscover it. Added to `apps/frontend/package.json`:
+
+    "test": "node --import tsx --test \"lib/*.test.ts\" \"components/**/*.test.ts\""
+
+**Cost if wrong:** none — it adds a script and changes no build input. The cost of
+leaving it was 503 tests that only someone who already knew the trick could run.
