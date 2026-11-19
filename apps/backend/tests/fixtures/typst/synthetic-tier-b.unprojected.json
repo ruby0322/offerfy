@@ -1,0 +1,11 @@
+[
+  "#import \"@preview/basic-resume:0.2.9\": *",
+  "#grid(",
+  "columns: (1fr, 1fr),",
+  "gutter: 8pt,",
+  "[*Data*\\ SQL, dbt, Airflow],",
+  "[*Visualization*\\ Superset, Matplotlib],",
+  ")",
+  "#let tag(label) = box(inset: 3pt, stroke: 0.5pt, radius: 2pt)[#label]",
+  "#tag(\"Open to relocation\") #tag(\"Available in March\")"
+]

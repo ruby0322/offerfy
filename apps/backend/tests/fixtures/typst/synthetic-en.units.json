@@ -1,0 +1,482 @@
+[
+  {
+    "id": "u1",
+    "kind": "arg",
+    "key": "author",
+    "role": null,
+    "span": [
+      55,
+      66
+    ],
+    "value": "Avery Quill",
+    "editable": true
+  },
+  {
+    "id": "u3",
+    "kind": "arg",
+    "key": "email",
+    "role": null,
+    "span": [
+      108,
+      131
+    ],
+    "value": "avery.quill@example.com",
+    "editable": true
+  },
+  {
+    "id": "u2",
+    "kind": "arg",
+    "key": "location",
+    "role": null,
+    "span": [
+      210,
+      234
+    ],
+    "value": "Springfield, Exampleland",
+    "editable": true
+  },
+  {
+    "id": "u4",
+    "kind": "arg",
+    "key": "github",
+    "role": null,
+    "span": [
+      263,
+      287
+    ],
+    "value": "github.com/example-avery",
+    "editable": true
+  },
+  {
+    "id": "u5",
+    "kind": "arg",
+    "key": "personal-site",
+    "role": null,
+    "span": [
+      308,
+      325
+    ],
+    "value": "avery.example.org",
+    "editable": true
+  },
+  {
+    "id": "u6",
+    "kind": "arg",
+    "key": "accent-color",
+    "role": null,
+    "span": [
+      345,
+      352
+    ],
+    "value": "#26428b",
+    "editable": true
+  },
+  {
+    "id": "u7",
+    "kind": "arg",
+    "key": "paper",
+    "role": null,
+    "span": [
+      418,
+      420
+    ],
+    "value": "a4",
+    "editable": true
+  },
+  {
+    "id": "u8",
+    "kind": "arg",
+    "key": "lang",
+    "role": null,
+    "span": [
+      432,
+      434
+    ],
+    "value": "en",
+    "editable": true
+  },
+  {
+    "id": "u9",
+    "kind": "line",
+    "key": null,
+    "role": "heading",
+    "span": [
+      469,
+      476
+    ],
+    "value": "Summary",
+    "editable": true
+  },
+  {
+    "id": "u10",
+    "kind": "line",
+    "key": null,
+    "role": "para",
+    "span": [
+      491,
+      604
+    ],
+    "value": "Backend engineer with a taste for small, boring systems that keep working. Writes the runbook before the feature.",
+    "editable": true
+  },
+  {
+    "id": "u11",
+    "kind": "line",
+    "key": null,
+    "role": "heading",
+    "span": [
+      610,
+      620
+    ],
+    "value": "Experience",
+    "editable": true
+  },
+  {
+    "id": "u12",
+    "kind": "arg",
+    "key": "title",
+    "role": null,
+    "span": [
+      639,
+      654
+    ],
+    "value": "Senior Engineer",
+    "editable": true
+  },
+  {
+    "id": "u13",
+    "kind": "arg",
+    "key": "location",
+    "role": null,
+    "span": [
+      670,
+      676
+    ],
+    "value": "Remote",
+    "editable": true
+  },
+  {
+    "id": "u14",
+    "kind": "arg",
+    "key": "company",
+    "role": null,
+    "span": [
+      691,
+      712
+    ],
+    "value": "Northwind Example Co.",
+    "editable": true
+  },
+  {
+    "id": "u15",
+    "kind": "arg",
+    "key": "start-date",
+    "role": null,
+    "span": [
+      750,
+      758
+    ],
+    "value": "Jan 2022",
+    "editable": true
+  },
+  {
+    "id": "u16",
+    "kind": "arg",
+    "key": "end-date",
+    "role": null,
+    "span": [
+      772,
+      779
+    ],
+    "value": "Present",
+    "editable": true
+  },
+  {
+    "id": "u17",
+    "kind": "line",
+    "key": null,
+    "role": "bullet",
+    "span": [
+      787,
+      849
+    ],
+    "value": "Cut p99 latency of the ordering service from 900 ms to 240 ms.",
+    "editable": true
+  },
+  {
+    "id": "u18",
+    "kind": "line",
+    "key": null,
+    "role": "bullet",
+    "span": [
+      852,
+      914
+    ],
+    "value": "Led a team of four through a zero-downtime database migration.",
+    "editable": true
+  },
+  {
+    "id": "u19",
+    "kind": "arg",
+    "key": "title",
+    "role": null,
+    "span": [
+      933,
+      950
+    ],
+    "value": "Software Engineer",
+    "editable": true
+  },
+  {
+    "id": "u20",
+    "kind": "arg",
+    "key": "location",
+    "role": null,
+    "span": [
+      966,
+      977
+    ],
+    "value": "Springfield",
+    "editable": true
+  },
+  {
+    "id": "u21",
+    "kind": "arg",
+    "key": "company",
+    "role": null,
+    "span": [
+      992,
+      1011
+    ],
+    "value": "Contoso Sample Ltd.",
+    "editable": true
+  },
+  {
+    "id": "u22",
+    "kind": "arg",
+    "key": "dates",
+    "role": null,
+    "span": [
+      1024,
+      1024
+    ],
+    "value": "",
+    "editable": true
+  },
+  {
+    "id": "u23",
+    "kind": "line",
+    "key": null,
+    "role": "bullet",
+    "span": [
+      1031,
+      1088
+    ],
+    "value": "Built the internal deploy dashboard used by 30 engineers.",
+    "editable": true
+  },
+  {
+    "id": "u24",
+    "kind": "line",
+    "key": null,
+    "role": "heading",
+    "span": [
+      1107,
+      1116
+    ],
+    "value": "Education",
+    "editable": true
+  },
+  {
+    "id": "u25",
+    "kind": "arg",
+    "key": "institution",
+    "role": null,
+    "span": [
+      1140,
+      1164
+    ],
+    "value": "Example State University",
+    "editable": true
+  },
+  {
+    "id": "u26",
+    "kind": "arg",
+    "key": "location",
+    "role": null,
+    "span": [
+      1180,
+      1204
+    ],
+    "value": "Springfield, Exampleland",
+    "editable": true
+  },
+  {
+    "id": "u27",
+    "kind": "arg",
+    "key": "degree",
+    "role": null,
+    "span": [
+      1218,
+      1242
+    ],
+    "value": "B.S. in Computer Science",
+    "editable": true
+  },
+  {
+    "id": "u28",
+    "kind": "arg",
+    "key": "start-date",
+    "role": null,
+    "span": [
+      1280,
+      1288
+    ],
+    "value": "Sep 2014",
+    "editable": true
+  },
+  {
+    "id": "u29",
+    "kind": "arg",
+    "key": "end-date",
+    "role": null,
+    "span": [
+      1302,
+      1310
+    ],
+    "value": "Jun 2018",
+    "editable": true
+  },
+  {
+    "id": "u30",
+    "kind": "line",
+    "key": null,
+    "role": "bullet",
+    "span": [
+      1318,
+      1375
+    ],
+    "value": "Graduated with honors; teaching assistant for Algorithms.",
+    "editable": true
+  },
+  {
+    "id": "u31",
+    "kind": "line",
+    "key": null,
+    "role": "heading",
+    "span": [
+      1380,
+      1388
+    ],
+    "value": "Projects",
+    "editable": true
+  },
+  {
+    "id": "u32",
+    "kind": "arg",
+    "key": "role",
+    "role": null,
+    "span": [
+      1409,
+      1419
+    ],
+    "value": "Maintainer",
+    "editable": true
+  },
+  {
+    "id": "u33",
+    "kind": "arg",
+    "key": "name",
+    "role": null,
+    "span": [
+      1431,
+      1440
+    ],
+    "value": "tinyqueue",
+    "editable": true
+  },
+  {
+    "id": "u34",
+    "kind": "arg",
+    "key": "url",
+    "role": null,
+    "span": [
+      1451,
+      1472
+    ],
+    "value": "example.com/tinyqueue",
+    "editable": true
+  },
+  {
+    "id": "u35",
+    "kind": "arg",
+    "key": "start-date",
+    "role": null,
+    "span": [
+      1510,
+      1514
+    ],
+    "value": "2020",
+    "editable": true
+  },
+  {
+    "id": "u36",
+    "kind": "arg",
+    "key": "end-date",
+    "role": null,
+    "span": [
+      1528,
+      1535
+    ],
+    "value": "Present",
+    "editable": true
+  },
+  {
+    "id": "u37",
+    "kind": "line",
+    "key": null,
+    "role": "bullet",
+    "span": [
+      1543,
+      1591
+    ],
+    "value": "A job queue small enough to read in one sitting.",
+    "editable": true
+  },
+  {
+    "id": "u38",
+    "kind": "line",
+    "key": null,
+    "role": "heading",
+    "span": [
+      1596,
+      1611
+    ],
+    "value": "Skills & Awards",
+    "editable": true
+  },
+  {
+    "id": "u39",
+    "kind": "line",
+    "key": null,
+    "role": "bullet",
+    "span": [
+      1615,
+      1643
+    ],
+    "value": "Languages: Python, Go, SQL",
+    "editable": true
+  },
+  {
+    "id": "u40",
+    "kind": "line",
+    "key": null,
+    "role": "bullet",
+    "span": [
+      1646,
+      1692
+    ],
+    "value": "Awards: Example Hackathon, first place, 2021",
+    "editable": true
+  }
+]

@@ -1,0 +1,7 @@
+#import "@preview/basic-resume:0.2.9": *
+
+#let data = (name: "Drew Lark", jobs: ((role: "Support Engineer", org: "Globex Sample Corp.", years: "2018 to 2021"), (role: "Site Reliability Engineer", org: "Umbrella Example Ltd.", years: "2021 to 2024")))
+
+#show: resume.with(author: data.name)
+
+#for job in data.jobs { [#strong(job.role), #job.org #h(1fr) #job.years \ ] }

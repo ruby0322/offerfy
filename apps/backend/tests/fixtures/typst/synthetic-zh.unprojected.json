@@ -1,0 +1,6 @@
+[
+  "#import \"@preview/basic-resume:0.2.9\": *",
+  "#let phone = \"0900-000-000\"",
+  "#set par(leading: 0.7em)",
+  "#pagebreak()"
+]
