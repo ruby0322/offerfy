@@ -40,10 +40,12 @@ import type { JobListItem } from "@/lib/jobs";
  * columns separate instead is why a role is here at all: picked for you this
  * week, against new to you since you looked.
  *
- * A row with no score still shows none -- that is a posting the sweep has not
- * reached, and a blank is the honest answer. So this column can be mixed,
- * which the standing-match fallback never is: `JobListItem` carries no score
- * to show.
+ * A row the sweep has not reached shows no number -- inventing one would be
+ * worse than a gap -- but it does carry a "scoring" tag in the slot under the
+ * number, which keeps the column from going ragged and says a number really is
+ * coming. The standing-match fallback gets no tag: those rows are blank
+ * because `JobListItem` has no score field, not because anyone is working on
+ * them, and many of them have been scored already.
  */
 
 type Props = {
@@ -68,6 +70,18 @@ type Role = {
   location: string | null;
   /** 0..1, or null for a posting the sweep has not scored yet. */
   score: number | null;
+  /**
+   * True only for an arrival still waiting on the sweep -- it gets the
+   * "scoring" tag, which fills the gap a missing number leaves and tells the
+   * reader a number is genuinely coming.
+   *
+   * False for the standing fallback even though those rows also show no
+   * number: `JobListItem` carries no score field, so its blank means "not
+   * available in this list", not "being scored". Many of those postings have
+   * been scored already. Tagging them would be a claim about work that is not
+   * happening.
+   */
+  pending: boolean;
 };
 
 export default function MatchesBlock({
@@ -98,6 +112,7 @@ export default function MatchesBlock({
           company: a.company,
           location: a.location,
           score: a.fit_score,
+          pending: a.fit_score === null,
         }))
       : matches.map((j) => ({
           id: j.id,
@@ -107,6 +122,7 @@ export default function MatchesBlock({
           // The standing set is a posting list, not a judgement: it has no
           // score to carry, so this column is uniformly unscored in fallback.
           score: null,
+          pending: false,
         }))
   ).slice(0, FRESH);
 
@@ -209,6 +225,7 @@ export default function MatchesBlock({
                   company={role.company}
                   meta={role.location}
                   score={role.score}
+                  tier={role.pending ? t("matchesScoringTag") : null}
                   action={
                     <Link
                       href={`/jobs/${encodeURIComponent(role.id)}`}

@@ -37,6 +37,9 @@ const d = en.dashboard;
 // so its absence is how "no score slot at all" is asserted. Checking for a
 // bare number instead would catch the card's own match count.
 const SCORE_SLOT = "min-w-8 shrink-0 text-right";
+// The number itself, as distinct from the slot that holds it: a pending row
+// renders the slot (for its tag) but must not render a number.
+const SCORE_NUMBER = "text-[1.05rem] font-medium leading-none";
 
 // A quiet week: the left column renders its plain sentence rather than
 // SamplePick, which carries a score slot of its own and would otherwise be
@@ -145,9 +148,9 @@ test("a scored arrival shows its score in the right column", () => {
   assert.ok(html.includes("90"), html);
 });
 
-test("an arrival the sweep has not reached shows no score", () => {
-  // A blank is the honest answer for a posting nobody has judged; handing it
-  // a number would be inventing one.
+test("an arrival the sweep has not reached is tagged, not numbered", () => {
+  // Inventing a number would be worse than a gap; the tag fills the gap and
+  // says a number is genuinely coming.
   const html = render(
     createElement(MatchesBlock, {
       ...base,
@@ -157,11 +160,14 @@ test("an arrival the sweep has not reached shows no score", () => {
     }),
   );
   assert.ok(html.includes("Backend Engineer"), html);
-  assert.ok(!html.includes(SCORE_SLOT), html);
+  assert.ok(html.includes(d.matchesScoringTag), html);
+  assert.ok(!html.includes(SCORE_NUMBER), html);
 });
 
-test("the standing fallback carries no score at all", () => {
-  // `JobListItem` is a posting list, not a judgement: there is nothing to show.
+test("the standing fallback gets no score and no scoring tag", () => {
+  // Those rows are blank because `JobListItem` has no score field, not
+  // because anyone is working on them -- many have been scored already, so
+  // the tag would claim work that is not happening.
   const html = render(
     createElement(MatchesBlock, {
       ...base,
@@ -171,5 +177,6 @@ test("the standing fallback carries no score at all", () => {
     }),
   );
   assert.ok(html.includes("Platform Engineer"), html);
+  assert.ok(!html.includes(d.matchesScoringTag), html);
   assert.ok(!html.includes(SCORE_SLOT), html);
 });
