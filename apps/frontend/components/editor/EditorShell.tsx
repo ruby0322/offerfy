@@ -544,8 +544,13 @@ export default function EditorShell({ resumeId }: Props) {
         // over a successful edit. The compile effect consumes the flag when `source`
         // changes, so it is only raised when it will -- an identical source never runs
         // that effect, and the flag would swallow the next real timer instead.
-        if (out.typstSource !== sourceRef.current) skipTimers.current = true;
+        const moved = out.typstSource !== sourceRef.current;
+        if (moved) skipTimers.current = true;
         adoptServerSource(out.typstSource);
+        // The compile effect is what refreshed the ATS strip after a field commit, and
+        // this adopt stands it down. `/ats` compiles for itself, so the strip is all that
+        // was lost; fire and forget, so a failure is never an edit error.
+        if (moved) void getAtsReport(resumeId).then(setAts, () => {});
         setUpdatedAt(new Date().toISOString());
         setUnpublishedChanges(true);
         // The edit compiled -- that is what let it commit -- so an empty page list is
