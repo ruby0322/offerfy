@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
-import ArrivalsBlock from "@/components/dashboard/ArrivalsBlock";
 import ApplicationFlow from "@/components/dashboard/ApplicationFlow";
 import CreditsStrip from "@/components/dashboard/CreditsStrip";
 import MatchesBlock from "@/components/dashboard/MatchesBlock";
@@ -47,10 +46,11 @@ export default function DashboardPage() {
   // The server decides what is new and when this person last looked, so
   // there is nothing to remember here: a reload asks the same question.
   //
-  // This page is the one that renders ArrivalsBlock, so it is the one that
-  // says the arrivals were shown -- the dashboard GET deliberately no longer
-  // stamps, because Applications, Matches and Profile fetch it too and show
-  // no arrivals at all. Said here rather than in the effect so that a
+  // This page is the one that shows the arrivals -- they are the right-hand
+  // column of MatchesBlock -- so it is the one that says they were shown. The
+  // dashboard GET deliberately no longer stamps, because Applications,
+  // Matches and Profile fetch it too and show no arrivals at all. Said here
+  // rather than in the effect so that a
   // refetch which brings NEW arrivals (after the first run, after a rebuild)
   // marks those too; each call is one UPDATE. Fire-and-forget: the rows are
   // already on screen, and a lost stamp only repeats one window.
@@ -208,9 +208,9 @@ export default function DashboardPage() {
             />
           )}
           <CreditsStrip />
-          <ArrivalsBlock arrivals={dash.arrivals} />
           <MatchesBlock
             digest={dash.digest}
+            arrivals={dash.arrivals}
             matches={dash.matches}
             matchCount={dash.match_count}
             hasPreference={hasSavedPreference(dash.preference)}
