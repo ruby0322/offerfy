@@ -53,7 +53,7 @@ from datetime import datetime, timezone
 import json
 
 from sqlalchemy import and_, exists, false, func, nulls_last, or_, select
-from sqlalchemy.orm import Query, Session
+from sqlalchemy.orm import Query, Session, load_only
 
 from app.models import Application, Job, JobFacets, JobPreference, JobScore
 from app.services.jobs.enrich import (
@@ -310,6 +310,29 @@ def match_preview(db: Session, pref: JobPreference, limit: int) -> list[Job]:
     )
 
 
+# The only Job columns an arrival needs: the six routers.dashboard.arrival_out
+# projects, plus first_seen_at, which is the unscored branch's window and the
+# recency key the two branches are merged on.
+#
+# Stated as a load_only because both branches below are .limit(50) over whole
+# Job entities, and Job.description_text and Job.description_html are both
+# `Text NOT NULL` with no deferral on the model. Without this a broad-preference
+# reader moved up to a hundred full job descriptions out of Postgres on every
+# dashboard load -- on an endpoint four pages call, in an API with a 15-slot
+# pool and synchronous handlers, a combination that has taken /healthz down in
+# this project before. A column added to arrival_out has to be added here too;
+# reading one that is not listed costs a query per row.
+ARRIVAL_COLUMNS = (
+    Job.id,
+    Job.title,
+    Job.company,
+    Job.apply_url,
+    Job.is_active,
+    Job.location,
+    Job.first_seen_at,
+)
+
+
 def arrival_rows(
     db: Session,
     user_id: str,
@@ -353,6 +376,7 @@ def arrival_rows(
     """
     scored = (
         db.query(Job, JobScore)
+        .options(load_only(*ARRIVAL_COLUMNS))
         .join(JobScore, and_(JobScore.job_id == Job.id, JobScore.user_id == user_id))
     )
     if since is not None:
@@ -365,7 +389,7 @@ def arrival_rows(
     ]
 
     matching = prefilter_query(db, pref).with_entities(Job.id).subquery()
-    waiting = db.query(Job).filter(
+    waiting = db.query(Job).options(load_only(*ARRIVAL_COLUMNS)).filter(
         Job.id.in_(select(matching.c.id)),
         ~exists().where(
             and_(JobScore.job_id == Job.id, JobScore.user_id == user_id)

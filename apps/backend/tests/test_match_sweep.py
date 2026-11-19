@@ -451,3 +451,45 @@ def test_a_zero_limit_asks_no_question_at_all(db_session):
     me = _person(db_session, "preview-zero")
     _posting(db_session)
     assert match_preview(db_session, _mine(me.id), 0) == []
+
+
+def test_arrivals_do_not_drag_the_descriptions_along(db_session):
+    """Both branches load only the columns an arrival projects.
+
+    Job.description_text and .description_html are Text NOT NULL and are not
+    deferred on the model, so whole-entity branches moved up to a hundred
+    descriptions per dashboard load -- four pages call that endpoint, against
+    a 15-slot pool with synchronous handlers.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    from app.jobs.match_sweep import arrival_rows
+    from app.models import JobScore
+    from app.routers.dashboard import arrival_out
+
+    me = _person(db_session, "arr-loadonly")
+    scored_job, waiting_job = _posting(db_session), _posting(db_session)
+    for job in (scored_job, waiting_job):
+        job.description_text = "x" * 5000
+        job.description_html = "<p>" + "x" * 5000 + "</p>"
+    db_session.add(
+        JobScore(
+            user_id=me.id, job_id=scored_job.id, facts_input_hash="a" * 64,
+            description_hash="b" * 64, model="m", outcome="scored",
+            tier="Strong fit", fit_score=0.8,
+            scored_at=freshness_cutoff(), created_at=freshness_cutoff(),
+        )
+    )
+    db_session.commit()
+    db_session.expire_all()
+
+    rows = arrival_rows(db_session, me.id, _mine(me.id), None, 50)
+    assert {str(job.id) for job, _ in rows} == {scored_job.id, waiting_job.id}
+    for job, score in rows:
+        unloaded = sa_inspect(job).unloaded
+        assert "description_text" in unloaded, "the description must stay in Postgres"
+        assert "description_html" in unloaded
+        # And every column the projection reads is already in hand, so the
+        # saving is not paid back one lazy load at a time.
+        arrival_out(job, score)
+        assert sa_inspect(job).unloaded >= {"description_text", "description_html"}

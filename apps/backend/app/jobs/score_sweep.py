@@ -105,7 +105,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from sqlalchemy import delete, func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only, undefer
 
 from app.db import get_engine, get_session_factory
 from app.jobs.build_digests import (
@@ -169,6 +169,12 @@ class SweepReport:
 # --------------------------------------------------------------------------
 
 
+# What the sweep itself reads off a pooled posting: the ordering key, and the
+# three fields the score and prose prompts put in front of the model besides
+# the description. The description is NOT here on purpose -- see `_pool`.
+_POOL_COLUMNS = (Job.id, Job.title, Job.company, Job.location, Job.first_seen_at)
+
+
 def _pool(db: Session, user: User) -> list[Job]:
     """Every posting this person's preference could match, newest first.
 
@@ -176,11 +182,42 @@ def _pool(db: Session, user: User) -> list[Job]:
     to pick a defined set, and recency is the ordering that needs no model. The
     whole pool, not a capped slice, because the cap here is on PURCHASES: a
     cached pair costs nothing and must not use up the allowance.
+
+    The whole pool is up to about 910 postings for a broad preference, and only
+    the <= SWEEP_CAP pairs actually bought need the description text. Both
+    description columns are `Text NOT NULL` and neither is deferred on the
+    model, so loading whole entities here moved every description in the pool
+    out of Postgres to read thirty of them -- and this runs on the API's event
+    loop when the first-run endpoint calls it. So the pool carries only
+    `_POOL_COLUMNS`, and `sweep_user` primes the descriptions for the pairs it
+    is about to buy, in one statement.
     """
     pref = saved_preference(db, user)
     if pref is None:
         return []
-    return prefilter_query(db, pref).order_by(Job.first_seen_at.desc(), Job.id.asc()).all()
+    return (
+        prefilter_query(db, pref)
+        .options(load_only(*_POOL_COLUMNS))
+        .order_by(Job.first_seen_at.desc(), Job.id.asc())
+        .all()
+    )
+
+
+def _prime_descriptions(db: Session, jobs: list[Job]) -> None:
+    """Load the description text for exactly these postings, in one statement.
+
+    The pool arrives without it (`_pool`). The scoring and prose prompts read
+    `description_text` off the pairs being bought, and a deferred column reads
+    back fine -- but one query per posting, inside the concurrent scoring
+    coroutines. One statement up front instead: these are the same instances
+    the identity map already holds, so the undeferred values land on them.
+    """
+    ids = [str(j.id) for j in jobs]
+    if not ids:
+        return
+    db.query(Job).filter(Job.id.in_(ids)).options(
+        undefer(Job.description_text)
+    ).all()
 
 
 async def _rebuild_facts(db: Session, user: User):
@@ -264,6 +301,8 @@ async def sweep_user(db: Session, *, user: User, cap: int = SWEEP_CAP) -> int | 
         arrivals = stale_pairs(db, user=user, facts=facts, jobs=pool)[: max(0, cap)]
         if not arrivals:
             return 0
+        # The descriptions, for these pairs only, before anything asks a model.
+        _prime_descriptions(db, arrivals)
         run = await cached_scores(db, user=user, facts=facts, jobs=pool, cap=cap)
         if run.error is not None:
             logger.warning("sweep could not buy every pair: user=%s %s", user.id, run.error)

@@ -277,6 +277,44 @@ async def test_the_cap_bounds_purchases_per_user_per_pass(db_session, monkeypatc
     assert len(_rows(db_session, user)) == 2
 
 
+async def test_the_pool_carries_no_descriptions_but_the_bought_pairs_do(
+    db_session, monkeypatch
+):
+    """Only the pairs being bought need the posting text.
+
+    A broad preference's pool is about 910 postings and the cap buys 30, and
+    both description columns are Text NOT NULL with no deferral on the model.
+    This also runs on the API's event loop, through the first-run endpoint.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    in_hand: dict[str, bool] = {}
+
+    def watch(db, user, jobs):
+        for job in jobs:
+            in_hand[job.id] = "description_text" not in sa_inspect(job).unloaded
+
+    Seams(monkeypatch, tier="Worth a look", on_score=watch)
+    user = _ready(db_session)
+    jobs = [_posting(db_session, age_minutes=i) for i in range(5)]
+    report = await sweep_all(db_session, now=NOW, cap=2)
+
+    assert report.bought == 2
+    # Primed in one statement before the provider is asked, not one lazy load
+    # per posting inside the concurrent scoring coroutines.
+    assert in_hand == {jobs[0].id: True, jobs[1].id: True}
+
+    db_session.expire_all()
+    pool = score_sweep._pool(db_session, user)
+    assert len(pool) == 5, "scoring a pair does not remove it from the pool"
+    for job in pool:
+        unloaded = sa_inspect(job).unloaded
+        assert "description_text" in unloaded and "description_html" in unloaded
+        # The columns the prompts and the ordering read are in hand, so the
+        # saving is not paid back one lazy load at a time.
+        assert {"id", "title", "company", "location", "first_seen_at"} & unloaded == set()
+
+
 async def test_a_broad_preference_fills_in_over_several_passes(db_session, monkeypatch):
     seams = Seams(monkeypatch, tier="Worth a look")
     user = _ready(db_session)
