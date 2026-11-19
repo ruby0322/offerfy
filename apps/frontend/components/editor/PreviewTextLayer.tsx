@@ -2,6 +2,7 @@
 
 import { Fragment, useMemo } from "react";
 import type { PreviewTextLayer as Layer } from "@/lib/api";
+import { cqwUnit } from "@/lib/preview-highlight";
 
 // Typst's SVG draws glyph outlines and carries no text, so the preview is a
 // picture. This lays the page's text back over that picture, transparent, one
@@ -39,7 +40,7 @@ export default function PreviewTextLayer({ layer }: Props) {
     // Every length is a share of the page width, so the layer tracks the
     // picture through the zoom control and the panel resize with no measuring:
     // 1cqw is a hundredth of the page box the two of them share.
-    const unit = 100 / layer.width;
+    const unit = cqwUnit(layer.width);
     return layer.spans.map((span, index) => {
       const natural = naturalWidth(span.text, span.size);
       return {
