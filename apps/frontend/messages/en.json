@@ -557,6 +557,7 @@
     "onboardSlow": "This is taking longer than usual. Press Continue to check again, or come back in a minute.",
     "onboardNoResume": "Saved. We could not read a resume yet, so scoring has not started. Matches appear once your resume is saved.",
     "onboardPaused": "Saved. Matching is paused for now, so scoring has not started. Your matches will be scored when it resumes.",
+    "onboardRunning": "Saved. Scoring is already under way for you. Press Continue to check for your matches.",
     "onboardGeneric": "Saved, but scoring did not start. Your matches will be scored in the next regular pass.",
     "onboardContinue": "Continue",
     "onboardEmptyHint": "Choose at least one answer above, or use more options.",

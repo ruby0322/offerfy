@@ -44,6 +44,9 @@ test("every refusal reason has its own sentence; an already-scored account has n
   assert.equal(firstRunNotice("already_scored"), null);
   assert.equal(firstRunNotice("no_resume"), "onboardNoResume");
   assert.equal(firstRunNotice("budget_paused"), "onboardPaused");
+  // The one reason where work IS under way: it must not read as "did not
+  // start, try the next regular pass".
+  assert.equal(firstRunNotice("already_running"), "onboardRunning");
   assert.equal(firstRunNotice("no_preference"), "onboardGeneric");
   // A reason the server grows later must not read as success.
   assert.equal(firstRunNotice("something_new"), "onboardGeneric");

@@ -74,6 +74,24 @@ class User(Base):
     matches_seen_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # When a first run was last claimed for this person. NULL means never.
+    #
+    # It exists to make the second of two concurrent first runs a no-op rather
+    # than a duplicate. Both tabs see zero job_scores rows, so the "no scores
+    # yet" test cannot separate them; a conditional UPDATE on this column can,
+    # atomically, and across workers -- which a process-local set cannot, since
+    # offerfy-api runs more than one. The design blessed the duplicate on the
+    # grounds that "the loser writes the same answer", which is true on SQLite
+    # and false on Postgres: the loser's first insert blocks on the winner's
+    # unique key until the winner's whole pass commits, and that block is a
+    # synchronous psycopg2 call on the API's event loop.
+    #
+    # Re-claimable after routers.matches.FIRST_RUN_CLAIM_TTL, so a run whose
+    # worker died does not lock the person out for good. See
+    # routers.matches._claim_first_run.
+    first_run_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Which model this person's chat turns run on. NULL means "whatever the
     # tier default is", which is the honest representation of never having

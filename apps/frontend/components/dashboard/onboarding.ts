@@ -47,6 +47,7 @@ export function pollVerdict(p: {
 export type OnboardNotice =
   | "onboardNoResume"
   | "onboardPaused"
+  | "onboardRunning"
   | "onboardGeneric"
   | "onboardRefreshFailed";
 
@@ -55,6 +56,10 @@ export type OnboardNotice =
  * nothing is right (the account already has scores, so there is nothing to
  * wait for and nothing went wrong). An unknown reason is a generic failure,
  * never a silent success.
+ *
+ * `already_running` gets its own sentence because the generic one says
+ * scoring did not start and will happen in the next regular pass, and for
+ * this reason alone a run IS under way -- another tab took the claim.
  */
 export function firstRunNotice(reason: string | null): OnboardNotice | null {
   switch (reason) {
@@ -64,6 +69,8 @@ export function firstRunNotice(reason: string | null): OnboardNotice | null {
       return "onboardNoResume";
     case "budget_paused":
       return "onboardPaused";
+    case "already_running":
+      return "onboardRunning";
     default:
       return "onboardGeneric";
   }

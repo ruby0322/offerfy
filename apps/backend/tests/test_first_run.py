@@ -15,7 +15,7 @@ from app.db import get_session_factory
 from app.deps import SESSION_COOKIE, _sign
 from app.jobs.score_sweep import SWEEP_CAP
 from app.main import app
-from app.models import JobScore
+from app.models import JobScore, User
 from app.routers import matches
 
 from tests.test_job_preferences_api import _signed_in
@@ -172,16 +172,89 @@ async def test_a_run_that_cannot_build_facts_logs_the_user(db_session, client, m
     assert _count(user.id) == 0
 
 
+def test_the_second_of_two_tabs_starts_nothing(client, db_session, monkeypatch):
+    """Two tabs, one run. The loser is told so and buys nothing.
+
+    This replaces a test that asserted BOTH runs bought, which was the
+    design's blessing of the duplicate ("the loser writes the same answer").
+    On Postgres the loser's first insert blocks on the winner's unique key
+    until the winner's whole pass commits, and that block is a synchronous
+    call on the API's event loop -- the worker serves nothing, /healthz
+    included. So the duplicate is refused instead.
+
+    Both tabs see zero job_scores rows, which is why `already_scored` cannot
+    tell them apart: the run here is held open so that no rows exist when the
+    second POST lands.
+    """
+    user = _ready_user(db_session, client)
+    started = asyncio.Event()
+    release = asyncio.Event()
+    passes = 0
+
+    async def held(db, *, user, cap=None):
+        nonlocal passes
+        passes += 1
+        started.set()
+        await asyncio.wait_for(release.wait(), timeout=5)
+        return 0
+
+    monkeypatch.setattr(matches, "sweep_user", held)
+    assert client.post("/v1/me/matches/first-run").json() == {
+        "started": True, "reason": None,
+    }
+    assert _count(user.id) == 0, "nothing is written yet, so not already_scored"
+    assert client.post("/v1/me/matches/first-run").json() == {
+        "started": False, "reason": "already_running",
+    }
+    release.set()
+    assert passes <= 1, "the second POST must not have scheduled a pass"
+
+
+def test_a_claim_is_one_winner_and_expires(db_session, monkeypatch):
+    """The claim itself: one statement decides, and a dead run does not
+    lock the person out for good."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.routers.matches import FIRST_RUN_CLAIM_TTL, _claim_first_run
+
+    user = _user(db_session)
+    now = datetime.now(timezone.utc)
+    assert _claim_first_run(db_session, user, now) is True
+    assert _claim_first_run(db_session, user, now) is False
+    # Still held a moment before it goes stale...
+    assert _claim_first_run(db_session, user, now + FIRST_RUN_CLAIM_TTL) is False
+    # ...and claimable once it has.
+    later = now + FIRST_RUN_CLAIM_TTL + timedelta(seconds=1)
+    assert _claim_first_run(db_session, user, later) is True
+    db_session.expire_all()
+    stamped = db_session.get(User, user.id).first_run_started_at
+    if stamped.tzinfo is None:
+        stamped = stamped.replace(tzinfo=timezone.utc)
+    assert stamped == later
+
+
+def test_a_refusal_leaves_the_claim_for_the_retry_it_invites(client, db_session):
+    # no_preference tells the person to go and save one. If the refusal had
+    # taken the claim, the run they were just told to make would be refused
+    # as already_running.
+    user = _signed_in(client, db_session, sub="sub-fr-claimfree")
+    assert client.post("/v1/me/matches/first-run").json()["reason"] == "no_preference"
+    db_session.expire_all()
+    assert db_session.get(User, user.id).first_run_started_at is None
+
+
 @pytest.mark.anyio
-async def test_two_runs_racing_for_the_same_pairs_leave_one_row_each(
+async def test_a_racing_write_back_still_leaves_one_row(
     db_session, client, monkeypatch, caplog
 ):
-    """Both runs must classify every pair as stale BEFORE either writes back.
+    """The upsert's conflict path stays correct, because the claim does not
+    cover everything.
 
-    With a scorer that never yields, gather() runs them one after the other and
-    the second finds the cache full, so the upsert's conflict path is never
-    reached. The barrier holds each scorer until both have arrived; both have
-    then already classified, and both write the same pairs.
+    A first run can still overlap a `score_sweep` pass for the same person in
+    another process, which no claim on this endpoint can prevent. So the pair
+    of runs is still exercised at the `write_back` level: both classify every
+    pair as stale before either writes, which is what reaches the conflict.
+    The barrier holds each scorer until both have arrived.
     """
     from app.services.jobs import score_cache
 
@@ -208,6 +281,5 @@ async def test_two_runs_racing_for_the_same_pairs_leave_one_row_each(
     # _run swallows a fault into a log line, so a conflict that raised would
     # still leave the winner's rows behind. Neither run may have failed.
     assert not [r for r in caplog.records if "first run failed" in r.getMessage()]
-    # Both really bought, rather than the second finding the first's rows.
-    assert len(seams.scored_jobs) == 2
-    assert _count(user.id) == 3
+    assert len(seams.scored_jobs) == 2, "both really reached the provider"
+    assert _count(user.id) == 3, "one row per pair, not two"

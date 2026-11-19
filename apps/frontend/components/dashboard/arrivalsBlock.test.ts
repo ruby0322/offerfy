@@ -22,11 +22,16 @@ function render(node: ReactElement): string {
     createElement(
       AppRouterContext.Provider,
       { value: router as never },
-      createElement(
-        NextIntlClientProvider,
-        { locale: "en", messages: en, timeZone: "Asia/Taipei" },
-        node,
-      ),
+      // children as a prop, as the other render helpers here do: the
+      // provider's props type requires it, so the third-argument form does
+      // not typecheck.
+      // eslint-disable-next-line react/no-children-prop
+      createElement(NextIntlClientProvider, {
+        locale: "en",
+        messages: en,
+        timeZone: "Asia/Taipei",
+        children: node,
+      }),
     ),
   );
 }

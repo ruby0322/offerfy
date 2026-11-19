@@ -8,6 +8,11 @@ docs/superpowers/specs/2026-11-19-onboarding-first-run-design.md.
 users.matches_seen_at is the server-side "last looked at matches" marker; NULL
 means never looked, so it deliberately has no server default.
 
+users.first_run_started_at is the claim that makes the second of two
+concurrent first runs a no-op instead of a duplicate that races on the
+job_scores unique key. NULL means no run has been claimed, same reasoning: a
+server default would make every account look like it had already had one.
+
 One revision for the pair, because they land in the same release and a
 half-applied pair has no useful meaning.
 
@@ -76,9 +81,14 @@ def upgrade() -> None:
         "users",
         sa.Column("matches_seen_at", sa.DateTime(timezone=True), nullable=True),
     )
+    op.add_column(
+        "users",
+        sa.Column("first_run_started_at", sa.DateTime(timezone=True), nullable=True),
+    )
 
 
 def downgrade() -> None:
+    op.drop_column("users", "first_run_started_at")
     op.drop_column("users", "matches_seen_at")
     op.drop_index("ix_job_scores_job_id", table_name="job_scores")
     op.drop_index("ix_job_scores_user_id", table_name="job_scores")

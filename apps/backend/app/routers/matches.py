@@ -15,6 +15,17 @@ next request that reuses it. So `_run` opens a session from the factory, as the
 `app/jobs` entry points do, and closes it in a `finally`. `sweep_user` commits
 its own scores; a task that did not would lose what it paid for.
 
+**The pass's queries are synchronous and run on the event loop, deliberately.**
+`_run` is a task, so everything in `sweep_user` that is not an `await` on httpx
+occupies the loop. The trade: the prefilter scan is tens of milliseconds at
+this catalogue size (about 20k postings) and the pass is a handful of
+statements, against the cost and risk of moving a function that awaits provider
+calls onto a thread. What was NOT acceptable was an unbounded wait, and that
+was a row lock rather than a scan -- see the claim below. Do not try to thread
+an async function; if the loop time ever becomes the problem, the pass has to
+move out of the API process entirely, which is what `score_sweep`'s own unit
+already is.
+
 **Spend is the platform's.** The scoring and any facts rebuild inside
 `sweep_user` run under `system_guard`, never `preflight`: billing a signup's
 calls to a registered account's 20 weekly edit credits would spend their
@@ -29,9 +40,28 @@ not derivable from them, and a response the server cannot answer truthfully is
 worse than a silent one. See `get_progress` for what the client may conclude.
 
 **Only a person with no scores at all may start one.** That is what "first"
-means, and it bounds re-triggering without a rate limit. Two tabs posting at
-once both see zero rows; `write_back` is an upsert on (user, posting), so the
-duplicate costs a little money and corrupts nothing.
+means, and it bounds re-triggering without a rate limit.
+
+**And only one at a time.** Two tabs posting at once both see zero rows, so
+that test cannot separate them; `_claim_first_run` can, with one conditional
+UPDATE on `users.first_run_started_at`. The loser is told `already_running`
+and starts nothing.
+
+The design blessed the duplicate -- "the window is seconds and the loser
+writes the same answer" -- and that is true on SQLite and false on Postgres.
+There, the loser's first `write_back` insert hits the unique key the winner
+inserted and BLOCKS on the winner's transaction until it commits, which is
+the end of the winner's entire pass. `_run` is scheduled with `create_task`,
+so that block is a synchronous psycopg2 call sitting on the event loop: for
+those seconds the worker serves nothing, `/healthz` included. The claim
+removes the contention rather than making the pass safe to block in.
+
+The claim is in the database and not in this process because `offerfy-api`
+runs more than one worker and the two tabs may land on different ones. It
+expires (`FIRST_RUN_CLAIM_TTL`) so a run whose worker died does not lock the
+person out for good; and `write_back`'s savepoint upsert stays, because a
+first run can still overlap a `score_sweep` pass for the same person in
+another process, which this claim does not cover and does not pretend to.
 
 **Over the global ceiling it says matching is paused and promises no time.** The
 sweep, the digest and this endpoint draw on one ceiling, so "the sweep will get
@@ -58,10 +88,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.db import get_db, get_session_factory
@@ -81,11 +111,50 @@ router = APIRouter()
 # be collected mid-run. Held here until it finishes.
 _running: set[asyncio.Task] = set()
 
+# How long a claim stands before another run may take it. A first run is about
+# fifteen pairs and a few seconds, so ten minutes is far longer than any real
+# one and still short enough that a worker killed mid-pass does not lock the
+# person out: they would otherwise sit at "0 of 15" with no way to retry, and
+# the only repair would be the next sweep pass up to six hours later.
+FIRST_RUN_CLAIM_TTL = timedelta(minutes=10)
+
 
 def _scored_count(db: Session, user: User) -> int:
     return db.execute(
         select(func.count()).select_from(JobScore).where(JobScore.user_id == user.id)
     ).scalar_one()
+
+
+def _claim_first_run(db: Session, user: User, now: datetime) -> bool:
+    """Take the one claim to run for this person, or report that it is taken.
+
+    One statement, so two tabs on two workers cannot both win: the WHERE does
+    the deciding and `rowcount` reports who did. A claim older than
+    FIRST_RUN_CLAIM_TTL is stale and may be taken again.
+
+    The commit is immediate and on purpose: an uncommitted claim is invisible
+    to the other worker, which is the whole thing this prevents.
+    """
+    stale_before = now - FIRST_RUN_CLAIM_TTL
+    result = db.execute(
+        update(User)
+        .where(
+            User.id == user.id,
+            or_(
+                User.first_run_started_at.is_(None),
+                User.first_run_started_at < stale_before,
+            ),
+        )
+        .values(first_run_started_at=now)
+        # The database decides, not the ORM: with the default synchronisation
+        # SQLAlchemy re-evaluates the WHERE in Python against objects in this
+        # session, which raises on a naive stored value against an aware `now`
+        # (SQLite stores naive) and would mean the claim was decided twice, in
+        # two places, by two rules.
+        .execution_options(synchronize_session=False)
+    )
+    db.commit()
+    return bool(result.rowcount)
 
 
 async def _run(user_id: str) -> None:
@@ -136,6 +205,11 @@ async def start_first_run(
     ceiling = _ceiling_uusd()
     if ceiling is not None and _over_ceiling(db, ceiling=ceiling, now=None):
         return FirstRunOut(started=False, reason="budget_paused")
+    # Last, and immediately before the task is scheduled: a claim taken and
+    # then refused for some other reason would block the retry that reason
+    # invites. Nothing below here can refuse.
+    if not _claim_first_run(db, user, datetime.now(timezone.utc)):
+        return FirstRunOut(started=False, reason="already_running")
     _start(user.id)
     return FirstRunOut(started=True, reason=None)
 
