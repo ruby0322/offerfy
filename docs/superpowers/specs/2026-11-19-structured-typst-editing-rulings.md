@@ -284,16 +284,71 @@ recording that **`set_arg` is a second door**, which the original ruling missed:
   body shows a fixed "Live"/"GitHub" label, so the url text would fail the
   content-survival checks).
 
-So nothing Offerfy generates today contains a raw-url argument, but a
-`typst_source` is user-editable text and the hazard is one template choice away.
-The fix is a leading-scheme check on any argument value — **not** a key-name
-allowlist, since `live-url` and `repo-url` are not spellings anyone would have
-predicted, and a key allowlist is the same whack-a-mole one level up.
+**Both halves of what I first concluded here were wrong, and the session I asked
+to implement it disproved them rather than complying. Corrected in place, with
+the original claims kept visible, because a ruling that quietly improves itself
+teaches nobody anything.**
+
+*What I claimed:* nothing Offerfy generates contains a raw-url argument, so the
+hazard was "one template choice away"; and the fix was a leading-scheme check on
+**any** argument value, explicitly *not* a key-name allowlist, since `live-url`
+and `repo-url` are not spellings anyone would have predicted and a key allowlist
+is the same whack-a-mole one level up.
+
+*Wrong on reachability.* The emitters are not the only generator.
+`app/routers/chat.py:350` injects `template_api_block(*spec)`, which inlines the
+package's own `template/main.typ` into the system prompt with the instruction to
+copy the example's function names and arguments and "replace only the personal
+content". For acorn-resume that block shows the model three raw-url arguments, so
+a chat-authored acorn résumé carries `live-url`/`repo-url` as editable string
+args — and acorn-resume is one of the `deterministic_pairs()` templates, switched
+to in plain language (`templates.py:126`). The choice is already made, in the
+prompt. This is the ordinary authoring path, not a hand-pasted edge case.
+
+*Wrong on the fix, in the exact direction I said I cared about.* I asked for the
+one way the fix could cost a person their edit, and then proposed it. Run against
+the existing `_URL_NOISE`/`_SCHEME` normalisation, a whole-value check refuses
+`JavaScript: The Good Parts` (a book, a course and a certificate — a thoroughly
+ordinary `name:`), `Data: A Love Story`, and `file: not found (a talk)`. The
+noise-stripping means "begins with `javascript:`" is not what the rule ends up
+asking. And the obvious repair — a space after the colon means prose — is unsafe,
+because `javascript: alert(1)` executes in a viewer and normalises to the *same
+shape* as the book title. **No value-only rule can be both safe and prose-safe.**
+
+*What shipped instead*, on `claude/silly-saha-1f5e85`: one shared
+`_executable_scheme` helper, two call sites, `set_line` still marks-only, and the
+`set_arg` site gated on `is_url_key(unit.key)` — living beside `is_style_key` in
+`typst_projection.py`, token-matched rather than substring (so `personal-site`
+matches on `site` without dragging in `pages`), style keys excluded, and read off
+the source rather than the request so a client cannot rename the field it claims
+to be writing. The key set was not guessed: every bare `link(<ident>)` site under
+`preview/` was traced back to its enclosing signature, yielding `live-url`,
+`repo-url`, `project-url`, `uri`, `link-value`, `homepage`, `destination`,
+`email`, `source_code`, plain `url` in eight more packages, and the IR's `Contact`
+fields. Three of those — `email`, `source_code`, `personal-site` — a url-ish-name
+guess would have missed.
+
+*Why the key gate is the better whack-a-mole*, which is the part I had backwards:
+the two rules fail in opposite directions. A key the list misses leaves a field
+exactly as exposed as it is today. A value rule that fires on prose takes away an
+edit someone legitimately wants. Incomplete beats wrong when the wrong direction
+is refusing a person's own résumé text.
+
+*The option that needs no names* is parsing the template, and it was rejected for
+cause: it needs Typst evaluated rather than grepped (basic-resume's value reaches
+`link()` through `contact-item(link-type: "https://")`, so a syntactic answer is
+wrong in both directions), the package may be absent at edit time, and it would
+make an edit's acceptance depend on a package download.
+
+*Declined:* adding the whole-value check as a union alongside the key gate. One
+space bypasses it, so it buys almost no depth while reopening the prose
+false-refusal surface that is the whole reason the value rule lost.
 
 **Cost if wrong:** an executable url in a résumé PDF a person sends to an
-employer. Low likelihood, and the author could already write it by hand in the
-Typst tab, so the exposure this adds is to the *reader* of a shared document, not
-to the author.
+employer. The author could already write it by hand in the Typst tab, so what
+this adds is exposure for the *reader* of a shared document — but the PoC
+compiled, and the PDF carries `/URI (javascript:alert(document.cookie))`, so the
+chain is real rather than theoretical.
 
 ### 58. Finding 8 named a field that was never built — the labels fix is frontend-only
 
@@ -328,3 +383,30 @@ code has to rediscover it. Added to `apps/frontend/package.json`:
 
 **Cost if wrong:** none — it adds a script and changes no build input. The cost of
 leaving it was 503 tests that only someone who already knew the trick could run.
+
+### 60. Production runs ~95 Typst packages that no commit pins — recorded, not fixed
+
+Found while verifying ruling 57 and worth separating from it, because it is not
+about editing at all.
+
+`.env.production:16` sets
+`TYPST_PACKAGE_PATH=/home/ruby0322/offerfy/apps/backend/typst/packages`, which
+`starter.resolve_package_path()` reads before falling back to the local tree.
+That directory is **gitignored** (`.gitignore:36`,
+`apps/backend/typst/packages/preview/*`), and `git ls-files` returns zero files
+for acorn-resume. So the ~95 packages production compiles against exist only on
+that host: no commit pins their versions, a clean clone cannot reproduce what
+prod renders, and a worktree sees only `basic-resume` and `scienceicons` — which
+is why this session could not find acorn-resume's source and had to be shown it.
+
+Consequences that bite in order of likelihood: a template's behaviour can change
+under the product with no diff to review; a hazard that lives in a package (like
+ruling 57's raw `link()`) is not reproducible from the repository; and a host
+rebuild loses the template set unless someone remembers to re-fetch it.
+
+Not fixed here — vendoring or lock-pinning ~95 packages is its own piece of work
+with its own licence questions, and it has nothing to do with the fields tab.
+
+**Cost if wrong:** nothing, since this ruling changes no code. The cost of not
+recording it is the next person concluding, as this session did, that a template
+hazard is unreachable because the package is not in the tree they can see.
