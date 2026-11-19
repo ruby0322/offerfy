@@ -13,6 +13,7 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import RichLine from "@/components/editor/RichLine";
 import { ApiError, getProjection, type EditResult, type IntentBody } from "@/lib/api";
+import { argLabelId } from "@/lib/arg-labels";
 import { shellNeedsResync } from "@/lib/field-ownership";
 import { armedUnitIds } from "@/lib/preview-highlight";
 import type { Mark } from "@/lib/rich-marks";
@@ -134,6 +135,7 @@ function lookup(
 function ArgRow({
   unit,
   hintId,
+  label,
   readOnlyReason,
   notice,
   epoch,
@@ -143,6 +145,8 @@ function ArgRow({
 }: {
   unit: ProjectionUnit;
   hintId: string;
+  /** What the field is called: the translated label, or the raw key when it has none. */
+  label: string;
   readOnlyReason: string | null;
   notice?: string;
   /** Changes whenever the unit set does; see the effect below. */
@@ -239,7 +243,7 @@ function ArgRow({
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       <label htmlFor={inputId} className="min-w-20 shrink-0 text-xs text-muted-foreground">
-        {unit.key}
+        {label}
       </label>
       <input
         id={inputId}
@@ -761,6 +765,15 @@ export default function StructuredPanel({
     [t],
   );
 
+  /** What an argument's row is called: its translated label, else the raw Typst key. */
+  const argLabel = useCallback(
+    (unit: ProjectionUnit): string => {
+      const id = argLabelId(unit.key);
+      return id ? t(id) : (unit.key ?? "");
+    },
+    [t],
+  );
+
   const line = useCallback(
     (unit: ProjectionUnit) => {
       const view = unitView(unit);
@@ -908,6 +921,7 @@ export default function StructuredPanel({
                   key={unit.id}
                   unit={unit}
                   hintId={hintId}
+                  label={argLabel(unit)}
                   readOnlyReason={readOnlyReason(unit)}
                   notice={unitNotices[unit.id]}
                   epoch={epoch}
@@ -945,6 +959,7 @@ export default function StructuredPanel({
                     key={unit.id}
                     unit={unit}
                     hintId={styleHintId}
+                    label={argLabel(unit)}
                     readOnlyReason={readOnlyReason(unit)}
                     notice={unitNotices[unit.id]}
                     epoch={epoch}
@@ -986,6 +1001,7 @@ export default function StructuredPanel({
       );
     },
     [
+      argLabel,
       blockIntent,
       commitArg,
       epoch,
