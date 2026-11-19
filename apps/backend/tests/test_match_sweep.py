@@ -204,6 +204,45 @@ def test_like_wildcards_in_a_token_are_literal(db_session):
     assert count_matches(db_session, _pref(target_locations="|north_america|")) == 0
 
 
+# The next five are an equivalence harness for the prefilter's token match: they
+# were written green against the LIKE implementation and must stay green across
+# the swap to `lower(col).in_(tokens)`. Each pairs the negative with a positive
+# control, so a matcher that matches nothing cannot pass.
+def test_a_token_does_not_match_a_longer_value(db_session):
+    _posting(db_session, country="TW")
+    _posting(db_session, country="TWX")
+    pref = _pref(target_locations="|tw|")
+    assert count_matches(db_session, pref) == 1
+
+
+def test_a_token_does_not_match_a_substring(db_session):
+    _posting(db_session, function="ml")
+    _posting(db_session, function="html")
+    assert count_matches(db_session, _pref(target_functions="|ml|")) == 1
+
+
+def test_an_underscore_in_a_region_is_not_a_wildcard(db_session):
+    _posting(db_session, country="US", region="north_america")
+    _posting(db_session, country="US", region="northXamerica")
+    assert count_matches(db_session, _pref(target_locations="|north_america|")) == 1
+
+
+def test_a_percent_in_a_token_is_not_a_wildcard(db_session):
+    _posting(db_session, country="US", region="50%off")
+    _posting(db_session, country="US", region="50xyzoff")
+    _posting(db_session, country="US", region="anything")
+    assert count_matches(db_session, _pref(target_locations="|50%off|")) == 1
+    assert count_matches(db_session, _pref(target_locations="|%|")) == 0
+
+
+def test_matching_is_case_insensitive(db_session):
+    _posting(db_session, country="TW")
+    _posting(db_session, function="Backend", country="US")
+    assert count_matches(db_session, _pref(target_locations="|tw|")) == 1
+    assert count_matches(db_session, _pref(target_functions="|backend|",
+                                           target_locations="|us|")) == 1
+
+
 def test_whitespace_only_seniority_is_no_constraint(db_session):
     _posting(db_session)
     assert count_matches(db_session, _pref(target_seniority="  ",
@@ -412,3 +451,45 @@ def test_a_zero_limit_asks_no_question_at_all(db_session):
     me = _person(db_session, "preview-zero")
     _posting(db_session)
     assert match_preview(db_session, _mine(me.id), 0) == []
+
+
+def test_arrivals_do_not_drag_the_descriptions_along(db_session):
+    """Both branches load only the columns an arrival projects.
+
+    Job.description_text and .description_html are Text NOT NULL and are not
+    deferred on the model, so whole-entity branches moved up to a hundred
+    descriptions per dashboard load -- four pages call that endpoint, against
+    a 15-slot pool with synchronous handlers.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    from app.jobs.match_sweep import arrival_rows
+    from app.models import JobScore
+    from app.routers.dashboard import arrival_out
+
+    me = _person(db_session, "arr-loadonly")
+    scored_job, waiting_job = _posting(db_session), _posting(db_session)
+    for job in (scored_job, waiting_job):
+        job.description_text = "x" * 5000
+        job.description_html = "<p>" + "x" * 5000 + "</p>"
+    db_session.add(
+        JobScore(
+            user_id=me.id, job_id=scored_job.id, facts_input_hash="a" * 64,
+            description_hash="b" * 64, model="m", outcome="scored",
+            tier="Strong fit", fit_score=0.8,
+            scored_at=freshness_cutoff(), created_at=freshness_cutoff(),
+        )
+    )
+    db_session.commit()
+    db_session.expire_all()
+
+    rows = arrival_rows(db_session, me.id, _mine(me.id), None, 50)
+    assert {str(job.id) for job, _ in rows} == {scored_job.id, waiting_job.id}
+    for job, score in rows:
+        unloaded = sa_inspect(job).unloaded
+        assert "description_text" in unloaded, "the description must stay in Postgres"
+        assert "description_html" in unloaded
+        # And every column the projection reads is already in hand, so the
+        # saving is not paid back one lazy load at a time.
+        arrival_out(job, score)
+        assert sa_inspect(job).unloaded >= {"description_text", "description_html"}

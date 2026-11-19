@@ -3,9 +3,19 @@
 Composition only: every number comes from a reader that already exists and is
 projected by the same function the single-purpose route uses. Nothing here
 calls a model or rebuilds resume facts; a page visit must not spend someone's
-credits. The one write a GET makes is stamping the digest's opened_at, once:
-the digest build's eligibility gate reads it, so without the stamp nobody ever
-counts as engaged and the digest stops being built for everyone.
+credits. The one write a GET makes is the digest's opened_at, once: the digest
+build's eligibility gate reads it, so without the stamp nobody ever counts as
+engaged and the digest stops being built for everyone.
+
+**This GET does not move the "last looked at matches" marker, and must not.**
+Four pages call it -- the overview, Applications, Matches and Profile -- and
+only the overview renders `arrivals`. A GET that stamped would let someone
+check an application status, close the window, and then read "nothing new
+since you last looked" above fifteen unseen roles. The marker is still the
+server's number, measured from users.matches_seen_at; what moved is who says
+when to advance it. The page that showed the arrivals says so, once, through
+POST /v1/me/matches/seen (routers/matches.py). The client supplies no `since`
+-- that was refused by the design and stays refused -- only "I showed them".
 """
 
 from __future__ import annotations
@@ -15,15 +25,15 @@ from dataclasses import asdict
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import require_user
-from app.jobs.match_sweep import count_matches, match_preview
-from app.models import User
+from app.jobs.match_sweep import arrival_rows, count_matches, match_preview
+from app.models import Job, JobScore, User
 from app.routers.applications import application_out
-from app.services.jobs.search import list_item
+from app.services.jobs.search import iso, list_item
 from app.routers.preferences import preference_out
 from app.models import Digest
 from app.schemas_jobs import (
@@ -31,6 +41,7 @@ from app.schemas_jobs import (
     DigestItemOut,
     DigestOut,
     EmployerViewsOut,
+    MatchArrivalOut,
     ResumeHealthOut,
 )
 from app.services.disclosure import disclosure_count, last_disclosed_at
@@ -56,6 +67,11 @@ router = APIRouter()
 # needs more than a card's worth. Still a cap on a preview rather than a
 # page size -- "see all" goes to /jobs, which is where paging lives.
 MATCH_PREVIEW = 12
+
+# Cap on arrivals. A first visit has no window, so without a cap a broad
+# preference would ship the whole match set on a GET that fires every page
+# load. Newest first, so the cap drops the oldest, not the freshest.
+ARRIVALS_CAP = 50
 
 
 def digest_out(digest: Digest) -> DigestOut:
@@ -85,37 +101,57 @@ def digest_out(digest: Digest) -> DigestOut:
     )
 
 
-def _since(raw: str | None) -> datetime | None:
-    """Parse the caller's "what is new to me" marker, or None.
+def _window_start(marker: datetime | None, now: datetime) -> datetime | None:
+    """The lower edge of "since you last looked", or None for a first visit.
 
-    A bad value is treated as absent rather than as an error: the line it
-    feeds is a nicety, and refusing the whole dashboard over a malformed
-    timestamp from a stale tab would be the wrong trade. A naive value is read
-    as UTC so a comparison against first_seen_at cannot raise.
+    A marker ahead of `now` (clock skew between workers, a replayed request)
+    is clamped to `now`. Read literally it would be a window starting in the
+    future, which is empty anyway but only by accident; the clamp makes the
+    meaning explicit -- "they looked just now" -- and the stamp that follows
+    repairs the stored value instead of preserving the skew. It is never
+    widened into "everything": that is what NULL means, and only NULL.
+    A naive value (SQLite in tests) is read as UTC.
     """
-    if not raw:
+    if marker is None:
         return None
-    try:
-        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    if marker.tzinfo is None:
+        marker = marker.replace(tzinfo=timezone.utc)
+    return min(marker, now)
+
+
+def arrival_out(job: Job, score: JobScore | None) -> MatchArrivalOut:
+    """Project one arrival; score is None for a posting not yet scored."""
+    return MatchArrivalOut(
+        job_id=job.id,
+        job_title=job.title,
+        company=job.company,
+        apply_url=job.apply_url,
+        job_is_active=job.is_active,
+        location=job.location,
+        tier=score.tier if score else None,
+        fit_score=score.fit_score if score else None,
+        reason=score.reason if score else None,
+        gap=score.gap if score else None,
+        scored_at=iso(score.scored_at) if score else None,
+    )
 
 
 @router.get("/v1/dashboard", response_model=DashboardOut)
 def get_dashboard(
-    since: str | None = Query(
-        default=None,
-        description=(
-            "ISO timestamp of the caller's previous visit. When given, the "
-            "response carries new_match_count: postings first seen after it."
-        ),
-    ),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
     pref = current_or_seeded(db, user)
-    window = _since(since)
+    now = datetime.now(timezone.utc)
+    # The marker as the last page that SHOWED arrivals left it. Nothing in this
+    # handler advances it; see the module docstring.
+    previous = user.matches_seen_at
+    first_visit = previous is None
+    window = _window_start(previous, now)
+    new_arrivals = [
+        arrival_out(job, score)
+        for job, score in arrival_rows(db, user.id, pref, window, ARRIVALS_CAP)
+    ]
     last = last_disclosed_at(db, user)
     digest = digest_service.latest_for_user(db, user=user)
     if digest is not None:
@@ -138,12 +174,11 @@ def get_dashboard(
             )
             db.rollback()
             digest = digest_service.latest_for_user(db, user=user)
-    return DashboardOut(
+    out = DashboardOut(
         preference=preference_out(db, user, pref),
         match_count=count_matches(db, pref),
-        new_match_count=(
-            None if window is None else count_matches(db, pref, since=window)
-        ),
+        arrivals=new_arrivals,
+        first_visit=first_visit,
         matches=[list_item(row) for row in match_preview(db, pref, MATCH_PREVIEW)],
         applications=[
             application_out(row) for row in pipeline_service.pipeline(db, user=user)
@@ -155,3 +190,4 @@ def get_dashboard(
         ),
         digest=digest_out(digest) if digest is not None else None,
     )
+    return out

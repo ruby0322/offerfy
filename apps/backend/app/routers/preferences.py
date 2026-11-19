@@ -26,7 +26,9 @@ def _pipe(values: list[str]) -> str:
     return f"|{'|'.join(values)}|" if values else ""
 
 
-def preference_out(db: Session, user: User, row: JobPreference) -> JobPreferenceOut:
+def preference_out(
+    db: Session, user: User, row: JobPreference, first_save: bool = False
+) -> JobPreferenceOut:
     return JobPreferenceOut(
         target_functions=_split(row.target_functions),
         target_locations=_split(row.target_locations),
@@ -38,6 +40,7 @@ def preference_out(db: Session, user: User, row: JobPreference) -> JobPreference
         # parses it.
         updated_at=row.updated_at.isoformat() if row.updated_at else None,
         facts_state=facts_state(db, user),
+        first_save=first_save,
     )
 
 
@@ -62,7 +65,9 @@ def put_job_preferences(
     # Mutate the loaded row in place: updated_at's onupdate fires only on an
     # UPDATE, so delete-and-reinsert would reset it to creation time.
     row = current_or_seeded(db, user)
-    if row not in db:
+    # No row before this write: the client starts the first run on this flag.
+    first_save = row not in db
+    if first_save:
         db.add(row)
     row.target_functions = _pipe(body.target_functions)
     row.target_locations = _pipe(body.target_locations)
@@ -71,7 +76,7 @@ def put_job_preferences(
     row.activity = body.activity
     db.commit()
     db.refresh(row)
-    return preference_out(db, user, row)
+    return preference_out(db, user, row, first_save=first_save)
 
 
 @router.get("/v1/me/matches/count")

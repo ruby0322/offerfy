@@ -190,12 +190,24 @@ class Tier:
     #
     # The profile cap below is NOT that limit: it predates this work as
     # routers/talent_me.REFRESH_LIMIT_PER_HOUR, guards a different endpoint, and
-    # was only moved here. Only a matching-tier person can have a talent
-    # profile at all:
+    # was only moved here.
+    #
+    # It was once true that only a matching-tier person could reach it --
     # services.profile.build_profile refuses without a live
-    # talent_introduction grant, and withdrawing deletes the profile. So the
-    # guest and registered values are unreachable by construction, and 0 says
-    # that rather than pretending to a limit nobody can hit.
+    # talent_introduction grant -- so the guest and registered values were 0 to
+    # say "unreachable" rather than to pretend to a limit nobody could hit.
+    # That stopped being true when matching started reading the same
+    # extraction: routers/preferences.refresh_resume_facts meters on this very
+    # purpose and needs NO grant, because the facts are the person's own (see
+    # services/resume_facts.py's docstring). A 0 here therefore stopped meaning
+    # "unreachable" and started meaning "refused", every time, for every
+    # account that had not volunteered to be shown to employers -- and since
+    # the preference seed is computed from those facts, that one zero was the
+    # whole reason a new account saw no matches. `registered` is now a real
+    # cap, not a closed door.
+    #
+    # GUEST stays 0 and is still unreachable by construction: both endpoints
+    # that spend on this purpose require a signed-in user.
     profile_builds_per_hour: int
 
 
@@ -218,8 +230,14 @@ TIERS: dict[str, Tier] = {
     # page, or tailor for one role. That is a legal constraint as much as a
     # product one: the matching bonus below is only lawfully a thank-you if the
     # service is genuinely usable without it. See the spec.
+    # 3 facts builds an hour. Lower than matching's 5 because this tier's
+    # weekly budget is a fifth of it, and the weekly budget is the real guard:
+    # an extraction is one call, and three is enough to cover the sitting this
+    # is actually for -- upload a resume, read what matching made of it, fix
+    # the thing it misread, build again. What it stops is a stuck client
+    # spending the week's 20 credits in a minute.
     REGISTERED: Tier(
-        REGISTERED, credits=20, turns=None, profile_builds_per_hour=0,
+        REGISTERED, credits=20, turns=None, profile_builds_per_hour=3,
     ),
     # 5/hour is what routers/talent_me.py enforced before this moved here.
     MATCHING: Tier(

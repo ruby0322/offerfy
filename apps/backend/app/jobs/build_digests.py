@@ -77,7 +77,7 @@ from app.services.jobs.digest import (
     classify,
 )
 from app.services.jobs.reasons import write_reasons
-from app.services.jobs.score import score_candidates
+from app.services.jobs.score_cache import cached_scores, models_for
 from app.services.metering import metered, system_guard, window_totals
 from app.services.profile import record_build_spend
 from app.services.resume_facts import (
@@ -372,6 +372,12 @@ async def build_for_user(
         db.commit()
     except Exception:
         # One transaction per user: nothing half-written survives a crash.
+        # This now also discards any `job_scores` rows `_judge` bought and
+        # flushed, so a crash after scoring pays for those judgements again
+        # next pass. Accepted on purpose: one transaction per user is what
+        # stops a half-scored digest from existing, and a rare duplicate
+        # purchase is cheaper than a wrong digest. Committing the scores
+        # separately would bring back the ambient commit the cache removed.
         db.rollback()
         raise
     db.refresh(digest)
@@ -381,24 +387,47 @@ async def build_for_user(
 async def _judge(db, *, user, facts, pool, period_start, limit):
     """Score the pool and write prose for what will be shown.
 
-    Returns (items by track, model, status). Reads the session, never writes
-    to it, so the caller's transaction is still empty when this returns and a
-    provider fault leaves nothing to roll back.
+    Returns (items by track, model, status). Unlike before the score cache, this
+    WRITES to the session: `cached_scores` flushes `job_scores` rows for whatever
+    it had to buy, so the caller's transaction is no longer empty when this
+    returns. That is deliberate, and it has a price the caller pays: see the
+    rollback in `build_for_user`.
     """
     if not pool:
         # Nothing matched, so nothing is asked of a provider and nothing is
         # paid for. A model name would be a claim that one was consulted.
         return {track: [] for track in TRACKS}, "", "empty"
 
-    run = await score_candidates(db, user=user, facts=facts, jobs=pool)
-    if run.error is not None:
+    # The pool is already bounded by CANDIDATE_CAP, so the buy cap is the pool
+    # itself: the digest never asks for less than it is going to show from.
+    run = await cached_scores(db, user=user, facts=facts, jobs=pool, cap=len(pool))
+    if not run.scored:
         # Row one of the spec's failure table: the prefilter order is the whole
         # answer, with no tiers, no scores and no prose. Silently reordering by
         # a worse signal while still showing confident tiers is the thing the
         # spec forbids, so the judgement columns stay NULL and the card says
         # the digest is degraded.
-        logger.warning("digest degraded: user=%s %s", user.id, run.error)
+        #
+        # This fires only when there is NOTHING to rank, not whenever
+        # `run.error` is set. It used to be the latter, which was right while a
+        # fault meant nothing had been judged. With a cache the common outage
+        # is 29 real judgements plus one new posting that could not be bought,
+        # and answering that with 30 postings in prefilter order and no scores
+        # would discard 29 judgements in hand -- strictly less honest than
+        # ranking them. The `strong_fit` cap already means a digest shows fewer
+        # postings than its pool holds, so a missing candidate is not a visible
+        # gap. `degraded` therefore means "nothing was scorable"; rows written
+        # before this meant "we could not rank these", which still holds.
+        # A refusal is not an error, and an all-refused pool lands here too.
+        logger.warning(
+            "digest degraded: user=%s error=%s refused=%d",
+            user.id, run.error or "none (nothing scorable)", len(run.refused),
+        )
         return {UNRANKED_TRACK: list(pool[:limit])}, run.model, "degraded"
+    if run.error is not None:
+        logger.warning(
+            "digest ranks a partial pool: user=%s %s", user.id, run.error
+        )
 
     tracks = classify(
         run.scored,
@@ -411,6 +440,12 @@ async def _judge(db, *, user, facts, pool, period_start, limit):
         # show, not about why: `candidate_count` is how a reader tells a thin
         # week from an unmatched preference.
         return {track: [] for track in TRACKS}, run.model, "empty"
+
+    # The model behind what the person will SEE, not behind the pool: a row
+    # scored by another model that fell below the tier cut or past the track cap
+    # is not on the card, and recording "mixed" for it would be a lie in the
+    # other direction. `run.model` is pool-scoped, so it is not used here.
+    model = models_for(db, user=user, job_ids=list(shown))
 
     by_id = {job.id: job for job in pool}
     # Prose is bought only for the items that will be shown: the call is priced
@@ -428,7 +463,7 @@ async def _judge(db, *, user, facts, pool, period_start, limit):
     written = {p.job_id: p for p in prose.prose}
     return (
         {track: [(s, written.get(s.job_id)) for s in items] for track, items in tracks.items()},
-        run.model,
+        model,
         "full",
     )
 

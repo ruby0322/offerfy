@@ -13,6 +13,7 @@ from app.routers import (
     dashboard,
     health,
     jobs,
+    matches,
     memory,
     models,
     preferences,
@@ -51,6 +52,7 @@ def create_app() -> FastAPI:
     application.include_router(usage.router)
     application.include_router(models.router)
     application.include_router(preferences.router)
+    application.include_router(matches.router)
     application.include_router(applications.router)
     application.include_router(dashboard.router)
     return application

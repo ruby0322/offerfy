@@ -1,10 +1,11 @@
 """The scheduled digest build: who it runs for, what it writes, where it stops.
 
 No test reaches a live provider. The two provider seams the build consumes --
-`score_candidates` and `write_reasons` -- are monkeypatched on the build module
-itself, which is also the point: they are the only two places this job spends
-money, and a test that had to stub httpx to reach them would be testing the
-wrong module. The two tests that do exercise the real scoring path stub
+`score_candidates` and `write_reasons` -- are monkeypatched where the build
+reaches them (`score_candidates` inside `score_cache`, which the build now reads
+through, and `write_reasons` on the build module). They are the only two places
+this job spends money, and a test that had to stub httpx to reach them would be
+testing the wrong module. The two tests that do exercise the real scoring path stub
 `httpx.AsyncClient` the way `test_jobs_score.py` does.
 
 The clock is passed in everywhere (`now=`), never read: eligibility reads the
@@ -47,6 +48,7 @@ from app.services.jobs.digest import (
     TRACKS,
     UNRANKED_TRACK,
 )
+from app.services.jobs import score_cache
 from app.services.jobs.reasons import Prose, ProseRun
 from app.services.jobs.score import ScoreRun, Scored
 from app.services.jobs.store import freshness_cutoff
@@ -226,7 +228,7 @@ class Seams:
             ]
             return run
 
-        monkeypatch.setattr(build_digests, "score_candidates", fake_score)
+        monkeypatch.setattr(score_cache, "score_candidates", fake_score)
         monkeypatch.setattr(build_digests, "write_reasons", fake_prose)
 
 
@@ -1023,3 +1025,103 @@ def test_main_all_users_bypasses_the_gate(db_session, monkeypatch):
     assert main(["--period-start", PERIOD_ARG, "--all-users"]) == 0
     db_session.expire_all()
     assert db_session.query(Digest).filter(Digest.period_start == PERIOD).count() == 1
+
+
+# --------------------------------------------------------------------------
+# the digest reads the score cache, and `degraded` means "nothing was scorable"
+# --------------------------------------------------------------------------
+
+
+def _cache(db, user, job, *, model="gpt-6-luna", tier="Strong fit"):
+    """A fresh cache row for this pair, written the way production writes one."""
+    facts = db.query(ResumeFacts).filter_by(user_id=user.id).one()
+    score_cache.write_back(
+        db, user=user, facts=facts, job=job, model=model, scored=_scored(job.id, tier)
+    )
+    db.commit()
+
+
+async def test_a_digest_built_from_cached_scores_calls_no_provider(db_session, monkeypatch):
+    seams = Seams(monkeypatch)
+    user = _ready(db_session)
+    jobs = [_posting(db_session) for _ in range(3)]
+    for job in jobs:
+        _cache(db_session, user, job)
+    built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    assert built.status == "full" and len(built.items) == 3
+    assert seams.scored_jobs == []
+
+
+async def test_one_unscored_miss_among_cached_scores_still_ranks(db_session, monkeypatch):
+    """29 judgements in hand and one posting that could not be bought: rank the 29."""
+    seams = Seams(monkeypatch, score_error="llm_unreachable")
+    user = _ready(db_session)
+    cached = [_posting(db_session) for _ in range(3)]
+    for job in cached:
+        _cache(db_session, user, job)
+    miss = _posting(db_session)
+    built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    assert seams.scored_jobs == [[miss.id]]  # the buy was attempted, and failed
+    assert built.status == "full"
+    assert built.candidate_count == 4
+    shown = {i.job_id for i in built.items}
+    assert shown == {j.id for j in cached}
+    assert all(i.tier is not None and i.track != UNRANKED_TRACK for i in built.items)
+
+
+async def test_a_digest_with_no_scores_at_all_is_degraded(db_session, monkeypatch):
+    Seams(monkeypatch, score_error="llm_unreachable")
+    user = _ready(db_session)
+    for _ in range(2):
+        _posting(db_session)
+    built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    assert built.status == "degraded"
+    assert {i.track for i in built.items} == {UNRANKED_TRACK}
+
+
+async def test_model_is_mixed_when_cached_scores_disagree(db_session, monkeypatch):
+    Seams(monkeypatch)
+    user = _ready(db_session)
+    _cache(db_session, user, _posting(db_session), model="gpt-6-luna")
+    _cache(db_session, user, _posting(db_session), model="gpt-6-sol")
+    built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    assert built.status == "full" and built.model == "mixed"
+
+
+async def test_model_is_the_single_model_when_they_agree(db_session, monkeypatch):
+    Seams(monkeypatch)
+    user = _ready(db_session)
+    _cache(db_session, user, _posting(db_session), model="gpt-6-sol")
+    _cache(db_session, user, _posting(db_session), model="gpt-6-sol")
+    built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    assert built.model == "gpt-6-sol"
+
+
+async def test_model_is_scoped_to_the_shown_items_not_the_pool(db_session, monkeypatch):
+    """A differently-modelled row below the tier cut is not on the card."""
+    Seams(monkeypatch)
+    user = _ready(db_session)
+    _cache(db_session, user, _posting(db_session), model="gpt-6-sol")
+    _cache(db_session, user, _posting(db_session), model="gpt-6-sol")
+    cut = _posting(db_session)
+    _cache(db_session, user, cut, model="gpt-6-luna", tier="Not a fit")
+    built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    assert built.status == "full" and len(built.items) == 2
+    assert cut.id not in {i.job_id for i in built.items}
+    assert built.model == "gpt-6-sol"
+
+
+async def test_a_refused_row_from_another_model_does_not_make_the_digest_mixed(
+    db_session, monkeypatch
+):
+    Seams(monkeypatch)
+    user = _ready(db_session)
+    _cache(db_session, user, _posting(db_session), model="gpt-6-sol")
+    facts = db_session.query(ResumeFacts).filter_by(user_id=user.id).one()
+    score_cache.write_back(
+        db_session, user=user, facts=facts, job=_posting(db_session),
+        model="gpt-6-luna", refused=True,
+    )
+    db_session.commit()
+    built = await build_for_user(db_session, user=user, period_start=PERIOD, now=NOW)
+    assert built.model == "gpt-6-sol"

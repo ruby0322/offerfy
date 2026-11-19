@@ -3,9 +3,16 @@ from datetime import timedelta
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from app.models import GuestSession, Resume, ResumeImport, ResumeImportStep, _utcnow
+from app.models import (
+    GuestSession,
+    Resume,
+    ResumeImport,
+    ResumeImportStep,
+    ResumeRevision,
+    _utcnow,
+)
 from app.services import import_run
-from app.services.revisions import source_hash
+from app.services.revisions import build_share_state, source_hash
 from app.services.import_run import (
     RENDER_CHECK_KEY,
     ImportAlreadyRunning,
@@ -459,3 +466,65 @@ def test_advance_with_the_reserved_key_does_not_write_into_it(db_session, resume
     row = _step_by_key(db_session, run, RENDER_CHECK_KEY)
     assert row is not None
     assert row.status == "active"
+
+
+# --- a finished import is a resume matching can read -------------------------
+
+
+def test_finish_publishes_the_resume_so_matching_can_read_it(db_session, resume):
+    """The gate that lost everyone who arrived through the hero's own CTA.
+
+    Matching reads `resume_facts.default_source`, which only considers masters
+    with a `published_revision_id` whose revision carries source. An imported
+    resume had none: publishing was a button in the editor's settings panel,
+    and `/v1/auth/claim` does not publish either, so the user who uploaded a
+    real resume and signed in arrived with a document matching could not read
+    and a dashboard telling them to go and press Save.
+
+    A successful import is the one moment we know the document holds real
+    content, so it is where the draft gets pinned.
+    """
+    run = start_run(db_session, resume)
+    assert resume.published_revision_id is None
+
+    finish(db_session, run)
+
+    db_session.refresh(resume)
+    assert resume.published_revision_id is not None
+    published = db_session.get(ResumeRevision, resume.published_revision_id)
+    assert published.typst_source == resume.typst_source
+
+
+def test_finish_publishes_without_making_the_resume_public(db_session, resume):
+    """What makes pinning safe to do unasked.
+
+    `public` is a ResumeShare row; `published_revision_id` is which revision
+    matching and the share link read. Pinning one has never implied the other,
+    and this is the assertion that keeps it that way -- if publishing ever
+    starts creating a share, this change has silently published people's
+    resumes to the web.
+    """
+    run = start_run(db_session, resume)
+
+    finish(db_session, run)
+
+    db_session.refresh(resume)
+    assert resume.published_revision_id is not None
+    assert build_share_state(db_session, resume).public is False
+
+
+def test_finish_on_a_superseded_run_publishes_nothing(db_session, resume):
+    """The no-op guard covers the pin too.
+
+    A superseded runner reaching its last event must not write `done`, and for
+    the same reason it must not pin a draft that the newer run owns and is
+    still rewriting.
+    """
+    old, _new = _supersede(db_session, resume)
+    db_session.refresh(resume)
+    assert resume.published_revision_id is None
+
+    finish(db_session, old)
+
+    db_session.refresh(resume)
+    assert resume.published_revision_id is None

@@ -48,14 +48,14 @@ built: see `_exclusions` for why neither digest track wants it.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import json
 
-from sqlalchemy import false, func, nulls_last, or_, select
-from sqlalchemy.orm import Query, Session
+from sqlalchemy import and_, exists, false, func, nulls_last, or_, select
+from sqlalchemy.orm import Query, Session, load_only
 
-from app.models import Application, Job, JobFacets, JobPreference
+from app.models import Application, Job, JobFacets, JobPreference, JobScore
 from app.services.jobs.enrich import (
     default_taxonomy,
     taxonomy_path,
@@ -181,24 +181,16 @@ def _tokens(delimited: str | None) -> list[str]:
     return [t for t in (delimited or "").lower().split("|") if t]
 
 
-def _escape(t: str) -> str:
-    return t.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-
-
 def _any_token(column, tokens: list[str]):
-    # Whole-token match against the pipe-delimited value, never a substring:
-    # '|tw|' must not match 'TWX' and '|ml|' must not match 'html'.
-    #
-    # DEFERRED OPTIMISATION: every column this is called with (JobFacets
-    # .function, .country, .region, .city) holds a SINGLE token, not a pipe
-    # list, so `lower(col).in_(tokens)` would be equivalent, index-usable and
-    # free of the escaping below. It is left as LIKE because the pipe idiom is
-    # the branch-wide convention and the cost is invisible at one query per
-    # page view; revisit when a later slice runs the prefilter once per active
-    # user on a schedule, which is where a sequential scan starts to matter.
-    padded = "|" + func.lower(column) + "|"
-    # _ and % are LIKE wildcards ('north_america' is a real region): escape.
-    return or_(*[padded.like(f"%|{_escape(t)}|%", escape="\\") for t in tokens])
+    # Whole-token match, never a substring: 'tw' must not match 'TWX' and 'ml'
+    # must not match 'html'. Every column this is called with (JobFacets
+    # .function, .country, .region, .city) holds a SINGLE token rather than a
+    # pipe list, so an IN on lower(col) asks the same question the pipe-padded
+    # LIKE did, without the wildcard escaping or the string concatenation. It is
+    # NOT index-usable as written: the schema indexes only the raw columns, and
+    # a plain btree cannot serve lower(col). A functional index on lower(col)
+    # is what would make it so, and is where the remaining win is.
+    return func.lower(column).in_(tokens)
 
 
 def _exclusions(query: Query, pref: JobPreference) -> Query:
@@ -289,26 +281,13 @@ def prefilter_query(db: Session, pref: JobPreference) -> Query:
     return _exclusions(q, pref)
 
 
-def count_matches(
-    db: Session, pref: JobPreference, *, since: datetime | None = None
-) -> int:
-    """How many live postings this preference matches.
-
-    `since` narrows to postings the catalogue first saw after that moment, for
-    the dashboard's "new since your last visit" line. It keys on
-    `first_seen_at` rather than `posted_at` deliberately: most of Workday
-    publishes "Posted Yesterday" as a phrase and carries no date at all, so a
-    posted_at window would silently drop a whole provider. first_seen_at is
-    when *we* learned of it, which is also the honest reading of "new to you".
-    """
+def count_matches(db: Session, pref: JobPreference) -> int:
+    """How many live postings this preference matches."""
     # Harmlessly redundant since the guard moved into prefilter_query; kept so
     # the cheap answer costs no round trip.
     if constrains_nothing(pref):
         return 0
-    q = prefilter_query(db, pref)
-    if since is not None:
-        q = q.filter(Job.first_seen_at > since)
-    return q.count()
+    return prefilter_query(db, pref).count()
 
 
 def match_preview(db: Session, pref: JobPreference, limit: int) -> list[Job]:
@@ -329,3 +308,111 @@ def match_preview(db: Session, pref: JobPreference, limit: int) -> list[Job]:
         .limit(limit)
         .all()
     )
+
+
+# The only Job columns an arrival needs: the six routers.dashboard.arrival_out
+# projects, plus first_seen_at, which is the unscored branch's window and the
+# recency key the two branches are merged on.
+#
+# Stated as a load_only because both branches below are .limit(50) over whole
+# Job entities, and Job.description_text and Job.description_html are both
+# `Text NOT NULL` with no deferral on the model. Without this a broad-preference
+# reader moved up to a hundred full job descriptions out of Postgres on every
+# dashboard load -- on an endpoint four pages call, in an API with a 15-slot
+# pool and synchronous handlers, a combination that has taken /healthz down in
+# this project before. A column added to arrival_out has to be added here too;
+# reading one that is not listed costs a query per row.
+ARRIVAL_COLUMNS = (
+    Job.id,
+    Job.title,
+    Job.company,
+    Job.apply_url,
+    Job.is_active,
+    Job.location,
+    Job.first_seen_at,
+)
+
+
+def arrival_rows(
+    db: Session,
+    user_id: str,
+    pref: JobPreference,
+    since: datetime | None,
+    limit: int,
+) -> list[tuple[Job, JobScore | None]]:
+    """What is new to this person: (posting, score-or-None) pairs, newest first.
+
+    An arrival is one of two things, and they come from different places.
+
+    1. A score row for this person whose created_at is after `since`. No
+       preference filter and no is_active filter: we scored it because it
+       matched at the time, which is a fact about what happened to them, and
+       editing the preference later does not un-happen it. The posting travels
+       as it is now, so one that closed since being scored comes back with
+       is_active False for the page to say so -- the inactive case is not an
+       exception, it is just what the row says.
+
+       created_at, NOT scored_at, and this is load-bearing. scored_at moves on
+       every rescore, and a rescore is the normal consequence of a resume
+       edit: the next sweep pass rebuilds the facts, every facts_input_hash
+       goes stale, and up to 30 pairs are bought again with a fresh
+       scored_at. Windowed on that, the dashboard announced "15 new roles for
+       you since you last looked" above fifteen roles the reader had already
+       seen -- the design's first anti-goal, and the opposite of section 5's
+       "a posting is new to the reader exactly once". created_at is written
+       once, by score_cache.write_back's insert, so an arrival arrives once.
+       The ordering follows the window for the same reason.
+    2. A posting the CURRENT preference matches (the prefilter, the only place
+       the current preference belongs) that this person has no score row for
+       yet. A broad preference fills in over several sweep passes, so for up to
+       a day the prefilter holds postings job_scores has not reached; hiding
+       them would make match_count disagree with the list under it, and
+       showing them unlabelled would read as "poor match" rather than "not
+       looked at yet". They come back with score None. They are windowed on
+       first_seen_at, so a posting already seen unscored is not "new" again
+       until it has a score (when it becomes kind 1).
+
+    `since=None` is a first visit: everything, up to `limit`.
+    """
+    scored = (
+        db.query(Job, JobScore)
+        .options(load_only(*ARRIVAL_COLUMNS))
+        .join(JobScore, and_(JobScore.job_id == Job.id, JobScore.user_id == user_id))
+    )
+    if since is not None:
+        scored = scored.filter(JobScore.created_at > since)
+    rows: list[tuple[Job, JobScore | None]] = [
+        (job, score)
+        for job, score in scored.order_by(JobScore.created_at.desc(), Job.id.desc())
+        .limit(limit)
+        .all()
+    ]
+
+    matching = prefilter_query(db, pref).with_entities(Job.id).subquery()
+    waiting = db.query(Job).options(load_only(*ARRIVAL_COLUMNS)).filter(
+        Job.id.in_(select(matching.c.id)),
+        ~exists().where(
+            and_(JobScore.job_id == Job.id, JobScore.user_id == user_id)
+        ),
+    )
+    if since is not None:
+        waiting = waiting.filter(Job.first_seen_at > since)
+    rows.extend(
+        (job, None)
+        for job in waiting.order_by(Job.first_seen_at.desc(), Job.id.desc())
+        .limit(limit)
+        .all()
+    )
+
+    def recency(pair):
+        # When it became new to this person: the pair's creation for a scored
+        # row (never its last rescore), the posting's arrival for one with no
+        # row yet. Both are the same measure the two windows above use.
+        job, score = pair
+        return score.created_at if score is not None else job.first_seen_at
+
+    def aware(dt):
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+    rows.sort(key=lambda pair: (aware(recency(pair)), pair[0].id), reverse=True)
+    return rows[:limit]

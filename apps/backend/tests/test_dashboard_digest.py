@@ -153,12 +153,14 @@ def test_marking_opened_is_the_only_write_a_dashboard_GET_makes(client, db_sessi
     _item(db_session, digest, _job(db_session, "w"))
     res, writes = _writes(db_session, lambda: client.get("/v1/dashboard"))
     assert res.status_code == 200
+    # The digest stamp, and nothing else. The arrivals marker is NOT written
+    # here any more: POST /v1/me/matches/seen owns it.
     assert len(writes) == 1, writes
-    stmt = writes[0].lstrip().upper()
-    assert stmt.startswith("UPDATE DIGESTS SET OPENED_AT"), writes
-    # Once opened, a visit is back to writing nothing at all.
+    assert writes[0].lstrip().upper().startswith("UPDATE DIGESTS SET OPENED_AT"), writes
+    # Once opened, a visit writes nothing at all.
     res, writes = _writes(db_session, lambda: client.get("/v1/dashboard"))
-    assert res.status_code == 200 and writes == []
+    assert res.status_code == 200
+    assert writes == [], writes
 
 
 def test_the_query_count_stays_flat_as_items_grow(client, db_session):

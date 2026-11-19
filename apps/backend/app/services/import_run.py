@@ -111,7 +111,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import Resume, ResumeImport, ResumeImportStep, _utcnow
-from app.services.revisions import source_hash
+from app.services.revisions import pin_current_draft, source_hash
 
 logger = logging.getLogger(__name__)
 
@@ -263,11 +263,29 @@ def touch(db: Session, run: ResumeImport) -> None:
 
 
 def finish(db: Session, run: ResumeImport) -> None:
-    """End a run successfully. Any step not yet reached is marked skipped.
+    """End a run successfully, and pin what it produced.
+
+    Any step not yet reached is marked skipped.
 
     A no-op on a run that is no longer `running`, for the same reason `fail`
     is: a superseded runner reaching its last event must not write `done` --
     on itself or, through `resume.import_status`, on the run that replaced it.
+    The pin below sits after that guard for the same reason: the newer run owns
+    the draft and is still rewriting it.
+
+    **Why the pin is here.** Matching reads
+    `resume_facts.default_source`, which only considers masters carrying a
+    `published_revision_id`. Nothing in the upload path ever set one -- the
+    editor's settings panel has the button, and `/v1/auth/claim` does not pin
+    either -- so someone who uploaded a real resume and signed in arrived with
+    a document matching could not read, and a dashboard that told them to go
+    and press Save. A finished import is the one moment we know the document
+    holds the person's own content rather than the starter's placeholders,
+    which is why it is this seam and not `create_resume`.
+
+    Pinning is not publishing to the web: `public` is a `ResumeShare` row and
+    is untouched here (asserted in tests/test_import_run.py). It only decides
+    which revision matching and the share link read.
     """
     if _live_status(db, run) != "running":
         logger.warning(
@@ -288,6 +306,7 @@ def finish(db: Session, run: ResumeImport) -> None:
         step.status = "skipped"
     run.status = "done"
     run.resume.import_status = "done"
+    pin_current_draft(db, run.resume)
     _bump(run)
     db.commit()
 

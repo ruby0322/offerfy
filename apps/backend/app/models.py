@@ -66,6 +66,47 @@ class User(Base):
     # see.
     website: Mapped[str | None] = mapped_column(String(255), nullable=True)
     bio: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # When this person last looked at their matches. Replaces the browser-side
+    # lib/last-visit.ts, which a cleared store or a second device silently
+    # reset. NULL means "has never looked" -- deliberately no server default,
+    # because a creation-time default would erase the difference between a
+    # genuine first visit and a returning person with a window to report on.
+    matches_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # When a first run was last claimed for this person. NULL means never.
+    #
+    # It exists to make the second of two concurrent first runs a no-op rather
+    # than a duplicate. Both tabs see zero job_scores rows, so the "no scores
+    # yet" test cannot separate them; a conditional UPDATE on this column can,
+    # atomically, and across workers -- which a process-local set cannot, since
+    # offerfy-api runs more than one. The design blessed the duplicate on the
+    # grounds that "the loser writes the same answer", which is true on SQLite
+    # and false on Postgres: the loser's first insert blocks on the winner's
+    # unique key until the winner's whole pass commits, and that block is a
+    # synchronous psycopg2 call on the API's event loop.
+    #
+    # Re-claimable after routers.matches.FIRST_RUN_CLAIM_TTL, so a run whose
+    # worker died does not lock the person out for good. See
+    # routers.matches._claim_first_run.
+    first_run_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # When a platform-paid resume-facts build last failed for this person, or
+    # NULL. The score sweep's failure memory: without it, a person whose
+    # extraction persistently fails -- a provider fault, or output that will
+    # not validate -- was retried on every pass, billed each time, and never
+    # scored. The cache's doctrine is that a refusal is remembered so it is not
+    # re-bought, and this path remembered nothing while drawing on the same
+    # ceiling as the weekly digest.
+    #
+    # Written only by score_sweep's own rebuild (system_guard, platform
+    # spend). The asked-for build, POST /v1/me/resume-facts/refresh, neither
+    # reads nor writes it: a person pressing Rebuild has asked, and must not be
+    # told to come back later because a cron job failed.
+    facts_build_failed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Which model this person's chat turns run on. NULL means "whatever the
     # tier default is", which is the honest representation of never having
@@ -1372,6 +1413,87 @@ class DigestItem(Base):
     # Read-only convenience. No schema effect; the job_id foreign key above is
     # the whole relationship in SQL.
     job: Mapped["Job"] = relationship(viewonly=True, lazy="select")
+
+
+class JobScore(Base):
+    """One cached judgement of one posting for one person.
+
+    One row per (user, job), enforced by the unique constraint. The two hashes
+    are recorded rather than keyed on: keying on them would accumulate a row
+    per resume edit per posting without bound, whereas one row per pair with
+    the hashes written down still answers "is this score stale?" and stays
+    bounded at the pairs a person could ever be shown. facts_input_hash is the
+    input_hash of the stored ResumeFacts row actually scored against (never a
+    recomputation from the live resume), and description_hash is the
+    JobFacets hash of the posting text; a change in either makes it a new
+    question. See section 1 of
+    docs/superpowers/specs/2026-11-19-onboarding-first-run-design.md.
+
+    tier and fit_score are nullable because not every answer the provider
+    gives is a score. A refusal is an answer, not a zero: it is stored with
+    outcome="refused" and no tier, so the pair is not re-bought on every pass,
+    and reading a number off it would invent a confident "no". The four
+    component probabilities are likewise nullable, as are reason, gap and
+    prose_model, which are written only when prose was bought.
+
+    outcome ("scored", "refused", "prose_rejected" -- see OUTCOMES) has no
+    CHECK constraint, matching Digest.status: the vocabulary lives here, with
+    its one writer in the scoring service. "prose_rejected" is a score that
+    stands whose sentence the citation validator dropped, recorded so the
+    prose is not re-bought every pass.
+    """
+
+    __tablename__ = "job_scores"
+    __table_args__ = (
+        UniqueConstraint("user_id", "job_id", name="job_scores_user_id_job_id_key"),
+    )
+
+    OUTCOMES = ("scored", "refused", "prose_rejected")
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    job_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    facts_input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    description_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    model: Mapped[str] = mapped_column(String(64), nullable=False)
+    tier: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    fit_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    requirements_met: Mapped[float | None] = mapped_column(Float, nullable=True)
+    seniority_fit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_fit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    direction_fit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gap: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prose_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    scored_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # When this pair was first judged. Written once, on insert, and never
+    # again -- a rescore moves scored_at and leaves this alone.
+    #
+    # The two dates answer two questions and must not be conflated. scored_at
+    # is "when was this judgement made", which the dashboard shows and
+    # score_sweep.sweep_order sorts by to find the longest-unswept person.
+    # created_at is "when did this posting become new to this person", which
+    # is what match_sweep.arrival_rows windows on. Keyed on scored_at, a
+    # resume edit announced the reader's whole match set as new again: the
+    # sweep rebuilds the facts, every facts_input_hash goes stale, up to 30
+    # pairs are rescored, and all of them get a fresh scored_at -- "15 new
+    # roles for you since you last looked" above fifteen roles they had
+    # already seen. That is the design's first anti-goal, and section 5's "a
+    # posting is new to the reader exactly once".
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
 
 
 class TailorRun(Base):

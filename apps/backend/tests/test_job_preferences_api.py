@@ -7,6 +7,7 @@ from app.deps import SESSION_COOKIE, _sign
 from app.models import JobPreference, LlmCall, ResumeFacts, TalentProfile, User
 from app.services import profile as profile_service
 from app.services.resume_facts import input_hash
+from app.services.usage import REGISTERED, TIERS
 from app.services.revisions import pin_current_draft, set_draft_source
 
 from tests.test_talent_profile import StubProfileLlm, _profile, _resume, _said, _stub
@@ -314,3 +315,103 @@ def test_match_count_counts_a_seed_that_was_never_saved(client, db_session):
 
 def test_match_count_requires_sign_in(client):
     assert client.get("/v1/me/matches/count").status_code == 401
+
+
+# --- the facts build is the person's own, and enforcement must allow it ------
+
+
+def test_a_registered_user_may_build_their_own_facts_under_enforcement(
+    client, db_session, monkeypatch, openai_enabled
+):
+    """The gate that made matching unreachable for every new account.
+
+    `resume-facts/refresh` meters on purpose="profile", whose hourly cap came
+    from TIERS[tier].profile_builds_per_hour -- 0 for `registered`, because
+    that number was sized for the TALENT profile, where only matching tier can
+    build at all. Matching's facts need no such grant (see
+    services/resume_facts.py), so `0 >= 0` refused the one button a new user
+    can press to make matching know who they are.
+
+    The whole suite runs with APP_ENV=development, where limits_enabled() is
+    False, so this path has to ask for enforcement to be tested at all.
+    """
+    monkeypatch.setenv("USAGE_LIMITS_ENABLED", "true")
+    get_settings.cache_clear()
+    user = _signed_in(client, db_session, sub="sub-facts-enforced")
+    _resume(db_session, user)
+    _stub(monkeypatch, StubProfileLlm(_said(_profile())))
+    r = client.post("/v1/me/resume-facts/refresh")
+    assert r.status_code == 200
+    assert r.json() == {"facts_state": "fresh", "error": None}
+
+
+def test_the_registered_facts_build_still_has_an_hourly_cap(
+    client, db_session, monkeypatch, openai_enabled
+):
+    """Allowed is not unmetered. The weekly credit cap is the budget guard;
+    this one stops a stuck client spending it in a minute."""
+    monkeypatch.setenv("USAGE_LIMITS_ENABLED", "true")
+    get_settings.cache_clear()
+    user = _signed_in(client, db_session, sub="sub-facts-burst")
+    _resume(db_session, user)
+    _stub(monkeypatch, StubProfileLlm(_said(_profile())))
+    allowed = TIERS[REGISTERED].profile_builds_per_hour
+    assert allowed > 0
+    for _ in range(allowed):
+        assert client.post("/v1/me/resume-facts/refresh").status_code == 200
+    assert client.post("/v1/me/resume-facts/refresh").status_code == 429
+
+
+def test_a_new_account_reaches_matches_without_an_employer_grant(
+    client, db_session, monkeypatch, openai_enabled
+):
+    """The funnel, end to end, with production enforcement on.
+
+    Every link in this chain already had its own passing test. The chain did
+    not: the facts build was refused at the tier, so the seed stayed empty, so
+    `constrains_nothing` returned the empty set, so a brand new account's match
+    count was 0 no matter how good the catalogue was. One test that walks the
+    whole way is the only one that would have caught that.
+
+    No talent_introduction grant anywhere in here, on purpose: being shown to
+    employers is a separate decision, and matching must not depend on it.
+    """
+    monkeypatch.setenv("USAGE_LIMITS_ENABLED", "true")
+    get_settings.cache_clear()
+    user = _signed_in(client, db_session, sub="sub-funnel")
+    _resume(db_session, user, source="= CV\nBackend Engineer\nTaipei, Taiwan")
+    _stub(
+        monkeypatch,
+        StubProfileLlm(
+            _said(
+                _profile(
+                    locations=["Taipei, Taiwan"],
+                    roles=[
+                        {
+                            "employer": "Acme",
+                            "title": "Backend Engineer",
+                            "start": "2021-03",
+                            "end": "Present",
+                            "highlights": ["Cut latency in half"],
+                        }
+                    ],
+                )
+            )
+        ),
+    )
+    for i in range(3):
+        _posting(db_session, 400 + i)
+
+    # 1. The resume is read. This is the call that used to 429.
+    built = client.post("/v1/me/resume-facts/refresh")
+    assert built.status_code == 200, built.json()
+    assert built.json()["facts_state"] == "fresh"
+
+    # 2. The preference seeds itself from what was read, with nothing saved.
+    seeded = client.get("/v1/me/job-preferences").json()
+    assert seeded["target_functions"] == ["backend"]
+    assert seeded["target_locations"] == ["tw"]
+    assert db_session.query(JobPreference).filter_by(user_id=user.id).count() == 0
+
+    # 3. And that seed already matches postings -- before any save.
+    assert client.get("/v1/me/matches/count").json() == {"count": 3}

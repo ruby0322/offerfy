@@ -1,39 +1,40 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
+import ArrivalsBlock from "@/components/dashboard/ArrivalsBlock";
 import ApplicationFlow from "@/components/dashboard/ApplicationFlow";
 import CreditsStrip from "@/components/dashboard/CreditsStrip";
 import MatchesBlock from "@/components/dashboard/MatchesBlock";
 import NextActionBand from "@/components/dashboard/NextActionBand";
+import OnboardingCard from "@/components/dashboard/OnboardingCard";
 import OngoingTable from "@/components/dashboard/OngoingTable";
 import ResumesBlock from "@/components/dashboard/ResumesBlock";
+import { arrivalHeadline, strongArrivalCount } from "@/components/dashboard/arrivals";
 import { nextSteps } from "@/components/dashboard/nextSteps";
+import { cardVisible } from "@/components/dashboard/onboarding";
 import { COUNTRY_KEYS, FUNCTION_KEYS, SENIORITY_KEYS } from "@/components/jobs/facet-labels";
 import { Link, useRouter } from "@/i18n/navigation";
 import { ApiError, listResumes, type Resume } from "@/lib/api";
 import type { Application } from "@/lib/applications";
 import { fetchDashboard, type Dashboard } from "@/lib/dashboard";
-import { strongFitCount } from "@/lib/digest";
-import { preferenceSummary } from "@/lib/jobs";
-import { readLastVisit, writeLastVisit } from "@/lib/last-visit";
+import { hasSavedPreference, markMatchesSeen, preferenceSummary } from "@/lib/jobs";
 
 /**
  * The overview: what changed, the one thing to do, and the shape of the search.
  *
- * Four blocks and no free-floating numbers. Every figure that wants studying
+ * A few blocks and no free-floating numbers. Every figure that wants studying
  * has moved to the tab that owns it -- the application metrics to
  * Applications, employer views and resume state to Profile, credits to Usage
  * -- because a row of numbers with no subject beside it is something you have
  * to hold in your head on the way down the page. What is left is a line
- * saying what is new, one action, the matches, and the pipeline as a shape
+ * saying what is new, one action, what landed and what matches, and the pipeline as a shape
  * with the few rows that need you.
  */
 export default function DashboardPage() {
   const t = useTranslations("dashboard");
   const tCommon = useTranslations("common");
   const tJobs = useTranslations("jobs");
-  const format = useFormatter();
   const router = useRouter();
 
   const [dash, setDash] = useState<Dashboard | null>(null);
@@ -42,37 +43,35 @@ export default function DashboardPage() {
   // Null until the list lands, and after a failure: ResumesBlock reads that
   // as "say nothing" rather than as "you have no resumes".
   const [resumes, setResumes] = useState<Resume[] | null>(null);
-  // Read once, before the first fetch stamps the new visit, so the "since"
-  // line describes the previous visit rather than this one.
-  const since = useRef<string | null>(null);
-  const [lastVisit, setLastVisit] = useState<Date | null>(null);
 
-  const load = useCallback(
-    async (window: string | null) => {
-      const next = await fetchDashboard(window);
-      setDash(next);
-      setRows(next.applications);
-      setError(null);
-      return next;
-    },
-    [],
-  );
+  // The server decides what is new and when this person last looked, so
+  // there is nothing to remember here: a reload asks the same question.
+  //
+  // This page is the one that renders ArrivalsBlock, so it is the one that
+  // says the arrivals were shown -- the dashboard GET deliberately no longer
+  // stamps, because Applications, Matches and Profile fetch it too and show
+  // no arrivals at all. Said here rather than in the effect so that a
+  // refetch which brings NEW arrivals (after the first run, after a rebuild)
+  // marks those too; each call is one UPDATE. Fire-and-forget: the rows are
+  // already on screen, and a lost stamp only repeats one window.
+  const apply = useCallback((next: Dashboard) => {
+    setDash(next);
+    setRows(next.applications);
+    setError(null);
+    void markMatchesSeen().catch(() => {});
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
-    since.current = readLastVisit();
-    if (since.current) {
-      const parsed = new Date(since.current);
-      if (!Number.isNaN(parsed.getTime())) setLastVisit(parsed);
-    }
-    load(since.current).catch((err) => {
-      if (cancelled) return;
-      if (err instanceof ApiError && err.status === 401) router.replace("/login");
-      else setError(err instanceof ApiError ? err.message : t("needLogin"));
-    });
-    // Stamped after the request is issued, so a reload inside the same second
-    // still reports the earlier window rather than an empty one.
-    writeLastVisit();
+    fetchDashboard()
+      .then((next) => {
+        if (!cancelled) apply(next);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 401) router.replace("/login");
+        else setError(err instanceof ApiError ? err.message : t("needLogin"));
+      });
     // One call, two readers: the "publish your resume" step needs the
     // master's id, and the resumes block needs the rest of the list.
     listResumes()
@@ -83,7 +82,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [load, router, t]);
+  }, [apply, router, t]);
 
   const summary = useMemo(() => {
     if (!dash) return "";
@@ -103,21 +102,30 @@ export default function DashboardPage() {
     [resumes],
   );
 
+  // Before the first save the preference is a computed seed, so a non-empty
+  // summary no longer means "they said what they want". `updated_at` does.
+  const showCard = dash ? cardVisible(dash.preference, dash.resume_health) : false;
+
   const steps = useMemo(() => {
     if (!dash) return [];
     return nextSteps({
       applications: rows,
       health: dash.resume_health,
       digest: dash.digest,
-      hasPreference: summary !== "",
+      hasPreference: hasSavedPreference(dash.preference),
+      cardOnPage: showCard,
       masterId,
     });
-  }, [dash, rows, summary, masterId]);
+  }, [dash, rows, masterId, showCard]);
 
-  // Postings rated "Strong fit", counted once each: lib/digest.ts owns both
-  // halves of that, because `items` is one row per (posting, track).
-  const strongFits = useMemo(
-    () => strongFitCount(dash?.digest?.items ?? []),
+  // The header line and the arrivals block read the same list, so the count
+  // up here and the rows below cannot disagree.
+  const headline = useMemo(
+    () => (dash ? arrivalHeadline(dash.arrivals.length, dash.first_visit) : null),
+    [dash],
+  );
+  const strongArrivals = useMemo(
+    () => strongArrivalCount(dash?.arrivals ?? []),
     [dash],
   );
 
@@ -131,43 +139,46 @@ export default function DashboardPage() {
         <h1 className="rr-page-title">{t("overviewTitle")}</h1>
         {dash ? (
           <>
-            {/* What changed since you last looked. The reason to open this
-                page on a day when nothing else has. */}
+            {/* What landed since you last looked, as the server measured it.
+                A first visit is its own sentence: the server's NULL marker
+                means nobody has looked yet, which is not the same thing as
+                "welcome back". Strong fits are folded into the same line
+                rather than counted again by the block below. */}
             <p className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm">
-              {lastVisit ? (
+              {headline?.kind === "first_visit" ? (
+                <span className="text-muted-foreground">
+                  {t("sinceFirstArrivals", { count: headline.count })}
+                </span>
+              ) : headline?.kind === "arrivals" ? (
                 <>
-                  <span className="text-muted-foreground">
-                    {t("sinceLabel", {
-                      date: format.relativeTime(lastVisit, new Date()),
-                    })}
+                  <span className="font-semibold">
+                    {t("sinceArrivals", { count: headline.count })}
                   </span>
-                  {dash.new_match_count !== null && dash.new_match_count > 0 ? (
+                  {strongArrivals > 0 ? (
                     <span className="font-semibold">
-                      {t("sinceNewMatches", { count: dash.new_match_count })}
+                      {t("sinceStrongFits", { count: strongArrivals })}
                     </span>
                   ) : null}
-                  {strongFits > 0 ? (
-                    <span className="font-semibold">
-                      {t("sinceStrongFits", { count: strongFits })}
-                    </span>
-                  ) : null}
-                  {/* The employer-view count used to sit here too. It is a
-                      TOTAL, and this line is a list of what changed since you
-                      were last here, so it was the one clause that did not
-                      answer the sentence it was in -- and it now appears a
-                      screen below, against the document that earned it. One
-                      number, one place. */}
                 </>
               ) : (
-                <span className="text-muted-foreground">{t("sinceFirstVisit")}</span>
+                <span className="text-muted-foreground">{t("sinceNothingNew")}</span>
               )}
             </p>
-            <p className="mt-2.5 inline-flex flex-wrap items-center gap-2 rounded-full border border-rule bg-sheet px-3 py-1 text-[0.78rem] text-muted-foreground">
-              {summary ? <span>{summary}</span> : <span>{t("matchEmpty")}</span>}
-              <Link href="/preferences" className="underline underline-offset-2">
-                {t("editPreferences")}
-              </Link>
-            </p>
+            {/* Not while the card is up: until the first save `summary` is
+                the resume's guess, and a pill saying "senior · backend" would
+                present a guess as something the person chose. */}
+            {showCard ? null : (
+              <p className="mt-2.5 inline-flex flex-wrap items-center gap-2 rounded-full border border-rule bg-sheet px-3 py-1 text-[0.78rem] text-muted-foreground">
+                {hasSavedPreference(dash.preference) ? (
+                  <span>{summary}</span>
+                ) : (
+                  <span>{t("matchEmpty")}</span>
+                )}
+                <Link href="/preferences" className="underline underline-offset-2">
+                  {t("editPreferences")}
+                </Link>
+              </p>
+            )}
           </>
         ) : null}
       </div>
@@ -179,18 +190,30 @@ export default function DashboardPage() {
 
       {dash ? (
         <div className="grid min-w-0 gap-4 [&>*]:min-w-0">
-          <NextActionBand
-            steps={steps}
-            applications={rows}
-            onChanged={replace}
-            onRebuilt={() => void load(since.current).catch(() => {})}
-          />
+          {showCard ? (
+            <OnboardingCard
+              pref={dash.preference}
+              // Returns the promise: the card must learn that the refetch failed.
+              onDone={() => fetchDashboard().then(apply)}
+            />
+          ) : null}
+          {/* "Nothing to do" under a card that is asking for something would
+              contradict it. */}
+          {showCard && steps.length === 0 ? null : (
+            <NextActionBand
+              steps={steps}
+              applications={rows}
+              onChanged={replace}
+              onRebuilt={() => void fetchDashboard().then(apply).catch(() => {})}
+            />
+          )}
           <CreditsStrip />
+          <ArrivalsBlock arrivals={dash.arrivals} />
           <MatchesBlock
             digest={dash.digest}
             matches={dash.matches}
             matchCount={dash.match_count}
-            newMatchCount={dash.new_match_count}
+            hasPreference={hasSavedPreference(dash.preference)}
           />
           <section className="rr-card px-5 py-4">
             <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">

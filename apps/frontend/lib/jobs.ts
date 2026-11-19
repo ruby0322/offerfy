@@ -587,7 +587,10 @@ export async function fetchJobPreferences(): Promise<JobPreference> {
   };
 }
 
-export async function saveJobPreferences(input: JobPreferenceInput): Promise<JobPreference> {
+/** What the PUT answers: the saved row, plus whether this was the first one. */
+export type SavedJobPreference = JobPreference & { first_save: boolean };
+
+export async function saveJobPreferences(input: JobPreferenceInput): Promise<SavedJobPreference> {
   // Built field by field so nothing but the five known keys can reach the
   // wire, and remote_required stays a boolean or null (StrictBool: "true" is a 422).
   const body: JobPreferenceInput = {
@@ -597,10 +600,50 @@ export async function saveJobPreferences(input: JobPreferenceInput): Promise<Job
     remote_required: input.remote_required,
     activity: input.activity,
   };
-  return apiJson<JobPreference>("/api/v1/me/job-preferences", {
-    method: "PUT",
-    body: JSON.stringify(body),
+  const out = await apiJson<JobPreference & { first_save?: boolean }>(
+    "/api/v1/me/job-preferences",
+    { method: "PUT", body: JSON.stringify(body) },
+  );
+  return { ...out, first_save: out.first_save === true };
+}
+
+export type FirstRun = { started: boolean; reason: string | null };
+
+/** Start scoring a new account's matches now, or learn why it did not start. */
+export async function startFirstRun(): Promise<FirstRun> {
+  const raw = await apiJson<Partial<FirstRun>>("/api/v1/me/matches/first-run", {
+    method: "POST",
   });
+  return { started: raw.started === true, reason: raw.reason ?? null };
+}
+
+/**
+ * Tell the server this person has been shown their arrivals, so the next
+ * window starts here.
+ *
+ * The window is still the server's number — `users.matches_seen_at`, no
+ * `since` on the wire. What this says is narrower and is the only thing the
+ * client knows: the rows have been rendered. It has to be said by the page
+ * that rendered them, because `GET /v1/dashboard` is fetched by four pages
+ * and only the overview shows arrivals; the GET used to stamp, which closed
+ * the window for someone who opened Applications to check a status.
+ *
+ * Fire-and-forget: the page is already on screen, so a failure means one
+ * window repeats, not a broken view. Callers ignore the rejection.
+ */
+export async function markMatchesSeen(): Promise<void> {
+  await apiJson<{ seen_at?: string }>("/api/v1/me/matches/seen", { method: "POST" });
+}
+
+export type MatchProgress = { scored: number; expected: number };
+
+/**
+ * Binary, not gradual: `scored` reads 0 until the pass commits once. There is
+ * deliberately no `running` field, so the caller bounds its own polling.
+ */
+export async function fetchMatchProgress(): Promise<MatchProgress> {
+  const raw = await apiJson<Partial<MatchProgress>>("/api/v1/me/matches/progress");
+  return { scored: raw.scored ?? 0, expected: raw.expected ?? 0 };
 }
 
 export async function refreshResumeFacts(): Promise<ResumeFactsRefresh> {
@@ -655,6 +698,37 @@ export function preferenceSummary(
     parts.push(pref.target_locations.map((c) => labels.country(c.toUpperCase())).join(", "));
   } else if (pref.remote_required === false) parts.push(labels.onsite);
   return parts.join(" · ");
+}
+
+/**
+ * Whether this person has said what they want: a saved row, and one that
+ * says something. Before the first save `pref` is the resume's computed seed,
+ * which is a guess and must not be presented as their choice; a saved row
+ * with every field empty says nothing and is asked about like a new one.
+ *
+ * The one definition. The overview, the matches tab, the profile checklist
+ * and `nextSteps` all branch on this, and two inline copies already drifted
+ * once (a saved-but-empty preference read "tell us what you want" in a pill
+ * and "nothing matches your search" in the list beneath it). Emptiness does
+ * not depend on the labels, so identity labels are enough to test it.
+ */
+export function hasSavedPreference(
+  pref: Pick<
+    JobPreference,
+    "updated_at" | "target_functions" | "target_locations" | "target_seniority" | "remote_required"
+  >,
+): boolean {
+  if (pref.updated_at === null) return false;
+  const same = (v: string) => v;
+  return (
+    preferenceSummary(pref, {
+      seniority: same,
+      fn: same,
+      country: same,
+      remote: "remote",
+      onsite: "onsite",
+    }) !== ""
+  );
 }
 
 // --- The daily ingest, by day ------------------------------------------------

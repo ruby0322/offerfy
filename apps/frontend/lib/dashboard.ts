@@ -16,15 +16,32 @@ export type EmployerViews = {
   last_disclosed_at: string | null;
 };
 
+export type MatchArrival = {
+  job_id: string;
+  job_title: string;
+  company: string;
+  apply_url: string;
+  /** False when the posting closed after it was scored; the row says so. */
+  job_is_active: boolean;
+  location: string | null;
+  /** Null with the score: not looked at yet, never a poor match. */
+  tier: string | null;
+  fit_score: number | null;
+  reason: string | null;
+  gap: string | null;
+  scored_at: string | null;
+};
+
 export type Dashboard = {
   preference: JobPreference;
   match_count: number;
   /**
-   * How many of those the catalogue first saw since the `since` we asked
-   * with. Null when we did not ask -- a first visit has no window, and 0
-   * would claim "nothing new" where the truth is "we never asked".
+   * Scored for this person since they last looked, measured by the server,
+   * plus matching postings the sweep has not reached yet (no score).
    */
-  new_match_count: number | null;
+  arrivals: MatchArrival[];
+  /** True exactly when the server has never recorded a look by this person. */
+  first_visit: boolean;
   /** The first few matching postings, newest first — the card shows these. */
   matches: JobListItem[];
   applications: Application[];
@@ -33,9 +50,28 @@ export type Dashboard = {
   digest: Digest | null;
 };
 
-export async function fetchDashboard(since?: string | null): Promise<Dashboard> {
-  const query = since ? `?since=${encodeURIComponent(since)}` : "";
-  return apiJson<Dashboard>(`/api/v1/dashboard${query}`);
+/**
+ * The two fields added here are defaulted, as the fetchers in lib/jobs.ts
+ * default theirs.
+ *
+ * Web has rolled ahead of the API on this host before -- it is three web
+ * instances and one API, rolled separately -- and `dash.arrivals.length` on
+ * an older API would throw inside the overview's own render and blank the
+ * whole page. Defaulted, the page degrades to "nothing new", which is what an
+ * API that cannot answer the question is actually saying.
+ */
+type DashboardWire = Omit<Dashboard, "arrivals" | "first_visit"> &
+  Partial<Pick<Dashboard, "arrivals" | "first_visit">>;
+
+export async function fetchDashboard(): Promise<Dashboard> {
+  const raw = await apiJson<DashboardWire>("/api/v1/dashboard");
+  return {
+    ...raw,
+    arrivals: raw.arrivals ?? [],
+    // False, not true: an absent answer is not evidence of a first visit, and
+    // "Welcome back" is the wrong thing to tell someone it cannot place.
+    first_visit: raw.first_visit ?? false,
+  };
 }
 
 export type SpendSlice = { purpose: string; credits: number; rounds: number };

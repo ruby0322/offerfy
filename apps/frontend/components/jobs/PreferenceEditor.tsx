@@ -21,6 +21,7 @@ import {
   SENIORITY_KEYS,
   type JobsMessageKey,
 } from "@/components/jobs/facet-labels";
+import { rebuildRefusal } from "@/components/jobs/preferenceRefusal";
 
 type Props = {
   initial: JobPreference;
@@ -127,25 +128,12 @@ export default function PreferenceEditor({ initial }: Props) {
     }
   }
 
-  /**
-   * What to say about a refusal. "Try again shortly" is right for a genuine
-   * burst and wrong for everything else here, so it is not the default.
-   *
-   * The hourly cap on profile builds is zero below the matching tier, which
-   * means the button cannot work at all rather than works-again-soon: the
-   * refusal is the same `burst` either way, and the tier is what separates
-   * them. (UsageLimitCard reads next_tier the same way to decide whether to
-   * offer the settings link.)
-   */
+  /** Which message, from the tested mapping; this only formats the date. */
   function refusalText(refusal: UsageRefusal): string {
-    if (refusal.limit === "burst") {
-      return refusal.tier === "matching"
-        ? t("rebuildTooOften")
-        : t("rebuildNeedsMatching");
-    }
-    if (refusal.limit === "weekly_turns" || refusal.limit === "weekly_credits") {
+    const message = rebuildRefusal(refusal);
+    if (message.key === "rebuildOutOfAllowance") {
       return t("rebuildOutOfAllowance", {
-        date: format.dateTime(new Date(refusal.reset_at), {
+        date: format.dateTime(new Date(message.resetAt as string), {
           month: "short",
           day: "numeric",
         }),
