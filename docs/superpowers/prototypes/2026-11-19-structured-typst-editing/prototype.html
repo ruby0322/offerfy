@@ -1,0 +1,1907 @@
+<!-- Reference for docs/superpowers/specs/2026-11-19-structured-typst-editing-design.md (the published POC page). -->
+<!-- Not built, not imported: a design reference only. -->
+<title>Typst 欄位編輯器</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Sans+TC:wght@400;500&display=swap">
+<style>
+/* Layout: a two-column workbench — the form on the left, the bytes it owns on the right. */
+:root{
+  --bg:#faf9f6; --surface:#ffffff; --surface-2:#f3f2ed; --surface-3:#eceae3;
+  --ink:#1c2321; --ink-2:#596360; --ink-3:#8b9390;
+  --line:#e3e2db; --line-2:#cecdc4;
+  --accent:#0f6e56; --accent-soft:#e1f5ee; --accent-line:#9fe1cb;
+  --warn:#854f0b; --warn-soft:#faeeda; --warn-line:#efc98a;
+  --bad:#a32d2d; --bad-soft:#fceaea; --bad-line:#f0a9a9;
+  --sans:"IBM Plex Sans","Noto Sans TC",ui-sans-serif,system-ui,sans-serif;
+  --mono:"IBM Plex Mono","Noto Sans TC",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#13181a; --surface:#1a2022; --surface-2:#212829; --surface-3:#272f30;
+  --ink:#e8ebe9; --ink-2:#a7afac; --ink-3:#7b8481;
+  --line:#2b3335; --line-2:#3a4345;
+  --accent:#5dcaa5; --accent-soft:#10302a; --accent-line:#1d6b57;
+  --warn:#fac775; --warn-soft:#352a12; --warn-line:#6a5220;
+  --bad:#f09595; --bad-soft:#331c1c; --bad-line:#6d3434;
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#13181a; --surface:#1a2022; --surface-2:#212829; --surface-3:#272f30;
+  --ink:#e8ebe9; --ink-2:#a7afac; --ink-3:#7b8481;
+  --line:#2b3335; --line-2:#3a4345;
+  --accent:#5dcaa5; --accent-soft:#10302a; --accent-line:#1d6b57;
+  --warn:#fac775; --warn-soft:#352a12; --warn-line:#6a5220;
+  --bad:#f09595; --bad-soft:#331c1c; --bad-line:#6d3434;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.65;margin:0}
+.wrap{max-width:1180px;margin:0 auto;padding-block:28px 56px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1{font-size:21px;font-weight:600;letter-spacing:-.01em;margin:0;text-wrap:balance}
+.lede{color:var(--ink-2);margin:6px 0 0;max-width:66ch}
+.lede code,.notes code{font-family:var(--mono);font-size:.92em;background:var(--surface-2);padding:1px 4px;border-radius:3px}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+.chip{display:flex;align-items:baseline;gap:7px;background:var(--surface);border:1px solid var(--line);
+  border-radius:999px;padding:5px 12px;font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums}
+.chip b{font-weight:500;color:var(--ink-3);letter-spacing:.04em;text-transform:uppercase;font-size:10.5px}
+.chip.ok{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent)}
+.chip.stale{background:var(--warn-soft);border-color:var(--warn-line);color:var(--warn)}
+.grid{display:grid;grid-template-columns:1.1fr 1fr;gap:16px;margin-top:20px;align-items:start}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;min-width:0}
+.card>header{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;justify-content:space-between;
+  padding:12px 16px;border-bottom:1px solid var(--line)}
+.card>header h2{font-size:13px;font-weight:600;margin:0;letter-spacing:.01em}
+.card>header .meta{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.body{padding:14px 16px}
+.form{max-height:min(70vh,760px);overflow:auto}
+.group{border-top:1px dashed var(--line);padding-top:13px;margin-top:13px}
+.group:first-child{border-top:0;padding-top:0;margin-top:0}
+.shead{display:flex;gap:6px;align-items:center;margin-bottom:9px}
+.shead .st{flex:1;min-width:0;font-weight:500;font-size:13px;width:auto!important}
+.row{display:grid;grid-template-columns:86px 1fr;gap:10px;align-items:center;margin-bottom:6px}
+.row>label{font-size:12.5px;color:var(--ink-2);word-break:break-all}
+.pair{display:flex;gap:8px;flex-wrap:wrap}
+.brow{margin:7px 0}
+.brow>label{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--ink-3);margin-bottom:3px}
+.sent{display:flex;flex-wrap:wrap;align-items:center;gap:3px;line-height:2.1}
+.item{border:1px solid var(--line);border-radius:8px;padding:11px 12px 9px;margin:9px 0;background:var(--surface-2)}
+.ihead{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:9px}
+input,textarea{font-family:var(--sans);font-size:13px;color:var(--ink);background:var(--surface-2);
+  border:1px solid var(--line);border-radius:6px;padding:5px 8px;min-width:0;max-width:100%}
+textarea,.row input,.pair input{width:100%}
+.item input{background:var(--surface)}
+input:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:-1px;background:var(--surface)}
+input[readonly]{background:var(--surface-3);color:var(--ink-3);cursor:not-allowed}
+.run{padding:3px 6px;border-radius:5px;border-color:var(--line-2)}
+.run.strong{font-weight:500}
+.run.emph{font-style:italic}
+.run.url{font-family:var(--mono);font-size:11.5px;color:var(--accent)}
+.wrap-b{display:inline-flex;align-items:center;gap:2px}
+.wrap-b b{font-size:9.5px;color:var(--ink-3);font-weight:500}
+.lk{display:inline-flex;align-items:center;gap:3px;border:1px dashed var(--line-2);border-radius:6px;padding:2px 4px}
+.tag{font-family:var(--mono);font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3)}
+.op{font-family:var(--mono);font-size:11.5px;background:var(--surface-3);color:var(--ink-3);
+  padding:3px 6px;border-radius:4px;white-space:pre}
+.op.lost{background:var(--warn-soft);color:var(--warn)}
+.ro{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:5px 0;padding:5px 8px;
+  background:var(--surface-3);border-radius:6px}
+.ro code{font-family:var(--mono);font-size:11px;color:var(--ink-3);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.ro .why{font-size:11px;color:var(--ink-3)}
+.rejected{outline:2px solid var(--bad)!important;background:var(--bad-soft)!important}
+pre{font-family:var(--mono);font-size:12px;line-height:1.72;margin:0;white-space:pre;overflow:auto;
+  max-height:min(70vh,760px);padding:14px 16px;tab-size:2}
+pre .sp{border-bottom:1px solid var(--line-2);border-radius:2px}
+pre .sp.on{background:var(--accent-soft);border-bottom:1px solid var(--accent);color:var(--accent);font-weight:500}
+pre .sp.ro{border-bottom-style:dotted;color:var(--ink-3)}
+pre .ob{background:var(--bad-soft);outline:1px solid var(--bad-line)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+button{font-family:var(--sans);font-size:12.5px;color:var(--ink);background:var(--surface);
+  border:1px solid var(--line-2);border-radius:6px;padding:7px 13px;cursor:pointer}
+button:hover{background:var(--surface-2)}
+button:disabled{opacity:.4;cursor:default}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.bx{font-size:11px;padding:3px 8px;line-height:1.3}
+.bx.armed{background:var(--bad);border-color:var(--bad);color:var(--bad-soft)}
+.ghost{background:transparent;border-style:dashed;color:var(--ink-2);width:100%;margin-top:4px}
+.toggle{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-2);
+  background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:6px 12px;cursor:pointer}
+.toggle input{width:auto;margin:0}
+.banner{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;
+  background:var(--warn-soft);border:1px solid var(--warn-line);color:var(--warn);
+  border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px}
+.banner button{background:var(--warn);border-color:var(--warn);color:var(--warn-soft);font-weight:500}
+.log{font-family:var(--mono);font-size:11.5px;max-height:260px;overflow:auto;padding:10px 16px 14px}
+.log div{padding:4px 0;border-bottom:1px solid var(--line);color:var(--ink-2);word-break:break-word}
+.log div:last-child{border-bottom:0}
+.log .k{display:inline-block;min-width:3.6em;color:var(--ink-3)}
+.log .ok .k{color:var(--accent)} .log .bad .k{color:var(--bad)} .log .warn .k{color:var(--warn)}
+.rverdict{font-size:13px;margin-bottom:10px}
+.rverdict b{color:var(--accent)}
+.rrow{display:grid;grid-template-columns:150px 1fr;gap:10px;padding:7px 0;border-top:1px solid var(--line);font-size:12.5px}
+.rlab{font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);padding-top:3px}
+.lints{margin:0;padding-left:1.1em}
+.lints li{margin-bottom:4px;color:var(--ink-2)}
+.cols2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;align-items:start}
+.notes{margin-top:26px;border-top:1px solid var(--line);padding-top:16px;color:var(--ink-2);font-size:12.5px}
+.notes h3{font-size:12.5px;font-weight:600;color:var(--ink);margin:0 0 8px}
+.notes ul{margin:0;padding-left:1.15em} .notes li{margin-bottom:5px}
+#formCard{position:relative}
+#bub{position:absolute;z-index:20;display:flex;flex-direction:column;gap:4px;padding:4px;
+  background:var(--surface);border:1px solid var(--line-2);border-radius:8px}
+#bub .r1,#bub .r2{display:flex;gap:4px}
+#bub button{padding:4px 9px;font-size:12px;line-height:1.25}
+#bub #bB{font-weight:600;min-width:30px}
+#bub #bI{font-style:italic;min-width:30px}
+#bub input{width:min(230px,56vw);font-family:var(--mono);font-size:11.5px;padding:4px 7px}
+.rtwrap{display:flex;gap:6px;align-items:flex-start}
+.rt{flex:1;min-width:0;min-height:1.95em;padding:5px 8px;border:1px solid var(--line);border-radius:6px;
+  background:var(--surface);font-size:13px;line-height:1.65;outline:none;white-space:pre-wrap;word-break:break-word}
+.rt:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.rt.ro-rt{background:var(--surface-3);color:var(--ink-3)}
+.rt.st{font-weight:500}
+.rt b{font-weight:600}
+.rt i{font-style:italic}
+.rt a{color:var(--accent);text-decoration:underline;text-underline-offset:2px}
+.rt [data-r="op"]{font-family:var(--mono);font-size:11px;background:var(--surface-3);color:var(--ink-3);
+  padding:0 3px;border-radius:3px}
+.rt:empty::before{content:"（空白）";color:var(--ink-3)}
+.tb{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:9px 16px;
+  border-bottom:1px solid var(--line);background:var(--surface-2)}
+.tb button{font-size:12px;padding:5px 11px}
+.tb input{flex:1 1 150px;min-width:110px;font-size:11.5px;padding:4px 8px;font-family:var(--mono)}
+.tbhint{flex:1 1 100%;font-size:11px;color:var(--ink-3)}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:6px;overflow:hidden}
+.seg button{border:0;border-radius:0;padding:4px 11px;font-size:11.5px;background:transparent;color:var(--ink-2)}
+.seg button.on{background:var(--accent);color:var(--bg)}
+.pv{max-height:min(70vh,760px);overflow:auto;padding:14px 14px 0;background:var(--surface-2);border-radius:0 0 10px 10px}
+.page{position:relative;background:#fffefb;border:1px solid var(--line-2);max-width:520px;margin:0 auto}
+.pg-inner{padding:30px 36px 36px;color:#1b1b19;
+  font-family:Georgia,Cambria,"Songti TC","Noto Serif CJK TC",serif;font-size:11px;line-height:1.5}
+.pg-tag{position:absolute;top:5px;right:7px;z-index:3;font-family:var(--mono);font-size:8.5px;
+  letter-spacing:.04em;color:#a9a9a1}
+.pg-name{font-size:18px;line-height:1.25;margin-bottom:2px}
+.pg-contact{font-size:9.5px;color:#4d4d48}
+.pg-dot{color:#a9a9a1}
+.pg-h2{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:#2a2a27;
+  margin:13px 0 4px;padding-bottom:2px;border-bottom:.7px solid #bcbcb4}
+.pg-entry{margin:6px 0}
+.pg-row{display:flex;gap:10px;align-items:baseline}
+.pg-lead{flex:1;font-weight:700;min-width:0}
+.pg-sub,.pg-sub2{font-style:italic;font-weight:400}
+.pg-sub2{font-size:10px;color:#4d4d48}
+.pg-right{white-space:nowrap;font-size:9.5px;color:#3d3d39}
+.pg-inner ul{margin:3px 0 0;padding-left:13px}
+.pg-inner li{margin-bottom:1.5px}
+.pg-p{margin:5px 0}
+.pg-link{color:#17489c;text-decoration:underline}
+.pg-op{font-family:var(--mono);font-size:8.5px;background:#eeede6;color:#8d8d86;padding:0 3px;border-radius:2px}
+.pg-break{margin:11px -36px;border-top:1px dashed #c6c6be;text-align:center;padding-top:2px;
+  font-size:8px;letter-spacing:.14em;color:#a9a9a1}
+.ovl{position:absolute;inset:0;pointer-events:none;z-index:2}
+.ovl>div{position:absolute}
+.hl-band{background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.hl-box{background:color-mix(in srgb,var(--accent) 26%,transparent);
+  outline:1px solid color-mix(in srgb,var(--accent) 60%,transparent);border-radius:2px}
+.hl-del{background:color-mix(in srgb,var(--bad) 15%,transparent);
+  outline:1.5px solid color-mix(in srgb,var(--bad) 65%,transparent);border-radius:3px}
+.pv-note{position:sticky;bottom:0;background:var(--surface-2);padding:7px 0 9px;
+  font-family:var(--mono);font-size:10.5px;color:var(--ink-3);text-align:center}
+@media (max-width:980px){.grid,.cols2{grid-template-columns:1fr}pre,.form,.pv{max-height:52vh}}
+@media (max-width:460px){.row{grid-template-columns:1fr}.rrow{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:no-preference){.rejected{animation:shake .18s 2}}
+@keyframes shake{0%,100%{transform:translateX(0)}50%{transform:translateX(3px)}}
+</style>
+
+<div class="wrap">
+  <span class="eyebrow">Offerfy · 結構化編輯 POC</span>
+  <h1>Typst 欄位編輯器</h1>
+  <p class="lede">點表單任一格，右邊那張紙會標出它印在哪一行；按下刪除，標的是整塊要消失的範圍。
+    兩種標示都只是 <code>data-leaf</code> 的查表，因為紙上的每一段都是同一棵投影長出來的。</p>
+
+  <div class="chips" id="chips"></div>
+
+  <div class="grid">
+    <section class="card" id="formCard">
+      <header><h2>結構化表單</h2><span class="meta" id="formMeta"></span></header>
+      <div class="tb"><span class="tbhint" id="tbHint">點一行內文或要點，選一段字就會跳出工具列</span></div>
+      <div class="body form" id="form"></div>
+      <div id="bub" hidden>
+        <div class="r1">
+          <button id="bB" title="粗體 ⌘B" aria-label="粗體">B</button>
+          <button id="bI" title="斜體 ⌘I" aria-label="斜體">I</button>
+          <button id="bLink" title="連結 ⌘K">連結</button>
+          <button id="bUnlink" hidden>移除</button>
+        </div>
+        <div class="r2" id="bRow2" hidden>
+          <input id="bUrl" type="text" placeholder="https://" aria-label="連結網址">
+          <button id="bOk">套用</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <header>
+        <h2 id="paneTitle">版面預覽</h2>
+        <span class="seg"><button id="tabPv" class="on">版面預覽</button><button id="tabSrc">原始碼</button></span>
+        <span class="meta" id="srcMeta"></span>
+      </header>
+      <div class="pv" id="pv">
+        <div class="page" id="page"></div>
+        <div class="pv-note" id="pvNote"></div>
+      </div>
+      <pre id="src" tabindex="0" aria-label="Typst 原始碼，目前編輯的葉子會標示出來" hidden></pre>
+    </section>
+  </div>
+
+  <div class="bar">
+    <button id="btnUndo">復原上一筆</button>
+    <button id="btnChat">模擬 chat 編輯</button>
+    <button id="btnReset">還原範例</button>
+    <label class="toggle"><input type="checkbox" id="btnRaw"> 關掉逃脫策略（模擬 bug）</label>
+  </div>
+
+  <div class="cols2">
+    <section class="card">
+      <header><h2>解析報告</h2><span class="meta">判斷泛用性就看這張</span></header>
+      <div class="body" id="report"></div>
+    </section>
+
+    <section class="card">
+      <header><h2>事件記錄</h2><span class="meta" id="logMeta"></span></header>
+      <div class="log" id="log"></div>
+    </section>
+  </div>
+
+  <section class="card" style="margin-top:16px">
+    <header><h2>丟你自己的原始碼進來</h2><span class="meta">判 Tier</span></header>
+    <div class="body">
+      <textarea id="probe" rows="6" placeholder="貼上一份 Typst 履歷原始碼。解析器不認任何函式名字，只認形狀，所以別的版型也判得出來。"></textarea>
+      <div class="bar" style="margin-top:10px">
+        <button class="primary" id="btnProbe">解析並判層</button>
+        <button id="btnLoad">載入成編輯對象</button>
+      </div>
+      <div id="probeOut" style="margin-top:10px;font-size:12.5px;color:var(--ink-2);line-height:2"></div>
+    </div>
+  </section>
+
+  <div class="notes">
+    <h3>六條讓它夠泛用的規則</h3>
+    <ul>
+      <li><b>R1 只認形狀，不認名字。</b>不是 allowlist <code>#work</code> / <code>#edu</code>，而是認「<code>#某個名字(...)</code> 裡的 <code>key: "字串字面值"</code>」。所以 <code>#project</code>、<code>#cvitem</code>、任何套件自己的元件都自動認得，欄位標籤直接用那個 key。</li>
+      <li><b>R2 絕不 fallback。</b>認不出來的行永遠不會變成輸入框。舊版把 <code>#project(</code>、<code>name: "..."</code>、<code>)</code> 各自變成一個可編的「內文」欄位——那是最糟的失敗，因為使用者改了它就會把語法寫進文件。</li>
+      <li><b>R3 <code>#let</code> 一跳間接。</b><code>author: name</code> 的值不是字面值，所以往上找 <code>#let name = "..."</code>，欄位指到那個字串。沒有人引用的 <code>#let</code> 會被標成死綁定。</li>
+      <li><b>R4 一個文字範圍就是一個編輯單位。</b>一條要點是一個可編輯面，<code>*粗體*</code> 和 <code>#link("url")[文字]</code> 是裡面的格式、不是另一個欄位——一句話在人眼裡是一件事，在這裡也是。行內的 run 只用來渲染和序列化。</li>
+      <li><b>R5 逃脫策略以原文為準。</b>canonical set 之外，這一段原本就逃脫過的字元繼續逃脫。所以 <code>Projects &amp; Achievements</code> 的裸 <code>&amp;</code> 和 <code>Systems Analysis \&amp; Design</code> 的 <code>\&amp;</code> 都能原封不動回去——這是「每個模板寫法不一樣」的直接解法。</li>
+      <li><b>R6 單位要通過 <code>serialize(parse(slice)) === slice</code> 才可編。</b>過不了就唯讀，不會悄悄改寫。解析器產生的序列化和 DOM 產生的序列化必須在未改動的單位上逐 byte 相同——那個等式就是這個編輯面安全的依據。</li>
+    </ul>
+    <h3 style="margin-top:14px">粗體和連結就是選字套格式</h3>
+    <ul>
+      <li>選一段字，旁邊就會浮出一條小工具列：<code>B</code>、<code>I</code>、連結。鍵盤是 <code>⌘B</code>／<code>⌘I</code>／<code>⌘K</code>——<code>⌘K</code> 直接把網址欄打開、游標已經在裡面，打完按 Enter 就套上去，整個手勢不用離開那句話。點已經存在的連結也會浮出同一條工具列，網址填好的，可以改或移除。</li>
+      <li>要讓它成立只有一個細節要小心：游標移到網址欄的那一刻，瀏覽器會把你在文字上的選取丟掉。所以工具列打開時就把 Range 複製一份，套用前再還原回去——這是「打網址不會丟失選取」的全部原因。</li>
+      <li>原理：套完格式之後把整個編輯面序列化回 Typst，換掉這一行自己那一段 span，其餘位移。<b>所以它是改值，不是結構操作</b>——不重新解析、不重新渲染表單，和打字走同一條路。</li>
+      <li><b>巢狀現在可以。</b>解析器會遞迴進 <code>*…*</code> 和 <code>#link(…)[…]</code>，所以粗體裡放連結、連結文字裡放粗體都能原樣回去。</li>
+      <li><b>字串參數還是放不了格式。</b><code>title: "*x*"</code> 在 Typst 裡會把星號原樣印出來。點到那種格子工具列會整排變灰，並說明原因——要讓職稱能有粗體，得版型那邊把參數改成收內容區塊 <code>[…]</code>，那是版型 API 的事。</li>
+    </ul>
+    <h3 style="margin-top:14px">新增用抄的，不用寫死的範本</h3>
+    <ul>
+      <li>「照這個段落的寫法加一筆」會把那個段落最後一個區塊的原始碼複製一份、把每個字串值換成「（待填）」。所以在 <code>#project</code> 段落它生 <code>#project</code>，在 <code>#work</code> 段落它生 <code>#work</code>，連 <code>dates-helper(...)</code> 的寫法都跟著。真機該改用 emitter 自己的 <code>heading_block</code> / <code>bullet_lines</code>，理由一樣：產生和解析要共用同一份文法。</li>
+    </ul>
+    <h3 style="margin-top:14px">哪些是真的、哪些是假的</h3>
+    <ul>
+      <li><b>真的</b>：解析器、行內標記的 run 切分、span 位移、逃脫策略、Tier 判定、解析報告、復原堆疊、新增用的形狀複製。</li>
+      <li><b>假的</b>：編譯閘門在這裡是括號與引號的平衡掃描，真機跑 <code>typst compile</code>；hash 是 FNV-1a，真機是 sha256。</li>
+      <li><b>表單不顯示</b>文件設定（<code>#import</code>、<code>#set</code>、<code>#pagebreak</code>）和註解——它們不能編也不是內容，但解析報告會逐項列出來，所以沒有被偷偷忽略。沒人引用的 <code>#let</code> 留著，因為它可以刪。</li>
+      <li><b>還沒做</b>：多行段落合併成一段（現在一行是一個單位）、<code>#grid</code> / <code>#table</code> 這類有自己內部結構的容器、以及 <code>layout.py</code> 的頁數與行數回饋。</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+/* Shape-based Typst resume parser, v3.
+   Rules:
+   R1 recognise shapes, never function names: `#ident(...)` with `key: "literal"` args.
+   R2 never fall back to "it must be prose" — an unclassified line is read-only structure.
+   R3 one hop through `#let ident = "literal"` so `author: name` still resolves.
+   R4 one text-bearing range = ONE editable unit. Inline markup inside it (strong, link,
+      unparsed constructs) is formatting within that unit, never a separate field, so a
+      sentence stays one surface. The runs exist only to render and to serialise it.
+   R5 escape policy = canonical set plus whatever this unit already had escaped.
+   R6 a unit is editable only if serialise(parse(slice)) === slice. */
+
+const CANON = "\\#$*_[]<>@~`";
+const LABEL = {
+  author:"姓名", name:"名稱", title:"職稱", company:"公司", location:"地點",
+  institution:"學校", degree:"學位", email:"Email", phone:"電話", github:"GitHub",
+  linkedin:"LinkedIn", "personal-site":"個人網站", website:"網站", url:"網址",
+  "start-date":"起", "end-date":"迄", dates:"期間", "accent-color":"強調色",
+  description:"說明", role:"角色", organization:"單位", awards:"獎項", position:"職位"
+};
+const URLISH = new Set(["github","linkedin","personal-site","website","url","orcid"]);
+const SLOT = {
+  title:"lead", name:"lead", institution:"lead", position:"lead",
+  company:"sub", organization:"sub", publisher:"sub", degree:"sub",
+  location:"right2", dates:"right", "start-date":"right", "end-date":"right"
+};
+
+function decode(slice){
+  const extra = new Set();
+  let out = "";
+  for (let i = 0; i < slice.length; i++){
+    if (slice[i] === "\\" && i + 1 < slice.length){
+      const c = slice[i + 1];
+      if (!CANON.includes(c) && c !== "/") extra.add(c);
+      out += c; i++; continue;
+    }
+    out += slice[i];
+  }
+  return { value: out, extra };
+}
+
+function encode(value, extra){
+  let out = "";
+  for (const c of value){
+    if (CANON.includes(c) || (extra && extra.has(c))) out += "\\" + c;
+    else out += c;
+  }
+  return out.replace(/\/\//g, "/\\/");
+}
+
+const escStr = s => s.replace(/([\\"])/g, "\\$1");
+const unescStr = s => s.replace(/\\([\\"])/g, "$1");
+
+const lineEnd = (src, i) => { const n = src.indexOf("\n", i); return n === -1 ? src.length : n; };
+const blank = (src, i, to) => i >= to || !src.slice(i, Math.min(lineEnd(src, i), to)).trim();
+
+function scanPair(src, open, oc, cc){
+  let depth = 0, inStr = false;
+  for (let i = open; i < src.length; i++){
+    const c = src[i];
+    if (inStr){ if (c === "\\") i++; else if (c === '"') inStr = false; continue; }
+    if (c === '"'){ inStr = true; continue; }
+    if (c === oc) depth++;
+    else if (c === cc){ depth--; if (!depth) return i + 1; }
+  }
+  return src.length;
+}
+const scanBlock = (src, open) => scanPair(src, open, "(", ")");
+const scanBrackets = (src, open) => scanPair(src, open, "[", "]");
+
+function readValue(src, v, end){
+  const c = src[v];
+  if (c === '"'){
+    let j = v + 1;
+    while (j < end){ if (src[j] === "\\"){ j += 2; continue; } if (src[j] === '"') break; j++; }
+    return { kind:"string", inner:{ start:v + 1, end:j }, vStart:v, vEnd:Math.min(j + 1, end) };
+  }
+  const m = /^([A-Za-z_][A-Za-z0-9_.-]*)\s*\(/.exec(src.slice(v, end));
+  if (m){
+    const o = v + m[0].length - 1, cl = scanBlock(src, o);
+    return { kind:"call", name:m[1], callOpen:o, callClose:cl, vStart:v, vEnd:Math.min(cl, end) };
+  }
+  if (c === "(" || c === "["){
+    const cl = c === "(" ? scanBlock(src, v) : scanBrackets(src, v);
+    return { kind:"other", vStart:v, vEnd:Math.min(cl, end) };
+  }
+  let j = v, d = 0, inStr = false;
+  while (j < end){
+    const ch = src[j];
+    if (inStr){ if (ch === "\\") j++; else if (ch === '"') inStr = false; j++; continue; }
+    if (ch === '"'){ inStr = true; j++; continue; }
+    if (ch === "(" || ch === "[") d++;
+    else if (ch === ")" || ch === "]") d--;
+    else if (ch === "," && d === 0) break;
+    j++;
+  }
+  return { kind:"other", vStart:v, vEnd:j };
+}
+
+function argEntries(src, open, close){
+  const out = [], end = close - 1;
+  let i = open + 1;
+  while (i < end){
+    const c = src[i];
+    if (c === " " || c === "\n" || c === "\t" || c === ","){ i++; continue; }
+    const m = /^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*/.exec(src.slice(i, end));
+    if (m){
+      const v = readValue(src, i + m[0].length, end);
+      out.push({ key:m[1], ...v });
+      i = Math.max(v.vEnd, i + m[0].length + 1);
+      continue;
+    }
+    const v = readValue(src, i, end);
+    out.push({ key:null, ...v });
+    i = Math.max(v.vEnd, i + 1);
+  }
+  return out;
+}
+
+/* R4: inline runs, for rendering and serialising one unit. No fields created here. */
+function runs(src, from, to){
+  const parts = [];
+  let i = from, textStart = from;
+  const flushText = at => {
+    if (at > textStart){
+      const { value, extra } = decode(src.slice(textStart, at));
+      parts.push({ kind:"text", start:textStart, end:at, value, extra:[...extra] });
+    }
+    textStart = at;
+  };
+  while (i < to){
+    const c = src[i];
+    if (c === "\\"){ i += 2; continue; }
+    if (c === "#"){
+      const lm = /^#link\("((?:[^"\\]|\\.)*)"\)\s*\[/.exec(src.slice(i, to));
+      if (lm){
+        const brk = i + lm[0].length - 1, close = scanBrackets(src, brk);
+        if (close <= to){
+          flushText(i);
+          parts.push({ kind:"link", start:i, end:close,
+                       url:{ start:i + 7, end:i + 7 + lm[1].length, value:unescStr(lm[1]) },
+                       body:{ start:brk + 1, end:close - 1 },
+                       parts:runs(src, brk + 1, close - 1) });
+          i = close; textStart = i; continue;
+        }
+      }
+      flushText(i);
+      const fm = /^#([A-Za-z_][A-Za-z0-9_.-]*)\s*/.exec(src.slice(i, to));
+      let j = i + (fm ? fm[0].length : 1);
+      while (j < to && (src[j] === "(" || src[j] === "[")) j = src[j] === "(" ? scanBlock(src, j) : scanBrackets(src, j);
+      j = Math.min(j, to);
+      parts.push({ kind:"opaque", start:i, end:j, raw:src.slice(i, j), lost:true });
+      i = j; textStart = i; continue;
+    }
+    if (c === "*" || c === "_"){
+      const close = src.indexOf(c, i + 1);
+      if (close > i + 1 && close < to && !src.slice(i + 1, close).includes("\n")){
+        flushText(i);
+        parts.push({ kind:c === "*" ? "strong" : "emph", start:i, end:close + 1,
+                     body:{ start:i + 1, end:close }, parts:runs(src, i + 1, close) });
+        i = close + 1; textStart = i; continue;
+      }
+    }
+    if (c === "["){
+      flushText(i);
+      const close = Math.min(scanBrackets(src, i), to);
+      parts.push({ kind:"group", start:i, end:close, parts:runs(src, i + 1, close - 1) });
+      i = close; textStart = i; continue;
+    }
+    if (c === "`"){
+      flushText(i);
+      const close = src.indexOf("`", i + 1);
+      const e = close === -1 || close >= to ? to : close + 1;
+      parts.push({ kind:"opaque", start:i, end:e, raw:src.slice(i, e), lost:true });
+      i = e; textStart = i; continue;
+    }
+    i++;
+  }
+  flushText(Math.min(i, to));
+  return parts;
+}
+
+function serializeParts(parts, extra){
+  let out = "";
+  for (const p of parts){
+    if (p.kind === "text") out += encode(p.value, extra);
+    else if (p.kind === "strong") out += "*" + serializeParts(p.parts, extra) + "*";
+    else if (p.kind === "emph") out += "_" + serializeParts(p.parts, extra) + "_";
+    else if (p.kind === "group") out += "[" + serializeParts(p.parts, extra) + "]";
+    else if (p.kind === "link") out += '#link("' + escStr(p.url.value) + '")[' + serializeParts(p.parts, extra) + "]";
+    else out += p.raw;
+  }
+  return out;
+}
+
+const plainOf = parts => parts.map(p =>
+  p.kind === "text" ? p.value :
+  p.kind === "opaque" ? "" :
+  plainOf(p.parts)).join("");
+
+const extraOf = parts => {
+  const set = new Set();
+  for (const p of parts){
+    if (p.kind === "text") p.extra.forEach(c => set.add(c));
+    else if (p.parts) extraOf(p.parts).forEach(c => set.add(c));
+  }
+  return set;
+};
+const countLost = parts => parts.reduce((a, p) =>
+  a + (p.kind === "opaque" && p.lost ? 1 : 0) + (p.parts ? countLost(p.parts) : 0), 0);
+
+function parse(src){
+  const fields = [], sections = [];
+  const report = { structures:{}, skipped:{}, opaque:0, heldContent:0, lints:[] };
+  const bump = (bag, key) => { bag[key] = (bag[key] || 0) + 1; };
+
+  const argField = (owner, label, key, span) => {
+    if (!span || span.end <= span.start) return null;
+    const slice = src.slice(span.start, span.end);
+    const value = unescStr(slice);
+    const f = { id:"f" + fields.length, kind:"arg", key, label, owner,
+                start:span.start, end:span.end, value, reversible:escStr(value) === slice };
+    fields.push(f);
+    return f;
+  };
+
+  const richField = (owner, label, span, role) => {
+    if (!span || span.end < span.start) return null;
+    const parts = runs(src, span.start, span.end);
+    const extra = extraOf(parts);
+    const slice = src.slice(span.start, span.end);
+    const f = { id:"f" + fields.length, kind:"rich", label, owner, role:role || "line",
+                start:span.start, end:span.end, parts, extra:[...extra],
+                value:plainOf(parts), lost:countLost(parts),
+                reversible:serializeParts(parts, extra) === slice };
+    fields.push(f);
+    report.opaque += f.lost;
+    return f;
+  };
+
+  const lets = new Map();
+  const letRe = /^#let\s+([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*"/gm;
+  let lm;
+  while ((lm = letRe.exec(src))){
+    const start = lm.index + lm[0].length;
+    let j = start;
+    while (j < src.length){ if (src[j] === "\\"){ j += 2; continue; } if (src[j] === '"') break; j++; }
+    lets.set(lm[1], { start, end:j, used:false });
+  }
+
+  const addArgs = (item, open, close, prefix) => {
+    for (const a of argEntries(src, open, close)){
+      if (!a.key) continue;
+      const label = (prefix ? prefix + " " : "") + (LABEL[a.key] || a.key);
+      if (a.kind === "string"){
+        const f = argField(item.id, label, a.key, a.inner);
+        if (f){
+          item.args.push(f.id);
+          if (URLISH.has(a.key) && !/[./]/.test(f.value))
+            report.lints.push(`\`${a.key}\` 的值是 "${f.value}"，看起來是標籤而不是網址（這個套件會連到 https://${f.value}）`);
+        }
+        continue;
+      }
+      if (a.kind === "call"){ addArgs(item, a.callOpen, a.callClose, LABEL[a.key] || a.key); continue; }
+      const raw = src.slice(a.vStart, a.vEnd).trim();
+      const bound = lets.get(raw);
+      if (bound){
+        bound.used = true;
+        const f = argField(item.id, label + `（經由 #let ${raw}）`, a.key, { start:bound.start, end:bound.end });
+        if (f) item.args.push(f.id);
+        continue;
+      }
+      bump(report.skipped, a.key);
+    }
+  };
+
+  const bulletsFor = (item, from, to) => {
+    let j = from;
+    while (j < to){
+      if (blank(src, j, to)) break;
+      const le = Math.min(lineEnd(src, j), to);
+      const line = src.slice(j, le);
+      if (/^\s*\/\//.test(line)){
+        item.notes.push({ outer:{ start:j, end:Math.min(le + 1, to) }, text:line.trim() });
+        bump(report.structures, "註解 //");
+        j = le + 1; continue;
+      }
+      const bm = line.match(/^\s*[-+]\s+/);
+      if (!bm) break;
+      const b = { id:item.id + "b" + item.bullets.length, outer:{ start:j, end:Math.min(le + 1, to) } };
+      b.field = richField(item.id, "要點 " + (item.bullets.length + 1), { start:j + bm[0].length, end:le }, "bullet");
+      item.bullets.push(b);
+      j = le + 1;
+    }
+    return j;
+  };
+
+  function scanBody(from, to, sec){
+    let i = from;
+    while (i < to){
+      if (blank(src, i, to)){ i = lineEnd(src, i) + 1; continue; }
+      const le = Math.min(lineEnd(src, i), to);
+      const line = src.slice(i, le);
+      const mk = (kind, extra) => Object.assign(
+        { id:sec.id + "i" + sec.items.length, kind, outer:{ start:i, end:Math.min(le + 1, to) },
+          args:[], bullets:[], notes:[], contentEnd:Math.min(le + 1, to) }, extra || {});
+
+      if (/^\s*\/\//.test(line)){
+        sec.items.push(mk("ro", { reason:"註解", raw:line.trim(), setup:false }));
+        bump(report.structures, "註解 //");
+        i = le + 1; continue;
+      }
+
+      const letM = /^#let\s+([A-Za-z_][A-Za-z0-9_-]*)\s*=/.exec(line);
+      if (letM){
+        sec.items.push(mk("let", { name:letM[1], binding:lets.get(letM[1]) }));
+        i = le + 1; continue;
+      }
+
+      const showM = /^#show:\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*\(/.exec(line);
+      const callM = /^#([A-Za-z_][A-Za-z0-9_.-]*)\s*\(/.exec(line);
+      const bodyM = /^#([A-Za-z_][A-Za-z0-9_.-]*)\s*\[/.exec(line);
+      if (showM || callM || bodyM){
+        const name = (showM || callM || bodyM)[1];
+        const item = mk("comp", { name, headStart:i, headEnd:0, body:null, bodyItems:null });
+        let after = i;
+        if (showM || callM){
+          const open = i + (showM || callM)[0].length - 1, close = scanBlock(src, open);
+          item.open = open; item.close = close;
+          addArgs(item, open, close);
+          after = close;
+        }
+        if (bodyM || src[after] === "["){
+          const brk = bodyM ? i + bodyM[0].length - 1 : after;
+          const close = scanBrackets(src, brk);
+          item.body = { start:brk + 1, end:close - 1 };
+          after = close;
+        }
+        item.headEnd = after;
+        item.contentEnd = Math.min(lineEnd(src, after) + 1, to);
+        if (item.body){
+          const sub = { id:item.id, items:[] };
+          scanBody(item.body.start, item.body.end, sub);
+          item.bodyItems = sub.items;
+        }
+        let j = bulletsFor(item, item.contentEnd, to);
+        item.contentEnd = j;
+        while (j < to && blank(src, j, to)) j = lineEnd(src, j) + 1;
+        item.outer.end = Math.min(j, to);
+        const leaves = item.args.length + item.bullets.length +
+          (item.bodyItems ? item.bodyItems.reduce((a, x) => a + x.args.length + (x.field ? 1 : 0), 0) : 0);
+        if (!leaves){
+          item.kind = "ro"; item.reason = "#" + name;
+          item.setup = !item.body && !item.bullets.length;
+          bump(report.structures, "#" + name);
+          if (!item.setup) report.heldContent++;
+        }
+        sec.items.push(item);
+        i = item.outer.end > i ? item.outer.end : i + 1;
+        continue;
+      }
+
+      if (/^#/.test(line)){
+        sec.items.push(mk("ro", { reason:line.split(/[\s(]/)[0], raw:line.trim(), setup:true }));
+        bump(report.structures, line.split(/[\s(]/)[0]);
+        i = le + 1; continue;
+      }
+
+      const bm = line.match(/^\s*[-+]\s+/);
+      const indent = line.match(/^\s*/)[0].length;
+      const item = mk(bm ? "bullet" : "para");
+      const n = sec.items.filter(x => x.kind === item.kind).length + 1;
+      item.field = richField(item.id, bm ? "第 " + n + " 行" : "內文 " + n,
+                             { start:i + (bm ? bm[0].length : indent), end:le },
+                             bm ? "bullet" : "para");
+      let j = le + 1;
+      while (j < to && blank(src, j, to)) j = lineEnd(src, j) + 1;
+      item.outer.end = Math.min(j, to);
+      sec.items.push(item);
+      i = item.outer.end > i ? item.outer.end : i + 1;
+    }
+  }
+
+  const firstHead = (() => { const m = /^== /m.exec(src); return m ? m.index : src.length; })();
+  const pre = { id:"s0", kind:"pre", title:"文件開頭", titleField:null,
+                outer:{ start:0, end:firstHead }, bodyStart:0, items:[] };
+  scanBody(0, firstHead, pre);
+  sections.push(pre);
+
+  const heads = [];
+  const hre = /^== (.+)$/gm;
+  let hm;
+  while ((hm = hre.exec(src))) heads.push({ idx:hm.index, ts:hm.index + 3, te:hm.index + 3 + hm[1].length });
+  heads.forEach((h, n) => {
+    const end = n + 1 < heads.length ? heads[n + 1].idx : src.length;
+    const sec = { id:"s" + (n + 1), kind:"section", title:src.slice(h.ts, h.te), titleField:null,
+                  outer:{ start:h.idx, end }, bodyStart:Math.min(lineEnd(src, h.idx) + 1, end), items:[] };
+    sec.titleField = richField(sec.id, "段落標題", { start:h.ts, end:h.te }, "heading");
+    scanBody(sec.bodyStart, end, sec);
+    sections.push(sec);
+  });
+
+  for (const [name, b] of lets) if (!b.used) report.lints.push(`\`#let ${name}\` 沒有被任何參數用到（死綁定）`);
+  return { fields, sections, report, lets };
+}
+
+function markLets(p){
+  for (const sec of p.sections)
+    for (const it of sec.items)
+      if (it.kind === "let") it.dead = !(p.lets.get(it.name) || {}).used;
+}
+
+function verdict(p, src){
+  const owned = p.fields.reduce((a, f) => a + (f.end - f.start), 0);
+  const bad = p.fields.filter(f => !f.reversible).length;
+  const structures = Object.values(p.report.structures).reduce((a, n) => a + n, 0);
+  const held = p.report.heldContent;
+  const editable = p.fields.filter(f => f.reversible).length;
+  const tier = !editable ? "C" : (bad || p.report.opaque || held) ? "B" : "A";
+  return { owned, bad, editable, structures, held, opaque:p.report.opaque, tier,
+           pct: src.length ? Math.round(owned / src.length * 100) : 0 };
+}
+
+if (typeof module !== "undefined")
+  module.exports = { parse, markLets, verdict, runs, serializeParts, plainOf, extraOf,
+                     decode, encode, escStr, unescStr, scanBlock, scanBrackets, argEntries, lineEnd, SLOT, LABEL };
+
+/* A mocked page preview built from the same projection the form edits.
+
+   Every edit unit is one element here carrying `data-leaf="<field id>"`, so both
+   highlight states are a lookup rather than a search:
+     editing — the line boxes of the selected unit, from Range.getClientRects()
+     removing — the block(s) holding every unit inside the armed outer span
+
+   It is a CSS mock, not typst output. The one thing a mock cannot know is where the
+   automatic page breaks fall; only an explicit `#pagebreak()` is drawn. In the product
+   that answer comes from compiling and reading the geometry back (app/services/layout.py). */
+
+const PV_SLOT = {
+  author:"name", name:"lead", title:"lead", institution:"lead", position:"lead",
+  company:"sub", organization:"sub", publisher:"sub", degree:"sub",
+  dates:"right", "start-date":"right", "end-date":"right",
+  location:"right2",
+  email:"contact", phone:"contact", github:"contact", linkedin:"contact",
+  "personal-site":"contact", website:"contact", orcid:"contact"
+};
+const PV_HIDDEN = new Set(["accent-color","font","paper","lang","author-position",
+                           "personal-info-position","margin","header-font","name-font"]);
+const pvSlot = f => PV_HIDDEN.has(f.key || "") ? "hidden" : (PV_SLOT[f.key || ""] || "other");
+const argSpan = f => `<span data-leaf="${f.id}">${esc(f.value) || "&nbsp;"}</span>`;
+
+function pvParts(parts){
+  let html = "";
+  for (const p of parts || []){
+    if (p.kind === "text") html += esc(p.value);
+    else if (p.kind === "strong") html += `<strong>${pvParts(p.parts)}</strong>`;
+    else if (p.kind === "emph") html += `<em>${pvParts(p.parts)}</em>`;
+    else if (p.kind === "group") html += pvParts(p.parts);
+    else if (p.kind === "link")
+      html += `<a class="pg-link" href="#" onclick="return false" title="${attr(p.url.value)}">` +
+              pvParts(p.parts) + `</a>`;
+    else html += `<span class="pg-op" title="沒認出來的構造，原樣保留">${esc(p.raw.slice(0, 14))}</span>`;
+  }
+  return html;
+}
+
+const pvUnit = (f, tag, cls, block) =>
+  `<${tag}${cls ? ` class="${cls}"` : ""} data-leaf="${f.id}" data-block="${block}">` +
+  (pvParts(f.parts) || "&nbsp;") + `</${tag}>`;
+
+function pvEntry(item){
+  const fs = item.args.map(field).filter(Boolean);
+  const pick = slot => fs.filter(f => pvSlot(f) === slot);
+  const lead = pick("lead"), sub = pick("sub"), right = pick("right"),
+        right2 = pick("right2"), other = pick("other");
+  let html = `<div class="pg-entry" data-block="${item.id}">`;
+  html += `<div class="pg-row"><span class="pg-lead">` +
+          lead.map(argSpan).join(" ") +
+          (sub.length ? `<span class="pg-sub">${lead.length ? "，" : ""}${sub.map(argSpan).join("，")}</span>` : "") +
+          `</span>`;
+  if (right.length) html += `<span class="pg-right">` + right.map(argSpan).join(" – ") + `</span>`;
+  html += `</div>`;
+  if (right2.length || other.length)
+    html += `<div class="pg-row"><span class="pg-sub2">` + other.map(argSpan).join("・") + `</span>` +
+            (right2.length ? `<span class="pg-right">${right2.map(argSpan).join("・")}</span>` : "") + `</div>`;
+  if (item.bodyItems)
+    for (const b of item.bodyItems) if (b.field) html += pvUnit(b.field, "div", "pg-p", b.id);
+  if (item.bullets.length)
+    html += `<ul>` + item.bullets.filter(b => b.field)
+              .map(b => pvUnit(b.field, "li", "", b.id)).join("") + `</ul>`;
+  html += `</div>`;
+  return html;
+}
+
+function buildPreview(){
+  const pre = S.parsed.sections[0];
+  const headComp = pre && pre.items.find(i => i.kind === "comp" && i.args.length);
+  let html = `<div class="pg-tag">版面模擬・非 typst 輸出</div><div class="pg-inner" id="pgInner">`;
+
+  if (headComp){
+    const fs = headComp.args.map(field).filter(Boolean);
+    const name = fs.filter(f => pvSlot(f) === "name");
+    const contact = fs.filter(f => pvSlot(f) === "contact" || pvSlot(f) === "right2");
+    html += `<div class="pg-head" data-block="${headComp.id}">`;
+    html += `<div class="pg-name">` + (name.length ? name.map(argSpan).join(" ") : "（沒有姓名參數）") + `</div>`;
+    if (contact.length)
+      html += `<div class="pg-contact">` + contact.map(argSpan).join(`<span class="pg-dot"> · </span>`) + `</div>`;
+    html += `</div>`;
+  }
+
+  if (pre)
+    for (const it of pre.items){
+      if (it === headComp) continue;
+      if (it.kind === "comp" && it.bodyItems){
+        for (const b of it.bodyItems) if (b.field) html += pvUnit(b.field, "div", "pg-p", b.id);
+      } else if (it.field) html += pvUnit(it.field, "div", "pg-p", it.id);
+    }
+
+  for (const sec of S.parsed.sections){
+    if (sec.kind !== "section") continue;
+    html += sec.titleField
+      ? pvUnit(sec.titleField, "div", "pg-h2", sec.id)
+      : `<div class="pg-h2" data-block="${sec.id}">${esc(sec.title)}</div>`;
+    let bullets = [];
+    const flush = () => { if (bullets.length){ html += `<ul>${bullets.join("")}</ul>`; bullets = []; } };
+    for (const it of sec.items){
+      if (it.kind === "bullet" && it.field){ bullets.push(pvUnit(it.field, "li", "", it.id)); continue; }
+      flush();
+      if (it.kind === "comp") html += pvEntry(it);
+      else if (it.kind === "para" && it.field) html += pvUnit(it.field, "div", "pg-p", it.id);
+      else if (it.kind === "ro" && /pagebreak/.test(it.reason || ""))
+        html += `<div class="pg-break" data-block="${it.id}">分頁</div>`;
+    }
+    flush();
+  }
+
+  html += `</div>`;
+  $("page").innerHTML = `<div class="ovl" id="ovl"></div>` + html;
+}
+
+/* Typing must not rebuild the page: swap that one unit's content and re-measure. */
+function updatePreviewLeaf(f){
+  const els = $("page").querySelectorAll(`[data-leaf="${f.id}"]`);
+  els.forEach(el => {
+    if (f.kind === "rich") el.innerHTML = pvParts(f.parts) || "&nbsp;";
+    else el.textContent = f.value || " ";
+  });
+}
+
+const pvIdsInside = span => S.parsed.fields
+  .filter(f => f.start >= span.start && f.end <= span.end)
+  .map(f => f.id);
+
+function pvRectsFor(id){
+  const out = [];
+  const els = [...$("page").querySelectorAll(`[data-leaf="${id}"]`)];
+  els.forEach(el => {
+    let rects = [];
+    try {
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      rects = [...r.getClientRects()];
+    } catch (e){ rects = []; }
+    if (!rects.length) rects = [el.getBoundingClientRect()];
+    rects.forEach(x => { if (x.width > 0.5 || x.height > 0.5) out.push({ rect:x, el }); });
+  });
+  return { els, hits:out };
+}
+
+function paintPreviewHighlight(){
+  const ovl = $("ovl");
+  if (!ovl) return;
+  ovl.innerHTML = "";
+  if ($("pv").hidden) return;
+  const page = $("page"), inner = $("pgInner");
+  if (!inner) return;
+  const pr = page.getBoundingClientRect(), ir = inner.getBoundingClientRect();
+  const put = (cls, left, top, width, height) =>
+    ovl.insertAdjacentHTML("beforeend",
+      `<div class="${cls}" style="left:${left.toFixed(1)}px;top:${top.toFixed(1)}px;` +
+      `width:${Math.max(width, 2).toFixed(1)}px;height:${Math.max(height, 2).toFixed(1)}px"></div>`);
+
+  if (!fresh()){ $("pvNote").textContent = "投影過期，重建後才對得起來"; return; }
+
+  if (S.outlined){
+    const ids = pvIdsInside(S.outlined);
+    const blocks = new Set();
+    for (const id of ids)
+      for (const hit of pvRectsFor(id).hits){
+        const b = hit.el.closest("[data-block]");
+        if (b) blocks.add(b);
+      }
+    const list = [...blocks];
+    const outermost = list.filter(b => !list.some(a => a !== b && a.contains && a.contains(b)));
+    for (const b of outermost){
+      const r = b.getBoundingClientRect();
+      put("hl-del", r.left - pr.left - 3, r.top - pr.top - 2, r.width + 6, r.height + 4);
+    }
+    $("pvNote").textContent = outermost.length
+      ? `要刪掉的：紙上 ${outermost.length} 塊、${ids.length} 個單位`
+      : `這個範圍在紙上沒有可見的內容（${ids.length} 個單位）`;
+    return;
+  }
+
+  const f = S.active ? field(S.active) : null;
+  if (!f){ $("pvNote").textContent = "點表單任一格，這裡會標出它在紙上的那一行"; return; }
+  const { els, hits } = pvRectsFor(f.id);
+  if (!els.length){ $("pvNote").textContent = `${f.label}：這個參數不印在紙上（版面設定）`; return; }
+  if (!hits.length){ $("pvNote").textContent = `${f.label}：在紙上，但現在量不到位置`; return; }
+  for (const hit of hits){
+    const r = hit.rect;
+    put("hl-band", ir.left - pr.left, r.top - pr.top, ir.width, r.height);
+    put("hl-box", r.left - pr.left, r.top - pr.top, r.width, r.height);
+  }
+  $("pvNote").textContent = `${f.label}：紙上 ${hits.length} 行`;
+  const host = $("pv"), hr = host.getBoundingClientRect(), first = hits[0].rect;
+  const want = first.top - hr.top - host.clientHeight / 2;
+  if (Math.abs(want) > host.clientHeight / 3) host.scrollTop += want;
+}
+
+function showPane(which){
+  const pv = which === "pv";
+  $("pv").hidden = !pv;
+  $("src").hidden = pv;
+  $("tabPv").classList.toggle("on", pv);
+  $("tabSrc").classList.toggle("on", !pv);
+  $("paneTitle").textContent = pv ? "版面預覽" : "typst_source";
+  if (pv) paintPreviewHighlight(); else paintSource();
+}
+
+function wirePreview(){
+  $("tabPv").onclick = () => showPane("pv");
+  $("tabSrc").onclick = () => showPane("src");
+  $("pv").addEventListener("click", e => {
+    const el = e.target.closest ? e.target.closest("[data-leaf]") : null;
+    if (!el) return;
+    const id = el.dataset.leaf;
+    const input = $("i-" + id);
+    if (input){ input.focus(); input.select && input.select(); return; }
+    S.active = id; S.outlined = null;
+    paintPreviewHighlight();
+  });
+  if (typeof ResizeObserver !== "undefined")
+    new ResizeObserver(() => paintPreviewHighlight()).observe($("page"));
+}
+
+/* One editable surface per line.
+
+   A sentence is one thing to a person, so it is one thing here: the whole text range of
+   a bullet, paragraph or heading is a single contenteditable surface, and bold, italics
+   and links are formatting inside it rather than fields of their own. Selecting a word
+   and pressing B is therefore an ordinary edit of that one unit, not a structural change
+   that splits it into three boxes.
+
+   The write path is unchanged: serialise the surface back to Typst, replace that unit's
+   span, shift what follows, compile-check before committing. `serializeParts` (what the
+   parser produces) and `serializeRT` (what the DOM produces) must agree byte for byte on
+   an untouched unit -- that identity is what makes the surface safe, and it is tested. */
+
+function partsHtml(parts){
+  let out = "";
+  for (const p of parts){
+    if (p.kind === "text") out += esc(p.value);
+    else if (p.kind === "strong") out += `<b>${partsHtml(p.parts)}</b>`;
+    else if (p.kind === "emph") out += `<i>${partsHtml(p.parts)}</i>`;
+    else if (p.kind === "group") out += `<span data-r="group">${partsHtml(p.parts)}</span>`;
+    else if (p.kind === "link")
+      out += `<a data-r="link" data-url="${attr(p.url.value)}" title="${attr(p.url.value)}">` +
+             partsHtml(p.parts) + `</a>`;
+    else out += `<span data-r="op" contenteditable="false" data-raw="${attr(p.raw)}">${esc(p.raw)}</span>`;
+  }
+  return out;
+}
+
+function serializeRT(node, extra){
+  let out = "";
+  const kids = node.childNodes || [];
+  for (let i = 0; i < kids.length; i++){
+    const n = kids[i];
+    if (n.nodeType === 3){ out += encode(n.nodeValue || "", extra); continue; }
+    if (n.nodeType !== 1) continue;
+    const tag = (n.tagName || "").toLowerCase();
+    const r = n.dataset ? n.dataset.r : null;
+    if (r === "op"){ out += n.dataset.raw; continue; }
+    if (tag === "br"){ out += " "; continue; }
+    if (r === "link" || tag === "a"){
+      const inner = serializeRT(n, extra);
+      const url = (n.dataset && n.dataset.url) || "";
+      out += inner ? '#link("' + escStr(url) + '")[' + inner + "]" : "";
+      continue;
+    }
+    if (tag === "b" || tag === "strong"){
+      const inner = serializeRT(n, extra);
+      out += inner ? "*" + inner + "*" : "";
+      continue;
+    }
+    if (tag === "i" || tag === "em"){
+      const inner = serializeRT(n, extra);
+      out += inner ? "_" + inner + "_" : "";
+      continue;
+    }
+    if (r === "group"){ out += "[" + serializeRT(n, extra) + "]"; continue; }
+    out += serializeRT(n, extra);     // a div or span the browser invented while editing
+  }
+  return out;
+}
+
+function richHtml(f, ok){
+  const editable = ok && f.reversible;
+  return `<div class="rt${editable ? "" : " ro-rt"}" id="i-${f.id}" data-f="${f.id}"` +
+         ` contenteditable="${editable ? "true" : "false"}" role="textbox"` +
+         ` aria-label="${attr(f.label)}" spellcheck="false">${partsHtml(f.parts)}</div>`;
+}
+
+/* A rich edit: the unit's whole span is replaced by what the surface now serialises to.
+   The form is never re-rendered here -- that would throw the caret away. */
+function applyRich(f, el){
+  if (!f.reversible || !fresh()) return;
+  if (S.src.slice(f.start, f.end) !== lastWritten(f)){
+    log("bad", "這一行的 span 已經不是它自己的內容了，沒有寫入，直接重建投影",
+        `${f.label}・span ${f.start}..${f.end}`);
+    rebuild();
+    return;
+  }
+  const extra = new Set(f.extra);
+  const text = serializeRT(el, extra);
+  if (text === S.src.slice(f.start, f.end)) return;
+  const candidate = S.src.slice(0, f.start) + text + S.src.slice(f.end);
+  const check = compileCheck(candidate);
+  if (!check.ok){
+    log("bad", "編譯檢查沒過，這一下沒有寫入：" + check.msg, `${f.label} 的原始碼原樣留著`);
+    return;
+  }
+  const delta = text.length - (f.end - f.start);
+  const moved = S.parsed.fields.filter(o => o !== f && o.start >= f.end).length;
+  shiftAll(S.parsed, f.end, delta, new Set());
+  S.src = candidate;
+  S.derived = hash(candidate);
+  f._wrote = text;
+  f.parts = runs(S.src, f.start, f.end);
+  f.value = plainOf(f.parts);
+  f.lost = 0;
+  S.active = f.id; S.outlined = null;
+  updatePreviewLeaf(f);
+  paintSource(); paintChips();
+  log("ok", `${f.label} ← ${JSON.stringify(f.value.length > 20 ? f.value.slice(0, 20) + "…" : f.value)}`,
+      `整行 span ${f.start}..${f.end}・delta ${delta >= 0 ? "+" : ""}${delta}・位移 ${moved} 個單位・` +
+      `其餘 ${S.src.length - (f.end - f.start)} bytes 不變・restamp ${S.derived}`);
+}
+
+/* Formatting acts on the browser's own selection, so it is the gesture people expect. */
+function activeSurface(){
+  const f = S.active ? field(S.active) : null;
+  if (!f || f.kind !== "rich" || !f.reversible) return null;
+  const el = $("i-" + f.id);
+  return el && el.isContentEditable !== false ? { f, el } : null;
+}
+
+function selectionInside(el){
+  const sel = typeof window !== "undefined" && window.getSelection ? window.getSelection() : null;
+  if (!sel || !sel.rangeCount) return null;
+  const r = sel.getRangeAt(0);
+  if (!el.contains || !el.contains(r.commonAncestorContainer)) return null;
+  return { sel, range:r, empty:r.collapsed };
+}
+
+function toggleBold(){
+  const a = activeSurface();
+  if (!a){ log("info", "先把游標放在一行內文裡", "粗體只作用在內文、要點和段落標題"); return; }
+  const s = selectionInside(a.el);
+  if (!s || s.empty){ log("info", "先選一段字", `在「${a.f.label}」裡拖選要變粗的字，或按 ⌘B / Ctrl+B`); return; }
+  try { document.execCommand("styleWithCSS", false, false); } catch (e){ /* older engines */ }
+  document.execCommand("bold");
+  applyRich(a.f, a.el);
+}
+
+function toggleItalic(){
+  const a = activeSurface();
+  if (!a) return;
+  const s = selectionInside(a.el);
+  if (!s || s.empty) return;
+  try { document.execCommand("styleWithCSS", false, false); } catch (e){ /* older engines */ }
+  document.execCommand("italic");
+  applyRich(a.f, a.el);
+}
+
+function updateToolbar(){
+  const f = S.active ? field(S.active) : null;
+  $("tbHint").textContent = !f ? "點一行內文或要點，選一段字就會跳出工具列"
+    : f.kind === "arg" ? `${f.label} 是字串參數：Typst 會把 *x* 原樣印出來，所以放不了格式`
+    : !f.reversible ? `${f.label} 是唯讀的（序列化回不去原樣）`
+    : `在「${f.label}」裡選一段字：⌘B 粗體・⌘I 斜體・⌘K 連結`;
+}
+
+/* Keyboard and paste live on the form, so they survive every re-render. */
+function wireRichKeys(){
+  const form = $("form");
+  form.addEventListener("keydown", e => {
+    const a = activeSurface();
+    if (!a || e.target !== a.el) return;
+    if (e.key === "Enter"){ e.preventDefault(); return; }   // one unit is one line
+    if (!(e.metaKey || e.ctrlKey)) return;
+    const k = (e.key || "").toLowerCase();
+    if (k === "b"){ e.preventDefault(); toggleBold(); }
+    else if (k === "i"){ e.preventDefault(); toggleItalic(); }
+    else if (k === "k"){ e.preventDefault(); syncBubble(true); openLinkRow(); }
+  });
+  form.addEventListener("paste", e => {
+    const a = activeSurface();
+    if (!a || e.target !== a.el) return;
+    e.preventDefault();
+    const text = (e.clipboardData ? e.clipboardData.getData("text/plain") : "").replace(/\s*\n+\s*/g, " ");
+    if (text) document.execCommand("insertText", false, text);
+  });
+}
+
+/* The formatting controls live at the selection, not at the top of the card.
+
+   Select a few words and a small bar appears beside them: B, I, and 連結. ⌘K opens its
+   URL field with the caret already inside, so the whole gesture is select → ⌘K → type →
+   Enter, without leaving the sentence. Clicking a link that is already there opens the
+   same bar with its URL filled in, which is also the only way to change one.
+
+   The one thing that needs care: focusing the URL field takes focus off the editable
+   surface and the browser drops the selection. So the Range is cloned when the bar opens
+   and restored right before the wrap, which is why typing a URL cannot lose your place. */
+
+const BUB = { range:null, surf:null, f:null, anchor:null };
+
+const bubShown = () => !$("bub").hidden;
+function hideBubble(){
+  $("bub").hidden = true;
+  $("bRow2").hidden = true;
+  BUB.range = null; BUB.surf = null; BUB.f = null; BUB.anchor = null;
+}
+
+function selCtx(){
+  const sel = typeof window !== "undefined" && window.getSelection ? window.getSelection() : null;
+  if (!sel || !sel.rangeCount) return null;
+  const r = sel.getRangeAt(0);
+  let n = r.commonAncestorContainer;
+  if (n && n.nodeType === 3) n = n.parentNode;
+  const surf = n && n.closest ? n.closest(".rt") : null;
+  if (!surf || surf.getAttribute("contenteditable") !== "true") return null;
+  const f = field(surf.dataset.f);
+  if (!f) return null;
+  let a = r.startContainer;
+  if (a && a.nodeType === 3) a = a.parentNode;
+  const anchor = a && a.closest ? a.closest("a") : null;
+  return { sel, range:r, surf, f, empty:r.collapsed,
+           anchor: anchor && surf.contains(anchor) ? anchor : null };
+}
+
+function placeBubble(rect){
+  const card = $("formCard"), bub = $("bub");
+  const cr = card.getBoundingClientRect();
+  bub.hidden = false;
+  const w = bub.offsetWidth || 190, h = bub.offsetHeight || 34;
+  let top = rect.top - cr.top - h - 7;
+  if (top < 2) top = rect.bottom - cr.top + 7;
+  let left = rect.left - cr.left + rect.width / 2 - w / 2;
+  left = Math.max(6, Math.min(left, cr.width - w - 6));
+  bub.style.top = top.toFixed(0) + "px";
+  bub.style.left = left.toFixed(0) + "px";
+}
+
+function syncBubble(keepRow){
+  const c = selCtx();
+  if (!c || (c.empty && !c.anchor)){
+    if (!$("bUrl").matches || !$("bUrl").matches(":focus")) hideBubble();
+    return;
+  }
+  BUB.range = c.range.cloneRange();
+  BUB.surf = c.surf; BUB.f = c.f; BUB.anchor = c.anchor;
+  $("bUnlink").hidden = !c.anchor;
+  $("bLink").textContent = c.anchor ? "改網址" : "連結";
+  $("bLink").disabled = !c.anchor && c.empty;
+  $("bB").disabled = c.empty;
+  $("bI").disabled = c.empty;
+  if (!keepRow) $("bRow2").hidden = true;
+  const rect = c.anchor && c.empty ? c.anchor.getBoundingClientRect() : c.range.getBoundingClientRect();
+  if (!rect || (!rect.width && !rect.height)) return hideBubble();
+  placeBubble(rect);
+}
+
+function restoreRange(){
+  if (!BUB.range) return false;
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(BUB.range);
+  return true;
+}
+
+function openLinkRow(){
+  if (!BUB.surf) syncBubble(true);
+  if (!BUB.surf) { log("info", "先把游標放在一行內文裡", "連結只作用在內文、要點和段落標題"); return; }
+  if (!BUB.anchor && BUB.range.collapsed){ log("info", "先選一段字", "選要變成連結的字，再按 ⌘K"); return; }
+  $("bub").hidden = false;
+  $("bRow2").hidden = false;
+  const u = $("bUrl");
+  u.value = BUB.anchor ? (BUB.anchor.dataset.url || "") : "";
+  u.focus();
+  u.select && u.select();
+}
+
+function applyLinkFromBubble(){
+  const url = ($("bUrl").value || "").trim();
+  if (!url){ $("bUrl").focus(); return; }
+  if (!BUB.surf || !restoreRange()) return;
+  if (BUB.anchor){
+    BUB.anchor.dataset.url = url;
+    BUB.anchor.title = url;
+  } else {
+    const a = document.createElement("a");
+    a.dataset.r = "link";
+    a.dataset.url = url;
+    a.title = url;
+    a.appendChild(BUB.range.extractContents());
+    BUB.range.insertNode(a);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    const after = document.createRange();
+    after.selectNodeContents(a);
+    sel.addRange(after);
+  }
+  const f = BUB.f, surf = BUB.surf;
+  hideBubble();
+  applyRich(f, surf);
+  surf.focus();
+}
+
+function unlinkFromBubble(){
+  if (!BUB.anchor || !BUB.surf) return;
+  const a = BUB.anchor, f = BUB.f, surf = BUB.surf;
+  while (a.firstChild) a.parentNode.insertBefore(a.firstChild, a);
+  a.remove();
+  surf.normalize && surf.normalize();
+  hideBubble();
+  applyRich(f, surf);
+  surf.focus();
+  log("ok", "拆掉連結，文字留下", f.label);
+}
+
+function bubbleFormat(cmd){
+  if (!BUB.surf || !restoreRange()) return;
+  const f = BUB.f, surf = BUB.surf;
+  try { document.execCommand("styleWithCSS", false, false); } catch (e){ /* older engines */ }
+  document.execCommand(cmd);
+  applyRich(f, surf);
+  syncBubble(false);
+}
+
+function wireBubble(){
+  const hold = el => { el.onmousedown = e => e.preventDefault(); };
+  hold($("bB")); hold($("bI")); hold($("bLink")); hold($("bUnlink")); hold($("bOk"));
+  $("bB").onclick = () => bubbleFormat("bold");
+  $("bI").onclick = () => bubbleFormat("italic");
+  $("bLink").onclick = openLinkRow;
+  $("bUnlink").onclick = unlinkFromBubble;
+  $("bOk").onclick = applyLinkFromBubble;
+  $("bUrl").onkeydown = e => {
+    if (e.key === "Enter"){ e.preventDefault(); applyLinkFromBubble(); }
+    else if (e.key === "Escape"){ e.preventDefault(); const s = BUB.surf; hideBubble(); if (s){ s.focus(); } }
+  };
+
+  const form = $("form");
+  const resync = () => { if (!$("bUrl").matches || !$("bUrl").matches(":focus")) syncBubble(false); };
+  form.addEventListener("mouseup", resync);
+  form.addEventListener("keyup", e => { if (e.key !== "Escape") resync(); });
+  form.addEventListener("scroll", () => { if (bubShown()) syncBubble(true); });
+  document.addEventListener("selectionchange", () => {
+    if (!bubShown()) { syncBubble(false); return; }
+    if ($("bRow2").hidden) syncBubble(false);
+  });
+  document.addEventListener("mousedown", e => {
+    if (!bubShown()) return;
+    const t = e.target;
+    if ($("bub").contains(t)) return;
+    if (t.closest && t.closest(".rt")) return;
+    hideBubble();
+  });
+}
+
+const SAMPLE = `#import "@preview/basic-resume:0.2.9": *
+
+#let name = "林宜蓁"
+#let email = "yichen.lin@example.com"
+
+#show: resume.with(
+  author: name,
+  location: "台北市",
+  email: email,
+  github: "github.com/yichenlin",
+  accent-color: "#1d9e75",
+  font: ("New Computer Modern", "Noto Serif CJK TC"),
+)
+
+#set par(leading: 0.65em)
+
+#align(left)[
+  後端工程師，五年經驗，專長是把慢掉的查詢和排程修回來。
+]
+
+== 工作經歷
+
+#work(
+  title: "後端工程師",
+  location: "台北市",
+  company: "星瀚科技",
+  dates: dates-helper(start-date: "2023-03", end-date: "Present"),
+)
+- 把訂單查詢的 p95 從 1.8s 壓到 240ms，拆掉三層巢狀子查詢。
+// - 這一行被註解掉了，表單不顯示它，但解析報告會算進去。
+- 接手排程系統，改用 *advisory lock*，重複寄送從每週 40 件降到 0 件。
+
+#work(
+  title: "軟體工程師",
+  location: "新竹市",
+  company: "宏晨資訊",
+  dates: dates-helper(start-date: "2021-07", end-date: "2023-02"),
+)
+- 在 CI 導入型別檢查，細節寫在 #link("https://example.com/ci")[這篇筆記]。
+
+== 學歷
+
+#edu(
+  institution: "國立臺灣大學",
+  location: "台北市",
+  degree: "資訊工程學系 學士",
+  dates: dates-helper(start-date: "2017-09", end-date: "2021-06"),
+)
+
+== 技能
+
+- *語言：* Python, TypeScript, Go
+- *資料庫：* PostgreSQL, Redis
+`;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;" }[c]));
+const attr = s => esc(s).replace(/"/g, "&quot;");
+const KIND_CN = { comp:"區塊", bullet:"條列", para:"內文", ro:"結構", let:"變數" };
+
+function hash(s){
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, "0");
+}
+
+function normalizeBlanks(src){
+  let out = src.replace(/\n{3,}/g, "\n\n");
+  if (!out.endsWith("\n")) out += "\n";
+  return out;
+}
+
+function compileCheck(src){
+  let paren = 0, brack = 0, inStr = false, line = 1;
+  for (let i = 0; i < src.length; i++){
+    const c = src[i];
+    if (c === "\n") line++;
+    if (inStr){
+      if (c === "\\"){ i++; continue; }
+      if (c === '"'){ inStr = false; continue; }
+      if (c === "\n") return { ok:false, msg:`第 ${line - 1} 行的字串沒有收尾` };
+      continue;
+    }
+    if (c === '"'){ inStr = true; continue; }
+    if (c === "(") paren++;
+    else if (c === ")"){ paren--; if (paren < 0) return { ok:false, msg:`第 ${line} 行多了一個 )` }; }
+    else if (c === "[") brack++;
+    else if (c === "]"){ brack--; if (brack < 0) return { ok:false, msg:`第 ${line} 行多了一個 ]` }; }
+  }
+  if (inStr) return { ok:false, msg:"檔案結束時字串還沒收尾" };
+  if (paren) return { ok:false, msg:`有 ${paren} 個 ( 沒關` };
+  if (brack) return { ok:false, msg:`有 ${brack} 個 [ 沒關` };
+  return { ok:true };
+}
+
+const S = { src:"", parsed:null, derived:"", active:null, outlined:null, raw:false, log:[], undo:[] };
+const fresh = () => hash(S.src) === S.derived;
+const field = id => S.parsed.fields.find(f => f.id === id);
+const contentful = it => it.kind === "comp" || it.kind === "bullet" || it.kind === "para";
+
+const SHIFT_KEYS = new Set(["start","end","contentEnd","bodyStart","headStart","headEnd","open","close"]);
+function shiftAll(node, from, delta, seen){
+  if (!node || typeof node !== "object" || seen.has(node)) return;
+  seen.add(node);
+  for (const k of Object.keys(node)){
+    const v = node[k];
+    if (typeof v === "number"){ if (SHIFT_KEYS.has(k) && v >= from) node[k] = v + delta; }
+    else if (v && typeof v === "object") shiftAll(v, from, delta, seen);
+  }
+}
+
+function log(kind, text, detail){
+  S.log.unshift({ kind, text, detail });
+  S.log = S.log.slice(0, 90);
+  $("log").innerHTML = S.log.map(e =>
+    `<div class="${e.kind}"><span class="k">${({ ok:"寫入", bad:"擋下", warn:"過期", info:"資訊" })[e.kind]}</span>` +
+    esc(e.text) + (e.detail ? ` <span style="color:var(--ink-3)">${esc(e.detail)}</span>` : "") + "</div>").join("");
+  $("logMeta").textContent = S.log.length + " 筆";
+}
+
+function load(src, why){
+  S.src = normalizeBlanks(src);
+  S.parsed = parse(S.src);
+  markLets(S.parsed);
+  S.derived = hash(S.src);
+  S.active = null; S.outlined = null;
+  render();
+  const v = verdict(S.parsed, S.src);
+  log("info", why, `Tier ${v.tier}・${S.parsed.fields.length} 個編輯單位（可編 ${v.editable}）・hash ${S.derived}`);
+}
+
+function rebuild(){
+  const before = S.parsed.fields.length;
+  S.parsed = parse(S.src);
+  markLets(S.parsed);
+  S.derived = hash(S.src);
+  S.active = null; S.outlined = null;
+  render();
+  log("info", "重建投影（重新解析，零成本）", `單位 ${before} → ${S.parsed.fields.length}・hash ${S.derived}`);
+}
+
+function lastWritten(f){
+  if (f._wrote !== undefined) return f._wrote;
+  return f.kind === "arg" ? escStr(f.value) : serializeParts(f.parts, new Set(f.extra));
+}
+
+/* A string argument: one input, one span. */
+function applyArg(f, next, el){
+  if (S.src.slice(f.start, f.end) !== lastWritten(f)){
+    log("bad", "這一格的 span 已經不是它自己的內容了，沒有寫入，直接重建投影",
+        `${f.label}・span ${f.start}..${f.end}`);
+    rebuild();
+    return;
+  }
+  const encoded = S.raw ? next : escStr(next);
+  const candidate = S.src.slice(0, f.start) + encoded + S.src.slice(f.end);
+  const check = compileCheck(candidate);
+  if (!check.ok){
+    log("bad", "編譯檢查沒過，整筆丟棄：" + check.msg, `${f.label} 的 span 原樣留著`);
+    el.value = f.value;
+    el.classList.add("rejected");
+    setTimeout(() => el.classList.remove("rejected"), 700);
+    return;
+  }
+  const delta = encoded.length - (f.end - f.start);
+  const moved = S.parsed.fields.filter(o => o !== f && o.start >= f.end).length;
+  shiftAll(S.parsed, f.end, delta, new Set());
+  f.value = next;
+  f._wrote = encoded;
+  S.src = candidate;
+  S.derived = hash(candidate);
+  S.active = f.id; S.outlined = null;
+  sizeInput(el, next);
+  updatePreviewLeaf(f);
+  paintSource(); paintChips();
+  log("ok", `${f.label} ← ${JSON.stringify(next.length > 20 ? next.slice(0, 20) + "…" : next)}`,
+      `span ${f.start}..${f.end}・delta ${delta >= 0 ? "+" : ""}${delta}・位移 ${moved} 個單位・` +
+      `其餘 ${S.src.length - (f.end - f.start)} bytes 不變・restamp ${S.derived}`);
+}
+
+/* A structural edit: an outer span is cut or a snippet spliced in, then re-parse. */
+function structural(label, next, detail, focusAt){
+  const normalized = normalizeBlanks(next);
+  const check = compileCheck(normalized);
+  if (!check.ok){ log("bad", "編譯檢查沒過，整筆丟棄：" + check.msg, label); return; }
+  S.undo.push(S.src);
+  const before = S.parsed.fields.length;
+  S.src = normalized;
+  S.parsed = parse(S.src);
+  markLets(S.parsed);
+  S.derived = hash(S.src);
+  S.outlined = null;
+  S.active = focusAt == null ? null : nearest(focusAt);
+  render();
+  log("ok", label, `${detail}・重新解析：單位 ${before} → ${S.parsed.fields.length}・` +
+      `自成一筆 revision（coalesce=False）・restamp ${S.derived}`);
+  if (S.active){
+    const el = $("i-" + S.active);
+    if (el){ el.focus(); el.select && el.select(); }
+  }
+}
+
+function nearest(offset){
+  let best = null;
+  for (const f of S.parsed.fields)
+    if (f.reversible && f.start >= offset && (!best || f.start < best.start)) best = f;
+  return best ? best.id : null;
+}
+
+const cut = (a, b) => S.src.slice(0, a) + S.src.slice(b);
+const splice = (at, t) => S.src.slice(0, at) + t + S.src.slice(at);
+const leafCount = it => it.args.length + it.bullets.filter(b => b.field).length +
+  (it.field ? 1 : 0) + (it.bodyItems ? it.bodyItems.reduce((a, x) => a + leafCount(x), 0) : 0);
+
+/* The snippet copies this document's own convention instead of a hardcoded shape. */
+function cloneShape(comp){
+  const base = comp.headStart;
+  let text = S.src.slice(comp.headStart, comp.headEnd);
+  const inside = comp.args.map(field).filter(f => f && f.start >= comp.headStart && f.end <= comp.headEnd)
+                   .sort((a, b) => b.start - a.start);
+  for (const f of inside)
+    text = text.slice(0, f.start - base) + "（待填）" + text.slice(f.end - base);
+  return text + "\n" + (comp.bullets.length ? "- （待填）\n" : "") + "\n";
+}
+
+function delBullet(item, b){
+  structural("刪掉一條要點" + (item.bullets.length === 1 ? "（這個區塊現在沒有要點了）" : ""),
+             cut(b.outer.start, b.outer.end),
+             `outer ${b.outer.start}..${b.outer.end}（-${b.outer.end - b.outer.start} bytes）`, b.outer.start);
+}
+
+function delItem(sec, item){
+  const n = leafCount(item);
+  if (sec.kind === "section" && sec.items.filter(contentful).length === 1)
+    return structural(`刪掉「${sec.title}」整個段落（最後一筆連標題一起刪）`,
+      cut(sec.outer.start, sec.outer.end),
+      `outer ${sec.outer.start}..${sec.outer.end}（-${sec.outer.end - sec.outer.start} bytes、${n + 1} 個單位）`,
+      sec.outer.start);
+  structural(`刪掉一個 ${item.name ? "#" + item.name : KIND_CN[item.kind]}`,
+    cut(item.outer.start, item.outer.end),
+    `outer ${item.outer.start}..${item.outer.end}（-${item.outer.end - item.outer.start} bytes、${n} 個單位）`,
+    item.outer.start);
+}
+
+function delSection(sec){
+  const n = sec.items.reduce((a, it) => a + leafCount(it), 0) + (sec.titleField ? 1 : 0);
+  structural(`刪掉「${sec.title}」整個段落`, cut(sec.outer.start, sec.outer.end),
+    `outer ${sec.outer.start}..${sec.outer.end}（-${sec.outer.end - sec.outer.start} bytes、${n} 個單位）`,
+    sec.outer.start);
+}
+
+function addBullet(item){
+  const snip = "- （待填）\n";
+  structural("在這個區塊底下加一條要點", splice(item.contentEnd, snip),
+    `插在 offset ${item.contentEnd}（區塊 outer 的內容邊界，+${snip.length} bytes）`, item.contentEnd);
+}
+
+function addInSection(sec){
+  const items = sec.items.filter(contentful);
+  const last = items[items.length - 1];
+  const at = last ? last.contentEnd : sec.bodyStart;
+  const comp = [...items].reverse().find(i => i.kind === "comp" && i.args.length);
+  let snip, how;
+  if (comp){ snip = cloneShape(comp); how = `照這個段落自己的 #${comp.name} 寫法複製一份`; }
+  else if (last && last.kind === "bullet"){ snip = "- （待填）\n"; how = "照這個段落自己的條列格式"; }
+  else { snip = "（待填）\n\n"; how = "一段內文"; }
+  structural("在「" + sec.title + "」加一筆", splice(at, snip),
+    `${how}・插在 offset ${at}（+${snip.length} bytes）`, at);
+}
+
+function addSection(){
+  const at = S.src.length;
+  const snip = "== 新段落\n\n（待填）\n\n";
+  structural("加一個新段落（標題和第一筆一起生）", splice(at, snip),
+    `插在 offset ${at}（+${snip.length} bytes）`, at);
+}
+
+function moveSection(sec, dir){
+  const list = S.parsed.sections.filter(s => s.kind === "section");
+  const at = list.indexOf(sec), other = list[at + dir];
+  if (!other) return;
+  const a = dir < 0 ? other : sec, b = dir < 0 ? sec : other;
+  const ta = S.src.slice(a.outer.start, a.outer.end), tb = S.src.slice(b.outer.start, b.outer.end);
+  structural(`把「${sec.title}」${dir < 0 ? "往上" : "往下"}搬`,
+    S.src.slice(0, a.outer.start) + tb + ta + S.src.slice(b.outer.end),
+    `兩塊 outer 對調：${ta.length} / ${tb.length} bytes，一次 splice`, a.outer.start);
+}
+
+function paintChips(){
+  const v = verdict(S.parsed, S.src);
+  const ok = fresh();
+  $("chips").innerHTML = [
+    `<span class="chip ${v.tier === "A" ? "ok" : ""}"><b>tier</b>${v.tier}</span>`,
+    `<span class="chip"><b>編輯單位</b>${v.editable} 可編${v.bad ? ` / ${v.bad} 唯讀` : ""}</span>`,
+    `<span class="chip ${ok ? "ok" : "stale"}"><b>derived_from</b>${S.derived}${ok ? " · 新鮮" : " · 過期"}</span>`,
+    `<span class="chip"><b>表單擁有</b>${v.pct}% 的 bytes</span>`,
+    `<span class="chip ${v.opaque || v.held ? "stale" : ""}"><b>沒認出來的構造</b>${v.opaque + v.held}</span>`,
+    `<span class="chip"><b>可復原</b>${S.undo.length} 筆</span>`
+  ].join("");
+  $("btnUndo").disabled = !S.undo.length;
+}
+
+function paintSource(){
+  const ok = fresh();
+  const marks = [];
+  if (ok){
+    if (S.outlined) marks.push({ s:S.outlined.start, e:S.outlined.end, cls:"sp ob" });
+    for (const f of S.parsed.fields)
+      marks.push({ s:f.start, e:f.end, id:f.id,
+                   cls:"sp" + (f.id === S.active ? " on" : "") + (f.reversible ? "" : " ro") });
+  }
+  marks.sort((a, b) => a.s - b.s || b.e - a.e);
+  let out = "", at = 0;
+  for (const mk of marks){
+    if (mk.s < at) continue;
+    out += esc(S.src.slice(at, mk.s));
+    out += `<span class="${mk.cls}"${mk.id ? ` id="m-${mk.id}"` : ""}>${esc(S.src.slice(mk.s, mk.e))}</span>`;
+    at = mk.e;
+  }
+  out += esc(S.src.slice(at));
+  $("src").innerHTML = out;
+  const f = S.active ? field(S.active) : null;
+  $("srcMeta").textContent = S.outlined ? `整塊 outer ${S.outlined.start}..${S.outlined.end}`
+    : f ? `${f.label}　offset ${f.start}..${f.end}`
+    : ok ? `${S.src.length} bytes` : "投影過期，暫不顯示 span";
+  if (!S.outlined && f){
+    const m = $("m-" + f.id), pre = $("src");
+    if (m) pre.scrollTop = Math.max(0, m.offsetTop - pre.clientHeight / 2);
+  }
+  paintPreviewHighlight();
+}
+
+const widthOf = s => {
+  let w = 0;
+  for (const c of String(s)) w += c.charCodeAt(0) > 0x2e80 ? 2 : 1;
+  return Math.min(46, Math.max(4, w + 2));
+};
+const sizeInput = (el, v) => { el.style.width = widthOf(v) + "ch"; };
+
+function argCtl(f, ok){
+  if (!f) return "";
+  const ro = !ok || !f.reversible ? " readonly" : "";
+  return `<input id="i-${f.id}" class="run" type="text" value="${attr(f.value)}"` +
+         ` style="width:${widthOf(f.value)}ch" title="${attr(f.label)}"${ro}>`;
+}
+
+function argRows(ids, ok){
+  const fs = ids.map(field).filter(Boolean);
+  let html = "";
+  for (let i = 0; i < fs.length; i++){
+    const f = fs[i], next = fs[i + 1];
+    if (/ 起$/.test(f.label) && next && / 迄$/.test(next.label)){
+      html += `<div class="row"><label for="i-${f.id}">${esc(f.label.replace(/ 起$/, ""))}</label>` +
+              `<div class="pair">${argCtl(f, ok)}${argCtl(next, ok)}</div></div>`;
+      i++; continue;
+    }
+    html += `<div class="row"><label for="i-${f.id}">${esc(f.label)}</label>${argCtl(f, ok)}</div>`;
+  }
+  return html;
+}
+
+const xBtn = (kind, ref, what) =>
+  `<button class="bx" data-del="${kind}" data-ref="${ref}" aria-label="刪除${what}">刪除</button>`;
+
+function richRow(f, ok, trail){
+  return `<div class="brow"><label>${esc(f.label)}</label>` +
+         `<div class="rtwrap">${richHtml(f, ok)}${trail || ""}</div></div>`;
+}
+
+/* Document settings and comments are not editable and not content, so the form does not
+   show them at all -- the parse report is where they are accounted for. */
+function itemHtml(sec, item, ok){
+  if (item.kind === "ro") return "";
+  if (item.kind === "let"){
+    if (!item.dead) return "";
+    return `<div class="ro"><span class="tag">#let ${esc(item.name)}</span>` +
+      `<code>${esc(S.src.slice(item.outer.start, item.outer.end).trim().slice(0, 56))}</code>` +
+      `<span class="why">沒有任何參數用到它</span>${xBtn("item", item.id, "這個變數")}</div>`;
+  }
+  if (item.kind === "comp"){
+    let html = `<div class="item"><div class="ihead"><span class="eyebrow">#${esc(item.name)}</span>` +
+      `${xBtn("item", item.id, "這個區塊")}</div>`;
+    html += argRows(item.args, ok);
+    if (item.bodyItems) for (const b of item.bodyItems) if (b.field) html += richRow(b.field, ok);
+    for (const b of item.bullets)
+      if (b.field) html += richRow(b.field, ok, xBtn("bullet", b.id, "這條要點"));
+    html += `<button class="ghost" data-add="bullet" data-ref="${item.id}">＋ 加一條要點</button></div>`;
+    return html;
+  }
+  if (!item.field) return "";
+  return richRow(item.field, ok, xBtn("item", item.id, "這一行"));
+}
+
+function render(){
+  paintChips();
+  paintReport();
+  const ok = fresh();
+  const v = verdict(S.parsed, S.src);
+  $("formMeta").textContent = `${S.parsed.sections.length} 段・Tier ${v.tier}`;
+  let html = ok ? "" :
+    `<div class="banner"><span>這份履歷剛被改過，表單手上的 span 不再對應原始碼。</span>
+     <button id="btnRebuild">重建投影</button></div>`;
+  for (const sec of S.parsed.sections){
+    const rows = sec.items.map(it => itemHtml(sec, it, ok)).join("");
+    if (!rows.trim() && !sec.titleField) continue;
+    html += `<div class="group">`;
+    if (sec.kind === "section"){
+      html += `<div class="shead">` +
+        (sec.titleField ? richHtml(sec.titleField, ok).replace('class="rt', 'class="rt st')
+                        : `<span class="eyebrow">${esc(sec.title)}</span>`) +
+        `<button class="bx" data-move="up" data-ref="${sec.id}" aria-label="往上搬">↑</button>
+         <button class="bx" data-move="down" data-ref="${sec.id}" aria-label="往下搬">↓</button>
+         ${xBtn("section", sec.id, "整個段落")}</div>`;
+    } else {
+      html += `<span class="eyebrow" style="display:block;margin-bottom:9px">${esc(sec.title)}</span>`;
+    }
+    html += rows;
+    if (sec.kind === "section")
+      html += `<button class="ghost" data-add="section-item" data-ref="${sec.id}">＋ 照這個段落的寫法加一筆</button>`;
+    html += `</div>`;
+  }
+  html += `<button class="ghost" id="btnAddSection" style="margin-top:14px">＋ 加一個新段落</button>`;
+  $("form").innerHTML = html;
+  wire(ok);
+  buildPreview();
+  paintSource();
+  updateToolbar();
+}
+
+function paintReport(){
+  const r = S.parsed.report, v = verdict(S.parsed, S.src);
+  const where = { A:"每個內容單位都能編，沒有任何內容被吞掉",
+                  B:"部分內容是唯讀的或有沒認出來的構造",
+                  C:"沒有任何可編的單位，只能用 chat 或原始碼" }[v.tier];
+  const bag = (title, obj) => {
+    const keys = Object.keys(obj);
+    if (!keys.length) return "";
+    return `<div class="rrow"><span class="rlab">${title}</span><span>` +
+      keys.map(k => `<code class="op">${esc(k)} ×${obj[k]}</code>`).join(" ") + `</span></div>`;
+  };
+  $("report").innerHTML =
+    `<div class="rverdict"><b>Tier ${v.tier}</b>　${esc(where)}</div>` +
+    `<div class="rrow"><span class="rlab">編輯單位</span><span>${S.parsed.fields.length} 個，可編 ${v.editable}，唯讀 ${v.bad}；` +
+    `表單擁有 ${v.owned} / ${S.src.length} bytes（${v.pct}%）</span></div>` +
+    bag("表單不顯示的文件設定與註解", r.structures) +
+    bag("跳過的參數（值不是字串字面值）", r.skipped) +
+    (v.opaque + v.held ? `<div class="rrow"><span class="rlab">沒認出來的構造</span><span>${v.opaque} 個行內、${v.held} 個區塊——原樣保留，不給編</span></div>` : "") +
+    (r.lints.length ? `<div class="rrow"><span class="rlab">檢出</span><ul class="lints">` +
+      r.lints.map(l => `<li>${esc(l).replace(/`([^`]+)`/g, "<code>$1</code>")}</li>`).join("") + `</ul></div>` : "");
+}
+
+function findRef(ref){
+  for (const sec of S.parsed.sections){
+    const walk = items => {
+      for (const it of items){
+        if (it.id === ref) return { sec, item:it };
+        for (const b of it.bullets) if (b.id === ref) return { sec, item:it, bullet:b };
+        if (it.bodyItems){ const hit = walk(it.bodyItems); if (hit) return hit; }
+      }
+      return null;
+    };
+    const hit = walk(sec.items);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function wire(ok){
+  delegate();
+  if (!ok) $("form").querySelectorAll("button:not(#btnRebuild)").forEach(b => b.disabled = true);
+}
+
+let delegated = false;
+function delegate(){
+  if (delegated) return;
+  delegated = true;
+  const form = $("form");
+
+  form.addEventListener("focusin", e => {
+    const t = e.target;
+    if (!t || !t.id || t.id.indexOf("i-") !== 0) return;
+    const f = field(t.id.slice(2));
+    if (!f) return;
+    S.active = f.id; S.outlined = null;
+    paintSource();
+    updateToolbar();
+  });
+
+  form.addEventListener("input", e => {
+    const el = e.target;
+    if (!el || !el.id || el.id.indexOf("i-") !== 0) return;
+    const f = field(el.id.slice(2));
+    if (!f || !f.reversible || !fresh()) return;
+    if (f.kind === "rich"){ applyRich(f, el); return; }
+    if (el.readOnly) return;
+    let next = el.value;
+    if (next.includes("\n")){
+      next = next.replace(/\n+/g, " ");
+      el.value = next;
+      log("warn", "換行拿掉了：一個字串參數就是一行", f.label);
+    }
+    applyArg(f, next, el);
+  });
+
+  form.addEventListener("click", e => {
+    const t = e.target;
+    const btn = t && t.closest ? t.closest("[data-del],[data-add],[data-move],#btnRebuild,#btnAddSection") : null;
+    if (!btn || btn.disabled) return;
+    if (btn.id === "btnRebuild") return rebuild();
+    if (btn.id === "btnAddSection") return addSection();
+    if (btn.dataset.move){
+      const sec = S.parsed.sections.find(s => s.id === btn.dataset.ref);
+      if (sec) moveSection(sec, btn.dataset.move === "up" ? -1 : 1);
+      return;
+    }
+    if (btn.dataset.add){
+      if (btn.dataset.add === "bullet"){
+        const hit = findRef(btn.dataset.ref);
+        if (hit) addBullet(hit.item);
+        return;
+      }
+      const sec = S.parsed.sections.find(s => s.id === btn.dataset.ref);
+      if (sec) addInSection(sec);
+      return;
+    }
+    if (btn.dataset.del) handleDelete(btn);
+  });
+
+  wireRichKeys();
+}
+
+function handleDelete(btn){
+  const kind = btn.dataset.del, ref = btn.dataset.ref;
+  let n = 0, span = null;
+  if (kind === "section"){
+    const sec = S.parsed.sections.find(s => s.id === ref);
+    n = sec.items.reduce((a, it) => a + leafCount(it), 0) + (sec.titleField ? 1 : 0);
+    span = sec.outer;
+  } else {
+    const hit = findRef(ref);
+    if (!hit) return;
+    if (hit.bullet){ n = 1; span = hit.bullet.outer; }
+    else { n = leafCount(hit.item); span = hit.item.outer; }
+  }
+  if (btn.dataset.armed !== "1"){
+    $("form").querySelectorAll("[data-del]").forEach(o => {
+      o.dataset.armed = "0"; o.classList.remove("armed"); o.textContent = "刪除";
+    });
+    btn.dataset.armed = "1";
+    btn.classList.add("armed");
+    btn.textContent = `確定刪除（${n} 個單位、${span.end - span.start} bytes）`;
+    S.outlined = span;
+    paintSource();
+    return;
+  }
+  if (kind === "section") delSection(S.parsed.sections.find(s => s.id === ref));
+  else {
+    const hit = findRef(ref);
+    if (hit && hit.bullet) delBullet(hit.item, hit.bullet);
+    else if (hit) delItem(hit.sec, hit.item);
+  }
+}
+
+$("btnUndo").onclick = () => {
+  if (!S.undo.length) return;
+  S.src = S.undo.pop();
+  S.parsed = parse(S.src);
+  markLets(S.parsed);
+  S.derived = hash(S.src);
+  S.active = null; S.outlined = null;
+  render();
+  log("info", "復原上一筆結構操作", `回到 hash ${S.derived}（真機就是 restore 上一筆 revision）`);
+};
+
+$("btnChat").onclick = () => {
+  const comps = [];
+  for (const sec of S.parsed.sections) for (const it of sec.items) if (it.kind === "comp" && it.args.length) comps.push(it);
+  if (!comps.length) return;
+  const ins = cloneShape(comps[comps.length - 1]).replace(/（待填）/g, "chat 寫進來的");
+  const at = comps[comps.length - 1].outer.start;
+  S.src = S.src.slice(0, at) + ins + S.src.slice(at);
+  render();
+  log("warn", "chat 直接改了 typst_source，hash 對不上了",
+      `+${ins.length} bytes 插在 offset ${at}・表單已鎖住`);
+};
+
+$("btnReset").onclick = () => { S.undo = []; load(SAMPLE, "載回範例履歷"); };
+
+$("btnRaw").onchange = e => {
+  S.raw = e.target.checked;
+  log("info", S.raw ? '逃脫策略關掉了：字串參數現在打 " 會被編譯檢查擋下' : "逃脫策略開回來了",
+      "只影響字串參數；內文的逃脫是序列化時決定的");
+};
+
+$("btnProbe").onclick = () => {
+  const src = $("probe").value;
+  if (!src.trim()){ $("probeOut").textContent = "先貼一份原始碼。"; return; }
+  const p = parse(normalizeBlanks(src)), v = verdict(p, src);
+  const names = {};
+  for (const sec of p.sections) for (const it of sec.items) if (it.kind === "comp") names["#" + it.name] = (names["#" + it.name] || 0) + 1;
+  $("probeOut").innerHTML =
+    `<b>Tier ${v.tier}</b>　${p.sections.length} 段、${p.fields.length} 個編輯單位（可編 ${v.editable}、唯讀 ${v.bad}）、` +
+    `吞掉 ${v.opaque + v.held} 個構造、擁有 ${v.pct}% 的 bytes<br>認出來的區塊：` +
+    (Object.keys(names).map(k => `<code class="op">${esc(k)} ×${names[k]}</code>`).join(" ") || "（沒有）") +
+    (p.report.lints.length ? `<br>檢出：${esc(p.report.lints[0])}${p.report.lints.length > 1 ? ` 等 ${p.report.lints.length} 項` : ""}` : "");
+};
+
+$("btnLoad").onclick = () => {
+  const src = $("probe").value;
+  if (!src.trim()) return;
+  const c = compileCheck(src);
+  if (!c.ok){ log("bad", "這份原始碼過不了編譯檢查，沒有載入：" + c.msg); return; }
+  S.undo = [];
+  load(src, "載入你貼的原始碼");
+};
+
+wirePreview();
+wireBubble();
+load(SAMPLE, "載入範例履歷");
+log("info", "選一段字，旁邊會浮出 B／I／連結；⌘K 直接開網址欄",
+    "點已經存在的連結也會浮出同一條，可以改網址或移除");
+
+</script>
