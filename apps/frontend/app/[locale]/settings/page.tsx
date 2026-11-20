@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import AccountCard from "@/components/AccountCard";
+import AgentKeys from "@/components/settings/AgentKeys";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
 import UsageCard from "@/components/UsageCard";
@@ -264,6 +265,11 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         ) : null}
+        {/* Not gated on `granted`: connecting an assistant has nothing to do
+            with matching. `granted` only decides whether the card carries the
+            republish warning, and is null until the consent read returns --
+            `=== true` keeps "unknown" from being treated as on. */}
+        <AgentKeys matchingOn={granted === true} />
         <UsageCard />
       </main>
       <Footer variant="app" />

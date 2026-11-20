@@ -249,3 +249,152 @@ def test_auth_me_carries_the_handle_and_the_name(client: TestClient, db_session)
     body = client.get("/v1/auth/me").json()["user"]
     assert body["username"] == "ruby"
     assert body["display_name"] == "Ruby!"
+
+
+# --------------------------------------------------------------------------
+# Agent keys: the cookie-authenticated management routes
+# --------------------------------------------------------------------------
+
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+from app.models import AgentApiKey, AgentToolCall  # noqa: E402
+from app.services.agent_keys import key_for_token, mint_agent_key  # noqa: E402
+
+KEYS = "/v1/me/agent-keys"
+
+
+def _bearer(raw):
+    return {"Authorization": f"Bearer {raw}"}
+
+
+def test_agent_key_routes_require_a_cookie(client: TestClient):
+    assert client.get(KEYS).status_code == 401
+    assert client.post(KEYS, json={"label": "k"}).status_code == 401
+    assert client.delete(f"{KEYS}/x").status_code == 401
+    assert client.get(f"{KEYS}/x/calls").status_code == 401
+
+
+def test_minting_returns_the_token_once(client, signed_in):
+    made = client.post(KEYS, json={"label": "laptop"}).json()
+    assert made["token"].startswith("ofa_")
+    assert made["label"] == "laptop"
+    listed = client.get(KEYS).json()
+    assert len(listed) == 1
+    assert listed[0]["id"] == made["id"]
+    assert "token" not in listed[0]
+    assert "key_hash" not in listed[0]
+    # No other field may smuggle the secret back either.
+    assert made["token"] not in str(listed)
+
+
+def test_an_agent_token_cannot_mint_another(client, db_session, a_user):
+    _, raw = mint_agent_key(db_session, user=a_user, label="k")
+    db_session.commit()
+    assert (
+        client.post(KEYS, json={"label": "second"}, headers=_bearer(raw)).status_code
+        == 401
+    )
+    # Nor read: the whole surface is cookie-only.
+    assert client.get(KEYS, headers=_bearer(raw)).status_code == 401
+    assert db_session.query(AgentApiKey).count() == 1
+
+
+def test_i_cannot_revoke_someone_elses_key(client, db_session, signed_in, other_user):
+    theirs, _ = mint_agent_key(db_session, user=other_user, label="theirs")
+    db_session.commit()
+    assert client.delete(f"{KEYS}/{theirs.id}").status_code == 404
+    db_session.refresh(theirs)
+    assert theirs.revoked_at is None
+
+
+def test_revoking_my_key_kills_it_and_frees_a_slot(client, db_session, signed_in):
+    made = [client.post(KEYS, json={"label": f"k{n}"}).json() for n in range(5)]
+    assert client.delete(f"{KEYS}/{made[0]['id']}").status_code == 204
+    ids = [row["id"] for row in client.get(KEYS).json()]
+    assert made[0]["id"] not in ids and len(ids) == 4
+    # The revoked token no longer authenticates, and a slot is free again.
+    assert key_for_token(db_session, made[0]["token"]) is None
+    assert client.post(KEYS, json={"label": "again"}).status_code == 200
+    # Revoking twice answers like revoking something that is not there.
+    assert client.delete(f"{KEYS}/{made[0]['id']}").status_code == 404
+
+
+def test_the_sixth_key_is_a_400(client, signed_in):
+    for n in range(5):
+        assert client.post(KEYS, json={"label": f"k{n}"}).status_code == 200
+    assert client.post(KEYS, json={"label": "sixth"}).status_code == 400
+    assert len(client.get(KEYS).json()) == 5
+
+
+def test_a_blank_or_overlong_label_is_a_400(client, signed_in):
+    for bad in ("", "   ", "x" * 256):
+        assert client.post(KEYS, json={"label": bad}).status_code == 400
+    assert client.get(KEYS).json() == []
+    # The boundary itself is fine.
+    assert client.post(KEYS, json={"label": "x" * 255}).status_code == 200
+
+
+def test_a_non_positive_expiry_is_a_400(client, signed_in):
+    for bad in (0, -1):
+        resp = client.post(KEYS, json={"label": "k", "expires_in_days": bad})
+        assert resp.status_code == 400
+    assert client.get(KEYS).json() == []
+
+
+def test_the_call_log_is_mine_only(client, db_session, signed_in, other_user):
+    theirs, _ = mint_agent_key(db_session, user=other_user, label="theirs")
+    db_session.commit()
+    assert client.get(f"{KEYS}/{theirs.id}/calls").status_code == 404
+
+
+def test_the_call_log_is_newest_first_and_carries_no_arguments(
+    client, db_session, signed_in, a_user, other_user
+):
+    mine, _ = mint_agent_key(db_session, user=a_user, label="mine")
+    theirs, _ = mint_agent_key(db_session, user=other_user, label="theirs")
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for n, tool in enumerate(["list_resumes", "publish_resume"]):
+        db_session.add(
+            AgentToolCall(
+                key_id=mine.id,
+                user_id=a_user.id,
+                tool=tool,
+                resume_id="r-1" if n else None,
+                outcome="ok",
+                created_at=t0 + timedelta(minutes=n),
+            )
+        )
+    db_session.add(
+        AgentToolCall(
+            key_id=theirs.id, user_id=other_user.id, tool="their_tool", outcome="ok"
+        )
+    )
+    db_session.commit()
+    rows = client.get(f"{KEYS}/{mine.id}/calls").json()
+    assert [r["tool"] for r in rows] == ["publish_resume", "list_resumes"]
+    assert rows[0]["resume_id"] == "r-1" and rows[1]["resume_id"] is None
+    assert set(rows[0]) == {"id", "tool", "resume_id", "outcome", "created_at"}
+
+
+def test_the_call_log_is_capped(client, db_session, signed_in, a_user):
+    key, _ = mint_agent_key(db_session, user=a_user, label="busy")
+    for _n in range(75):
+        db_session.add(
+            AgentToolCall(key_id=key.id, user_id=a_user.id, tool="t", outcome="ok")
+        )
+    db_session.commit()
+    assert len(client.get(f"{KEYS}/{key.id}/calls").json()) == 50
+
+
+def test_one_keys_log_does_not_show_my_other_keys_calls(
+    client, db_session, signed_in, a_user
+):
+    first, _ = mint_agent_key(db_session, user=a_user, label="first")
+    second, _ = mint_agent_key(db_session, user=a_user, label="second")
+    for key, tool in ((first, "from_first"), (second, "from_second")):
+        db_session.add(
+            AgentToolCall(key_id=key.id, user_id=a_user.id, tool=tool, outcome="ok")
+        )
+    db_session.commit()
+    rows = client.get(f"{KEYS}/{first.id}/calls").json()
+    assert [r["tool"] for r in rows] == ["from_first"]

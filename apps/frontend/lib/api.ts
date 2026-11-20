@@ -1316,6 +1316,66 @@ export async function deleteTalentProfile(): Promise<void> {
   await apiFetch("/api/v1/me/talent-profile", { method: "DELETE" });
 }
 
+/**
+ * Credentials a signed-in person mints for their own AI assistant.
+ *
+ * `token` exists on `AgentKeyCreated` and nowhere else: the server returns it
+ * from the mint call once and cannot produce it again, so the caller has to
+ * show it then or lose it.
+ */
+export type AgentKey = {
+  id: string;
+  label: string;
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+};
+
+export type AgentKeyCreated = AgentKey & { token: string };
+
+/** One logged call. There are no arguments: the server stores none. */
+export type AgentToolCall = {
+  id: string;
+  tool: string;
+  resume_id: string | null;
+  /** ok | refused | error | throttled */
+  outcome: string;
+  created_at: string;
+};
+
+export async function listAgentKeys(): Promise<AgentKey[]> {
+  return apiJson<AgentKey[]>("/api/v1/me/agent-keys");
+}
+
+export async function createAgentKey(label: string): Promise<AgentKeyCreated> {
+  return apiJson<AgentKeyCreated>("/api/v1/me/agent-keys", {
+    method: "POST",
+    body: JSON.stringify({ label }),
+  });
+}
+
+export async function revokeAgentKey(id: string): Promise<void> {
+  const res = await apiFetch(`/api/v1/me/agent-keys/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const body = await parseBody(res);
+    throw new ApiError(errorMessage(body, res.statusText || "Request failed"), res.status, body);
+  }
+}
+
+export async function listAgentKeyCalls(id: string): Promise<AgentToolCall[]> {
+  return apiJson<AgentToolCall[]>(`/api/v1/me/agent-keys/${encodeURIComponent(id)}/calls`);
+}
+
+/** The server's machine-readable reason for a refused mint, e.g. `too_many_keys`. */
+export function agentKeyErrorCode(err: unknown): string | null {
+  if (!(err instanceof ApiError)) return null;
+  const body = err.body as { detail?: { error?: unknown } } | null;
+  const code = body?.detail?.error;
+  return typeof code === "string" ? code : null;
+}
+
 export async function claimResumes(): Promise<void> {
   try {
     await apiJson("/api/v1/auth/claim", { method: "POST" });
