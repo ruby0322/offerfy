@@ -23,7 +23,7 @@ from app.services.revisions import source_hash
 from app.services.starter import resolve_font_paths, resolve_package_path
 from app.services.text_layer import extract_text_layer
 from app.services.typst_compile import compile_typst, typst_binary
-from app.services.typst_projection import Projection, Unit
+from app.services.typst_projection import Projection, Unit, call_end
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,52 @@ def _line_units(projection: Projection) -> list[Unit]:
     return [u for u in projection.units.values() if u.role]
 
 
+def _block_anchors(source: str, projection: Projection) -> list[Unit]:
+    """A pseudo line unit per component block, so a block's own rows can be known.
+
+    A string argument carries no label -- it is not a line -- so `_arg_bands` can only
+    bracket it between the line units around it, which says nothing when two bulletless
+    entries share one bracket: an education section with no bullets got no band at all.
+    A bare label written after the call tags the block's rendered output, and its
+    position falls inside the block's FIRST row exactly as a line unit's does, so
+    `_assign` can walk a block's rows under its existing rules rather than new ones.
+
+    Two shapes are left out, and they are left out by different things. A `#show:`
+    block is code, where ` <label>` after the closing paren is a syntax error rather
+    than a tag ("expected semicolon or line break"); it never reaches that, because
+    `#show: f(` has no `#name(` head for `call_end` to find, so the `kind` test below
+    only states the intent. A `#call(...)[body]` block is the one the test is
+    load-bearing for: the label would land between the arguments and the body and take
+    the body off the call, and the shadow then fails to compile with "missing argument:
+    body" -- one `typst eval` serves the whole request, so that is a 400 and not a
+    missing highlight. Both keep the bracket fallback.
+    """
+    out: list[Unit] = []
+    for section in projection.sections:
+        for block in section.blocks:
+            if block.kind != "comp" or block.body is not None:
+                continue
+            ids = [i for i in block.args
+                   if i in projection.units and not projection.units[i].style]
+            if not ids:
+                continue
+            end = call_end(source, block)
+            if end is None:
+                continue
+            out.append(Unit(
+                id=f"b{block.id}", kind="block", span=(block.outer[0], end),
+                # The block's rows are the ones carrying its own arguments' text, which
+                # is what `_assign` matches a candidate row against.
+                value="".join(projection.units[i].value for i in ids),
+                editable=False, role="block"))
+    return out
+
+
+def _anchorable(source: str, projection: Projection) -> list[Unit]:
+    """Everything that can carry a label: the line units, plus the component blocks."""
+    return _line_units(projection) + _block_anchors(source, projection)
+
+
 def _prefix(source: str) -> str:
     """A label namespace the person's own source does not use.
 
@@ -74,14 +120,14 @@ def _label_at(source: str, unit: Unit) -> int:
 
 
 def label_shadow(source: str, projection: Projection) -> str:
-    """`source` with ` <ofy-uNN>` added to every line unit, laid out identically.
+    """`source` with ` <ofy-uNN>` added to every line unit and component block.
 
     Descending, so the offsets of the units still to be labelled stay valid. An end
     marker follows the document so the caller can tell the shadow paginated like it.
     """
     prefix = _prefix(source)
     out = source
-    for unit in sorted(_line_units(projection), key=lambda u: -u.span[1]):
+    for unit in sorted(_anchorable(source, projection), key=lambda u: -u.span[1]):
         at = _label_at(source, unit)
         out = out[:at] + f" <{prefix}{unit.id}>" + out[at:]
     return out + f"\n#metadata(none) <{prefix}end>\n"
@@ -300,6 +346,27 @@ def _arg_bands(source: str, projection: Projection, bands: dict[str, list[Band]]
     return out
 
 
+def _block_arg_bands(projection: Projection,
+                     bands: dict[str, list[Band]]) -> dict[str, list[Band]]:
+    """Every content argument of a block takes the bands of the block itself.
+
+    Same contract as `_arg_bands` -- the band is the block's row, not the field's, since
+    a `title` and a `company` print on rows this cannot tell apart -- but read off the
+    block's own anchor instead of bracketed between its neighbours. That is what lets
+    two bulletless siblings each get their own rows: their anchors bound each other.
+    """
+    out: dict[str, list[Band]] = {}
+    for section in projection.sections:
+        for block in section.blocks:
+            rows = bands.get(f"b{block.id}")
+            if not rows:
+                continue
+            for uid in block.args:
+                if uid in projection.units and not projection.units[uid].style:
+                    out[uid] = rows
+    return out
+
+
 def anchor_bands(source: str, projection: Projection,
                  layers: list[dict] | None = None) -> dict[str, list[Band]]:
     """unit id -> one Band per rendered line the unit occupies; `{}` when unknown.
@@ -313,7 +380,7 @@ def anchor_bands(source: str, projection: Projection,
     key = source_hash(source)
     if key in _cache:
         return {uid: list(rows) for uid, rows in _cache[key].items()}
-    units = _line_units(projection)
+    units = _anchorable(source, projection)
     positions, end = _eval_anchors(
         label_shadow(source, projection), [u.id for u in units], _prefix(source))
     if layers is None:
@@ -325,7 +392,15 @@ def anchor_bands(source: str, projection: Projection,
             logger.warning("shadow has %s pages, document %s", end, len(layers))
         return {}
     bands = _assign(units, positions, layers)
+    # The bracket first, then the block's own anchor over it where there is one: both
+    # answer the same question and the anchor is the better answer.
     bands.update(_arg_bands(source, projection, bands, layers))
+    bands.update(_block_arg_bands(projection, bands))
+    for unit in units:
+        if unit.kind == "block":
+            # A pseudo unit is not on the form; its rows have been handed to its
+            # arguments and its id would be a key no caller can resolve.
+            bands.pop(unit.id, None)
     if len(_cache) >= _CACHE_SIZE:
         _cache.pop(next(iter(_cache)))
     _cache[key] = bands

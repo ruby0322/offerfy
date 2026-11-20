@@ -964,3 +964,18 @@ def line_role(line: str) -> str | None:
     None when it is not projected as a line."""
     unit = line_unit(line)
     return unit.role if unit else None
+
+
+def call_end(source: str, block: Block) -> int | None:
+    """Index just past the `)` closing `block`'s argument list, or None if it has none.
+
+    `content_end` runs to the end of the block's bullets and `outer` to the end of the
+    blank lines after them, so neither says where the call itself stops. The anchor
+    service needs that, because a bare label written there tags the block's own rendered
+    output; written at `content_end` it would tag the last bullet instead. Asking the
+    parser keeps the bracket arithmetic in the module that owns the grammar.
+    """
+    call = _HASH_CALL.match(source, block.outer[0])
+    if call is None:
+        return None
+    return _close_of(source, call.end() - 1)

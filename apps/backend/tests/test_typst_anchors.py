@@ -10,7 +10,7 @@ from app.services.typst_anchors import (
     Band, anchor_bands, anchor_positions, label_shadow)
 from app.services.typst_compile import compile_typst, typst_available
 from app.services.typst_anchors import _arg_bands, _assign, _squash
-from app.services.typst_projection import Unit, parse_projection
+from app.services.typst_projection import Unit, call_end, parse_projection
 from tests.test_typst_fixtures import FIXTURES
 
 pytestmark = pytest.mark.skipif(not typst_available(), reason="typst binary not available")
@@ -335,10 +335,12 @@ def test_a_layout_argument_gets_no_band_because_it_prints_nowhere():
     assert not any(u.id in bands for u in style)
 
 
-def test_two_bulletless_entries_in_one_section_get_no_band_rather_than_a_shared_one():
-    """No band is better than a wrong one (anti-goal 3). With no bullets between them,
-    two sibling entries sit inside the same bracket -- the section heading above and the
-    next heading below -- and nothing here tells one's rows from the other's."""
+def test_two_bulletless_entries_in_one_section_each_get_their_own_rows():
+    """Two sibling entries with no bullets between them share one bracket, so bracketing
+    gave neither a band -- an education section written without bullets had no highlight
+    at all, which is what a person reported. Each block carries its own label now, so the
+    anchors bound each other and each entry gets its own rows. Anti-goal 3 still holds:
+    the bands must not be shared, and must not be swapped."""
     src = read("synthetic-en")
     for bullet in ("- Cut p99 latency of the ordering service from 900 ms to 240 ms.\n",
                    "- Led a team of four through a zero-downtime database migration.\n",
@@ -346,16 +348,104 @@ def test_two_bulletless_entries_in_one_section_get_no_band_rather_than_a_shared_
         assert bullet in src
         src = src.replace(bullet, "")
     p = parse_projection(src)
-    bands = anchor_bands(src, p)
-    assert bands                                      # the eval still worked
+    layers = extract_text_layer(compile_typst(src, "pdf"))
+    bands = anchor_bands(src, p, layers=layers)
     in_experience = [uid for s in p.sections if s.title_unit
                      and p.units[s.title_unit].value == "Experience"
                      for b in s.blocks for uid in b.args]
     assert len(in_experience) == 9
-    assert not any(uid in bands for uid in in_experience)
-    # The entries that still have a bullet keep their bands.
-    edu = next(b for s in p.sections for b in s.blocks if b.name == "edu")
-    assert all(bands.get(uid) for uid in edu.args)
+    assert all(bands.get(uid) for uid in in_experience), [
+        p.units[uid].key for uid in in_experience if not bands.get(uid)]
+
+    first, second = [b for s in p.sections for b in s.blocks if b.name == "work"]
+    rows_a, rows_b = bands[first.args[0]], bands[second.args[0]]
+    # Each entry's own rows, in the order they render, and not its sibling's.
+    assert [_row_texts(layers, b) for b in rows_a] == [
+        ["Senior Engineer", "Jan 2022 — Present"],
+        ["Northwind Example Co.", "Remote"]]
+    assert [_row_texts(layers, b) for b in rows_b] == [
+        ["Software Engineer"], ["Contoso Sample Ltd.", "Springfield"]]
+    assert {(b.page, b.y) for b in rows_a}.isdisjoint({(b.page, b.y) for b in rows_b})
+
+
+def test_sibling_entries_whose_text_is_identical_still_get_their_own_rows():
+    """The reported shape: two degrees at the same university, so `institution` and
+    `location` are byte-identical between the entries and only the degree and the dates
+    differ. Matching rows by text cannot separate these; the anchors can, because each
+    block's label bounds the next one's."""
+    src = ('#import "@preview/basic-resume:0.2.9": *\n\n'
+           '#show: resume.with(author: "Ruby Example", email: "r@example.com")\n\n'
+           '== Education\n\n'
+           '#edu(\n'
+           '  institution: "National Taiwan University",\n'
+           '  location: "Taipei, Taiwan",\n'
+           '  dates: dates-helper(start-date: "2026-02", end-date: "2028-01"),\n'
+           '  degree: "Master’s in Information Management",\n'
+           ')\n\n'
+           '#edu(\n'
+           '  institution: "National Taiwan University",\n'
+           '  location: "Taipei, Taiwan",\n'
+           '  dates: dates-helper(start-date: "2021-09", end-date: "2025-06"),\n'
+           '  degree: "Bachelor’s in Information Management",\n'
+           ')\n')
+    p = parse_projection(src)
+    layers = extract_text_layer(compile_typst(src, "pdf"))
+    bands = anchor_bands(src, p, layers=layers)
+
+    masters, bachelors = [b for s in p.sections for b in s.blocks if b.name == "edu"]
+    assert [p.units[i].value for i in masters.args] == [
+        "National Taiwan University", "Taipei, Taiwan", "2026-02", "2028-01",
+        "Master’s in Information Management"]
+    # Every field of both entries is highlightable -- none was, before the block label.
+    for block in (masters, bachelors):
+        assert all(bands.get(uid) for uid in block.args), [
+            p.units[uid].key for uid in block.args if not bands.get(uid)]
+
+    rows_a = [_row_texts(layers, b) for b in bands[masters.args[0]]]
+    rows_b = [_row_texts(layers, b) for b in bands[bachelors.args[0]]]
+    # The shared rows land once each, and the degree that differs picks the right entry.
+    assert rows_a == [["National Taiwan University", "Taipei, Taiwan"],
+                      ["Master’s in Information Management", "2026-02 — 2028-01"]]
+    assert rows_b == [["National Taiwan University", "Taipei, Taiwan"],
+                      ["Bachelor’s in Information Management", "2021-09 — 2025-06"]]
+    assert {(b.page, b.y) for b in bands[masters.args[0]]}.isdisjoint(
+        {(b.page, b.y) for b in bands[bachelors.args[0]]})
+
+
+def test_a_block_with_a_body_takes_no_label_so_the_shadow_still_compiles():
+    """`#figure(caption: "...")[body]` has a keyed string argument, so it is a block with
+    content -- but a label after its closing paren lands between the arguments and the
+    body and takes the body away from the call. Verified: the shadow then fails to
+    compile with "missing argument: body", and since the bands come from one `typst
+    eval` that is a 400 for the whole request, not a missing highlight. So a block with
+    a body keeps the bracket, and the caption still gets a band from it."""
+    src = ('#import "@preview/basic-resume:0.2.9": *\n\n'
+           '#show: resume.with(author: "Ruby Example", email: "r@example.com")\n\n'
+           '== Experience\n\n'
+           '#figure(caption: "A caption that is content")[A figured body]\n\n'
+           '#work(title: "Analyst", company: "Initech")\n'
+           '- Did the thing.\n')
+    p = parse_projection(src)
+    figure = next(b for s in p.sections for b in s.blocks if b.name == "figure")
+    assert figure.body is not None and figure.args          # content, and a body
+    assert f"b{figure.id}" not in label_shadow(src, p)      # no label of its own
+    # The `#show:` block is excluded too, by having no `#name(` head to measure from.
+    show = next(b for s in p.sections for b in s.blocks if b.kind == "show")
+    assert call_end(src, show) is None
+    assert f"b{show.id}" not in label_shadow(src, p)
+
+    _assert_same_layout(src)                                # and so it still compiles
+    bands = anchor_bands(src, p)
+    # The sibling that CAN take a label still does, and the request still answers.
+    work = next(b for s in p.sections for b in s.blocks if b.name == "work")
+    assert f"b{work.id}" in label_shadow(src, p)
+    assert all(bands.get(uid) for uid in work.args)
+    # The caption itself stays unhighlighted, as it was before blocks carried labels: a
+    # figure prints its caption BELOW its body, so the bracket between the heading above
+    # and the body unit holds no rows. Checked against the previous commit, so this is a
+    # standing limit of the bracket and not something the block label took away.
+    caption = next(u for u in p.units.values() if u.key == "caption")
+    assert caption.id not in bands
 
 
 def test_a_document_with_no_line_unit_gets_no_band_at_all():
