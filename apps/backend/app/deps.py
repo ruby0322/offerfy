@@ -224,6 +224,7 @@ def require_agent_caller(
     if key is None:
         raise unauthorized
     user = db.get(User, key.user_id)
+    # Defensive: users.id cascades to the key, so this is nearly unreachable.
     if user is None:
         raise unauthorized
     return user, key

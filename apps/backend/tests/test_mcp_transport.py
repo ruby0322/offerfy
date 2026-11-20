@@ -108,14 +108,27 @@ def test_revoking_between_two_calls_closes_the_door(probe, db_session, a_user):
     assert probe.post(PROBE, headers=_bearer(raw)).status_code == 401
 
 
-def test_a_key_whose_user_vanished_is_the_same_401(probe, db_session, a_user):
+def test_a_key_whose_user_vanished_is_the_same_401(probe, db_session, a_user, monkeypatch):
+    """The guard is defensive: users.id cascades to the key row (and SQLite
+    runs with foreign_keys=ON), so a live key with no user is nearly
+    unreachable. Deleting the user therefore removes the key and would only
+    hit the unknown-token path. Force the lookup instead, so the `user is
+    None` branch itself is what answers, on any backend."""
+    from sqlalchemy.orm import Session
+
     from app.models import User
 
     _, raw = mint_agent_key(db_session, user=a_user, label="k")
     db_session.commit()
-    # SQLite does not enforce the FK here, so the orphan can exist.
-    db_session.query(User).filter(User.id == a_user.id).delete(synchronize_session=False)
-    db_session.commit()
+    real_get = Session.get
+
+    def get(self, entity, ident, *args, **kwargs):
+        if entity is User:
+            return None
+        return real_get(self, entity, ident, *args, **kwargs)
+
+    monkeypatch.setattr(Session, "get", get)
     r = probe.post(PROBE, headers=_bearer(raw))
     assert r.status_code == 401
     assert r.json()["detail"] == "Credential required"
+    assert r.headers["www-authenticate"] == "Bearer"
