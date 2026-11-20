@@ -102,6 +102,10 @@ GATE_TIMEOUT = 10.0
 #: refused at startup rather than quietly accepted.
 MAX_IN_FLIGHT_ENV = "OFFERFY_MAX_IN_FLIGHT"
 
+#: Where the gate records itself on a request's ASGI scope, so a handler can ask
+#: which gate is above it instead of guessing from process-wide state.
+SCOPE_KEY = "offerfy_gate"
+
 #: Routes that must answer even when every slot is taken.
 UNGATED_PATHS = frozenset({"/healthz", "/readyz"})
 
@@ -165,7 +169,12 @@ class InFlightGate:
     and the point here is to add a bound, not more machinery per request.
     """
 
-    #: The installed gate, for diagnostics. One per worker process.
+    #: The gate built most recently in this process, as a handle for tests and
+    #: ad-hoc diagnostics. In production that is the only one, but it is NOT the
+    #: answer to "which gate served this request" -- a second gate built
+    #: anywhere in the process takes the name over, which is how `/readyz` came
+    #: to report a test fixture's ceiling of 1 instead of 32. Read `SCOPE_KEY`
+    #: off the request for that.
     current: "InFlightGate | None" = None
 
     def __init__(self, app: ASGIApp, limit: int | None = None, timeout: float = GATE_TIMEOUT):
@@ -187,6 +196,11 @@ class InFlightGate:
         return self.limit - self._semaphore.value
 
     async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            # Before the ungated return, so `/readyz` -- which is ungated, and so
+            # never meets the gate any other way -- still reports the gate that is
+            # in its own stack rather than whichever was built last.
+            scope[SCOPE_KEY] = self
         if scope["type"] != "http" or is_ungated(scope.get("path", "")):
             await self.app(scope, receive, send)
             return
@@ -216,9 +230,13 @@ class InFlightGate:
             self._semaphore.release()
 
 
-def gate_state() -> dict[str, int | None]:
-    """What the gate is doing right now, for /readyz."""
-    gate = InFlightGate.current
+def gate_state(gate: "InFlightGate | None") -> dict[str, int | None]:
+    """What `gate` is doing right now, for /readyz.
+
+    Takes the gate rather than finding one: the caller reads it off the request,
+    so the numbers belong to the stack that answered. Nulls when there is no gate
+    in that stack, which is a real answer -- an unbounded worker.
+    """
     if gate is None:
         return {"limit": None, "in_flight": None, "waiting": None, "shed": None}
     return {

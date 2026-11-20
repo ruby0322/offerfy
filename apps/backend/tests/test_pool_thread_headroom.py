@@ -287,3 +287,36 @@ def test_readyz_reports_gate_saturation():
     for key in ("in_flight", "waiting", "shed"):
         assert key in gate, f"/readyz gate block is missing {key!r}"
         assert isinstance(gate[key], int)
+
+
+def test_readyz_reports_its_own_gate_not_the_last_one_built(tmp_path):
+    """`/readyz` must read the gate above it, not whichever was built last.
+
+    This is the test above's own failure mode, and it was real: `gate_state()`
+    read the class attribute `InFlightGate.current`, so once any other gate was
+    constructed in the process -- one of the miniatures in this file -- `/readyz`
+    on the real app reported that ceiling instead of its own. It passed in a
+    solo run only because `TestClient(real_app)` happened to be the first thing
+    to build the real stack; in the full suite it failed with `1 == 32`. Starlette
+    builds an app's middleware once, so the real gate is NOT reconstructed on a
+    later TestClient, and nothing restores the name.
+    """
+    from fastapi.testclient import TestClient
+
+    # A gate that is not the real app's, constructed and left as the most recent.
+    built = _build_app(tmp_path, gate_limit=1, gate_timeout=0.05)
+    assert _hammer(built, path="/healthz", total=1) == [200]  # builds the stack
+    assert InFlightGate.current is not None
+    assert InFlightGate.current.limit == 1, (
+        "this test proves nothing unless a foreign gate is the most recent one"
+    )
+    assert InFlightGate.current not in [
+        m.cls for m in real_app.user_middleware
+    ], "the foreign gate must not be the real app's own"
+
+    with TestClient(real_app) as client:
+        gate = client.get("/readyz").json()["gate"]
+    assert gate["limit"] == DEFAULT_MAX_IN_FLIGHT, (
+        f"/readyz reported {gate['limit']}, which is the foreign gate's ceiling "
+        "-- it is reading process-wide state instead of its own request's scope"
+    )

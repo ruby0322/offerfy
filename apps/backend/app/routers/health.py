@@ -1,11 +1,11 @@
 import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.concurrency import gate_state
+from app.concurrency import SCOPE_KEY, gate_state
 from app.config import get_settings
 from app.db import get_db
 
@@ -38,7 +38,7 @@ def healthz_sse():
 
 
 @router.get("/readyz")
-def readyz(db: Session = Depends(get_db)):
+def readyz(request: Request, db: Session = Depends(get_db)):
     try:
         db.execute(text("SELECT 1"))
     except Exception as exc:
@@ -49,4 +49,6 @@ def readyz(db: Session = Depends(get_db)):
     # test. `gate` makes it one curl: `in_flight` at `limit` with `waiting`
     # above zero is a saturated worker, and `shed` counts what it turned away.
     # Ungated itself, so it still answers when every slot is taken.
-    return {"status": "ok", "gate": gate_state()}
+    # Read off this request's own scope: the gate that is actually above this
+    # handler, not the last one built in the process.
+    return {"status": "ok", "gate": gate_state(request.scope.get(SCOPE_KEY))}
