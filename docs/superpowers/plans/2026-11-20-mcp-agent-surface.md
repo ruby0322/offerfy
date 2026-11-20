@@ -29,6 +29,7 @@
 - **Export links live 10 minutes.**
 - **UI strings land in all three locales** (`messages/{en,zh-TW,zh-CN}.json`) and are designed and checked in zh-TW, not English.
 - **Never run prettier on this repo.** No config; lines are hand-wrapped at ~90.
+- **Every assertion must be able to fail.** A test that would still pass under the wrong implementation is not coverage, it is decoration — and five of them have already shipped on this branch and been caught in review: a test whose premise a later task invalidated, one that asserted only a status code where the error code was the point, one that deleted a row the foreign key cascaded away so the branch under test was never reached, one that promised a guest case and never created a guest, and one that checked a cap with fewer rows than the cap. Before writing an assertion, ask what wrong code it would catch; if the answer is "none", either strengthen it or delete it. Where a test pins behaviour that is already correct, say so in the report rather than presenting it as RED evidence.
 - **Deploy order:** `alembic upgrade head` → `npm run build:public` → `kill -HUP` API → roll web. The migration runs before any reload because `create_all()` runs on every API start.
 
 ## Review Focus
