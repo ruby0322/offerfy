@@ -183,12 +183,10 @@ def _create_tailor(db: Session, user: User, args: dict) -> dict:
     label = args.get("target_label")
     if label is not None and not isinstance(label, str):
         raise HTTPException(status_code=400, detail="target_label must be a string")
-    try:
-        tailor = family.create_tailor(
-            db, resume, title=args.get("title"), target_label=label
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    # The same checker as every other title; family.create_tailor re-checks it.
+    tailor = family.create_tailor(
+        db, resume, title=_clean_title(args.get("title")), target_label=label
+    )
     db.commit()
     return {
         "resume_id": tailor.id,

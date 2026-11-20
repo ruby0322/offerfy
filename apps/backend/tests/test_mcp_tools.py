@@ -438,3 +438,98 @@ def test_the_resume_router_rejects_an_unknown_locale(client):
     assert r.status_code == 400
     assert "locale must be" in r.json()["detail"]
     assert client.post("/v1/resumes", json={"locale": "en"}).status_code == 201
+
+
+def _caller(client, db, user):
+    """One key, many calls: `_raw_call` mints a key per call and keys are capped."""
+    _, raw = mint_agent_key(db, user=user, label="t")
+    db.commit()
+
+    def call(name, args):
+        r = client.post(
+            "/mcp",
+            headers={"Authorization": f"Bearer {raw}"},
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                  "params": {"name": name, "arguments": args}},
+        )
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    return call
+
+
+def _text(body):
+    return body["result"]["content"][0]["text"]
+
+
+def test_set_resume_title_checks_ownership_before_the_title(
+    client, db_session, a_user, other_user
+):
+    from tests.conftest import _resume_for
+
+    theirs = _resume_for(db_session, other_user)
+    body = _raw_call(
+        client, db_session, a_user, "set_resume_title",
+        {"resume_id": theirs.id, "title": ""},
+    )
+    assert _is_tool_error(body)
+    assert "not found" in _text(body).lower()
+
+
+def test_guest_owned_resumes_are_not_found_for_fork_and_rename(
+    client, db_session, a_user
+):
+    orphan = _guest_resume(db_session, "g8")
+    for tool in ("create_tailor", "set_resume_title"):
+        body = _raw_call(
+            client, db_session, a_user, tool, {"resume_id": orphan.id, "title": "x"}
+        )
+        assert _is_tool_error(body), tool
+        assert "not found" in _text(body).lower(), tool
+    db_session.expire_all()
+    assert orphan.title == "Guest draft"
+
+
+def test_a_title_of_the_wrong_type_is_a_400_not_a_crash(
+    client, db_session, a_user, my_resume
+):
+    # A crash is also isError, but its text is the generic "failed unexpectedly".
+    call = _caller(client, db_session, a_user)
+    for tool, args in (
+        ("create_tailor", {"resume_id": my_resume.id}),
+        ("set_resume_title", {"resume_id": my_resume.id}),
+        ("create_resume", {}),
+    ):
+        for bad in (3.5, [], {}, 0, False, None):
+            if tool == "create_resume" and bad is None:
+                continue
+            body = call(tool, {**args, "title": bad})
+            assert _is_tool_error(body), (tool, bad)
+            assert "required" in _text(body), (tool, bad, _text(body))
+
+
+def test_create_resume_locale_of_the_wrong_type_is_a_400(client, db_session, a_user):
+    from app.models import Resume
+
+    call = _caller(client, db_session, a_user)
+    for bad in ([], {}, 0, False, 3.5, 7):
+        body = call("create_resume", {"locale": bad})
+        assert _is_tool_error(body), bad
+        assert "locale must be" in _text(body), bad
+    assert db_session.query(Resume).filter(Resume.user_id == a_user.id).count() == 0
+
+
+def test_create_resume_null_or_empty_locale_means_the_default(
+    client, db_session, a_user
+):
+    for unset in (None, ""):
+        out = json.loads(
+            _call(client, db_session, a_user, "create_resume", {"locale": unset})
+        )
+        assert out["locale"] == "zh-TW"
+
+
+def test_the_router_still_treats_an_empty_locale_as_the_default(client):
+    r = client.post("/v1/resumes", json={"locale": ""})
+    assert r.status_code == 201
+    assert r.json()["locale"] == "zh-TW"
