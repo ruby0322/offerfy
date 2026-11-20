@@ -1009,7 +1009,9 @@ git commit -m "feat(agent): create, fork and rename resumes"
   - `EXPORT_TTL_SECONDS = 600`
   - `GET /v1/resumes/export/{token}` — public, `include_in_schema=False`.
 
-**`publish_resume` goes through the share door, not `POST .../publish`.** `publish_resume` in the router only calls `pin_current_draft`, which sets `published_revision_id` and creates no link at all; the link is the `ResumeShare` row that `PUT .../share` writes. The tool therefore goes through `sharing.set_public`, which creates the share row and pins if nothing is pinned.
+**`publish_resume` opens both doors, because the website has two and neither alone is "publish".** The router's `publish_resume` calls `pin_current_draft` unconditionally — that is the publish *button*, and it creates no link at all. `PUT .../share` creates the `ResumeShare` row that *is* the link, but pins only if nothing is pinned — that is the share *toggle*. The tool must do both: **pin the current draft unconditionally, and ensure a share row exists.**
+
+Going through the share door alone was the plan's first answer and it is wrong: on an already-pinned resume it publishes the *old* revision, so an agent that edits and then publishes puts stale content on the public link while reporting success. After `publish_resume`, `unpublished_changes` must always be false — that is the invariant to test. The field is still worth returning on the read path.
 
 **`unpublish_resume` deletes the share row and leaves `published_revision_id` alone,** matching the website exactly. It therefore does not close the talent profile — `profile.readable_profiles_query` gates on `published_revision_id`, so a published resume keeps that gate open. This is deliberate and was decided by the user; the tool description must say it, and so must the settings page.
 
