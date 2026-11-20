@@ -137,10 +137,17 @@ def _own_key(db: Session, user: User, key_id: str) -> AgentApiKey:
     return key
 
 
+def _utc(value: datetime) -> datetime:
+    """SQLite hands back naive datetimes and Postgres aware ones, while a value
+    just assigned in this session is aware either way. Comparing a mix raises,
+    so normalise before ordering on them."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
 def _retired_at(key: AgentApiKey) -> datetime:
     """When a key stopped working, for ordering the retired ones."""
-    stamps = [t for t in (key.revoked_at, key.expires_at) if t is not None]
-    return max(stamps) if stamps else key.created_at
+    stamps = [_utc(t) for t in (key.revoked_at, key.expires_at) if t is not None]
+    return max(stamps) if stamps else _utc(key.created_at)
 
 
 @router.get(

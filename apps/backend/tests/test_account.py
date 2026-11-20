@@ -434,6 +434,21 @@ def test_the_list_bounds_how_many_retired_keys_it_shows(
     assert listed[1]["label"] == "old-0"
 
 
+def test_ordering_retired_keys_survives_a_mixed_timezone_pair():
+    """One stamp read back from SQLite (naive) beside one assigned in this
+    session (aware) is what `max()` refuses to compare."""
+    from app.routers.account import _retired_at
+
+    key = AgentApiKey(
+        user_id="u",
+        key_hash="h",
+        label="l",
+        revoked_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        expires_at=datetime(2026, 1, 1),
+    )
+    assert _retired_at(key) == datetime(2026, 1, 2, tzinfo=timezone.utc)
+
+
 def test_an_expired_key_is_listed_and_marked_but_does_not_authenticate(
     client, db_session, signed_in, a_user
 ):
