@@ -654,3 +654,48 @@ def test_the_publish_descriptions_name_the_talent_profile_consequence():
     assert "open to matching" in pub and "recruiter" in pub
     assert "open to matching" in unpub and "website" in unpub
     assert "not" in unpub.lower().split("open to matching")[0]
+
+
+def _edit_after_publish(db_session, resume):
+    from app.services.revisions import set_draft_source
+
+    # The tool ran on its own session: without a refresh this one still sees no
+    # pin and would coalesce the edit into the published revision in place.
+    db_session.refresh(resume)
+
+    set_draft_source(db_session, resume, resume.typst_source + "\n// edited by agent\n")
+    db_session.commit()
+
+
+def test_publish_after_an_edit_publishes_the_current_draft(
+    client, db_session, a_user, my_resume
+):
+    from app.services.revisions import published_source
+
+    call = _caller(client, db_session, a_user)
+    first = json.loads(_text(call("publish_resume", {"resume_id": my_resume.id})))
+    assert first["unpublished_changes"] is False
+    _edit_after_publish(db_session, my_resume)
+    second = json.loads(_text(call("publish_resume", {"resume_id": my_resume.id})))
+    db_session.expire_all()
+    db_session.refresh(my_resume)
+    assert "edited by agent" in my_resume.typst_source
+    assert second["unpublished_changes"] is False
+    assert second["token"] == first["token"]
+    assert published_source(db_session, my_resume) == my_resume.typst_source
+
+
+def test_publish_of_a_pinned_but_unshared_resume_pins_the_current_draft(
+    client, db_session, a_user, my_resume
+):
+    # Pinned earlier (e.g. by the website's publish button), then edited, never shared.
+    from app.services.revisions import pin_current_draft, published_source
+
+    pin_current_draft(db_session, my_resume)
+    db_session.commit()
+    _edit_after_publish(db_session, my_resume)
+    out = json.loads(_call(client, db_session, a_user, "publish_resume",
+                           {"resume_id": my_resume.id}))
+    db_session.refresh(my_resume)
+    assert out["public"] is True and out["unpublished_changes"] is False
+    assert published_source(db_session, my_resume) == my_resume.typst_source

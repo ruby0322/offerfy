@@ -25,6 +25,9 @@ def _fetch(client, token: str):
 def _bare(url: str) -> str:
     """The tool's url is the public one, behind Next's /api rewrite; the test
     client talks to the backend directly, where routes are bare."""
+    # `/api` is the frontend's rewrite onto the backend (see Next's config); the
+    # test client talks to the bare backend, where the route has no prefix. The
+    # tool is right to return the public path.
     assert url.startswith("/api/v1/resumes/export/"), url
     return url[len("/api"):]
 

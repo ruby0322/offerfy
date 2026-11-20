@@ -7,6 +7,9 @@ profile. This is a one-shot pipe: the token is `resume_id|expiry` signed with
 when `export_resume` minted it, and the link is bearer-style so a download
 client needs no credential. Anyone holding it can fetch that one PDF until it
 expires, which is why it is short.
+
+Known gap: the route has no rate limit and every hit is a PDF compile. The ten
+minute TTL bounds it; single-use would need the table this design avoids.
 """
 
 import time

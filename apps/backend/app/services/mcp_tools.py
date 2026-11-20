@@ -44,7 +44,7 @@ from app.services import (
     resume_write,
     sharing,
 )
-from app.services.revisions import source_hash
+from app.services.revisions import pin_current_draft, source_hash
 from app.services.starter import default_title, generate_starter, validate_locale
 from app.services.typst_projection import parse_projection
 
@@ -215,14 +215,21 @@ def _set_resume_title(db: Session, user: User, args: dict) -> dict:
 
 def _set_public(db: Session, user: User, args: dict, public: bool) -> dict:
     resume = resume_access.owned_by_user(db, user, _required_str(args, "resume_id"))
+    if public:
+        # Both website doors, because "publish" means "make the current version
+        # visible": the publish button pins the draft unconditionally, but only
+        # the share toggle creates the link, and it pins just when nothing is
+        # pinned, so on its own it would publish a stale revision. Pin first, so
+        # the share row can never exist without a pin; one commit covers both.
+        pin_current_draft(db, resume)
     state = sharing.set_public(db, resume, public)
     db.commit()
     return state.model_dump()
 
 
 def _publish_resume(db: Session, user: User, args: dict) -> dict:
-    """Make a resume public through the SHARE door, not `POST .../publish`: that
-    route only pins a revision and creates no link."""
+    """Pin the current draft and make sure the link exists. The link comes from
+    the SHARE door, not `POST .../publish`, which creates none."""
     return _set_public(db, user, args, True)
 
 
@@ -462,9 +469,8 @@ REGISTRY: dict[str, Tool] = {
             "description": "Make one of the signed-in user's resumes public: "
             "creates a link that anyone who has it can open, with no sign-in, "
             "and returns it as `token` (the page is /s/<token> on the site). It "
-            "publishes the revision last pinned, or pins the current draft if "
-            "none is; `unpublished_changes` says whether later edits are not in "
-            "it. Also: if the user has \"open to matching\" on and their "
+            "publishes the CURRENT draft, including edits made since any earlier "
+            "publish, so what the link shows is what you just edited. Also: if the user has \"open to matching\" on and their "
             "talent profile points at this resume, publishing re-opens that "
             "profile to recruiters with credentials. Only call this when the "
             "user has asked to publish.",
@@ -504,9 +510,11 @@ REGISTRY: dict[str, Tool] = {
         spec={
             "name": "export_resume",
             "description": "Get a download link for one of the signed-in user's "
-            "resumes as a PDF of its current draft. Returns `url` (a path on "
-            "the same site as this MCP endpoint), `expires_at` (the link works "
-            "for 10 minutes) and `filename`. Anyone holding the link can "
+            "resumes as a PDF of its current draft. Returns `url`, a PATH, not a "
+            "full URL: resolve it against the origin you reached this MCP "
+            "endpoint on (if that is https://example.com/api/mcp, fetch "
+            "https://example.com/api/v1/resumes/export/<token>). Also returns "
+            "`expires_at` (the link works for 10 minutes) and `filename`. Anyone holding the link can "
             "download that PDF until it expires, so do not post it anywhere. "
             "It does not publish the resume.",
             "parameters": {
