@@ -419,7 +419,9 @@ def test_an_unknown_protocol_version_is_the_modern_unsupported_error(client, raw
     assert err["data"]["requested"] == "1999-01-01"
 
 
-def test_a_header_that_disagrees_with_the_body_version_is_a_header_mismatch(client, raw_key):
+def test_a_header_disagreeing_with_the_body_version_is_a_header_mismatch(
+    client, raw_key
+):
     """Both values are supported, so only the disagreement can be what trips."""
     from app.services.mcp_protocol import LEGACY_VERSION, MODERN_VERSION
 

@@ -121,7 +121,8 @@ def check_version(request, body) -> None:
     # rejected, because a router trusting the header would then disagree with
     # the code that executes the body.
     method_header = request.headers.get("mcp-method")
-    if method_header is not None and isinstance(body, dict) and method_header != body.get("method"):
+    body_method = body.get("method") if isinstance(body, dict) else None
+    if method_header is not None and method_header != body_method:
         raise _mismatch("Mcp-Method does not match the request method")
 
     if header is not None and meta is not None and header != meta:
@@ -130,12 +131,17 @@ def check_version(request, body) -> None:
     if era_of(request, body) == "legacy":
         return
     requested = header if header is not None else meta
+    if requested is None:
+        # A modern-only method (`server/discover`) with no version anywhere.
+        # Nothing was offered, so this is not an unsupported version; the
+        # header is a required one (streamable-http, Protocol Version Header).
+        raise _mismatch("MCP-Protocol-Version header is required")
     if requested not in SUPPORTED:
         raise ProtocolError(
             400,
             UNSUPPORTED_VERSION,
             "Unsupported protocol version",
-            {"supported": list(SUPPORTED), "requested": (requested or "")[:32]},
+            {"supported": list(SUPPORTED), "requested": requested[:32]},
         )
     if header is None:
         raise _mismatch("MCP-Protocol-Version header is required")

@@ -31,7 +31,9 @@ def raw_key(db_session, a_user):
     return raw
 
 
-def _raw_rpc(client, raw, method, *, header_version, body_version, params=None, extra=None):
+def _raw_rpc(
+    client, raw, method, *, header_version, body_version, params=None, extra=None
+):
     params = dict(params or {})
     if body_version is not None:
         params["_meta"] = {VKEY: body_version}
@@ -75,8 +77,11 @@ def test_a_modern_tools_list_works_without_any_handshake(client, raw_key):
 
 
 def test_the_legacy_handshake_still_works(client, raw_key):
-    r = client.post(MCP, headers={"Authorization": f"Bearer {raw_key}"},
-                    json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+    r = client.post(
+        MCP,
+        headers={"Authorization": f"Bearer {raw_key}"},
+        json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+    )
     assert r.json()["result"]["protocolVersion"] == LEGACY_VERSION
     assert "resultType" not in r.json()["result"]
 
@@ -99,7 +104,9 @@ def test_an_unsupported_version_is_a_recognized_modern_error(client, raw_key):
 
 
 def test_an_unsupported_header_alone_is_the_same_modern_error(client, raw_key):
-    r = _raw_rpc(client, raw_key, "tools/list", header_version="1999-01-01", body_version=None)
+    r = _raw_rpc(
+        client, raw_key, "tools/list", header_version="1999-01-01", body_version=None
+    )
     assert r.status_code == 400
     assert r.json()["error"]["code"] == -32022
 
@@ -113,31 +120,39 @@ def test_a_header_body_version_mismatch_is_rejected(client, raw_key):
 
 
 def test_a_modern_body_without_the_header_is_rejected(client, raw_key):
-    r = _raw_rpc(client, raw_key, "tools/list", header_version=None, body_version=MODERN_VERSION)
+    r = _raw_rpc(
+        client, raw_key, "tools/list", header_version=None, body_version=MODERN_VERSION
+    )
     assert r.status_code == 400
     assert r.json()["error"]["code"] == -32020
 
 
 def test_a_modern_header_without_a_body_version_is_rejected(client, raw_key):
-    r = _raw_rpc(client, raw_key, "tools/list", header_version=MODERN_VERSION, body_version=None)
+    r = _raw_rpc(
+        client, raw_key, "tools/list", header_version=MODERN_VERSION, body_version=None
+    )
     assert r.status_code == 400
     assert r.json()["error"]["code"] == -32020
 
 
 def test_a_disagreeing_mcp_method_header_is_a_mismatch(client, raw_key):
-    r = _rpc(client, raw_key, "tools/list", MODERN_VERSION, extra={"Mcp-Method": "tools/call"})
+    wrong = {"Mcp-Method": "tools/call"}
+    r = _rpc(client, raw_key, "tools/list", MODERN_VERSION, extra=wrong)
     assert r.status_code == 400
     assert r.json()["error"]["code"] == -32020
 
 
 def test_a_matching_or_absent_mcp_method_header_is_accepted(client, raw_key):
-    ok = _rpc(client, raw_key, "tools/list", MODERN_VERSION, extra={"Mcp-Method": "tools/list"})
+    right = {"Mcp-Method": "tools/list"}
+    ok = _rpc(client, raw_key, "tools/list", MODERN_VERSION, extra=right)
     assert ok.status_code == 200
     assert _rpc(client, raw_key, "tools/list", MODERN_VERSION).status_code == 200
 
 
 def test_initialize_is_legacy_only_and_names_the_supported_versions(client, raw_key):
-    out = _rpc(client, raw_key, "initialize", MODERN_VERSION).json()
+    r = _rpc(client, raw_key, "initialize", MODERN_VERSION)
+    assert r.status_code == 404
+    out = r.json()
     assert out["error"]["code"] == -32601
     assert out["error"]["data"]["supported"] == list(SUPPORTED)
 
@@ -145,14 +160,32 @@ def test_initialize_is_legacy_only_and_names_the_supported_versions(client, raw_
 def test_server_discover_is_modern_only(client, raw_key):
     out = _rpc(client, raw_key, "server/discover", LEGACY_VERSION).json()
     assert out["error"]["code"] == -32601
-    bare = client.post(MCP, headers={"Authorization": f"Bearer {raw_key}"},
-                       json={"jsonrpc": "2.0", "id": 1, "method": "server/discover"})
-    assert bare.status_code == 400  # no version at all: a malformed modern request
+    bare = client.post(
+        MCP,
+        headers={"Authorization": f"Bearer {raw_key}"},
+        json={"jsonrpc": "2.0", "id": 1, "method": "server/discover"},
+    )
+    # No version anywhere: nothing was offered, so it is not an unsupported
+    # version (-32022 with a `requested`), it is a missing required header.
+    assert bare.status_code == 400
+    err = bare.json()["error"]
+    assert err["code"] == -32020
+    assert "header is required" in err["message"]
+    assert "data" not in err
 
 
 def test_an_unknown_modern_method_is_404_with_a_jsonrpc_error(client, raw_key):
     r = _rpc(client, raw_key, "nope/nothing", MODERN_VERSION)
     assert r.status_code == 404
+    assert r.json()["error"]["code"] == -32601
+
+
+def test_an_unknown_legacy_method_is_still_a_200_jsonrpc_error(client, raw_key):
+    r = _rpc(client, raw_key, "nope/nothing", None)
+    assert r.status_code == 200
+    assert r.json()["error"]["code"] == -32601
+    r = _rpc(client, raw_key, "nope/nothing", LEGACY_VERSION)
+    assert r.status_code == 200
     assert r.json()["error"]["code"] == -32601
 
 
@@ -180,7 +213,8 @@ def test_a_modern_unknown_tool_is_still_audited_as_refused(client, db_session, r
     out = _rpc(client, raw_key, "tools/call", MODERN_VERSION,
                params={"name": "drop_database", "arguments": {}}).json()
     assert out["error"]["code"] == -32602
-    assert [(r.tool, r.outcome) for r in _audit(db_session)] == [("drop_database", "refused")]
+    rows = _audit(db_session)
+    assert [(r.tool, r.outcome) for r in rows] == [("drop_database", "refused")]
 
 
 def test_era_of_unit():

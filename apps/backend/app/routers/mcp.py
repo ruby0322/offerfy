@@ -105,7 +105,9 @@ class _ToolCrash(Exception):
 
 
 class _RpcError(Exception):
-    def __init__(self, code: int, message: str, data: dict | None = None, status: int = 200):
+    def __init__(
+        self, code: int, message: str, data: dict | None = None, status: int = 200
+    ):
         self.code = code
         self.message = message
         self.data = data
@@ -311,7 +313,9 @@ async def mcp_endpoint(
     try:
         mcp_protocol.check_version(request, body)
     except mcp_protocol.ProtocolError as exc:
-        return _error(id_ if has_id else None, exc.code, exc.message, exc.data, exc.status)
+        return _error(
+            id_ if has_id else None, exc.code, exc.message, exc.data, exc.status
+        )
     modern = mcp_protocol.era_of(request, body) == "modern"
 
     if not has_id:
