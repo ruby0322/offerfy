@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import {
   ApiError,
   agentKeyErrorCode,
+  agentKeyIsLive,
   createAgentKey,
   listAgentKeyCalls,
   listAgentKeys,
@@ -41,6 +42,21 @@ type OutcomeKey = (typeof OUTCOMES)[keyof typeof OUTCOMES];
 
 function outcomeKey(outcome: string): OutcomeKey | null {
   return outcome in OUTCOMES ? OUTCOMES[outcome as keyof typeof OUTCOMES] : null;
+}
+
+/**
+ * The server's own "no such key of yours" answer, as opposed to any other 404.
+ * `_own_key` in app/routers/account.py sends this detail for a key that is
+ * missing, already revoked, or someone else's -- all of which mean the key the
+ * person asked to revoke is not live. A 404 from a misrouted path or a proxy
+ * carries something else, and must not be read as success.
+ */
+const KEY_NOT_FOUND = "Key not found";
+
+function isAlreadyGone(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 404) return false;
+  const body = err.body as { detail?: unknown } | null;
+  return body?.detail === KEY_NOT_FOUND;
 }
 
 export default function AgentKeys({ matchingOn }: { matchingOn: boolean }) {
@@ -136,6 +152,7 @@ export default function AgentKeys({ matchingOn }: { matchingOn: boolean }) {
       created_at: made.created_at,
       last_used_at: made.last_used_at,
       expires_at: made.expires_at,
+      revoked_at: null,
     };
     setFresh(made);
     setCopied(false);
@@ -162,19 +179,25 @@ export default function AgentKeys({ matchingOn }: { matchingOn: boolean }) {
     try {
       await revokeAgentKey(id);
     } catch (err) {
-      // 404 means the key is already gone (revoked in another tab, say), which
-      // is the outcome that was asked for. Anything else really did fail.
-      if (!(err instanceof ApiError && err.status === 404)) {
+      // A 404 with the server's own body means the key is already gone
+      // (revoked in another tab, say), which is the outcome that was asked
+      // for. A 404 from a misrouted path or a proxy has the same status and a
+      // different body, and treating that as success would leave a live key
+      // hidden behind the muted stale note if the re-list below also failed.
+      if (!isAlreadyGone(err)) {
         setError(t("errorGeneric"));
         setRevoking(null);
         return;
       }
     }
-    // Revoked. Drop it locally first so it cannot linger as "live" if the
-    // re-list below fails.
+    // Revoked. Mark it locally first so it cannot linger as "live" if the
+    // re-list below fails; the server keeps retired keys listed, with their log.
     if (fresh?.id === id) setFresh(null);
-    if (open === id) setOpen(null);
-    setKeys((prev) => (prev ?? []).filter((key) => key.id !== id));
+    setKeys((prev) =>
+      (prev ?? []).map((key) =>
+        key.id === id ? { ...key, revoked_at: new Date().toISOString() } : key,
+      ),
+    );
     await refreshKeys();
     setRevoking(null);
   }
@@ -270,11 +293,19 @@ export default function AgentKeys({ matchingOn }: { matchingOn: boolean }) {
             <ul className="flex flex-col divide-y divide-border rounded-md border border-border">
               {keys.map((key) => {
                 const rows = calls[key.id];
+                const live = agentKeyIsLive(key);
                 return (
                   <li key={key.id} className="flex flex-col gap-2 p-3">
                     <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
                       <div className="min-w-0 flex-1 basis-48">
-                        <p className="break-words text-sm font-medium">{key.label}</p>
+                        <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 break-words text-sm font-medium">
+                          <span>{key.label}</span>
+                          {live ? null : (
+                            <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
+                              {key.revoked_at ? t("revoked") : t("expired")}
+                            </span>
+                          )}
+                        </p>
                         <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
                           {t("created", { date: day(key.created_at) })}
                           {" · "}
@@ -296,15 +327,17 @@ export default function AgentKeys({ matchingOn }: { matchingOn: boolean }) {
                         >
                           {open === key.id ? t("hideRecent") : t("recent")}
                         </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          disabled={revoking === key.id}
-                          onClick={() => void revoke(key.id)}
-                        >
-                          {revoking === key.id ? t("revoking") : t("revoke")}
-                        </Button>
+                        {live ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={revoking === key.id}
+                            onClick={() => void revoke(key.id)}
+                          >
+                            {revoking === key.id ? t("revoking") : t("revoke")}
+                          </Button>
+                        ) : null}
                       </div>
                     </div>
 

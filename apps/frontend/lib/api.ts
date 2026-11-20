@@ -1329,7 +1329,16 @@ export type AgentKey = {
   created_at: string;
   last_used_at: string | null;
   expires_at: string | null;
+  /** Set once the key has been revoked. The list keeps retired keys so their
+   *  action log stays readable -- revoking is when a person wants to read it. */
+  revoked_at: string | null;
 };
+
+/** Whether a listed key still authenticates. The server lists retired ones. */
+export function agentKeyIsLive(key: AgentKey, now: number = Date.now()): boolean {
+  if (key.revoked_at) return false;
+  return !key.expires_at || new Date(key.expires_at).getTime() > now;
+}
 
 export type AgentKeyCreated = AgentKey & { token: string };
 

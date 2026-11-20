@@ -25,7 +25,8 @@ from app.schemas import (
     AgentToolCallOut,
 )
 from app.services.account import AccountError, apply
-from app.services.agent_keys import TooManyKeys, live_keys, mint_agent_key
+from app.services.agent_keys import TooManyKeys, is_live, mint_agent_key
+from app.services.mcp_tools import AUDIT_PINNED_TOOLS
 
 router = APIRouter()
 
@@ -92,10 +93,31 @@ def patch_account(
 # `require_agent_caller`. A holder of an `ofa_` token must not be able to mint
 # itself a successor or revoke the key that is limiting it; that is a decision
 # for the signed-in person at their own keyboard.
+#
+# And every one carries `include_in_schema=False`, like the rest of this
+# feature's routes: the Next rewrite publishes /api/openapi.json, so a route in
+# that document is a route described on the open web -- here, the shape of the
+# credential-minting call. The flag is per-route because this router's account
+# routes are listed; `tests/test_account.py` asserts no agent-key path reaches
+# `app.openapi()`.
 # --------------------------------------------------------------------------
 
 MAX_LABEL_LENGTH = 255
+
+#: Rows of any kind, newest first.
 CALL_LOG_LIMIT = 50
+#: Rows from `mcp_tools.AUDIT_PINNED_TOOLS` kept on top of that, newest first.
+#:
+#: The spec names publish visibility as this log's main purpose, and "the user
+#: does not know what the agent did" as an anti-goal. With one flat limit, at
+#: the quota's 300 calls an hour a `publish_resume` scrolled out of view in
+#: minutes -- so the one row the log exists for was the first to go. Pinning
+#: rather than a "changes only" filter because the answer must be visible
+#: without the person knowing to ask for it.
+CALL_LOG_PINNED_LIMIT = 20
+#: Revoked and expired keys listed alongside the live ones, most recently
+#: retired first. Bounded so a long-lived account's list cannot grow forever.
+RETIRED_KEYS_LISTED = 10
 
 
 def _bad_request(code: str) -> HTTPException:
@@ -115,12 +137,40 @@ def _own_key(db: Session, user: User, key_id: str) -> AgentApiKey:
     return key
 
 
-@router.get("/v1/me/agent-keys", response_model=list[AgentKeyOut])
+def _retired_at(key: AgentApiKey) -> datetime:
+    """When a key stopped working, for ordering the retired ones."""
+    stamps = [t for t in (key.revoked_at, key.expires_at) if t is not None]
+    return max(stamps) if stamps else key.created_at
+
+
+@router.get(
+    "/v1/me/agent-keys", response_model=list[AgentKeyOut], include_in_schema=False
+)
 def list_agent_keys(db: Session = Depends(get_db), user: User = Depends(require_user)):
-    return live_keys(db, user)
+    """Live keys oldest first, then the most recently retired ones.
+
+    Not `live_keys` alone. Revoking is what a person does on *suspecting*
+    misuse, which is exactly when they want to read that key's log -- and while
+    this listed live keys only, revoking made the key disappear and took its
+    log with it. `revoked_at` is in the payload so the card can mark a key
+    retired rather than offering to revoke it again.
+    """
+    rows = (
+        db.query(AgentApiKey)
+        .filter(AgentApiKey.user_id == user.id)
+        .order_by(AgentApiKey.created_at, AgentApiKey.id)
+        .all()
+    )
+    live = [key for key in rows if is_live(key)]
+    retired = sorted(
+        (key for key in rows if not is_live(key)), key=_retired_at, reverse=True
+    )
+    return live + retired[:RETIRED_KEYS_LISTED]
 
 
-@router.post("/v1/me/agent-keys", response_model=AgentKeyCreated)
+@router.post(
+    "/v1/me/agent-keys", response_model=AgentKeyCreated, include_in_schema=False
+)
 def create_agent_key(
     body: AgentKeyCreate,
     db: Session = Depends(get_db),
@@ -151,7 +201,9 @@ def create_agent_key(
     )
 
 
-@router.delete("/v1/me/agent-keys/{key_id}", status_code=204)
+@router.delete(
+    "/v1/me/agent-keys/{key_id}", status_code=204, include_in_schema=False
+)
 def revoke_agent_key(
     key_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)
 ):
@@ -164,15 +216,30 @@ def revoke_agent_key(
     return Response(status_code=204)
 
 
-@router.get("/v1/me/agent-keys/{key_id}/calls", response_model=list[AgentToolCallOut])
+@router.get(
+    "/v1/me/agent-keys/{key_id}/calls",
+    response_model=list[AgentToolCallOut],
+    include_in_schema=False,
+)
 def agent_key_calls(
     key_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)
 ):
+    """The last CALL_LOG_LIMIT rows of any kind, plus the last
+    CALL_LOG_PINNED_LIMIT that changed or exposed something, merged newest
+    first. See CALL_LOG_PINNED_LIMIT for why the pinned half exists."""
     key = _own_key(db, user, key_id)
-    return (
+    rows = (
         db.query(AgentToolCall)
         .filter(AgentToolCall.key_id == key.id, AgentToolCall.user_id == user.id)
         .order_by(AgentToolCall.created_at.desc(), AgentToolCall.id.desc())
-        .limit(CALL_LOG_LIMIT)
+    )
+    recent = rows.limit(CALL_LOG_LIMIT).all()
+    pinned = (
+        rows.filter(AgentToolCall.tool.in_(sorted(AUDIT_PINNED_TOOLS)))
+        .limit(CALL_LOG_PINNED_LIMIT)
         .all()
+    )
+    merged = {row.id: row for row in recent + pinned}
+    return sorted(
+        merged.values(), key=lambda row: (row.created_at, row.id), reverse=True
     )

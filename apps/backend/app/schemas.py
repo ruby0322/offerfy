@@ -631,13 +631,20 @@ class AgentKeyCreate(BaseModel):
 
 class AgentKeyOut(BaseModel):
     """A credential as listed. Deliberately has no token and no hash: the raw
-    value exists only in the mint response, and the hash is not for clients."""
+    value exists only in the mint response, and the hash is not for clients.
+
+    `revoked_at` is here because the list includes retired keys: a person who
+    has just revoked a key is exactly the person who wants to read its log.
+    With `expires_at`, it is what tells the card to mark a key retired instead
+    of offering to revoke it again.
+    """
 
     id: str
     label: str
     created_at: datetime
     last_used_at: datetime | None = None
     expires_at: datetime | None = None
+    revoked_at: datetime | None = None
 
 
 class AgentKeyCreated(AgentKeyOut):
