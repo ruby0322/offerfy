@@ -16,6 +16,16 @@ importing every emitter module, and a module that both defines the thing
 emitter modules depend on *and* imports them would be circular the moment
 an emitter module needed that definition back. See `base.py`'s docstring.
 
+A package only earns a place here if the *whole* document it emits is
+reachable from the form: the registry is what the picker labels "instant",
+and an instant template whose fields the form cannot show is a worse
+promise than no promise. `clean-print-cv` was removed on that ground --
+it carries every entry inside one `#let data = (...)` dict and hands
+sub-dicts to its section functions (`cv-header(data.personal)`), a shape
+`typst_projection` makes no unit of, so its form was empty (Tier C) and
+`insert_item` refused outright. It remains in the picker's AI-rewrite
+half, where nothing is promised about the form.
+
 Pinned to an exact `(name, version)` pair, never just a name: a package's
 API can change between versions (`ats-friendly-resume` renames two of
 `basic-resume`'s own parameters -- a later task's whole point), so an
@@ -30,7 +40,7 @@ own `EMITTER_PINS` placeholder, so a pair only needs declaring once, here.
 
 from __future__ import annotations
 
-from app.services.emitters import acorn_resume, ats_friendly_resume, basic_resume, clean_print_cv
+from app.services.emitters import acorn_resume, ats_friendly_resume, basic_resume
 from app.services.emitters.base import EmitResult, Emitter
 
 __all__ = ["EmitResult", "Emitter", "deterministic_pairs", "emitter_for"]
@@ -39,7 +49,6 @@ _EMITTERS: dict[tuple[str, str], Emitter] = {
     (basic_resume.name, basic_resume.version): basic_resume,
     (ats_friendly_resume.name, ats_friendly_resume.version): ats_friendly_resume,
     (acorn_resume.name, acorn_resume.version): acorn_resume,
-    (clean_print_cv.name, clean_print_cv.version): clean_print_cv,
 }
 
 

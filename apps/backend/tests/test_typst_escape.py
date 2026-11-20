@@ -132,11 +132,12 @@ def test_typst_value_normalises_an_embedded_newline_to_a_space():
     # A raw newline is legal *syntax* inside a Typst string literal (it
     # simply spans source lines) -- so this was never a compile failure,
     # it was a silent one: the literal line break survived into whatever
-    # displayed the string. Surfaced by the first dict-shaped emitter
-    # (clean_print_cv.py), which routes free-form prose through this
-    # function instead of markup_value -- every earlier caller only ever
-    # passed short, structured values (dates, names) with no embedded
-    # newline to begin with. Same normalisation, same reason, as
+    # displayed the string. Surfaced by a dict-shaped emitter (since
+    # removed from the registry) that routed free-form prose through this
+    # function instead of markup_value -- every other caller only ever
+    # passes short, structured values (dates, names) with no embedded
+    # newline to begin with, which is why nothing caught it earlier and
+    # why this test, not a caller, is what keeps it fixed. Same normalisation, same reason, as
     # markup_value's own (see test_markup_value_normalises_an_embedded_
     # newline_to_a_space above).
     assert typst_value("line one\nline two") == '"line one line two"'

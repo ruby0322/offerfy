@@ -122,9 +122,9 @@ _SCHEME_RE = re.compile(r"^\s*https?://", re.IGNORECASE)
 def bare_url(value: str | None) -> str:
     """`value` with a leading `http://`/`https://` removed -- the raw
     string behind `url_value`, for a call site that needs the text rather
-    than a quoted literal (acorn-resume's `(url, label)` pairs, which
-    build their own `https://` target; clean-print-cv's `data` dict, which
-    `typst_value` quotes once for the whole dict).
+    than a quoted literal -- acorn-resume's `(url, label)` pairs, which
+    build their own `https://` target, and any emitter that quotes a whole
+    structure once through `typst_value` rather than field by field.
 
     The IR carries an implicit "bare domain, no scheme" convention that
     nothing used to enforce -- not the schema, not `prompts.EXTRACT_PROMPT`,

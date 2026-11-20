@@ -17,7 +17,7 @@ from io import BytesIO
 
 import pytest
 from pdfminer.high_level import extract_pages
-from pdfminer.layout import LTChar, LTTextContainer
+from pdfminer.layout import LTTextContainer
 from pdfminer.pdfdocument import PDFDocument
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
@@ -38,7 +38,7 @@ from app.services.typst_compile import (
     compile_typst_with_stderr,
     typst_available,
 )
-from tests.fixtures.golden_content import GOLDEN, MINIMAL
+from tests.fixtures.golden_content import GOLDEN
 
 pytestmark = pytest.mark.skipif(not typst_available(), reason="typst binary not available")
 
@@ -302,12 +302,10 @@ def test_registered_emitter_never_emits_a_doubled_scheme_in_a_link_target(pair):
     # PDF's annotations rather than asserted on the emitted source,
     # because the source is where it looked fine.
     #
-    # `clean-print-cv` is the one pair that renders no link annotation at
-    # all (it prints every URL as plain text -- confirmed against
-    # `cv-template.typ`), so for that pair this is the weaker statement
-    # that nothing regressed into emitting a broken one. The companion
-    # test below is what keeps the assertion from going vacuous across
-    # the whole registry.
+    # A pair that renders no link annotation at all passes this for free,
+    # so it is the weaker statement that nothing regressed into emitting a
+    # broken target. The companion test below is what keeps the assertion
+    # from going vacuous across the whole registry.
     name, version = pair
     source = emitter_for(name, version).emit(_SCHEMED_CONTACTS).source
     uris = _pdf_uris(compile_typst(source, "pdf"))
@@ -333,107 +331,3 @@ def test_the_registry_renders_link_targets_at_all():
     assert "https://github.com/weiling" in everything
     assert "https://github.com/weiling/doubled" in everything
     assert "mailto:scheme@example.com" in everything
-
-
-# --- clean-print-cv's unguarded contact separators ------------------------
-
-
-def _clean_print_cv_contact_row(content: ResumeContent) -> str:
-    """The rendered contact row, reassembled from the glyphs sitting on
-    its own baseline and normalised to single spaces.
-
-    Built this way rather than read off `extract_pdf_text`'s second line
-    because pdfminer's line grouping is font-dependent and the row is
-    not: `contact-sep` (cv-template.typ:43) draws its bar at a fixed 8pt
-    between two `h(5pt)` gaps while the values around it render at the
-    body size, and whether pdfminer calls that one text container or
-    three depends on the body face's advance widths. Under New Computer
-    Modern it was one line; under this emitter's PT Serif the same page
-    -- same glyphs, same baseline, same visual row -- splits into three.
-    Grouping by baseline measures what the page shows under either.
-
-    The gap rule only has to tell `h(5pt)` apart from the near-zero
-    advance between two letters of a word, so the threshold is loose on
-    purpose. A real space character inside a value (a city and country,
-    say) is a glyph like any other and survives the collapse as one
-    space.
-    """
-    source = emitter_for("clean-print-cv", "0.1.0").emit(content).source
-    chars: list[LTChar] = []
-
-    def collect(node) -> None:
-        if isinstance(node, LTChar):
-            chars.append(node)
-        elif hasattr(node, "__iter__"):
-            for child in node:
-                collect(child)
-
-    for page in extract_pages(BytesIO(compile_typst(source, "pdf"))):
-        collect(page)
-    assert chars, "clean-print-cv rendered no text at all"
-
-    # Grouped by text-matrix origin, not by `y0`: `y0` is the bottom of
-    # the glyph box, so the separator's 8pt bar and the body-size values
-    # beside it land on different `y0` values while sharing a baseline --
-    # grouping on it splits the row into "the values" and "the bars" and
-    # quietly returns one of the two.
-    baselines: dict[float, list[LTChar]] = {}
-    for char in chars:
-        baselines.setdefault(round(char.matrix[5], 1), []).append(char)
-    # Top-down: the name block first, then the contact row under it.
-    contact = sorted(baselines[sorted(baselines, reverse=True)[1]], key=lambda c: c.x0)
-
-    out = ""
-    for previous, char in zip([None, *contact], contact):
-        if previous is not None and char.x0 - previous.x1 > 0.3 * char.size:
-            out += " "
-        out += char.get_text()
-    return " ".join(out.split()) + (" " if out.endswith(" ") else "")
-
-
-def test_clean_print_cv_renders_no_separator_junk_for_three_contact_values():
-    # The fix's real payoff, read off the page rather than the source:
-    # `email | phone | location` is printed with *unconditional*
-    # separators (cv-template.typ:107-111) and `contact-sep` is a
-    # closed-over `#let`, so the only lever is which values occupy those
-    # three slots. Packing present values into them in order means
-    # anyone with three or more contact values -- email + phone +
-    # location, or email + two links -- renders with no stray separator
-    # at all. Field-for-field mapping rendered this exact content as
-    # `r@example.com  |    |    |  github.com/a  |  a.dev`.
-    content = ResumeContent(
-        name="Packed",
-        contact=Contact(email="r@example.com", github="github.com/a", website="a.dev"),
-    )
-    assert _clean_print_cv_contact_row(content) == "r@example.com | github.com/a | a.dev"
-
-
-def test_clean_print_cv_renders_one_trailing_separator_for_two_contact_values():
-    # Two values fill two of the three unguarded slots, so one trailing
-    # separator is left. Field-for-field mapping rendered the same
-    # content with three separators and two of them dangling.
-    content = ResumeContent(
-        name="Two", contact=Contact(email="r@example.com", github="github.com/a")
-    )
-    assert _clean_print_cv_contact_row(content).rstrip() == "r@example.com | github.com/a |"
-
-
-def test_clean_print_cv_still_renders_two_separators_for_minimal():
-    """What `MINIMAL` -- name + email, the shape of an untouched starter --
-    actually renders through this emitter, pinned rather than assumed.
-
-    This is the residual the packing cannot remove, recorded here so it
-    is a known number rather than a surprise: the unguarded part of
-    cv-header's contact row always emits exactly two `contact-sep`
-    glyphs, and no arrangement of a single value can hide both. Removing
-    them would mean not calling `cv-header` at all (reimplementing the
-    name block, rule, subtitle and contact row against this package's
-    *internal* style `#let`s) or emitting negative `h()` spacing into a
-    slot, which is font- and size-dependent junk in a PDF a person sends
-    to employers. If this assertion ever starts failing because the row
-    got *cleaner*, that is the fix, not a regression -- update it.
-    """
-    row = _clean_print_cv_contact_row(MINIMAL)
-    assert row.startswith("jordan@example.com")
-    assert row.count("|") == 2
-    assert row.rstrip() == "jordan@example.com | |"

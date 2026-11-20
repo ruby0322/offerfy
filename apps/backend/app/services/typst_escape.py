@@ -85,11 +85,12 @@ _IMPORT = re.compile(r"^\s*#import\s")
 # they differ in *how* a line break would otherwise cause harm, not in
 # whether it would). Defined once, ahead of both, rather than per-caller
 # -- a prior version of `typst_value` left this out, which worked for
-# every call-shaped emitter (dates, names: never multi-line) until the
-# first dict-shaped one (`clean_print_cv.py`) routed actual résumé prose
-# through it instead of `markup_value`, and the gap surfaced as a raw
-# newline reaching the rendered page as a literal line break instead of
-# a space.
+# every call-shaped emitter (dates, names: never multi-line) until a
+# dict-shaped one routed actual résumé prose through it instead of
+# `markup_value`, and the gap surfaced as a raw newline reaching the
+# rendered page as a literal line break instead of a space. That emitter
+# has since been removed; the normalisation is what kept the bug from
+# coming back with the next multi-line value, from any shape of emitter.
 _LINE_BREAK_RE = re.compile("[\r\n\x0b\x0c\x85  ]+")
 
 
