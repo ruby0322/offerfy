@@ -1708,7 +1708,7 @@ class AgentApiKey(Base):
     )
 
 
-DISCLOSURE_PURPOSES =("talent_introduction",)
+DISCLOSURE_PURPOSES = ("talent_introduction",)
 DISCLOSURE_SCOPES = ("summary", "full")
 
 
