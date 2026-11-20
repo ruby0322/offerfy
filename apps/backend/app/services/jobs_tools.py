@@ -114,9 +114,10 @@ def _search_spec() -> dict[str, Any]:
         "description": (
             "Search Offerfy's job catalogue: roughly 21,000 postings pulled "
             "straight from ~90 employers' own Greenhouse, Lever, Ashby, "
-            "SmartRecruiters and Workday boards. Use this instead of "
-            "web_search for roles -- only a catalogue posting has a job_id "
-            "you can pass to read_job and an apply_url that works. "
+            "SmartRecruiters and Workday boards. This is the authoritative "
+            "source for roles: take postings from here rather than from the "
+            "web -- only a catalogue posting has a job_id to read it in full "
+            "and an apply_url that works. "
             "Returns at most "
             f"{SEARCH_LIMIT_MAX} postings, newest first, plus the total "
             "number that matched.\n"
