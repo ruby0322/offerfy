@@ -10,6 +10,10 @@ provider-neutral specs plus a handler factory closing over the request's
   read_job            -- one posting in full, for tailoring against it.
   read_my_job_profile -- the signed-in person's own job context.
 
+The catalogue half (`catalogue_specs` / `catalogue_handlers`: search_jobs and
+read_job) is shared with the MCP surface (services/mcp_tools.py) and must stay
+resume-independent: no resume, no user, only a session.
+
 Why tools and not a prompt block: the role card is rebuilt and re-sent on
 every turn, so putting postings or a digest in it would charge every
 conversation about margins for job data it never looks at.
@@ -249,7 +253,7 @@ def jobs_tool_specs(resume: Resume) -> list[dict]:
     model that calls it from a stale transcript gets an explanation instead of
     "unknown tool".
     """
-    specs: list[dict] = [_search_spec(), _READ_JOB]
+    specs: list[dict] = catalogue_specs()
     if resume.user_id is not None:
         specs.append(_READ_JOB_PROFILE)
     return specs
@@ -278,9 +282,14 @@ def _facets_for(db: Session, job_ids: list[str]) -> dict[str, JobFacets]:
     return {row.job_id: row for row in rows}
 
 
-def jobs_tool_handlers(
-    db: Session, resume: Resume, user: User | None
-) -> dict[str, Callable[[dict], str]]:
+def catalogue_specs() -> list[dict]:
+    """The resume-independent tools: the catalogue search and the posting read."""
+    return [_search_spec(), _READ_JOB]
+
+
+def catalogue_handlers(db: Session) -> dict[str, Callable[[dict], str]]:
+    """Handlers for `catalogue_specs`. They need a session and nothing else."""
+
     def search(args: dict) -> str:
         raw_limit = args.get("limit")
         try:
@@ -368,6 +377,12 @@ def jobs_tool_handlers(
         )
         return json.dumps(payload, ensure_ascii=False)
 
+    return {SEARCH_JOBS_TOOL: search, READ_JOB_TOOL: read_job}
+
+
+def jobs_tool_handlers(
+    db: Session, resume: Resume, user: User | None
+) -> dict[str, Callable[[dict], str]]:
     def read_profile(_args: dict) -> str:
         if user is None:
             return json.dumps(
@@ -423,11 +438,7 @@ def jobs_tool_handlers(
             ensure_ascii=False,
         )
 
-    return {
-        SEARCH_JOBS_TOOL: search,
-        READ_JOB_TOOL: read_job,
-        READ_JOB_PROFILE_TOOL: read_profile,
-    }
+    return {**catalogue_handlers(db), READ_JOB_PROFILE_TOOL: read_profile}
 
 
 def _digest_payload(digest) -> dict[str, Any]:
