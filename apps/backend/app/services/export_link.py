@@ -3,8 +3,8 @@
 Deliberately NOT a `ResumeShare` token. That one is a state the user chose to be
 in: it has a table, a revoke path, an OG image and a relationship to the talent
 profile. This is a one-shot pipe: the token is `export|resume_id|expiry` signed
-with `deps._sign` and nothing is stored. It carries no user id: ownership was checked
-when `export_resume` minted it, and the link is bearer-style so a download
+with `deps._sign` and nothing is stored. It carries no user id: ownership was
+checked when `export_resume` minted it, and the link is bearer-style so a download
 client needs no credential. Anyone holding it can fetch that one PDF until it
 expires, which is why it is short.
 
@@ -21,11 +21,11 @@ EXPORT_TTL_SECONDS = 600
 
 # The signed value's first field, and the reason it exists: `_sign` and
 # `auth_token_secret` are shared with the session cookie, whose value is a bare
-# user id. Neither shape can be read as the other today -- a cookie has no `|`
-# and an export token has two fields -- but that is an accident of the two
-# formats, not a rule, and the next value signed with this secret could make it
-# false. Every export token says what it is for, and anything that does not is
-# not an export token.
+# user id. No confusion between the two was possible before this prefix either
+# -- a cookie's value has no `|` in it -- but that was an accident of the two
+# formats rather than a rule, and the next thing signed with this secret could
+# have made it false. Now every export token says what it is for, and a signed
+# value that does not say `export` is not one.
 _PURPOSE = "export"
 
 
