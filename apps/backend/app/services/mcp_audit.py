@@ -30,6 +30,10 @@ No tool arguments are recorded: they carry resume content. Only the tool name,
 which resume it was about, and the outcome: ok, refused (an HTTPException
 escaped), error (anything else) or throttled (the quota refusal itself).
 
+An audit write that fails is reported, with one exception: the `ok` row, where
+the handler's work has already committed and an error would misdescribe the
+account. `audited`'s `else` branch carries the full reasoning.
+
 **Why throttled is its own outcome.** The quota counts rows, and a refused
 call is recorded. If the quota's own refusal were an ordinary `refused` row it
 would feed the count that caused it, so a client looping past 300 would keep
@@ -45,6 +49,7 @@ view. One row discloses "your assistant hit the limit"; the refusal message
 carries the reopen time, so nothing is lost by not writing the rest.
 """
 
+import logging
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -55,6 +60,8 @@ from sqlalchemy import func
 
 from app.db import get_session_factory
 from app.models import AgentApiKey, AgentToolCall
+
+logger = logging.getLogger(__name__)
 
 QUOTA_PER_HOUR = 300
 
@@ -97,7 +104,11 @@ def record(
     key_id: str, user_id: str, tool: str, resume_id: str | None, outcome: str
 ) -> None:
     """Write one audit row on its own session. Raises if the write fails: a
-    silently lost audit row is the failure this module exists to prevent."""
+    silently lost audit row is the failure this module exists to prevent.
+
+    One caller catches it: the `ok` branch of `audited`, where the handler's
+    work has already committed. The reasoning is there, not here -- this
+    function still reports its own failure to whoever called it."""
     db = get_session_factory()()
     try:
         db.add(_new_row(key_id, user_id, tool, resume_id, outcome))
@@ -206,4 +217,22 @@ def audited(key_id: str, user_id: str, tool: str) -> Iterator[Call]:
         record(key_id, user_id, tool, call.resume_id, "error")
         raise
     else:
-        record(key_id, user_id, tool, call.resume_id, "ok")
+        # **The `ok` path, and only the `ok` path, swallows a failed audit
+        # write.** By the time this runs the handler's work has committed (the
+        # transport commits before leaving the block), so raising here would
+        # report `-32603` for a call that *landed* -- and an agent that reads an
+        # error retries, which is how one `create_resume` becomes two. On this
+        # path an error is a lie about the state of the account, and a missing
+        # audit row shouted into the application log is the smaller loss.
+        #
+        # The asymmetry is the point, and it is why this is not a reversal of
+        # the "never swallow an audit failure" rule above: on the `refused`,
+        # `error` and `throttled` paths **nothing landed**, so an error is the
+        # truth, the caller has nothing to be inconsistent with, and the write
+        # must still propagate. Those three are deliberately left alone.
+        try:
+            record(key_id, user_id, tool, call.resume_id, "ok")
+        except Exception:
+            logger.exception(
+                "mcp audit: lost an `ok` row for tool %r on key %s", tool[:64], key_id
+            )

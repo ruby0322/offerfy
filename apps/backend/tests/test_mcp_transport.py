@@ -506,6 +506,60 @@ def test_an_audit_layer_failure_is_a_jsonrpc_internal_error(client, raw_key, mon
     assert r.json()["error"]["code"] == -32603
 
 
+def _record_that_fails_on(outcome: str, monkeypatch):
+    """Make the audit write fail for one outcome and work for the others."""
+    from app.services import mcp_audit
+
+    real = mcp_audit.record
+
+    def record(key_id, user_id, tool, resume_id, written):
+        if written == outcome:
+            raise RuntimeError("audit db down")
+        return real(key_id, user_id, tool, resume_id, written)
+
+    monkeypatch.setattr(mcp_audit, "record", record)
+
+
+def test_a_lost_ok_row_does_not_report_an_error_for_a_write_that_landed(
+    client, db_session, raw_key, monkeypatch
+):
+    """`create_resume` commits, so once the handler returns the resume exists.
+    Answering -32603 because the audit row could not be written tells the agent
+    the opposite, and an agent that reads an error retries -- which is how one
+    create becomes two. The audit gap goes to the application log instead."""
+    from app.models import Resume
+
+    _record_that_fails_on("ok", monkeypatch)
+    r = _call(client, raw_key, "create_resume", {"locale": "en"})
+    assert r.status_code == 200
+    body = r.json()
+    assert "error" not in body, body
+    assert body["result"]["isError"] is False
+    made = body["result"]["structuredContent"]["resume_id"]
+    db_session.expire_all()
+    assert db_session.get(Resume, made) is not None
+    # The row really is missing -- the test would pass vacuously otherwise.
+    assert _audit_rows(db_session) == []
+
+
+def test_a_lost_refusal_row_is_still_an_internal_error(
+    client, db_session, raw_key, monkeypatch
+):
+    """The other half of the asymmetry: on a refusal nothing landed, so an
+    error is the truth and the audit failure must still propagate."""
+    _record_that_fails_on("refused", monkeypatch)
+    r = _call(client, raw_key, "get_resume", {"resume_id": "no-such-resume"})
+    assert r.status_code == 200
+    assert r.json()["error"]["code"] == -32603
+
+
+def test_a_lost_error_row_is_still_an_internal_error(client, raw_key, monkeypatch):
+    _record_that_fails_on("error", monkeypatch)
+    _register(monkeypatch, "crash2", _flush_then(RuntimeError("boom")))
+    r = _call(client, raw_key, "crash2")
+    assert r.json()["error"]["code"] == -32603
+
+
 def test_an_internal_error_survives_a_rollback_that_fails(client, raw_key, monkeypatch):
     """The generic branch exists for pool and database failures, and on exactly
     those its own `db.rollback()` is what raises. Unguarded, it turned the

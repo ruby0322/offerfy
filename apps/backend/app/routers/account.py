@@ -26,7 +26,7 @@ from app.schemas import (
 )
 from app.services.account import AccountError, apply
 from app.services.agent_keys import TooManyKeys, is_live, mint_agent_key
-from app.services.mcp_tools import AUDIT_PINNED_TOOLS
+from app.services.mcp_tools import AUDIT_DISCLOSURE_TOOLS, AUDIT_PINNED_TOOLS
 
 router = APIRouter()
 
@@ -104,17 +104,32 @@ def patch_account(
 
 MAX_LABEL_LENGTH = 255
 
+# The log is three windows merged, newest first, deduplicated. The spec names
+# publish visibility as its main purpose and "the user does not know what the
+# agent did" as an anti-goal, and one flat window could not deliver that: at
+# the quota's 300 calls an hour a `publish_resume` scrolled out in minutes.
+# Windowed rather than a "changes only" filter because the answer has to be
+# visible without the person knowing to ask for it.
+#
+# **What this actually guarantees**, which is less than "pinned forever":
+#   * the last CALL_LOG_DISCLOSURE_LIMIT publishes, unpublishes and exports are
+#     shown whatever else the assistant did afterwards -- a user's own editing
+#     cannot push a publish out, which one shared window did not prevent;
+#   * the last CALL_LOG_PINNED_LIMIT changes of any kind likewise, except that
+#     later *changes* can displace earlier ones;
+#   * the last CALL_LOG_LIMIT calls of any kind, reads included.
+# The hole that remains: an assistant that publishes or exports more than
+# CALL_LOG_DISCLOSURE_LIMIT times pushes the oldest of those out of the log,
+# and nothing here says so on screen. Say it, do not widen the claim.
+
 #: Rows of any kind, newest first.
 CALL_LOG_LIMIT = 50
-#: Rows from `mcp_tools.AUDIT_PINNED_TOOLS` kept on top of that, newest first.
-#:
-#: The spec names publish visibility as this log's main purpose, and "the user
-#: does not know what the agent did" as an anti-goal. With one flat limit, at
-#: the quota's 300 calls an hour a `publish_resume` scrolled out of view in
-#: minutes -- so the one row the log exists for was the first to go. Pinning
-#: rather than a "changes only" filter because the answer must be visible
-#: without the person knowing to ask for it.
+#: Rows from `mcp_tools.AUDIT_PINNED_TOOLS` (everything that writes or exposes).
 CALL_LOG_PINNED_LIMIT = 20
+#: Rows from `mcp_tools.AUDIT_DISCLOSURE_TOOLS` (everything that reaches someone
+#: other than the user). A window of its own so high-volume editing -- which is
+#: also pinned -- cannot crowd out the publish the person came to look for.
+CALL_LOG_DISCLOSURE_LIMIT = 10
 #: Revoked and expired keys listed alongside the live ones, most recently
 #: retired first. Bounded so a long-lived account's list cannot grow forever.
 RETIRED_KEYS_LISTED = 10
@@ -145,9 +160,21 @@ def _utc(value: datetime) -> datetime:
 
 
 def _retired_at(key: AgentApiKey) -> datetime:
-    """When a key stopped working, for ordering the retired ones."""
+    """When a key stopped working, for ordering the retired ones.
+
+    The **earliest** of its stamps, not the latest: a key revoked today with an
+    expiry thirty days out stopped working today, and ordering it by that
+    expiry would sort it ahead of every key retired since -- which is what
+    decides whose log falls off the end of the bounded list above.
+
+    Deliberately no "has this stamp taken effect yet" filter. The earliest
+    stamp is always one that has: anything earlier than an effective stamp is
+    itself effective, and a key whose stamps are *all* in the future is live,
+    so `is_live` has already kept it out of this function. Such a filter was
+    written and then removed -- under `min` it is a branch no test can reach.
+    """
     stamps = [_utc(t) for t in (key.revoked_at, key.expires_at) if t is not None]
-    return max(stamps) if stamps else _utc(key.created_at)
+    return min(stamps) if stamps else _utc(key.created_at)
 
 
 @router.get(
@@ -216,7 +243,11 @@ def revoke_agent_key(
 ):
     key = _own_key(db, user, key_id)
     if key.revoked_at is not None:
-        # Already gone: say what the list says.
+        # Already revoked: the same answer as a key that is not yours, and the
+        # same detail, which is what the card reads to tell "it was already
+        # gone" from a 404 that came from somewhere else. (The list does now
+        # show revoked keys, marked, but it offers no Revoke button for one --
+        # reaching here means a stale tab, not a visible control.)
         raise HTTPException(status_code=404, detail="Key not found")
     key.revoked_at = datetime.now(timezone.utc)
     db.flush()
@@ -231,22 +262,28 @@ def revoke_agent_key(
 def agent_key_calls(
     key_id: str, db: Session = Depends(get_db), user: User = Depends(require_user)
 ):
-    """The last CALL_LOG_LIMIT rows of any kind, plus the last
-    CALL_LOG_PINNED_LIMIT that changed or exposed something, merged newest
-    first. See CALL_LOG_PINNED_LIMIT for why the pinned half exists."""
+    """Three windows merged newest first and deduplicated: recent calls of any
+    kind, recent changes, and recent disclosures. The block above
+    CALL_LOG_LIMIT says what that does and does not guarantee."""
     key = _own_key(db, user, key_id)
     rows = (
         db.query(AgentToolCall)
         .filter(AgentToolCall.key_id == key.id, AgentToolCall.user_id == user.id)
         .order_by(AgentToolCall.created_at.desc(), AgentToolCall.id.desc())
     )
-    recent = rows.limit(CALL_LOG_LIMIT).all()
-    pinned = (
-        rows.filter(AgentToolCall.tool.in_(sorted(AUDIT_PINNED_TOOLS)))
-        .limit(CALL_LOG_PINNED_LIMIT)
-        .all()
-    )
-    merged = {row.id: row for row in recent + pinned}
+
+    def window(tools, limit):
+        q = rows if tools is None else rows.filter(AgentToolCall.tool.in_(sorted(tools)))
+        return q.limit(limit).all()
+
+    merged = {
+        row.id: row
+        for row in (
+            window(None, CALL_LOG_LIMIT)
+            + window(AUDIT_PINNED_TOOLS, CALL_LOG_PINNED_LIMIT)
+            + window(AUDIT_DISCLOSURE_TOOLS, CALL_LOG_DISCLOSURE_LIMIT)
+        )
+    }
     return sorted(
         merged.values(), key=lambda row: (row.created_at, row.id), reverse=True
     )

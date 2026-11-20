@@ -434,9 +434,14 @@ def test_the_list_bounds_how_many_retired_keys_it_shows(
     assert listed[1]["label"] == "old-0"
 
 
-def test_ordering_retired_keys_survives_a_mixed_timezone_pair():
-    """One stamp read back from SQLite (naive) beside one assigned in this
-    session (aware) is what `max()` refuses to compare."""
+def test_a_key_is_retired_when_it_was_revoked_not_when_it_would_have_expired():
+    """A key revoked today with an expiry thirty days out stopped working
+    today. Ordering it by the later stamp would sort it ahead of every key
+    retired in between, which is what decides who falls off the bounded list.
+
+    Also the mixed-timezone case: one stamp read back from SQLite (naive)
+    beside one assigned in this session (aware) is what comparison refuses.
+    """
     from app.routers.account import _retired_at
 
     key = AgentApiKey(
@@ -444,9 +449,28 @@ def test_ordering_retired_keys_survives_a_mixed_timezone_pair():
         key_hash="h",
         label="l",
         revoked_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
-        expires_at=datetime(2026, 1, 1),
+        expires_at=datetime(2026, 3, 1),  # naive, and later than the revoke
     )
     assert _retired_at(key) == datetime(2026, 1, 2, tzinfo=timezone.utc)
+    # And when the expiry is the earlier of the two, that is when it stopped.
+    key.expires_at = datetime(2026, 1, 1)
+    assert _retired_at(key) == datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+
+def test_retired_keys_are_ordered_by_when_they_stopped_working(
+    client, db_session, signed_in, a_user
+):
+    """`older` was revoked ten days ago but carries an expiry a month out;
+    `newer` was revoked yesterday. Ordering on the later of a key's two stamps
+    puts `older` first, on the strength of a date that has not happened."""
+    now = datetime.now(timezone.utc)
+    older, _ = mint_agent_key(db_session, user=a_user, label="older")
+    older.revoked_at = now - timedelta(days=10)
+    older.expires_at = now + timedelta(days=30)
+    newer, _ = mint_agent_key(db_session, user=a_user, label="newer")
+    newer.revoked_at = now - timedelta(days=1)
+    db_session.commit()
+    assert [row["label"] for row in client.get(KEYS).json()] == ["newer", "older"]
 
 
 def test_an_expired_key_is_listed_and_marked_but_does_not_authenticate(
@@ -491,6 +515,46 @@ def test_a_publish_stays_in_the_log_behind_a_wall_of_reads(
     assert stamps == sorted(stamps, reverse=True)
     assert len({r["id"] for r in rows}) == len(rows)
     assert rows[-1]["tool"] == "publish_resume"
+
+
+def test_a_publish_survives_a_wall_of_the_users_own_editing(
+    client, db_session, signed_in, a_user
+):
+    """The reason disclosures get a window of their own. `edit_resume` is
+    pinned too, so with one shared window an assistant doing a long editing
+    session pushed the publish out of the changes half, and the reads pushed it
+    out of the recent half -- leaving the log unable to answer the one question
+    it exists for."""
+    from app.routers.account import CALL_LOG_LIMIT, CALL_LOG_PINNED_LIMIT
+
+    key, _ = mint_agent_key(db_session, user=a_user, label="busy")
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    db_session.add(
+        AgentToolCall(
+            key_id=key.id, user_id=a_user.id, tool="publish_resume",
+            resume_id="r-1", outcome="ok", created_at=t0,
+        )
+    )
+    later = 0
+    # More edits than the changes window, and more reads than the recent one.
+    for tool, count in (
+        ("edit_resume", CALL_LOG_PINNED_LIMIT + 5),
+        ("get_resume", CALL_LOG_LIMIT + 5),
+    ):
+        for _ in range(count):
+            later += 1
+            db_session.add(
+                AgentToolCall(
+                    key_id=key.id, user_id=a_user.id, tool=tool, outcome="ok",
+                    created_at=t0 + timedelta(minutes=later),
+                )
+            )
+    db_session.commit()
+    rows = client.get(f"{KEYS}/{key.id}/calls").json()
+    assert "publish_resume" in [r["tool"] for r in rows]
+    stamps = [r["created_at"] for r in rows]
+    assert stamps == sorted(stamps, reverse=True)
+    assert len({r["id"] for r in rows}) == len(rows)
 
 
 def test_one_keys_log_does_not_show_my_other_keys_calls(

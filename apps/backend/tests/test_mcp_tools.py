@@ -116,21 +116,26 @@ def test_a_missing_posting_is_a_404_and_another_refusal_is_a_400(
 
 
 def test_every_tool_is_classified_for_the_audit_log(client):
-    """A tool added later must not default to invisible in the user's log: the
-    two sets have to cover the registry exactly, so adding a tool without
-    deciding which side it is on fails here."""
+    """A tool added later must not default to invisible in the user's log. The
+    three bands partition the registry, so adding a tool without deciding
+    whether it discloses, changes or only reads fails here."""
     from app.services.mcp_tools import (
+        AUDIT_CHANGE_TOOLS,
+        AUDIT_DISCLOSURE_TOOLS,
         AUDIT_PINNED_TOOLS,
-        AUDIT_UNPINNED_TOOLS,
+        AUDIT_READ_TOOLS,
         REGISTRY,
     )
 
-    assert AUDIT_PINNED_TOOLS | AUDIT_UNPINNED_TOOLS == set(REGISTRY)
-    assert not AUDIT_PINNED_TOOLS & AUDIT_UNPINNED_TOOLS
-    # And the classification is the right way round for the write tools.
-    assert {"publish_resume", "put_resume_source", "set_job_preferences"} <= (
-        AUDIT_PINNED_TOOLS
-    )
+    bands = (AUDIT_DISCLOSURE_TOOLS, AUDIT_CHANGE_TOOLS, AUDIT_READ_TOOLS)
+    assert set().union(*bands) == set(REGISTRY)
+    assert sum(len(band) for band in bands) == len(REGISTRY)  # pairwise disjoint
+    # And the bands are the right way round where it matters.
+    assert "publish_resume" in AUDIT_DISCLOSURE_TOOLS
+    assert "export_resume" in AUDIT_DISCLOSURE_TOOLS
+    assert "put_resume_source" in AUDIT_CHANGE_TOOLS
+    assert "get_resume" in AUDIT_READ_TOOLS
+    assert AUDIT_PINNED_TOOLS == AUDIT_DISCLOSURE_TOOLS | AUDIT_CHANGE_TOOLS
 
 
 def test_the_mcp_job_specs_are_the_catalogue_specs(client):

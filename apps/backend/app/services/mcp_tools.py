@@ -718,29 +718,42 @@ REGISTRY: dict[str, Tool] = {
 }
 
 
-#: The tools whose audit rows stay visible however much later traffic there is
-#: (app/routers/account.py::CALL_LOG_PINNED_LIMIT). Every tool that changes
-#: something the user owns, plus `export_resume`, which changes nothing but
-#: hands out a link to the PDF -- a disclosure the person is entitled to see
-#: for the same reason as a publish. `tests/test_mcp_tools.py` asserts that
-#: every name in REGISTRY is on one side of this line or the other, so a tool
-#: added later cannot default to invisible.
-AUDIT_PINNED_TOOLS = frozenset(
+# How a tool's audit rows are kept visible in the user's own log
+# (app/routers/account.py reads these; its three limits are the windows).
+#
+# Every tool in REGISTRY is in exactly one of the three sets below, and
+# `tests/test_mcp_tools.py::test_every_tool_is_classified_for_the_audit_log`
+# asserts that, so a tool added later cannot default to invisible: it will not
+# compile past the test without someone deciding which band it belongs in.
+
+#: Reaches someone other than the user. These get a window of their own,
+#: because the question the log exists to answer is "did my assistant publish
+#: anything?" and the answer must not be crowded out by the user's *own* edits.
+#: `export_resume` is here though it changes nothing: it hands out a link that
+#: anyone holding it can fetch the PDF with, which is a disclosure in the same
+#: sense as a publish.
+AUDIT_DISCLOSURE_TOOLS = frozenset(
+    {
+        "publish_resume",
+        "unpublish_resume",
+        "export_resume",
+    }
+)
+
+#: Changes the user's own data without exposing it to anyone else.
+AUDIT_CHANGE_TOOLS = frozenset(
     {
         "create_resume",
         "create_tailor",
         "edit_resume",
         "put_resume_source",
         "set_resume_title",
-        "publish_resume",
-        "unpublish_resume",
-        "export_resume",
         "set_job_preferences",
     }
 )
 
-#: The read-only rest, named rather than derived so the test above can fail.
-AUDIT_UNPINNED_TOOLS = frozenset(
+#: Reads. Visible only while they are among the most recent calls.
+AUDIT_READ_TOOLS = frozenset(
     {
         "search_jobs",
         "read_job",
@@ -750,6 +763,9 @@ AUDIT_UNPINNED_TOOLS = frozenset(
         "get_job_preferences",
     }
 )
+
+#: Everything that writes or exposes, as one set, for the "changes" window.
+AUDIT_PINNED_TOOLS = AUDIT_DISCLOSURE_TOOLS | AUDIT_CHANGE_TOOLS
 
 
 def specs() -> list[dict]:
