@@ -59,21 +59,16 @@ def _score(user, job, fit_score, outcome="scored") -> JobScore:
 
 
 def test_search_jobs_finds_a_posting_by_keyword(client, db_session, a_user, a_job):
-    # The shared fixture's last_seen_at is a fixed 2026-09-01; search only
-    # advertises postings inside the freshness window, so a clock past that
-    # window would hide it. Make it fresh rather than depend on today's date.
-    a_job.last_seen_at = datetime.now(timezone.utc)
-    db_session.commit()
     assert a_job.title in _call(client, db_session, a_user, "search_jobs", {"q": a_job.title})
 
 
-def test_get_job_returns_the_posting(client, db_session, a_user, a_job):
-    assert a_job.company in _call(client, db_session, a_user, "get_job", {"job_id": a_job.id})
+def test_read_job_returns_the_posting(client, db_session, a_user, a_job):
+    assert a_job.company in _call(client, db_session, a_user, "read_job", {"job_id": a_job.id})
 
 
-def test_get_job_on_an_unknown_id_is_a_tool_error(client, db_session, a_user):
+def test_read_job_on_an_unknown_id_is_a_tool_error(client, db_session, a_user):
     assert _is_tool_error(
-        _raw_call(client, db_session, a_user, "get_job", {"job_id": "no-such-posting"})
+        _raw_call(client, db_session, a_user, "read_job", {"job_id": "no-such-posting"})
     )
 
 
@@ -81,11 +76,7 @@ def test_the_mcp_job_specs_are_the_catalogue_specs(client):
     """One search_jobs in this codebase, not two."""
     listed = {s["name"]: s for s in specs()}
     for shared in catalogue_specs():
-        name = "get_job" if shared["name"] == "read_job" else shared["name"]
-        assert listed[name]["parameters"] == shared["parameters"]
-        assert listed[name]["description"] == shared["description"].replace(
-            "read_job", "get_job"
-        )
+        assert listed[shared["name"]] == shared
 
 
 def test_list_matches_returns_scored_rows_best_first(
@@ -124,3 +115,13 @@ def test_list_matches_limit_is_capped(client, db_session, a_user, a_job, another
     assert one["items"][0]["job_id"] == another_job.id
     many = json.loads(_call(client, db_session, a_user, "list_matches", {"limit": 10**6}))
     assert len(many["items"]) <= SEARCH_LIMIT_MAX
+
+
+def test_list_matches_hides_a_posting_that_has_closed(
+    client, db_session, a_user, a_job, another_job
+):
+    another_job.is_active = False
+    db_session.add_all([_score(a_user, a_job, 0.4), _score(a_user, another_job, 0.9)])
+    db_session.commit()
+    rows = json.loads(_call(client, db_session, a_user, "list_matches", {}))["items"]
+    assert [r["job_id"] for r in rows] == [a_job.id]

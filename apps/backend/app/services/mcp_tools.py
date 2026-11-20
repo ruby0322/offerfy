@@ -78,17 +78,15 @@ def _list_resumes(db: Session, user: User, args: dict) -> dict:
     }
 
 
-def _catalogue_tool(shared: dict, handler_key: str, name: str) -> Tool:
+def _catalogue_tool(shared: dict) -> Tool:
     """A catalogue tool, borrowed whole from the chat surface.
 
-    The spec is the shared one (only the name may differ, and the descriptions
-    follow it), so there is exactly one definition of what a catalogue search
-    accepts. The handler runs the shared handler and turns its `{"error": ...}`
+    The spec is the shared one, unchanged, so there is exactly one definition
+    (and one description to keep honest) of what a catalogue tool accepts. The
+    handler runs the shared handler and turns its `{"error": ...}`
     answer into a tool error, which is how this transport reports failure.
     """
-    description = shared["description"].replace(
-        jobs_tools.READ_JOB_TOOL, "get_job"
-    )
+    handler_key = shared["name"]
 
     def handler(db: Session, user: User, args: dict) -> dict:
         payload = json.loads(jobs_tools.catalogue_handlers(db)[handler_key](args))
@@ -97,9 +95,7 @@ def _catalogue_tool(shared: dict, handler_key: str, name: str) -> Tool:
             raise HTTPException(status_code=404 if missing else 400, detail=payload["error"])
         return payload
 
-    return Tool(
-        spec={**shared, "name": name, "description": description}, handler=handler
-    )
+    return Tool(spec=shared, handler=handler)
 
 
 def _list_matches(db: Session, user: User, args: dict) -> dict:
@@ -116,7 +112,11 @@ def _list_matches(db: Session, user: User, args: dict) -> dict:
     rows = (
         db.query(JobScore, Job)
         .join(Job, Job.id == JobScore.job_id)
-        .filter(JobScore.user_id == user.id, JobScore.outcome == "scored")
+        .filter(
+            JobScore.user_id == user.id,
+            JobScore.outcome == "scored",
+            Job.is_active.is_(True),
+        )
         .order_by(JobScore.fit_score.desc(), JobScore.scored_at.desc())
         .limit(limit)
         .all()
@@ -137,22 +137,19 @@ def _list_matches(db: Session, user: User, args: dict) -> dict:
     }
 
 
-_search = _catalogue_tool(jobs_tools.catalogue_specs()[0], jobs_tools.SEARCH_JOBS_TOOL,
-                          "search_jobs")
-_get_job = _catalogue_tool(jobs_tools.catalogue_specs()[1], jobs_tools.READ_JOB_TOOL,
-                           "get_job")
+_CATALOGUE = {spec["name"]: _catalogue_tool(spec) for spec in jobs_tools.catalogue_specs()}
 
 REGISTRY: dict[str, Tool] = {
-    "search_jobs": _search,
-    "get_job": _get_job,
+    **_CATALOGUE,
     "list_matches": Tool(
         spec={
             "name": "list_matches",
             "description": "List the signed-in user's best-scoring job matches, "
             "highest fit first, from scores Offerfy has already computed. Each "
             "row carries the posting plus tier, fit_score, reason and gap. "
-            "Returns nothing for postings not yet scored; it never triggers "
-            "scoring.",
+            "Only postings that are still open are listed, so a match that "
+            "has since closed does not appear. Returns nothing for postings "
+            "not yet scored; it never triggers scoring.",
             "parameters": {
                 "type": "object",
                 "properties": {

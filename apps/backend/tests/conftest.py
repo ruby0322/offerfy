@@ -147,11 +147,11 @@ def _resume_for(db, user, title="Untitled"):
 
 
 def _job_with_facets(db, source_id: str, title: str):
-    from datetime import datetime, timezone
+    from app.models import Job, JobFacets, _utcnow
 
-    from app.models import Job, JobFacets
-
-    now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+    # Relative to now: a catalogue posting is live by default, inside the
+    # freshness window search_jobs enforces. A fixed date would age out.
+    now = _utcnow()
     job = Job(
         source="greenhouse",
         source_id=source_id,

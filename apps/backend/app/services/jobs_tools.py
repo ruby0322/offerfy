@@ -215,8 +215,8 @@ _READ_JOB = {
         "Read one catalogue posting in full, including its description with "
         "the company's repeated boilerplate removed. Call this before "
         "tailoring a resume for a role, and tailor from this text rather than "
-        "from the job title. Takes a job_id from search_jobs or from "
-        "read_my_job_profile. A posting that has closed is still returned, "
+        "from the job title. Takes a job_id from a job search or "
+        "any other list of postings. A posting that has closed is still returned, "
         "flagged with is_active=false or stale=true -- tell the person rather "
         "than presenting it as open."
     ),
