@@ -18,7 +18,7 @@ from app.services.revisions import set_draft_source, source_hash
 from app.services.typst_compile import typst_available
 from app.services.typst_projection import parse_projection
 from tests.conftest import _resume_for
-from tests.test_mcp_tools import _is_tool_error, _raw_call
+from tests.test_mcp_tools import _caller, _is_tool_error, _raw_call, _text
 
 pytestmark = [
     pytest.mark.anyio,
@@ -186,6 +186,30 @@ def test_put_resume_source_replaces_the_document(
     assert _ok(body)["hash"] == source_hash("= Via the tool")
     db_session.expire_all()
     assert db_session.get(type(my_resume), my_resume.id).typst_source == "= Via the tool"
+
+
+def test_a_get_resume_round_trip_leaves_the_document_byte_identical(
+    client, db_session, a_user, my_resume
+):
+    """What `get_resume` returns must be what `put_resume_source` can send back.
+
+    The tool description tells the agent to read first and then write the whole
+    document, so anything the read omits -- the first line, the
+    `#show: resume.with(...)` preamble -- is content the agent has to invent,
+    and the hash guard and the compile gate both pass on the invention. The
+    projection alone cannot do this: it carries unit values and byte spans, not
+    the document.
+    """
+    before = my_resume.typst_source
+    call = _caller(client, db_session, a_user)
+    got = json.loads(_text(call("get_resume", {"resume_id": my_resume.id})))
+    assert got["typst_source"] == before
+    body = call("put_resume_source", {
+        "resume_id": my_resume.id, "hash": got["hash"],
+        "typst_source": got["typst_source"]})
+    assert not _is_tool_error(body), body
+    db_session.expire_all()
+    assert db_session.get(type(my_resume), my_resume.id).typst_source == before
 
 
 def test_put_resume_source_with_a_stale_hash_is_a_tool_error(

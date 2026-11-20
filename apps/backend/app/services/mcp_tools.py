@@ -92,12 +92,19 @@ def _list_resumes(db: Session, user: User, args: dict) -> dict:
 
 
 def _get_resume(db: Session, user: User, args: dict) -> dict:
-    """One of the caller's resumes as the structured field view.
+    """One of the caller's resumes: the whole Typst source and the field view.
 
-    Returns the unit ids and current values an edit intent needs, and the
-    `hash` of the source they were read from, which is how a later edit proves
-    it is editing what it read. A resume that is missing, someone else's, or a
-    guest's is the same 404.
+    `typst_source` is the document itself, and it is not optional. The
+    projection is the unit ids and current values an edit intent needs -- unit
+    values and byte spans *into* the source, never a substitute for it: the
+    first line and the `#show: resume.with(...)` preamble appear in no unit. The
+    only tool that can delete or reorder anything is `put_resume_source`, which
+    replaces the whole document, so an agent that cannot read the document has
+    to invent one, and both guards in front of that write pass on the
+    invention: the `hash` is the one it was handed, and plain Typst compiles.
+    `hash` is of the source these were read from, which is how a later edit
+    proves it is editing what it read. A resume that is missing, someone
+    else's, or a guest's is the same 404.
     """
     resume_id = args.get("resume_id")
     if not isinstance(resume_id, str) or not resume_id:
@@ -112,6 +119,7 @@ def _get_resume(db: Session, user: User, args: dict) -> dict:
         "parent_resume_id": resume.parent_resume_id,
         "target_label": resume.target_label,
         "hash": source_hash(resume.typst_source),
+        "typst_source": resume.typst_source,
         "projection": projection,
     }
 
@@ -404,7 +412,8 @@ REGISTRY: dict[str, Tool] = {
             "name": "edit_resume",
             "description": "Change one field of one of the signed-in user's "
             "resumes: set an argument or a line, or add a bullet, an entry or a section. "
-            "Call get_resume first and pass its `hash` and a unit `id` (and "
+            "Call get_resume first and pass its `hash` and a unit `id` from "
+            "its `projection` (and "
             "`expect`, that unit's current value, for set_arg and set_line). "
             "It is refused if the document changed since you read it, and if "
             "the result would not compile; nothing is written then. Returns the "
@@ -429,7 +438,8 @@ REGISTRY: dict[str, Tool] = {
                     },
                     "target": {
                         "type": "string",
-                        "description": "insert_bullet, insert_item, insert_section: the id to insert into or after.",
+                        "description": "insert_bullet, insert_item, "
+                        "insert_section: the id to insert into or after.",
                     },
                     "placeholder": {"type": "string"},
                     "title": {"type": "string", "description": "insert_section: its heading."},
@@ -446,16 +456,25 @@ REGISTRY: dict[str, Tool] = {
             "description": "Replace the WHOLE Typst source of one of the "
             "signed-in user's resumes. This is the only way to delete or "
             "reorder content, and it overwrites everything not in your "
-            "`typst_source`, so call get_resume first for the current `hash` "
-            "and write the full document. Refused if the document changed "
-            "since that hash, if the source is empty, or if Typst cannot "
-            "compile it; nothing is written then. Returns the new `hash`.",
+            "`typst_source`. Call get_resume first and edit the "
+            "`typst_source` it returns, keeping its preamble and everything "
+            "you were not asked to change; send that back with its `hash`. "
+            "Never compose a document from the projection alone, and never "
+            "from memory: anything you leave out is deleted, and neither "
+            "guard below can tell an edited document from an invented one. "
+            "Refused if the document changed since that hash, if the source "
+            "is empty, or if Typst cannot compile it; nothing is written "
+            "then. Returns the new `hash`.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "resume_id": {"type": "string", "description": "From list_resumes."},
                     "hash": {"type": "string", "description": "From get_resume."},
-                    "typst_source": {"type": "string", "description": "The full new document."},
+                    "typst_source": {
+                        "type": "string",
+                        "description": "The full new document: get_resume's "
+                        "`typst_source` with your change applied.",
+                    },
                 },
                 "required": ["resume_id", "hash", "typst_source"],
                 "additionalProperties": False,
@@ -531,7 +550,8 @@ REGISTRY: dict[str, Tool] = {
             "creates a link that anyone who has it can open, with no sign-in, "
             "and returns it as `token` (the page is /s/<token> on the site). It "
             "publishes the CURRENT draft, including edits made since any earlier "
-            "publish, so what the link shows is what you just edited. Also: if the user has \"open to matching\" on and their "
+            "publish, so what the link shows is what you just edited. Also: "
+            "if the user has \"open to matching\" on and their "
             "talent profile points at this resume, publishing re-opens that "
             "profile to recruiters with credentials. Only call this when the "
             "user has asked to publish.",
@@ -575,7 +595,8 @@ REGISTRY: dict[str, Tool] = {
             "full URL: resolve it against the origin you reached this MCP "
             "endpoint on (if that is https://example.com/api/mcp, fetch "
             "https://example.com/api/v1/resumes/export/<token>). Also returns "
-            "`expires_at` (the link works for 10 minutes) and `filename`. Anyone holding the link can "
+            "`expires_at` (the link works for 10 minutes) and `filename`. "
+            "Anyone holding the link can "
             "download that PDF until it expires, so do not post it anywhere. "
             "It does not publish the resume.",
             "parameters": {
@@ -663,11 +684,13 @@ REGISTRY: dict[str, Tool] = {
     "get_resume": Tool(
         spec={
             "name": "get_resume",
-            "description": "Read one of the signed-in user's resumes as its "
-            "structured fields: every editable unit with its id and current "
-            "value, plus a `hash` of the source they were read from. Use the "
-            "ids to describe an edit and the hash to show you are editing what "
-            "you read.",
+            "description": "Read one of the signed-in user's resumes: "
+            "`typst_source` is the complete Typst document, `projection` is "
+            "every editable unit with its id and current value, and `hash` is "
+            "of the source both were read from. Use the ids to describe an "
+            "edit with edit_resume, the whole `typst_source` as the starting "
+            "point for put_resume_source, and the hash to show you are "
+            "editing what you read.",
             "parameters": {
                 "type": "object",
                 "properties": {
