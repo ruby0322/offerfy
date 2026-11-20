@@ -22,6 +22,8 @@ from sqlalchemy.orm import Session
 
 from app.models import JobPreference, ResumeFacts, User
 from app.schemas import TalentProfilePayload, TalentRole
+from app.schemas_jobs import JobPreferenceOut
+from app.services.resume_facts import facts_state
 from app.services.jobs.enrich import (
     default_taxonomy,
     function_of,
@@ -173,3 +175,25 @@ def current_or_seeded(db: Session, user: User) -> JobPreference:
         return row
     facts = db.query(ResumeFacts).filter(ResumeFacts.user_id == user.id).one_or_none()
     return JobPreference(user_id=user.id, **seed_from_facts(facts))
+
+
+def _split(text: str) -> list[str]:
+    return [p for p in text.split("|") if p]
+
+
+def preference_out(
+    db: Session, user: User, row: JobPreference, first_save: bool = False
+) -> JobPreferenceOut:
+    return JobPreferenceOut(
+        target_functions=_split(row.target_functions),
+        target_locations=_split(row.target_locations),
+        target_seniority=row.target_seniority,
+        remote_required=row.remote_required,
+        activity=row.activity,
+        # A transient seed has no row yet, hence no timestamp. null, never "":
+        # an empty string in a timestamp field trips the first client that
+        # parses it.
+        updated_at=row.updated_at.isoformat() if row.updated_at else None,
+        facts_state=facts_state(db, user),
+        first_save=first_save,
+    )

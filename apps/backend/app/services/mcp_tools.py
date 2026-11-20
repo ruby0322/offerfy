@@ -46,7 +46,7 @@ from app.services import (
     resume_write,
     sharing,
 )
-from app.services.jobs.preferences import current_or_seeded
+from app.services.jobs.preferences import current_or_seeded, preference_out
 from app.services.revisions import pin_current_draft, source_hash
 from app.services.starter import default_title, generate_starter, validate_locale
 from app.services.typst_projection import parse_projection
@@ -314,9 +314,6 @@ def _list_matches(db: Session, user: User, args: dict) -> dict:
 
 
 def _preferences_out(db: Session, user: User, row, first_save: bool = False) -> dict:
-    # Imported here: the router module pulls in the metering and profile stack.
-    from app.routers.preferences import preference_out
-
     return preference_out(db, user, row, first_save=first_save).model_dump()
 
 
