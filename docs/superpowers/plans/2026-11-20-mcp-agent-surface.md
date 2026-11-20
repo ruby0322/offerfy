@@ -23,7 +23,9 @@
 - **`require_agent_caller` has no fallthrough.** Session cookie, guest cookie and admin account all get 401. Every failure is the same 401 with detail `"Credential required"` and header `WWW-Authenticate: Bearer`.
 - **Audit rows and `last_used_at` are written on a session from `get_session_factory()`,** never the request's. `get_db` rolls back on any exception.
 - **Max 5 live keys per user**; a 6th mint is 400.
-- **Quota is 300 calls per key per hour,** counted on `agent_tool_calls` before any work.
+- **Quota is 300 calls per key per hour,** counted on `agent_tool_calls` before any work, excluding rows whose outcome is `throttled` (the quota's own refusals — see Task 3).
+- **Outcomes are exactly `ok` | `refused` | `error` | `throttled`.**
+- **A tool's `resume_id` argument is validated before it reaches the audit handle** — a string of at most 36 characters, or `None`. Task 4 owns that check; `mcp_audit.record` coerces anything else to `None` defensively so an audit write can never be what fails.
 - **Export links live 10 minutes.**
 - **UI strings land in all three locales** (`messages/{en,zh-TW,zh-CN}.json`) and are designed and checked in zh-TW, not English.
 - **Never run prettier on this repo.** No config; lines are hand-wrapped at ~90.
@@ -267,7 +269,9 @@ git commit -m "feat(agent): bearer-only dependency for the agent surface"
 **Interfaces:**
 - Consumes: `app.db.get_session_factory`, `AgentApiKey`.
 - Produces:
-  - `AgentToolCall` with `id, key_id, user_id, tool, resume_id, outcome, created_at`; `key_id` and `user_id` both `ondelete="CASCADE"`; `user_id` and `created_at` indexed.
+  - `AgentToolCall` with `id, key_id, user_id, tool, resume_id, outcome, created_at`; `key_id` and `user_id` both `ondelete="CASCADE"`; `user_id` and `created_at` indexed, **plus a composite index on `(key_id, created_at)`** — that is the quota's own query and it runs on every tool call, so a `created_at`-only index would scan every key's recent rows and filter.
+  - `outcome` is exactly `ok` | `refused` | `error` | `throttled`. **`throttled` is the quota's own refusal and is excluded from the quota count.** Without that exclusion the window never drains: a refused call writes a row, the row counts, and a client stuck in a loop stays locked out indefinitely — "300 per hour" becomes permanent. Excluding every `refused` row instead would let a client hammer invalid ids forever without ever being throttled, which is worse; only the throttle's own bookkeeping is exempt. The refusal is still recorded, it just does not feed the thing that caused it.
+  - `created_at` carries a Python-side default, not a server default — the quota test constructs rows with an explicit `created_at`, and a server default would make every row look current. Follow `JobScore.created_at`.
   - `QUOTA_PER_HOUR = 300`
   - `record(key_id: str, user_id: str, tool: str, resume_id: str | None, outcome: str) -> None` — opens its own session, commits, swallows nothing.
   - `check_quota(key_id: str, *, now: datetime | None = None) -> None` — raises `HTTPException(429, "Too many calls")`.
