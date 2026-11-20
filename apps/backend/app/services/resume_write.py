@@ -25,17 +25,29 @@ slot for the whole call.
 
 import asyncio
 import dataclasses
+import logging
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models import Resume
+from app.schemas import PreviewPages
 from app.schemas_editing import IntentIn
 from app.services.revisions import set_draft_source, source_hash
+from app.services.typst_anchors import anchor_bands
+from app.services.typst_compile import compile_preview_pages
 from app.services.typst_intents import IntentError, apply_intent
 from app.services.typst_projection import parse_projection
 
+logger = logging.getLogger(__name__)
+
 _STALE = "The document changed; reload it."
+
+# The largest `write_source` accepts, in UTF-8 bytes. A real resume is around 10 KB;
+# 256 KiB is some 25x that, so no honest document meets it. It exists to bound the
+# compile, not to survive it: three Typst subprocesses run for up to 30s each, and an
+# agent in a loop can hand us a megabyte at a time. Refused before the compile.
+MAX_SOURCE_BYTES = 256 * 1024
 
 
 def edit_error(status: int, code: str, detail: str, reason: str = "") -> HTTPException:
@@ -52,13 +64,24 @@ def edit_error(status: int, code: str, detail: str, reason: str = "") -> HTTPExc
     return HTTPException(status_code=status, detail=body)
 
 
-def _preview_pages(source: str, with_bands: bool = False):
-    # The compile-and-bands helper lives with the preview routes, which share it and
-    # whose tests patch its collaborators there. Imported at call time because the
-    # router imports this module.
-    from app.routers.resumes import _preview_pages as compile_preview
+def _preview_pages(source: str, with_bands: bool = False) -> PreviewPages:
+    """Compile `source` to preview pages; raises HTTPException if Typst rejects it.
 
-    return compile_preview(source, with_bands)
+    Shared with the preview routes, which import it from here.
+    """
+    pages = compile_preview_pages(source)
+    if with_bands and pages["text_layers"]:
+        # Where each line unit sits, for the editor to highlight. Best effort like the
+        # text layer: a preview without bands is still a preview, and the eval is a
+        # second subprocess that must not turn a good compile into a failed request.
+        try:
+            bands = anchor_bands(
+                source, parse_projection(source), layers=pages["text_layers"])
+            pages["bands"] = {
+                uid: [dataclasses.asdict(b) for b in rows] for uid, rows in bands.items()}
+        except Exception:
+            logger.warning("anchor bands unavailable", exc_info=True)
+    return PreviewPages(**pages)
 
 
 async def _compile_gate(candidate: str, with_bands: bool):
@@ -142,6 +165,10 @@ async def write_source(db: Session, resume: Resume, *, source: str, expected_has
         raise edit_error(409, "stale_hash", _STALE)
     if not source.strip():
         raise edit_error(400, "empty_source", "The document cannot be empty.")
+    if len(source.encode("utf-8")) > MAX_SOURCE_BYTES:
+        raise edit_error(
+            400, "source_too_large",
+            f"The document is larger than {MAX_SOURCE_BYTES // 1024} KiB.")
 
     # Release the pooled connection before the compile; see `apply_edit`.
     db.commit()

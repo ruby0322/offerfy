@@ -5,7 +5,7 @@ from sqlalchemy import event
 
 from app import models
 from app.db import get_engine, get_session_factory
-from app.routers import resumes as resumes_router
+from app.services import resume_write
 from app.services.resume_content import ResumeContent, store_content, stored_content
 from app.services.revisions import set_draft_source, source_hash
 from app.services.typst_compile import typst_available
@@ -150,7 +150,7 @@ def test_a_write_that_lands_during_the_compile_wins_and_the_edit_is_refused(
     rid = resume_with(client, src)
     body = title_intent(client, rid, "Mine")
     interloper = src + "\n// landed while compiling\n"
-    real = resumes_router.compile_preview_pages
+    real = resume_write.compile_preview_pages
 
     def compile_then_someone_writes(source):
         result = real(source)
@@ -164,7 +164,7 @@ def test_a_write_that_lands_during_the_compile_wins_and_the_edit_is_refused(
         return result
 
     monkeypatch.setattr(
-        resumes_router, "compile_preview_pages", compile_then_someone_writes)
+        resume_write, "compile_preview_pages", compile_then_someone_writes)
     r = client.post(f"/v1/resumes/{rid}/edit", json=body)
     assert r.status_code == 409 and r.json()["detail"]["code"] == "stale_hash"
     assert stored(db_session, rid) == interloper
@@ -204,14 +204,14 @@ def test_no_pool_connection_is_held_while_typst_compiles(client, monkeypatch):
 
     rid = resume_with(client, read("synthetic-en"))
     body = title_intent(client, rid, "Pool")
-    real = resumes_router.compile_preview_pages
+    real = resume_write.compile_preview_pages
     seen: list[int] = []
 
     def compile_and_look(source):
         seen.append(out[0])
         return real(source)
 
-    monkeypatch.setattr(resumes_router, "compile_preview_pages", compile_and_look)
+    monkeypatch.setattr(resume_write, "compile_preview_pages", compile_and_look)
     event.listen(engine, "checkout", took)
     event.listen(engine, "checkin", gave)
     try:
@@ -231,7 +231,7 @@ def test_a_missing_typst_binary_is_not_reported_as_a_broken_edit(client, monkeyp
     def unavailable(source):
         raise HTTPException(status_code=503, detail="Typst is not available")
 
-    monkeypatch.setattr(resumes_router, "compile_preview_pages", unavailable)
+    monkeypatch.setattr(resume_write, "compile_preview_pages", unavailable)
     r = client.post(f"/v1/resumes/{rid}/edit", json=body)
     assert r.status_code == 503 and r.json()["detail"] == "Typst is not available"
 
@@ -373,7 +373,7 @@ def test_a_failing_eval_costs_the_bands_not_the_preview(client, monkeypatch):
     def broken(*args, **kwargs):
         raise RuntimeError("eval is down")
 
-    monkeypatch.setattr(resumes_router, "anchor_bands", broken)
+    monkeypatch.setattr(resume_write, "anchor_bands", broken)
     r = client.get(f"/v1/resumes/{rid}/preview")
     assert r.status_code == 200 and r.json()["pages"] and r.json()["bands"] == {}
 
@@ -384,7 +384,7 @@ def test_a_failing_eval_costs_the_bands_not_the_edit(client, monkeypatch):
     def broken(*args, **kwargs):
         raise RuntimeError("eval is down")
 
-    monkeypatch.setattr(resumes_router, "anchor_bands", broken)
+    monkeypatch.setattr(resume_write, "anchor_bands", broken)
     r = client.post(
         f"/v1/resumes/{rid}/edit", json=title_intent(client, rid, "Staff Engineer"))
     assert r.status_code == 200
@@ -404,8 +404,8 @@ def test_preview_holds_no_pool_connection_while_typst_runs(client, monkeypatch):
         out[0] -= 1
 
     rid = resume_with(client, read("synthetic-en"))
-    real_compile = resumes_router.compile_preview_pages
-    real_bands = resumes_router.anchor_bands
+    real_compile = resume_write.compile_preview_pages
+    real_bands = resume_write.anchor_bands
     seen: dict[str, list[int]] = {"compile": [], "eval": []}
 
     def compile_and_look(source):
@@ -416,8 +416,8 @@ def test_preview_holds_no_pool_connection_while_typst_runs(client, monkeypatch):
         seen["eval"].append(out[0])
         return real_bands(*args, **kwargs)
 
-    monkeypatch.setattr(resumes_router, "compile_preview_pages", compile_and_look)
-    monkeypatch.setattr(resumes_router, "anchor_bands", bands_and_look)
+    monkeypatch.setattr(resume_write, "compile_preview_pages", compile_and_look)
+    monkeypatch.setattr(resume_write, "anchor_bands", bands_and_look)
     event.listen(engine, "checkout", took)
     event.listen(engine, "checkin", gave)
     try:

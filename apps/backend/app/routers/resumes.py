@@ -51,8 +51,7 @@ from app.services.extract import (
 from app.services.import_run import ImportAlreadyRunning, snapshot as import_snapshot, start_run
 from app.services.import_runner import run_import
 from app.services.tailor_run import TailorRunAlreadyRunning
-from app.services.resume_write import apply_edit
-from app.services.typst_anchors import anchor_bands
+from app.services.resume_write import _preview_pages, apply_edit
 from app.services.typst_projection import parse_projection
 from app.services.tailor_run import snapshot as tailor_snapshot
 from app.services.tailor_run import start_run as start_tailor_run
@@ -79,7 +78,6 @@ from app.services.sse import SSE_HEADERS, sse_frame
 from app.services.starter import default_title, generate_starter, title_from_filename
 from app.services.templates import apply_prompt, is_supported
 from app.services.typst_compile import (
-    compile_preview_pages,
     compile_typst,
 )
 
@@ -767,22 +765,6 @@ def compile_resume(
         return _preview_pages(resume.typst_source)
     data = compile_typst(resume.typst_source, "pdf")
     return RawResponse(content=data, media_type="application/pdf")
-
-
-def _preview_pages(source: str, with_bands: bool = False) -> PreviewPages:
-    pages = compile_preview_pages(source)
-    if with_bands and pages["text_layers"]:
-        # Where each line unit sits, for the editor to highlight. Best effort like the
-        # text layer: a preview without bands is still a preview, and the eval is a
-        # second subprocess that must not turn a good compile into a failed request.
-        try:
-            bands = anchor_bands(
-                source, parse_projection(source), layers=pages["text_layers"])
-            pages["bands"] = {
-                uid: [dataclasses.asdict(b) for b in rows] for uid, rows in bands.items()}
-        except Exception:
-            logger.warning("anchor bands unavailable", exc_info=True)
-    return PreviewPages(**pages)
 
 
 @router.get("/v1/resumes/{resume_id}/preview", response_model=PreviewPages)

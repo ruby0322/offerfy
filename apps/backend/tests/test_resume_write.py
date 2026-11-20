@@ -271,3 +271,55 @@ def test_edit_resume_on_someone_elses_resume_is_404(
     assert _is_tool_error(body)
     db_session.expire_all()
     assert "Hijack" not in db_session.get(type(theirs), theirs.id).typst_source
+
+
+def test_edit_resume_insert_section_is_accepted_and_changes_the_document(
+    client, db_session, a_user, my_resume
+):
+    before = my_resume.typst_source
+    proj = parse_projection(before)
+    out = _ok(_raw_call(client, db_session, a_user, "edit_resume", {
+        "resume_id": my_resume.id, "hash": proj.hash, "kind": "insert_section",
+        "title": "Publications"}))
+    db_session.expire_all()
+    stored = db_session.get(type(my_resume), my_resume.id).typst_source
+    assert stored != before
+    assert "Publications" in stored
+    assert out["hash"] == source_hash(stored)
+
+
+async def test_an_oversized_source_is_refused_before_the_compile(
+    db_session, my_resume, monkeypatch
+):
+    compiled = []
+    monkeypatch.setattr(
+        resume_write, "_preview_pages", lambda *a, **k: compiled.append(a) or {"pages": []})
+    before = my_resume.typst_source
+    big = "= Hi\n" + "x" * resume_write.MAX_SOURCE_BYTES
+    with pytest.raises(HTTPException) as caught:
+        await write_source(
+            db_session, my_resume, source=big, expected_hash=source_hash(before))
+    assert caught.value.status_code == 400
+    assert compiled == []
+    db_session.refresh(my_resume)
+    assert my_resume.typst_source == before
+
+
+async def test_a_source_exactly_at_the_cap_is_accepted(db_session, my_resume, monkeypatch):
+    monkeypatch.setattr(resume_write, "_preview_pages", lambda *a, **k: {"pages": []})
+    edge = "x" * resume_write.MAX_SOURCE_BYTES
+    await write_source(
+        db_session, my_resume, source=edge, expected_hash=source_hash(my_resume.typst_source))
+    db_session.refresh(my_resume)
+    assert my_resume.typst_source == edge
+
+
+async def test_the_cap_counts_bytes_not_characters(db_session, my_resume, monkeypatch):
+    monkeypatch.setattr(resume_write, "_preview_pages", lambda *a, **k: {"pages": []})
+    cjk = "履" * (resume_write.MAX_SOURCE_BYTES // 3 + 1)  # fewer chars than the cap
+    assert len(cjk) < resume_write.MAX_SOURCE_BYTES
+    with pytest.raises(HTTPException) as caught:
+        await write_source(
+            db_session, my_resume, source=cjk,
+            expected_hash=source_hash(my_resume.typst_source))
+    assert caught.value.status_code == 400

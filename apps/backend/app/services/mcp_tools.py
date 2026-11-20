@@ -110,11 +110,11 @@ def _required_str(args: dict, name: str) -> str:
     return value
 
 
-# What `edit_resume` may do. `apply_intent` also knows `delete`, `move_section` and
-# `insert_section`; the agent surface deliberately does not offer them, so the only
-# way an assistant removes or reorders content is `put_resume_source`, which is
-# guarded the same way and shows the whole document.
-_EDIT_KINDS = ("set_arg", "set_line", "insert_bullet", "insert_item")
+# What `edit_resume` may do: set a field, or add something. `apply_intent` also
+# knows `delete` and `move_section`; the agent surface deliberately does not offer
+# them, so the only way an assistant removes or reorders content is
+# `put_resume_source`, which is guarded the same way and shows the whole document.
+_EDIT_KINDS = ("set_arg", "set_line", "insert_bullet", "insert_item", "insert_section")
 _EDIT_FIELDS = ("hash", "kind", "unit", "expect", "value", "text", "marks", "target",
                 "dir", "placeholder", "title")
 
@@ -241,7 +241,7 @@ REGISTRY: dict[str, Tool] = {
         spec={
             "name": "edit_resume",
             "description": "Change one field of one of the signed-in user's "
-            "resumes: set an argument or a line, or add a bullet or an entry. "
+            "resumes: set an argument or a line, or add a bullet, an entry or a section. "
             "Call get_resume first and pass its `hash` and a unit `id` (and "
             "`expect`, that unit's current value, for set_arg and set_line). "
             "It is refused if the document changed since you read it, and if "
@@ -267,9 +267,10 @@ REGISTRY: dict[str, Tool] = {
                     },
                     "target": {
                         "type": "string",
-                        "description": "insert_bullet, insert_item: the id to insert into.",
+                        "description": "insert_bullet, insert_item, insert_section: the id to insert into or after.",
                     },
                     "placeholder": {"type": "string"},
+                    "title": {"type": "string", "description": "insert_section: its heading."},
                 },
                 "required": ["resume_id", "hash", "kind"],
                 "additionalProperties": False,
