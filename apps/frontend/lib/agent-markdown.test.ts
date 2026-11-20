@@ -46,6 +46,7 @@ test("llms.txt says when to use Offerfy and when not to", () => {
   assert.match(body, /Google sign-in is for humans/i);
   assert.match(body, /never submit/i);
   assert.doesNotMatch(body, /no public agent API/i);
+  assert.doesNotMatch(body, /unauthenticated agent API/i);
   assert.doesNotMatch(body, /self-serve API keys/i);
   assert.match(body, /https:\/\/offerfy\.cc\/en\/about/);
 });

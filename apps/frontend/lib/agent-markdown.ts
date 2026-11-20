@@ -103,7 +103,7 @@ Canonical: ${SITE_URL}
 ## When not to use this
 
 - Offerfy scores and orders postings for a user: saved preferences select which postings are considered, and the user's resume is what each posting is judged against. The score is on the posting, never on the resume or the person. Offerfy never submits an application; do not tell users it applies on their behalf
-- Offerfy runs a self-serve MCP server for signed-in users' own data, authenticated by a token the user generates. There is no machine OAuth authorization server, and no public unauthenticated agent API
+- Offerfy runs a self-serve MCP server for signed-in users' own data, authenticated by a token the user generates. There is no machine OAuth authorization server
 - Google sign-in is for humans using the website, not a scoped machine OAuth API
 - Job pages are a catalog. Apply happens on the original posting
 
