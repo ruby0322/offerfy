@@ -36,7 +36,7 @@ from app.models import Job, JobScore, User
 from app.schemas_editing import IntentIn
 from app.services import family, jobs_tools, resume_access, resume_write
 from app.services.revisions import source_hash
-from app.services.starter import default_title, generate_starter
+from app.services.starter import default_title, generate_starter, validate_locale
 from app.services.typst_projection import parse_projection
 
 # The legacy MCP revision (2025-11-25, an `initialize` handshake), which the
@@ -163,10 +163,7 @@ def _clean_title(value: Any) -> str:
 
 def _create_resume(db: Session, user: User, args: dict) -> dict:
     """A new blank resume from the static starter. Makes no model call."""
-    # Imported here: the router module pulls in the whole web layer.
-    from app.routers.resumes import _validate_locale
-
-    locale = _validate_locale(args.get("locale"))
+    locale = validate_locale(args.get("locale"))
     title = _clean_title(args["title"]) if "title" in args else default_title(locale)
     resume = resume_access.create_for_user(
         db,

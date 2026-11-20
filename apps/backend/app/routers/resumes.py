@@ -23,7 +23,6 @@ from app.schemas import (
     AtsReport,
     CompileBody,
     FamilyMember,
-    LOCALES,
     PreviewPages,
     ResumeCreate,
     ResumeFamilyOut,
@@ -75,7 +74,12 @@ from app.services.revisions import (
 from app.services import resume_access
 from app.services.s3 import delete_object, put_object
 from app.services.sse import SSE_HEADERS, sse_frame
-from app.services.starter import default_title, generate_starter, title_from_filename
+from app.services.starter import (
+    default_title,
+    generate_starter,
+    title_from_filename,
+    validate_locale,
+)
 from app.services.templates import apply_prompt, is_supported
 from app.services.typst_compile import (
     compile_typst,
@@ -182,13 +186,6 @@ def _schedule_tailor(resume_id: str, run_id: str, model: str | None = None) -> N
     task.add_done_callback(_tailor_tasks.discard)
 
 
-def _validate_locale(locale: str | None) -> str:
-    value = locale or "zh-TW"
-    if value not in LOCALES:
-        raise HTTPException(status_code=400, detail="locale must be en, zh-TW, or zh-CN")
-    return value
-
-
 def _iso(dt: datetime | None) -> str | None:
     if dt is None:
         return None
@@ -267,7 +264,7 @@ def create_resume(
     db: Session = Depends(get_db),
     user: User | None = Depends(get_current_user),
 ):
-    locale = _validate_locale(body.locale)
+    locale = validate_locale(body.locale)
     _, guest = owner_context(request, response, db, user, ensure=True)
     if user is None and guest is None:
         raise HTTPException(status_code=401, detail="Guest session required")
@@ -296,7 +293,7 @@ async def upload_resume(
     db: Session = Depends(get_db),
     user: User | None = Depends(get_current_user),
 ):
-    locale_v = _validate_locale(locale)
+    locale_v = validate_locale(locale)
     filename = file.filename or "upload.bin"
     if not allowed_upload(filename):
         raise HTTPException(status_code=400, detail="Unsupported file type")

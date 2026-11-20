@@ -430,3 +430,11 @@ def test_set_resume_title_on_someone_elses_resume_is_not_found(
 def test_no_tool_can_delete_a_resume(client, db_session, a_user):
     # A guard, not a proof: it cannot catch a delete tool with another name.
     assert not [name for name in (s["name"] for s in specs()) if "delete" in name]
+
+
+def test_the_resume_router_rejects_an_unknown_locale(client):
+    # validate_locale lives in services/starter.py; the router must still use it.
+    r = client.post("/v1/resumes", json={"locale": "klingon"})
+    assert r.status_code == 400
+    assert "locale must be" in r.json()["detail"]
+    assert client.post("/v1/resumes", json={"locale": "en"}).status_code == 201
