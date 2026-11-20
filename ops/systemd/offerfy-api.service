@@ -10,6 +10,26 @@ Group=baeir
 WorkingDirectory=/home/ruby0322/offerfy/apps/backend
 EnvironmentFile=/home/ruby0322/offerfy/.env.production
 Environment=PATH=/home/ruby0322/offerfy/apps/backend/.tools:/home/ruby0322/offerfy/apps/backend/.venv/bin:/usr/local/bin:/usr/bin
+# Deliberately still 2. Concurrency was raised in `app/db.py` instead -- see the
+# budget written out there -- because changing this line needs
+# `systemctl daemon-reload`, which needs root, and agent sessions have no
+# passwordless sudo (section 4 of AGENTS.md). The pool was the binding
+# constraint anyway: 25 slots per worker against anyio's 40 threads per worker
+# meant connections ran out while threads were still free.
+#
+# **If you ever raise this, redo the arithmetic in app/db.py first.** At 40
+# slots per worker, 4 workers is a 160-connection ceiling, and three concurrent
+# ingest timers can add 120 more against max_connections=250. Raising workers
+# without raising the ceiling is the pool-exhaustion outage again.
+#
+# The count is hardcoded on purpose. UVICORN_WORKERS used to sit in
+# .env.production looking authoritative while nothing read it; reading it here
+# would need an `sh -c` wrapper, and that changes what MainPID points at --
+# which is what AGENTS.md's sudo-less `kill -HUP` depends on.
+#
+# Changing this line needs `daemon-reload` and a `restart`, never a HUP: a HUP
+# reloads code only, so the worker count would be unchanged and the edit would
+# look like it did nothing.
 ExecStart=/home/ruby0322/offerfy/apps/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 2
 Restart=always
 RestartSec=3

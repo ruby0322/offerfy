@@ -7,6 +7,25 @@ version: "2.3"
 services:
   postgres:
     image: postgres:16-alpine
+    # Both are startup parameters, so changing either needs a container
+    # recreate (`docker compose up -d postgres`), not a restart.
+    #
+    # max_connections: the API's pool is 25 per worker (pool_size=15 +
+    # max_overflow=10, see apps/backend/app/db.py and the reasoning there), so
+    # 4 workers ceiling at 100. The three ingest timers run the same engine and
+    # carry their own pool, worst case 3 x 25 = 75. Plus
+    # superuser_reserved_connections (3) and room for a psql session: ~180.
+    # 250 leaves real headroom; the stock 100 did not even cover the API.
+    #
+    # shared_buffers: the database is ~540 MB, so 1 GB holds it entirely. The
+    # container has no memory limit and the host has tens of GB free. Stock was
+    # 128 MB.
+    command:
+      - postgres
+      - -c
+      - max_connections=250
+      - -c
+      - shared_buffers=1GB
     environment:
       POSTGRES_DB: offerfy
       POSTGRES_USER: postgres
@@ -153,6 +172,43 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    restart: unless-stopped
+
+  # Load balancer in front of the host's Next.js instances, so the public
+  # frontend can be restarted with no downtime. See
+  # ops/nginx/offerfy-web-lb.conf for the reasoning and
+  # docs/host-scaling-plan.md section 2.6 for the design.
+  #
+  # NOTE ON HARD RULE 9 (every `ports:` entry must be 127.0.0.1-prefixed): this
+  # service has no `ports:` at all. `network_mode: host` means publishing does
+  # not apply -- the bind is controlled by nginx's own `listen 192.168.49.1:3210`,
+  # which is the minikube bridge and NOT the public NIC. Host networking is
+  # required because the upstreams are host processes on 127.0.0.1:320x and the
+  # listener has to be the address the cluster's Endpoints object points at.
+  #
+  # Unlike `backend`/`frontend` above, this service IS used for the public site.
+  web-lb:
+    image: nginx:1.27-alpine
+    network_mode: host
+    volumes:
+      - ./ops/nginx/offerfy-web-lb.conf:/etc/nginx/nginx.conf:ro
+      # A DIRECTORY, not a file: ops/rolling-restart-web.sh replaces the upstream
+      # file by rename, and renaming over a bind-mounted *file* breaks the mount.
+      - ./ops/nginx/upstream.d:/etc/nginx/upstream.d:ro
+    # The image defaults to a 1024 fd limit, and nginx warns that
+    # worker_connections 4096 "exceed open file resource limit: 1024". That is not
+    # cosmetic here: every proxied request costs two descriptors, and an SSE chat
+    # stream holds its pair open for the length of the model's answer, so 1024
+    # would cap concurrent streams far below what the API can serve.
+    ulimits:
+      nofile:
+        soft: 16384
+        hard: 16384
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3211/lb-health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
     restart: unless-stopped
 
 volumes:

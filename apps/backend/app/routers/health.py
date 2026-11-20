@@ -5,6 +5,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.concurrency import gate_state
 from app.config import get_settings
 from app.db import get_db
 
@@ -42,4 +43,10 @@ def readyz(db: Session = Depends(get_db)):
         db.execute(text("SELECT 1"))
     except Exception as exc:
         raise HTTPException(status_code=503, detail="database unavailable") from exc
-    return {"status": "ok"}
+    # Saturation, reported rather than inferred. On 2026-11-20 a worker served
+    # ~10k 500s an hour while this endpoint answered a bare "ok", and working
+    # out that it was at capacity took `ss`, `pg_stat_activity` and a load
+    # test. `gate` makes it one curl: `in_flight` at `limit` with `waiting`
+    # above zero is a saturated worker, and `shed` counts what it turned away.
+    # Ungated itself, so it still answers when every slot is taken.
+    return {"status": "ok", "gate": gate_state()}

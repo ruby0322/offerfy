@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.concurrency import InFlightGate
 from app.db import ensure_schema
 from app.routers import (
     account,
@@ -36,6 +37,11 @@ async def lifespan(_application: FastAPI):
 
 def create_app() -> FastAPI:
     application = FastAPI(title="Offerfy", lifespan=lifespan)
+    # Outermost middleware, so a request waits for a slot before it touches a
+    # router, a dependency or the connection pool. Without it, concurrency
+    # beyond the pool's 40 slots collapses the whole worker into QueuePool
+    # timeouts -- see app/concurrency.py.
+    application.add_middleware(InFlightGate)
     application.include_router(health.router)
     application.include_router(auth.router)
     application.include_router(account.router)

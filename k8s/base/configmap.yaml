@@ -4,9 +4,13 @@ metadata:
   name: offerfy-config
 data:
   APP_ENV: "production"
+  # UVICORN_WORKERS removed 2026-11-16: nothing read it. scripts/start-backend.sh
+  # execs uvicorn with no --workers flag, so the value was decoration that would
+  # mislead whoever changed it expecting an effect. The same is true of the two
+  # keys below -- host and port are hardcoded in that script too -- but they
+  # happen to agree with it, so they are left until the script is reworked.
   UVICORN_HOST: "0.0.0.0"
   UVICORN_PORT: "8000"
-  UVICORN_WORKERS: "1"
   MAX_UPLOAD_MB: "10"
   S3_ENDPOINT: "http://seaweedfs-s3:8333"
   S3_REGION: "us-east-1"

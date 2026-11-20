@@ -21,9 +21,37 @@ sudo**, which is the part the runbook assumes you have.
 | | |
 |---|---|
 | Public site | `https://offerfy.cc` |
-| Frontend | systemd **`offerfy-web`** → `npx next start --port 3200`, cwd `/home/ruby0322/offerfy/apps/frontend` |
-| API | systemd **`offerfy-api`** → uvicorn `127.0.0.1:8001` |
+| Frontend | **three** `next start` instances — `offerfy-web` (system unit, `:3200`) plus `offerfy-web@3201` and `offerfy-web@3202` (**user** units), all cwd `/home/ruby0322/offerfy/apps/frontend` |
+| Frontend load balancer | **`web-lb`** compose service — nginx on `192.168.49.1:3210`, round-robins the three. This is what the cluster's Service points at |
+| API | systemd **`offerfy-api`** → uvicorn `127.0.0.1:8001`, 2 workers, DB pool 30+10 per worker (see §10) |
 | Source of truth | the **`main`** branch, checked out at `/home/ruby0322/offerfy` |
+
+**The frontend path gained a hop on 2026-11-16, so that it can be restarted without
+downtime** (`next start` is one process and has to die before it is replaced):
+
+```
+ingress-nginx → Service offerfy-native-3100  targetPort 3210
+  → 192.168.49.1:3210   web-lb (nginx container, host networking)
+      → 127.0.0.1:3200  offerfy-web.service    (system unit)
+      → 127.0.0.1:3201  offerfy-web@3201       (user unit)
+      → 127.0.0.1:3202  offerfy-web@3202       (user unit)
+```
+
+Three things about it that are easy to get wrong:
+
+- **ingress-nginx routes by the Service's `targetPort`, not by the Endpoints/EndpointSlice
+  port.** Patching the Endpoints alone changes nothing. Change `targetPort`.
+- **Only `:3200` and `:3210` are open to the cluster** — UFW allows
+  `192.168.49.0/24 → tcp 3200` and `→ tcp 3210` and nothing else, so 3201/3202 are
+  deliberately unreachable except through the proxy.
+- **Multiple Endpoints subsets cannot replace the proxy.** The EndpointSliceMirroring
+  controller flattens all subsets into one slice with a single shared `ports` list, and two
+  subsets both named `http` fail validation. Tried and reverted; see
+  `docs/host-scaling-plan.md` §2.1.
+
+There is **no CI** (no `.github/`), **no `gh` CLI on the host**, and Offerfy is **not** a
+k8s Deployment — the manifests in `k8s/` are not applied for it. Nothing deploys itself.
+A push alone changes nothing; the host must be rebuilt and restarted by hand.
 
 There is **no CI** (no `.github/`), **no `gh` CLI on the host**, and Offerfy is **not** a
 k8s Deployment — the manifests in `k8s/` are not applied for it. Nothing deploys itself.
@@ -50,8 +78,18 @@ npm run build:public
 # 4. The /api rewrite is baked in at build time. It MUST be :8001.
 python3 -c "import json; print(json.load(open('.next/routes-manifest.json'))['rewrites']['afterFiles'])"
 
-# 5. Restart (see §4 if you have no sudo), then smoke (§5).
+# 5. Roll the three instances one at a time. No downtime, no sudo. Then smoke (§5).
+ops/rolling-restart-web.sh
 ```
+
+**All three instances share one `.next`, and that has a consequence during a deploy.**
+`next build` replaces files rather than writing in place (which is what makes the `cp -al`
+in step 2 a real backup), so between the build and the last instance's restart, an instance
+that has not yet rolled is serving HTML that references chunk files already unlinked. The
+browser gets a `ChunkLoadError` and reloads onto the new build. **This is not new with three
+instances** — it already happened with one, for the whole gap between build and restart —
+but the window now lasts until the last instance has rolled, roughly a minute. The real fix
+is per-release directories, which is not built; see `docs/host-scaling-plan.md` §5.
 
 **Order, when the release also changes the API.** `docs/deploy.md` step 4 says
 "restart web, then `kill -HUP` the API". That is right for a frontend-only
@@ -103,29 +141,86 @@ writes every restart as `sudo systemctl restart …`. **You do not need sudo.** 
 run `User=ruby0322` with `Restart=always`, so the owning user can signal the main
 process and systemd brings it back.
 
-```bash
-# Frontend: SIGTERM, systemd respawns it. Budget ~40 s of downtime — the npx/next tree
-# can sit in `deactivating` for ~36 s — but it is VARIABLE, not reliably 40 s: on
-# 2026-11-13 a new MainPID was active 4 s after the signal and the site answered 200
-# immediately. Announce 40 s; do not conclude something broke if it returns sooner.
-kill -TERM $(systemctl show -p MainPID --value offerfy-web)
-# Wait for a NEW MainPID and ActiveState=active before smoking:
-systemctl show -p MainPID -p ActiveState -p NRestarts offerfy-web
+**Frontend: use the script. There is no downtime window any more.**
 
-# API: SIGHUP instead — uvicorn respawns workers while the master holds the socket,
-# so there is no downtime. Reloads code only, never the environment or .next.
+```bash
+ops/rolling-restart-web.sh            # all three instances, one at a time
+ops/rolling-restart-web.sh --dry-run  # prints what it would do, touches nothing
+PORTS="3201 3202" ops/rolling-restart-web.sh
+```
+
+It drains each instance out of the load balancer (marks it `down` in
+`ops/nginx/upstream.d/`, graceful nginx reload), waits for the replacement to answer,
+then puts it back — checking the public site between every step and stopping on the first
+non-200. **Measured 2026-11-16 across a full three-instance restart: 109/109 GETs and
+75/75 POSTs with zero failures.** The old `~40 s of downtime` budget is gone.
+
+Do **not** just `kill -TERM` an instance that is still in rotation. nginx retries another
+upstream on a connect failure, but `non_idempotent` is deliberately off, so a POST already
+delivered to a dying instance is not retried — it fails to a real user. The drain is the
+whole point.
+
+```bash
+# API: SIGHUP — uvicorn respawns workers while the master holds the socket, so there is
+# no downtime. Reloads code only, never the environment or .next. Verify by the listener,
+# never by worker count: `ss -ltnp | grep 8001` should show master + 2 workers.
 kill -HUP $(systemctl show -p MainPID --value offerfy-api)
 ```
 
-If you do have sudo, `sudo systemctl restart offerfy-web` is faster and cleaner; prefer
-it. Either way, say the downtime window out loud first — this is the live site.
+A HUP does **not** re-read the unit file, so a change to `ExecStart` (the worker count)
+needs `daemon-reload` + `restart`, which needs root. Concurrency now lives in
+`app/db.py`'s pool instead, precisely so it can ship with a HUP — see §10.
+
+**An `.env.production` change needs a full restart, and a HUP will silently not do it.**
+The master is what read `EnvironmentFile`; a HUP only respawns its workers, so the old
+value stays live and the edit looks like it did nothing. Still no sudo — TERM the master
+and `Restart=always` (`RestartSec=3`) brings back a new one:
+
+```bash
+kill -TERM $(systemctl show -p MainPID --value offerfy-api)
+# then wait for a NEW MainPID; measured 2026-11-19: healthy ~5 s after the TERM.
+```
+
+Unlike a HUP **this is a real outage**: there is one API instance and nothing in front of
+:8001, and a single job-board page view fans out ~10 API calls. Say so before you do it.
+
+Two things to check, because neither shows up in `systemctl`:
+
+- **Before**: a full restart runs `Base.metadata.create_all()` (`app/db.py`), so confirm
+  `app/models.py` and `alembic/` are clean in this shared tree first — a restart from a
+  dirty tree creates tables prod has no migration for.
+- **After**: verify the *environment*, not the process. The unit and the listener look
+  identical whether or not the new value arrived. Read the master's own environ, and
+  count or fingerprint — never echo a secret into a terminal:
+
+```bash
+PID=$(systemctl show -p MainPID --value offerfy-api)
+tr '\0' '\n' < /proc/$PID/environ | grep -c '^OPENAI_API_KEY='
+```
+
+For the two LLM keys there is an end-to-end check as well: `/api/v1/models` lists a
+provider's models only when that provider has a credential, so a short list means the API
+never saw the key. Both keys take a comma-separated **list** now — see
+`app/services/api_keys.py`.
+
+Emergency single-instance restart, if the load balancer itself is the problem:
+`kill -TERM $(systemctl show -p MainPID --value offerfy-web)`, then wait for a NEW MainPID.
+Expect up to ~40 s; the system unit has no `TimeoutStopSec` cap (the user units do).
 
 ## 5. Smoke after every deploy
 
+**`ops/verify-capacity.sh` runs most of this for you** — worker count by listener, the
+connection budget read out of `app/db.py`, every instance in the load balancer answering,
+and the four public probes. Run it after any change to workers, `max_connections`, or the
+instance set. The manual version:
+
 ```bash
 systemctl is-active offerfy-api offerfy-web
+systemctl --user is-active offerfy-web@3201 offerfy-web@3202
 curl -sS -o /dev/null -w '%{http_code}\n' -L https://offerfy.cc/          # 200
 curl -sS -o /dev/null -w '%{http_code}\n' https://offerfy.cc/api/healthz  # 200, not optional
+curl -sS -o /dev/null -w '%{http_code}\n' https://offerfy.cc/api/readyz   # 200 — this one hits the DB
+curl -sS https://offerfy.cc/api/readyz   # and read the `gate` block — see §10
 curl -sS -D - -o /dev/null --max-time 15 https://offerfy.cc/api/v1/auth/google/start \
   | grep -i '^location:'   # redirect_uri MUST be offerfy.cc, never 127.0.0.1
 ```
@@ -133,6 +228,24 @@ curl -sS -D - -o /dev/null --max-time 15 https://offerfy.cc/api/v1/auth/google/s
 HTML 200 alone proves nothing: the API can be down while pages still render. To prove
 the *new* build is live, grep a string only it has out of a served chunk — a matching
 chunk filename does not mean matching content.
+
+**And a 200 does not prove the request went where you think.** Two separate failures on
+2026-11-16 came from exactly this. After changing the Service's `targetPort`, the site kept
+answering 200 from the *old* path for several minutes while ingress-nginx resynced — so the
+smoke passed, and a later restart of the old target took the site down for 4 s. Check the
+controller's own view, not the status code:
+
+```bash
+POD=$(kubectl -n ingress-nginx get pod -l app.kubernetes.io/component=controller -o name | head -1)
+kubectl -n ingress-nginx exec "$POD" -- curl -s localhost:10246/configuration/backends \
+  | grep -o '"address":"[^"]*","port":"[0-9]*"'     # MUST show 192.168.49.1:3210
+docker logs --tail 20 offerfy-web-lb-1 | grep -oE '127\.0\.0\.1:32[0-9][0-9]' | sort | uniq -c
+```
+
+When counting the load balancer's log to prove requests are spread, **count only the new
+lines** — take a `wc -l` before and after. A `--tail N` window silently includes earlier
+probes, which is how "4/4/4" looked like proof when traffic was in fact still bypassing the
+proxy entirely.
 
 ## 6. Things that have bitten us
 
@@ -193,7 +306,8 @@ there are **three** files now, including the `OnFailure=` handler:
 ```bash
 mkdir -p ~/.config/systemd/user
 cp /home/ruby0322/offerfy/ops/systemd/offerfy-ingest*.{service,timer} ~/.config/systemd/user/
-# the weekly digest's three units install the same way (offerfy-digest*), but stay un-enabled
+# the weekly digest's three units install the same way (offerfy-digest*) and are ENABLED
+# (checked 2026-11-16 — this line used to say they stay un-enabled; see "The weekly digest timer")
 systemctl --user daemon-reload
 systemctl --user enable --now offerfy-ingest.timer
 ```
@@ -640,4 +754,144 @@ Console** on the site, so "is Google crawling the job pages" remains unanswerabl
 systemd **user** unit in `~/.config/systemd/user/`, no sudo, `OnFailure=` writes to
 `journalctl --user -p err`. The unit files are in `ops/systemd/offerfy-digest*` (install
 with the same `cp` glob as ingest); runbook details are in `docs/deploy.md` ("Weekly job digest
-timer"). It spends real money, so it is installed but **not enabled**; enabling it is the human's last deploy step (see deploy.md).
+timer"). It spends real money.
+
+**It is enabled and armed, and this file said otherwise until 2026-11-16.** Live state as
+checked that day: `systemctl --user is-enabled offerfy-digest.timer` → `enabled`,
+`is-active` → `active`, `NextElapseUSecRealtime` → Mon 2026-11-16 05:08 CST — and
+`LastTriggerUSec` is **empty** with no journal entries, so it has never actually fired. In
+other words a money-spending job that two places in this file described as "not enabled" was
+one scheduling slot away from its first run. If you are reading this and the behaviour needs
+to change, `systemctl --user disable --now offerfy-digest.timer`; do not assume from the
+prose which way it is set, check it.
+
+## 10. Capacity: workers, the pool, and the connection budget
+
+Raised 2026-11-16, all of it with zero downtime and no sudo.
+
+| | before | now | where |
+|---|---|---|---|
+| Postgres `max_connections` | 100 (stock) | **250** | `docker-compose.yml`, `command:` |
+| Postgres `shared_buffers` | 128 MB (stock) | **1 GB** | same — the DB is ~540 MB, so it now fits in cache |
+| API DB pool | 15+10 = 25/worker | **30+10 = 40/worker** | `apps/backend/app/db.py` |
+| uvicorn workers | 2 | **2** (unchanged) | `ops/systemd/offerfy-api.service` |
+
+**Why the pool and not the worker count.** The pool was the binding constraint, not the
+workers: FastAPI runs every sync `def` handler in anyio's threadpool, which defaults to
+**40 threads per process** (measured, not assumed), so at 25 connections per worker the pool
+ran dry while threads were still free. It also ships with a `kill -HUP`, where a
+worker-count change would need `daemon-reload` and root.
+
+> **That raise matched the pool to the thread limiter, 40 and 40, "so neither is silently
+> the next wall". That reasoning was wrong and it took the job board down on 2026-11-20.**
+> A request holds its pool connection from its first query until its dependency teardown
+> gets a threadpool thread *again*, so for part of its life it holds a connection and no
+> thread — which means connections in use track requests **in flight**, not threads. Once
+> in-flight passed 40 the worker jammed: handlers blocked in checkout holding threads, the
+> teardowns that would free a connection queued behind them, and `pool_timeout=3` turned it
+> into ~10k `QueuePool limit of size 30 overflow 10 reached` 500s an hour — a third to a
+> half of all job board traffic — while Postgres sat idle at 76 of 250 connections and
+> `/healthz`, `/readyz`, `systemctl` and the listener all looked fine.
+>
+> **Lowering the thread limit makes it worse, so do not reach for that.** Teardown needs a
+> thread too; starve threads and connections are held *longer*. Measured on one worker
+> against the live catalogue:
+>
+> | in flight | threads 40 | threads 16 | **gated at 32** |
+> |---|---|---|---|
+> | 60 | 100%, 40 req/s | 98.8%, 43 req/s | **100%, 56 req/s** |
+> | 150 | 68.3%, 19 req/s | 21.2%, 8 req/s | **100%, 55 req/s** |
+> | 300 | 24.3%, 15 req/s | 0%, 10 req/s | **100%, 50 req/s** |
+
+**What actually bounds it now: the in-flight gate.** `apps/backend/app/concurrency.py`
+installs `InFlightGate` as the outermost middleware, admitting **32 requests per worker** and
+making the rest *wait* — a queued request is slow, a request that cannot get a connection is
+a 500. Because a slot is held for the whole request, checked-out connections can never
+exceed 32 against a 40-slot pool, so **the pool cannot be exhausted by request load at all**.
+Requests waiting longer than 10s get a `503` with `Retry-After` instead of queueing forever.
+
+Three things about it that are easy to get wrong:
+
+- **The ceiling must stay below the pool** (`MAX_IN_FLIGHT < pool_size + max_overflow`).
+  `tests/test_pool_thread_headroom.py` asserts it from both numbers in source, and
+  `ops/verify-capacity.sh` checks it against what the *running* workers report.
+- **`/healthz`, `/readyz` and the SSE streams bypass the gate.** A stream does not finish
+  until it ends, so gating one would hold a slot for minutes — the same shape as the bug
+  `tests/test_sse_sessions.py` pins for pool connections, one layer up. A new SSE route must
+  be added to `UNGATED_PATTERN`; the test walks the real routes and fails if it is not.
+- **`GET /readyz` now reports saturation**, so you do not have to infer it:
+  `{"status":"ok","gate":{"limit":32,"in_flight":3,"waiting":0,"shed":0}}`. `in_flight` at
+  `limit` with `waiting` above zero is a saturated worker. During the 2026-11-20 incident
+  this endpoint answered a bare `"ok"` while a third of traffic failed.
+
+It is a per-worker ceiling, so two workers admit 64 at once; the pool budget below is
+per-worker and unchanged.
+
+### One worker can hold nearly every connection, and that is expected
+
+The two uvicorn workers share one listening socket, and the three `next-server` instances
+keep HTTP keep-alive pools — so each socket stays pinned to whichever worker accepted it.
+Whichever worker comes up first takes essentially everything. Measured 2026-11-20, twice,
+including straight after a HUP:
+
+```
+worker A  650–963 established connections to :8001
+worker B    2–60
+```
+
+**This is not a bug to chase, and `ops/verify-capacity.sh` cannot see it** — it counts
+socket *holders* (master + N workers), which looks right either way. It mattered before the
+gate because all that traffic landed on one worker's 40-slot pool; with the gate, a worker
+admits 32 whatever its connection count, so the imbalance is harmless. If you want to see
+it:
+
+```bash
+ss -tnp state established | grep ':8001' | grep -oE 'pid=[0-9]+' | sort | uniq -c | sort -rn
+```
+
+Do not try to "fix" it by matching pool to connections. Balancing it properly needs each
+worker on its own port behind nginx `least_conn` (the shape §2 already uses for the
+frontend), which is a real change and has not been needed.
+
+**The budget, against `max_connections=250`:**
+
+```
+API       2 workers x 40                     =  80
+ingest    3 timers  x 40 (worst case)        = 120   a batch pass really uses a handful
+reserved  superuser_reserved_connections     =   3
+                                               ---
+                                               203  of 250
+```
+
+`pool_size` is a **ceiling, not a reservation** — SQLAlchemy opens connections lazily, so
+steady state sits far below it (measured idle: ~22–33). Plan against the ceiling anyway,
+because the ceiling is what gets reached under exactly the load that matters.
+
+**If you ever raise `--workers`, redo this arithmetic first.** At 40 slots per worker, 4
+workers is a 160-connection ceiling and three concurrent timers add 120 — that is 283, over
+the limit. `ops/verify-capacity.sh` does the sum for you and reads the pool numbers out of
+`db.py` rather than keeping its own copy.
+
+**`UVICORN_WORKERS` was deleted from `.env.production` and from `k8s/base/configmap.yaml`.**
+Nothing read it — the count is hardcoded in `ExecStart` — and a config key that silently does
+nothing is worse than no key. `UVICORN_HOST`/`UVICORN_PORT` in the configmap are equally
+unread by `scripts/start-backend.sh`; they only survive because they happen to agree with it.
+
+### The firewall, because it will surprise you
+
+UFW allows the cluster to reach **exactly two ports** on this host:
+
+```
+### tuple ### allow tcp 3200 0.0.0.0/0 any 192.168.49.0/24 in
+### tuple ### allow tcp 3210 0.0.0.0/0 any 192.168.49.0/24 in   # added 2026-11-16
+```
+
+3201 and 3202 are deliberately **not** open — they are reachable only through `web-lb`. If
+you add a fourth instance, it needs no rule; if you move the load balancer's port, it does.
+The chain also ends with a pre-existing `-s 140.112.0.0/12 -j ACCEPT`, so campus can already
+reach every port here; that is not new and it applies to 3200 just the same.
+
+A corollary worth knowing: **a port that is listening on the host can still be unreachable
+from the cluster**, and the symptom is a timeout, not a refusal. A *published docker port*
+is the exception — those go through Docker's own DNAT chains and bypass the UFW INPUT
+policy entirely, which is what `docs/deploy.md` hard rule 9 is warning about.

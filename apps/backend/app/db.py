@@ -10,6 +10,17 @@ from app.config import get_settings
 _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
 
+#: Per-worker Postgres pool. Read by `ops/verify-capacity.sh` for the connection
+#: budget, and by `app.concurrency` for the thread-headroom invariant -- so these
+#: are constants rather than literals buried in the `create_engine` call.
+POOL_SIZE = 30
+POOL_MAX_OVERFLOW = 10
+
+
+def pool_capacity() -> int:
+    """Most connections one worker can ever hold open at once."""
+    return POOL_SIZE + POOL_MAX_OVERFLOW
+
 
 class Base(DeclarativeBase):
     pass
@@ -44,15 +55,48 @@ def _make_engine(url: str) -> Engine:
     # handlers and the API stopped answering *everything*, /healthz included,
     # while systemd and the :8001 listener both still looked healthy.
     #
-    # 25 per worker x 2 workers = 50, against Postgres max_connections=100.
+    # **Raised 2026-11-16 from 15+10 to 30+10.**
+    #
+    # FastAPI runs every sync `def` handler via `run_in_threadpool`, and anyio's
+    # default limiter is **40 threads per process** (measured, not assumed:
+    # `anyio.to_thread.current_default_thread_limiter().total_tokens`). At 25
+    # slots per worker the pool ran dry while threads were still free, so
+    # connections -- not CPU, not threads -- were what capped concurrency.
+    #
+    # **That raise matched the pool to the thread limiter, 40 and 40, on the
+    # reasoning that "neither resource is silently the next wall". Matching them
+    # is what broke the API on 2026-11-20 -- see `app/concurrency.py`. The pool
+    # must stay strictly larger than the thread limit, because a sync request
+    # holds a connection across two *separate* threadpool acquisitions and so
+    # spends part of its life holding a connection while holding no thread.**
+    # The headroom invariant is asserted by `tests/test_pool_thread_headroom.py`;
+    # do not re-match these two numbers.
+    #
+    # The budget, against `max_connections=250` (docker-compose.yml):
+    #
+    #     API        2 workers x 40          =  80
+    #     ingest     3 timers  x 40 worst    = 120   (a batch pass really uses a
+    #                                                 handful; this is the ceiling)
+    #     reserved   superuser_reserved_connections =   3
+    #                                           ---
+    #                                           203  of 250
+    #
+    # `pool_size` is a ceiling, not a reservation -- SQLAlchemy opens
+    # connections lazily -- so steady state sits far below this. Plan against
+    # the ceiling anyway: the ceiling is what gets reached under exactly the
+    # load that matters.
+    #
+    # Deployable with `kill -HUP` and no sudo, which is why the concurrency went
+    # here rather than into the unit's `--workers`.
+    #
     # pool_timeout is deliberately short: a saturated pool should fail fast and
     # visibly rather than park a threadpool thread for 30s and take the whole
     # API down quietly with it.
     return create_engine(
         url,
         pool_pre_ping=True,
-        pool_size=15,
-        max_overflow=10,
+        pool_size=POOL_SIZE,
+        max_overflow=POOL_MAX_OVERFLOW,
         pool_timeout=3,
     )
 

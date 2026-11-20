@@ -1,0 +1,67 @@
+# systemd **user** unit — installs to ~/.config/systemd/user/, not /etc.
+# One Next.js instance per port; `%i` is the port:
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp /home/ruby0322/offerfy/ops/systemd/offerfy-web@.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now offerfy-web@3201 offerfy-web@3202
+#
+# **Why a user unit and not a system one.** `next start` is a single process, so
+# the only way to restart the frontend without downtime is to run several and
+# take them out of rotation one at a time. A system unit template would be the
+# tidier end state, but installing one needs `/etc/systemd/system` plus
+# `systemctl daemon-reload`, and both need root — `systemctl daemon-reload` as
+# this user returns "Interactive authentication required". A user unit needs
+# none of it and this host already relies on the pattern for the three ingest
+# timers (`loginctl show-user ruby0322 --property=Linger` → `Linger=yes`).
+#
+# If you ever have root and want to convert: add `User=ruby0322`/`Group=baeir`,
+# change `WantedBy=` to `multi-user.target`, install to /etc/systemd/system, and
+# drop `--user` from every systemctl call in ops/rolling-restart-web.sh.
+#
+# **The instance set is deliberately mixed.** Port 3200 stays on the original
+# *system* unit `offerfy-web.service`, because disabling that one would also
+# need root — and there is no reason to: it is a perfectly good instance. So the
+# live set is 3200 (system) + 3201 + 3202 (user). ops/rolling-restart-web.sh
+# knows which port belongs to which kind of unit.
+#
+# **Do not restart an instance that is still in the Endpoints object.**
+# ingress-nginx does not retry a POST onto another upstream, so a POST landing
+# mid-restart fails to a real user. ops/rolling-restart-web.sh drains first.
+#
+# All instances share apps/frontend/.next. Fine for serving, but note that
+# `next build` replaces files rather than writing in place, so after a build an
+# instance that has not yet restarted serves HTML referencing chunks already
+# unlinked; the client gets a ChunkLoadError and reloads. That is pre-existing
+# behaviour with one instance too — several instances only make the window last
+# until the last one has restarted.
+[Unit]
+Description=Offerfy Next.js (next start on 0.0.0.0:%i)
+Documentation=file:///home/ruby0322/offerfy/docs/host-scaling-plan.md
+
+# No After=/Wants= on offerfy-api.service: a user manager cannot order itself
+# against system units. Restart=always covers a start that lands before the API
+# is up — Next only needs the API per request, not at boot.
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ruby0322/offerfy/apps/frontend
+Environment=BACKEND_INTERNAL_URL=http://127.0.0.1:8001
+Environment=PATH=/usr/local/bin:/usr/bin
+ExecStart=/usr/local/bin/npx next start --hostname 0.0.0.0 --port %i
+Restart=always
+RestartSec=3
+
+# AGENTS.md section 4 records the npx/next tree sitting in `deactivating` for
+# ~36 s after a SIGTERM. On the single-port unit that was merely slow; here it
+# would stall every step of a rolling restart and hold the port against its own
+# replacement. Capping it is safe precisely because the instance is drained out
+# of the Ingress first, so nothing is in flight.
+TimeoutStopSec=20
+
+# Shared host (pd-care and others). Stay polite, but not as polite as the ingest
+# timers: this one serves user requests.
+Nice=0
+
+[Install]
+WantedBy=default.target
