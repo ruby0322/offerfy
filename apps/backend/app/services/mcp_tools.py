@@ -29,10 +29,12 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.models import Job, JobScore, User
-from app.services import jobs_tools, resume_access
+from app.schemas_editing import IntentIn
+from app.services import jobs_tools, resume_access, resume_write
 from app.services.revisions import source_hash
 from app.services.typst_projection import parse_projection
 
@@ -99,6 +101,53 @@ def _get_resume(db: Session, user: User, args: dict) -> dict:
         "hash": source_hash(resume.typst_source),
         "projection": projection,
     }
+
+
+def _required_str(args: dict, name: str) -> str:
+    value = args.get(name)
+    if not isinstance(value, str) or not value:
+        raise HTTPException(status_code=400, detail=f"{name} is required")
+    return value
+
+
+# What `edit_resume` may do. `apply_intent` also knows `delete`, `move_section` and
+# `insert_section`; the agent surface deliberately does not offer them, so the only
+# way an assistant removes or reorders content is `put_resume_source`, which is
+# guarded the same way and shows the whole document.
+_EDIT_KINDS = ("set_arg", "set_line", "insert_bullet", "insert_item")
+_EDIT_FIELDS = ("hash", "kind", "unit", "expect", "value", "text", "marks", "target",
+                "dir", "placeholder", "title")
+
+
+async def _edit_resume(db: Session, user: User, args: dict) -> dict:
+    """One structured field edit. Makes no model call."""
+    resume = resume_access.owned_by_user(db, user, _required_str(args, "resume_id"))
+    if args.get("kind") not in _EDIT_KINDS:
+        raise HTTPException(
+            status_code=400, detail=f"kind must be one of: {', '.join(_EDIT_KINDS)}"
+        )
+    try:
+        intent = IntentIn(**{k: args[k] for k in _EDIT_FIELDS if k in args})
+    except ValidationError as exc:
+        fields = ", ".join(sorted({str(e["loc"][0]) for e in exc.errors() if e["loc"]}))
+        raise HTTPException(status_code=400, detail=f"Invalid edit arguments: {fields}")
+    out = await resume_write.apply_edit(db, resume, intent)
+    # No rendered pages: they are megabytes of SVG an assistant cannot use. The new
+    # projection carries the unit ids a follow-up edit needs.
+    return {"resume_id": resume.id, "hash": out["hash"], "projection": out["projection"]}
+
+
+async def _put_resume_source(db: Session, user: User, args: dict) -> dict:
+    """Replace one resume's whole Typst source. Makes no model call."""
+    resume = resume_access.owned_by_user(db, user, _required_str(args, "resume_id"))
+    expected = _required_str(args, "hash")
+    source = args.get("typst_source")
+    if not isinstance(source, str):
+        raise HTTPException(status_code=400, detail="typst_source is required")
+    out = await resume_write.write_source(
+        db, resume, source=source, expected_hash=expected
+    )
+    return {"resume_id": resume.id, "hash": out["hash"]}
 
 
 def _catalogue_tool(shared: dict) -> Tool:
@@ -187,6 +236,69 @@ REGISTRY: dict[str, Tool] = {
             },
         },
         handler=_list_matches,
+    ),
+    "edit_resume": Tool(
+        spec={
+            "name": "edit_resume",
+            "description": "Change one field of one of the signed-in user's "
+            "resumes: set an argument or a line, or add a bullet or an entry. "
+            "Call get_resume first and pass its `hash` and a unit `id` (and "
+            "`expect`, that unit's current value, for set_arg and set_line). "
+            "It is refused if the document changed since you read it, and if "
+            "the result would not compile; nothing is written then. Returns the "
+            "new `hash` and projection. It cannot delete or reorder anything.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "resume_id": {"type": "string", "description": "From list_resumes."},
+                    "hash": {"type": "string", "description": "From get_resume."},
+                    "kind": {"type": "string", "enum": list(_EDIT_KINDS)},
+                    "unit": {"type": "string", "description": "set_arg, set_line: a unit id."},
+                    "expect": {
+                        "type": "string",
+                        "description": "set_arg, set_line: the unit's current value.",
+                    },
+                    "value": {"type": "string", "description": "set_arg: the new value."},
+                    "text": {"type": "string", "description": "set_line: the new text."},
+                    "marks": {
+                        "type": "array",
+                        "description": "set_line: link/emphasis marks over `text`.",
+                        "items": {"type": "object"},
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "insert_bullet, insert_item: the id to insert into.",
+                    },
+                    "placeholder": {"type": "string"},
+                },
+                "required": ["resume_id", "hash", "kind"],
+                "additionalProperties": False,
+            },
+        },
+        handler=_edit_resume,
+    ),
+    "put_resume_source": Tool(
+        spec={
+            "name": "put_resume_source",
+            "description": "Replace the WHOLE Typst source of one of the "
+            "signed-in user's resumes. This is the only way to delete or "
+            "reorder content, and it overwrites everything not in your "
+            "`typst_source`, so call get_resume first for the current `hash` "
+            "and write the full document. Refused if the document changed "
+            "since that hash, if the source is empty, or if Typst cannot "
+            "compile it; nothing is written then. Returns the new `hash`.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "resume_id": {"type": "string", "description": "From list_resumes."},
+                    "hash": {"type": "string", "description": "From get_resume."},
+                    "typst_source": {"type": "string", "description": "The full new document."},
+                },
+                "required": ["resume_id", "hash", "typst_source"],
+                "additionalProperties": False,
+            },
+        },
+        handler=_put_resume_source,
     ),
     "list_resumes": Tool(
         spec={

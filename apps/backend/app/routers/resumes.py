@@ -51,7 +51,7 @@ from app.services.extract import (
 from app.services.import_run import ImportAlreadyRunning, snapshot as import_snapshot, start_run
 from app.services.import_runner import run_import
 from app.services.tailor_run import TailorRunAlreadyRunning
-from app.services.typst_intents import IntentError, apply_intent
+from app.services.resume_write import apply_edit
 from app.services.typst_anchors import anchor_bands
 from app.services.typst_projection import parse_projection
 from app.services.tailor_run import snapshot as tailor_snapshot
@@ -838,73 +838,9 @@ async def edit(
     ones the stored text actually has.
     """
     resume = _owned_resume(resume_id, request, response, db, user, ensure=True)
-    current = resume.typst_source
-    if body.hash != source_hash(current):
-        raise _edit_error(409, "stale_hash", "The document changed; reload it.")
-    try:
-        candidate = apply_intent(current, parse_projection(current), body)
-    except IntentError as exc:
-        raise _edit_error(400, exc.code, exc.detail, exc.reason)
-
-    # Release the pool connection before the compile: the SELECT above opened a
-    # transaction, and three 30s subprocess timeouts (SVG, PDF and the anchor eval; 90s
-    # worst case) must not hold a slot (a starved pool takes down even /healthz). Everything needed is already in
-    # plain strings; the object is only re-read after the compile, below.
-    db.commit()
-
-    # The compile is the gate and the preview in one: `compile_preview_pages`
-    # (via `_preview_pages`) raises HTTPException on a source typst rejects. Off
-    # the event loop for the same reason `switch_template` does it.
-    try:
-        preview = await asyncio.to_thread(_preview_pages, candidate, True)
-    except HTTPException as exc:
-        if exc.status_code != 400:
-            # Typst missing (503), timed out (504) or silent (500): not the
-            # person's edit breaking the document.
-            raise
-        first = str(exc.detail).strip().splitlines()[:1]
-        raise _edit_error(400, "compile_failed", first[0] if first else "")
-
-    # A chat edit or a second tab can land while the compile runs; re-read and
-    # re-check rather than overwrite it. This is what makes releasing the
-    # connection above safe.
-    db.refresh(resume)
-    if source_hash(resume.typst_source) != body.hash:
-        raise _edit_error(409, "stale_hash", "The document changed; reload it.")
-
-    # Never coalesced. `set_draft_source` merges into the latest revision inside
-    # its window whoever wrote it, and the request's hash cannot say whose that
-    # was: it equals the latest revision's hash whenever the draft is in sync.
-    # So "coalesce only when hash == latest.content_hash" always coalesces, and
-    # a field edit right after a chat reply would rewrite the reply's revision.
-    # No `restamp_content`: the snapshot did not change, the Typst did, so
-    # re-keying it would make a snapshot without this edit claim to describe the
-    # edited document, and the next template switch would emit the old text. Left
-    # alone it is stale, and that switch re-extracts.
-    set_draft_source(db, resume, candidate, coalesce=False)
-    db.commit()
-    return EditOut(
-        hash=source_hash(candidate),
-        typst_source=candidate,
-        projection=ProjectionOut.model_validate(
-            dataclasses.asdict(parse_projection(candidate))
-        ),
-        preview=preview,
-    )
-
-
-def _edit_error(status: int, code: str, detail: str, reason: str = "") -> HTTPException:
-    """A refusal the client can word for itself.
-
-    `detail` is one English sentence from the service; `reason` is the machine-readable
-    half, present where a code covers several quite different refusals (`unsupported`
-    covers four for `insert_item` alone) and the client has to pick the sentence in the
-    person's own language. Absent when there is nothing to distinguish.
-    """
-    body = {"code": code, "detail": detail}
-    if reason:
-        body["reason"] = reason
-    return HTTPException(status_code=status, detail=body)
+    # The guards, the compile gate and the write live in `resume_write`, shared with
+    # the MCP tools. This handler only resolves ownership and shapes the response.
+    return EditOut(**await apply_edit(db, resume, body))
 
 
 @router.get("/v1/resumes/{resume_id}/preview.svg", response_model=PreviewPages)
