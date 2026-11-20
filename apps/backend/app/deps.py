@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
-from app.models import GuestSession, Resume, TalentApiKey, User
+from app.models import AgentApiKey, GuestSession, Resume, TalentApiKey, User
+from app.services.agent_keys import key_for_token as agent_key_for_token
 from app.services.guest import GUEST_COOKIE, ensure_guest, hash_guest_key
 from app.services.talent_keys import key_for_token
 
@@ -187,3 +188,42 @@ def require_talent_caller(
     # row is the point of the endpoint.
     key.last_used_at = datetime.now(timezone.utc)
     return key
+
+
+def require_agent_caller(
+    request: Request, db: Session = Depends(get_db)
+) -> tuple[User, AgentApiKey]:
+    """A user's own agent token, or nothing at all.
+
+    Same shape as require_talent_caller, for a credential that IS self-serve:
+    a signed-in user mints it for their own assistant and it acts as them.
+    There is deliberately no fallthrough. A session cookie, a guest cookie and
+    an admin account all get 401 here; the only thing that opens this door is
+    an `ofa_` bearer token. Tools downstream receive an already-resolved User
+    and never see how it was authenticated, which is what lets another
+    credential type (OAuth) be added later without touching any tool.
+
+    Every failure is the same 401 with the same message. Which of missing,
+    malformed, unknown, revoked, expired or orphaned it was is not the
+    caller's business, and saying would let someone sort valid-but-dead
+    tokens from invented ones.
+
+    last_used_at is not stamped here. A write in this request's transaction is
+    rolled back by any HTTPException a tool raises, so the stamp belongs to
+    the transport, on its own session.
+    """
+    unauthorized = HTTPException(
+        status_code=401,
+        detail="Credential required",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    header = request.headers.get("authorization") or ""
+    if not header.lower().startswith("bearer "):
+        raise unauthorized
+    key = agent_key_for_token(db, header[7:].strip())
+    if key is None:
+        raise unauthorized
+    user = db.get(User, key.user_id)
+    if user is None:
+        raise unauthorized
+    return user, key
