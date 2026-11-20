@@ -25,7 +25,7 @@ from app.schemas import (
     AgentToolCallOut,
 )
 from app.services.account import AccountError, apply
-from app.services.agent_keys import live_keys, mint_agent_key
+from app.services.agent_keys import TooManyKeys, live_keys, mint_agent_key
 
 router = APIRouter()
 
@@ -139,7 +139,7 @@ def create_agent_key(
         key, raw = mint_agent_key(
             db, user=user, label=label, expires_in_days=body.expires_in_days
         )
-    except ValueError as exc:
+    except TooManyKeys as exc:
         raise _bad_request("too_many_keys") from exc
     return AgentKeyCreated(
         id=key.id,

@@ -398,3 +398,46 @@ def test_one_keys_log_does_not_show_my_other_keys_calls(
     db_session.commit()
     rows = client.get(f"{KEYS}/{first.id}/calls").json()
     assert [r["tool"] for r in rows] == ["from_first"]
+
+
+def test_a_positive_expiry_is_accepted_and_sets_expires_at(client, db_session, signed_in):
+    resp = client.post(KEYS, json={"label": "k", "expires_in_days": 30})
+    assert resp.status_code == 200
+    expires = datetime.fromisoformat(resp.json()["expires_at"])
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    delta = expires - datetime.now(timezone.utc)
+    assert timedelta(days=29, hours=23) < delta <= timedelta(days=30)
+    # And without the field the key does not expire.
+    assert client.post(KEYS, json={"label": "k2"}).json()["expires_at"] is None
+
+
+def test_only_the_cap_is_reported_as_too_many_keys(client, signed_in, monkeypatch):
+    """A different ValueError from the service must not read as a key-limit message."""
+    from app.routers import account as account_router
+
+    def boom(*_a, **_k):
+        raise ValueError("something else entirely")
+
+    monkeypatch.setattr(account_router, "mint_agent_key", boom)
+    with pytest.raises(ValueError, match="something else"):
+        client.post(KEYS, json={"label": "k"})
+
+
+def test_a_revoked_keys_call_log_outlives_the_credential(
+    client, db_session, signed_in, a_user
+):
+    """Deliberate: DELETE on a revoked key is 404, but its log stays readable.
+
+    An audit trail that vanishes when you revoke is useless exactly when you
+    revoke because something looked wrong."""
+    key, _ = mint_agent_key(db_session, user=a_user, label="leaked")
+    db_session.add(
+        AgentToolCall(key_id=key.id, user_id=a_user.id, tool="get_resume", outcome="ok")
+    )
+    db_session.commit()
+    assert client.delete(f"{KEYS}/{key.id}").status_code == 204
+    assert client.delete(f"{KEYS}/{key.id}").status_code == 404
+    rows = client.get(f"{KEYS}/{key.id}/calls")
+    assert rows.status_code == 200
+    assert [r["tool"] for r in rows.json()] == ["get_resume"]

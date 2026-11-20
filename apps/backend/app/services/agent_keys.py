@@ -25,6 +25,15 @@ AGENT_KEY_PREFIX = "ofa_"
 MAX_LIVE_KEYS = 5
 
 
+class TooManyKeys(ValueError):
+    """The user already holds MAX_LIVE_KEYS live keys.
+
+    A ValueError subclass so existing callers that catch ValueError still work,
+    but callers that mean "the cap" catch this one: a different ValueError out
+    of mint_agent_key must not be reported to a person as a key-limit problem.
+    """
+
+
 def new_agent_key() -> str:
     return AGENT_KEY_PREFIX + secrets.token_urlsafe(32)
 
@@ -83,11 +92,11 @@ def mint_agent_key(
 ) -> tuple[AgentApiKey, str]:
     """Create one credential. The raw token is returned once and never stored.
 
-    Raises ValueError("Too many keys") when the user already holds
+    Raises TooManyKeys when the user already holds
     MAX_LIVE_KEYS live ones; revoke one first.
     """
     if len(live_keys(db, user)) >= MAX_LIVE_KEYS:
-        raise ValueError("Too many keys")
+        raise TooManyKeys("Too many keys")
     raw = new_agent_key()
     expires_at = (
         datetime.now(timezone.utc) + timedelta(days=expires_in_days)

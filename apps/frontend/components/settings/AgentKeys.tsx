@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
+  ApiError,
   agentKeyErrorCode,
   createAgentKey,
   listAgentKeyCalls,
@@ -53,9 +54,19 @@ export default function AgentKeys({ matchingOn }: { matchingOn: boolean }) {
   const [busy, setBusy] = useState(false);
   const [revoking, setRevoking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Set when the list could not be re-read after a change that DID succeed.
+  // Kept apart from `error` on purpose: this is "the screen may be behind",
+  // never "the thing you did failed".
+  const [stale, setStale] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [calls, setCalls] = useState<Record<string, AgentToolCall[] | "failed">>({});
-  const [origin, setOrigin] = useState("");
+  // "" on the server and during hydration, the real origin afterwards, so the
+  // two renders agree without setting state inside an effect.
+  const origin = useSyncExternalStore(
+    () => () => {},
+    () => window.location.origin,
+    () => "",
+  );
 
   const day = useCallback(
     (iso: string) => new Date(iso).toLocaleDateString(locale, { dateStyle: "medium" }),
@@ -68,8 +79,6 @@ export default function AgentKeys({ matchingOn }: { matchingOn: boolean }) {
   );
 
   useEffect(() => {
-    // Set after mount so the server render and the first client render agree.
-    setOrigin(window.location.origin);
     let cancelled = false;
     listAgentKeys()
       .then((rows) => {
@@ -86,16 +95,26 @@ export default function AgentKeys({ matchingOn }: { matchingOn: boolean }) {
     };
   }, [t]);
 
+  /**
+   * Re-read the list after a change. Never throws, and never reports a failure
+   * of the change itself: the change already succeeded by the time this runs.
+   */
+  async function refreshKeys() {
+    try {
+      setKeys(await listAgentKeys());
+      setStale(false);
+    } catch {
+      setStale(true);
+    }
+  }
+
   async function generate(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError(null);
+    let made: AgentKeyCreated;
     try {
-      const made = await createAgentKey(label.trim());
-      setFresh(made);
-      setCopied(false);
-      setLabel("");
-      setKeys(await listAgentKeys());
+      made = await createAgentKey(label.trim());
     } catch (err) {
       const code = agentKeyErrorCode(err);
       setError(
@@ -105,9 +124,25 @@ export default function AgentKeys({ matchingOn }: { matchingOn: boolean }) {
             ? t("errorLabel")
             : t("errorGeneric"),
       );
-    } finally {
       setBusy(false);
+      return;
     }
+    // The key exists now. Show the token and the key first, from what the mint
+    // returned, so a failed re-list below cannot hide a live credential or
+    // sit an error next to a secret the person is deciding whether to copy.
+    const listed: AgentKey = {
+      id: made.id,
+      label: made.label,
+      created_at: made.created_at,
+      last_used_at: made.last_used_at,
+      expires_at: made.expires_at,
+    };
+    setFresh(made);
+    setCopied(false);
+    setLabel("");
+    setKeys((prev) => [...(prev ?? []), listed]);
+    await refreshKeys();
+    setBusy(false);
   }
 
   async function copy() {
@@ -126,14 +161,22 @@ export default function AgentKeys({ matchingOn }: { matchingOn: boolean }) {
     setError(null);
     try {
       await revokeAgentKey(id);
-      if (fresh?.id === id) setFresh(null);
-      if (open === id) setOpen(null);
-      setKeys(await listAgentKeys());
-    } catch {
-      setError(t("errorGeneric"));
-    } finally {
-      setRevoking(null);
+    } catch (err) {
+      // 404 means the key is already gone (revoked in another tab, say), which
+      // is the outcome that was asked for. Anything else really did fail.
+      if (!(err instanceof ApiError && err.status === 404)) {
+        setError(t("errorGeneric"));
+        setRevoking(null);
+        return;
+      }
     }
+    // Revoked. Drop it locally first so it cannot linger as "live" if the
+    // re-list below fails.
+    if (fresh?.id === id) setFresh(null);
+    if (open === id) setOpen(null);
+    setKeys((prev) => (prev ?? []).filter((key) => key.id !== id));
+    await refreshKeys();
+    setRevoking(null);
   }
 
   async function toggleCalls(id: string) {
@@ -168,6 +211,11 @@ export default function AgentKeys({ matchingOn }: { matchingOn: boolean }) {
         ) : null}
 
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        {stale ? (
+          <p role="status" className="text-xs leading-5 text-muted-foreground">
+            {t("listStale")}
+          </p>
+        ) : null}
 
         <form onSubmit={(event) => void generate(event)} className="flex flex-col gap-1.5">
           <label htmlFor="agent-key-label" className="text-sm font-medium">

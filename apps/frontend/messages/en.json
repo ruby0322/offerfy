@@ -1904,6 +1904,7 @@
     "errorTooMany": "You already have 5 keys. Revoke one to make another.",
     "errorLabel": "Give the key a name of up to 255 characters.",
     "errorGeneric": "Something went wrong. Please try again.",
+    "listStale": "The change went through, but the list could not be refreshed. Reload the page to see your current keys.",
     "loadFailed": "Could not load your keys. Please reload."
   }
 }
