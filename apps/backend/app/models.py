@@ -1715,8 +1715,9 @@ class AgentToolCall(Base):
     so refusals and errors are recorded too. Deliberately holds no arguments:
     they carry resume content. Only the tool name, which resume it was about
     (resume_id is a plain string, not a foreign key, so the record outlives the
-    resume) and the outcome ("ok", "refused" or "error"; no CHECK constraint,
-    matching JobScore.outcome).
+    resume) and the outcome ("ok", "refused", "error" or "throttled"; no CHECK
+    constraint, matching JobScore.outcome). "throttled" is the quota's own
+    refusal and is the one outcome the quota does not count.
 
     Both foreign keys cascade: the rows go with the key and with the account.
     created_at takes a Python-side default so a test or backfill can set it; a
@@ -1724,6 +1725,10 @@ class AgentToolCall(Base):
     """
 
     __tablename__ = "agent_tool_calls"
+    # The quota query (WHERE key_id = ? AND created_at >= ?) runs on every tool
+    # call; this composite serves it. user_id (settings page) and created_at
+    # keep their single-column indexes.
+    __table_args__ = (Index("ix_agent_tool_calls_key_created", "key_id", "created_at"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     key_id: Mapped[str] = mapped_column(

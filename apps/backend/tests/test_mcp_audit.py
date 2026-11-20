@@ -99,3 +99,53 @@ def test_calls_older_than_an_hour_do_not_count(client, db_session, a_user):
     db_session.commit()
     with audited(key, "search_jobs"):
         pass  # must not raise
+
+
+def test_a_throttled_call_is_recorded_as_throttled(client, db_session, a_user):
+    key, _ = mint_agent_key(db_session, user=a_user, label="k")
+    db_session.commit()
+    for _ in range(QUOTA_PER_HOUR):
+        with audited(key, "search_jobs"):
+            pass
+    with pytest.raises(HTTPException):
+        with audited(key, "search_jobs"):
+            pass
+    outcomes = [
+        r.outcome
+        for r in db_session.query(AgentToolCall).order_by(AgentToolCall.created_at)
+    ]
+    assert outcomes.count("throttled") == 1
+    assert "refused" not in outcomes
+
+
+def test_throttled_rows_do_not_count_toward_the_quota(client, db_session, a_user):
+    """A hammering client must not keep its own window full: only the throttle's
+    bookkeeping is exempt, so once the real calls age out the key works again."""
+    key, _ = mint_agent_key(db_session, user=a_user, label="k")
+    db_session.commit()
+    now = datetime.now(timezone.utc)
+    old = now - timedelta(minutes=61)
+    for _ in range(QUOTA_PER_HOUR):
+        db_session.add(AgentToolCall(key_id=key.id, user_id=a_user.id,
+                                     tool="search_jobs", outcome="ok", created_at=old))
+    for _ in range(QUOTA_PER_HOUR):
+        db_session.add(AgentToolCall(key_id=key.id, user_id=a_user.id,
+                                     tool="search_jobs", outcome="throttled", created_at=now))
+    db_session.commit()
+    with audited(key, "search_jobs"):
+        pass  # 300 recent throttled rows must not lock the key out
+
+
+def test_ordinary_refusals_still_count_toward_the_quota(client, db_session, a_user):
+    """Excluding all refused rows would let a client hammering bad resume ids
+    through forever."""
+    key, _ = mint_agent_key(db_session, user=a_user, label="k")
+    db_session.commit()
+    for _ in range(QUOTA_PER_HOUR):
+        db_session.add(AgentToolCall(key_id=key.id, user_id=a_user.id,
+                                     tool="get_resume", outcome="refused"))
+    db_session.commit()
+    with pytest.raises(HTTPException) as caught:
+        with audited(key, "get_resume"):
+            pass
+    assert caught.value.status_code == 429

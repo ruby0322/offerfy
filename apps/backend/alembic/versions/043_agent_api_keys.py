@@ -11,7 +11,8 @@ agent_tool_calls (see app.models.AgentToolCall) is the audit trail and the
 hourly quota's counter. Both foreign keys are ondelete="CASCADE". resume_id is
 a plain string, not a foreign key, so the record outlives the resume. created_at
 has no server default: the writer sets it, and a default would make a
-backfilled row look current. No arguments are stored; they carry resume content.
+backfilled row look current. The composite index (key_id, created_at) serves
+the per-call quota query. No arguments are stored; they carry resume content.
 
 agent_api_keys: one row per credential a user mints for their own AI assistant (the MCP
 surface). See app.models.AgentApiKey. Distinct from talent_api_keys, which an
@@ -68,9 +69,13 @@ def upgrade() -> None:
     )
     op.create_index("ix_agent_tool_calls_user_id", "agent_tool_calls", ["user_id"])
     op.create_index("ix_agent_tool_calls_created_at", "agent_tool_calls", ["created_at"])
+    op.create_index(
+        "ix_agent_tool_calls_key_created", "agent_tool_calls", ["key_id", "created_at"]
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("ix_agent_tool_calls_key_created", table_name="agent_tool_calls")
     op.drop_index("ix_agent_tool_calls_created_at", table_name="agent_tool_calls")
     op.drop_index("ix_agent_tool_calls_user_id", table_name="agent_tool_calls")
     op.drop_table("agent_tool_calls")

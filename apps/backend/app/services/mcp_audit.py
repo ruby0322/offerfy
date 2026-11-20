@@ -20,7 +20,15 @@ nothing but its own audit row. rate_limit.RateEvent is deliberately not used:
 it requires a guest session and no-ops outside production.
 
 No tool arguments are recorded: they carry resume content. Only the tool name,
-which resume it was about, and the outcome (ok, refused, error).
+which resume it was about, and the outcome: ok, refused (an HTTPException
+escaped), error (anything else) or throttled (the quota refusal itself).
+
+**Why throttled is its own outcome.** The quota counts rows, and a refused
+call is recorded. If the quota's own refusal were an ordinary `refused` row it
+would feed the count that caused it, so a client looping past 300 would keep
+its window full forever: a permanent lockout of the user by their own script.
+check_quota therefore counts every row except `throttled`. Not every `refused`
+row: a client hammering invalid resume ids must still be throttled.
 """
 
 from contextlib import contextmanager
@@ -36,9 +44,13 @@ from app.models import AgentApiKey, AgentToolCall
 
 QUOTA_PER_HOUR = 300
 
+THROTTLED = "throttled"
+
 # AgentToolCall.resume_id is String(36). The caller assigns it from raw tool
 # arguments, so an oversized value must not turn the audit write into a failure
-# (record deliberately swallows nothing).
+# (record deliberately swallows nothing). This coercion is only a backstop: the
+# caller (the MCP dispatch) is expected to validate resume_id where it reads the
+# arguments, and to reject a malformed one before it gets here.
 _RESUME_ID_MAX = 36
 
 
@@ -73,6 +85,7 @@ def check_quota(key_id: str, *, now: datetime | None = None) -> None:
             db.query(func.count(AgentToolCall.id))
             .filter(
                 AgentToolCall.key_id == key_id,
+                AgentToolCall.outcome != THROTTLED,
                 AgentToolCall.created_at >= now - timedelta(hours=1),
             )
             .scalar()
@@ -106,13 +119,13 @@ class Call:
 @contextmanager
 def audited(key: AgentApiKey, tool: str) -> Iterator[Call]:
     # Capture before anything can expire or detach the instance. A refused
-    # call is itself recorded (it spends nothing but its own row).
+    # call is itself recorded, as throttled so it does not feed its own count.
     key_id, user_id = key.id, key.user_id
     call = Call()
     try:
         check_quota(key_id)
     except HTTPException:
-        record(key_id, user_id, tool, None, "refused")
+        record(key_id, user_id, tool, None, THROTTLED)
         raise
     _stamp_last_used(key_id)
     try:
