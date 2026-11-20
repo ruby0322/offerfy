@@ -533,3 +533,124 @@ def test_the_router_still_treats_an_empty_locale_as_the_default(client):
     r = client.post("/v1/resumes", json={"locale": ""})
     assert r.status_code == 201
     assert r.json()["locale"] == "zh-TW"
+
+
+# --- publish / unpublish ----------------------------------------------------
+
+
+def _share_rows(db_session, resume):
+    from app.models import ResumeShare
+
+    db_session.expire_all()
+    return db_session.query(ResumeShare).filter(ResumeShare.resume_id == resume.id).count()
+
+
+def test_publish_creates_a_working_public_link(client, db_session, a_user, my_resume):
+    out = json.loads(_call(client, db_session, a_user, "publish_resume",
+                           {"resume_id": my_resume.id}))
+    assert out["public"] is True and out["token"]
+    assert client.get(f"/v1/shares/{out['token']}").status_code == 200
+
+
+def test_publish_also_pins_a_revision(client, db_session, a_user, my_resume):
+    _call(client, db_session, a_user, "publish_resume", {"resume_id": my_resume.id})
+    db_session.refresh(my_resume)
+    assert my_resume.published_revision_id is not None
+
+
+def test_publish_never_leaves_a_share_without_a_pinned_revision(
+    client, db_session, a_user, my_resume
+):
+    # A share row with no pin makes /v1/shares/{token} 404 on a resume the tool
+    # just called public. Check the pair, from the database, after each call.
+    from app.models import Resume
+
+    call = _caller(client, db_session, a_user)
+    seen_shared = False
+    for tool in ("publish_resume", "unpublish_resume", "publish_resume"):
+        call(tool, {"resume_id": my_resume.id})
+        db_session.expire_all()
+        pinned = db_session.get(Resume, my_resume.id).published_revision_id
+        if _share_rows(db_session, my_resume):
+            seen_shared = True
+            assert pinned is not None, tool
+    assert seen_shared
+
+
+def test_publish_is_idempotent_and_keeps_the_token(client, db_session, a_user, my_resume):
+    call = _caller(client, db_session, a_user)
+    first = json.loads(_text(call("publish_resume", {"resume_id": my_resume.id})))
+    second = json.loads(_text(call("publish_resume", {"resume_id": my_resume.id})))
+    assert first["token"] == second["token"]
+    assert _share_rows(db_session, my_resume) == 1
+
+
+def test_unpublish_closes_the_link_but_not_the_talent_gate(client, db_session, a_user,
+                                                            my_resume):
+    """The user chose this. Pinning stays, so a consenting profile stays readable."""
+    pub = json.loads(_call(client, db_session, a_user, "publish_resume",
+                           {"resume_id": my_resume.id}))
+    db_session.refresh(my_resume)
+    pinned = my_resume.published_revision_id
+    assert pinned is not None
+    out = json.loads(_call(client, db_session, a_user, "unpublish_resume",
+                           {"resume_id": my_resume.id}))
+    assert out["public"] is False and out["token"] is None
+    assert client.get(f"/v1/shares/{pub['token']}").status_code == 404
+    db_session.refresh(my_resume)
+    assert my_resume.published_revision_id == pinned
+
+
+def test_unpublish_on_a_never_published_resume_is_a_quiet_no_op(
+    client, db_session, a_user, my_resume
+):
+    out = json.loads(_call(client, db_session, a_user, "unpublish_resume",
+                           {"resume_id": my_resume.id}))
+    assert out["public"] is False
+    db_session.refresh(my_resume)
+    assert my_resume.published_revision_id is None
+
+
+def test_publish_and_unpublish_on_someone_elses_resume_are_not_found(
+    client, db_session, a_user, other_user
+):
+    from tests.conftest import _resume_for
+
+    theirs = _resume_for(db_session, other_user)
+    call = _caller(client, db_session, a_user)
+    for tool in ("publish_resume", "unpublish_resume"):
+        body = call(tool, {"resume_id": theirs.id})
+        assert _is_tool_error(body), tool
+        assert "not found" in _text(body).lower(), tool
+    assert _share_rows(db_session, theirs) == 0
+    db_session.refresh(theirs)
+    assert theirs.published_revision_id is None
+
+
+def test_publish_and_unpublish_resume_id_of_the_wrong_type_is_a_400(
+    client, db_session, a_user
+):
+    call = _caller(client, db_session, a_user)
+    for tool in ("publish_resume", "unpublish_resume"):
+        for bad in (3, [], {}, None, False, ""):
+            body = call(tool, {"resume_id": bad})
+            assert _is_tool_error(body), (tool, bad)
+            assert "resume_id is required" in _text(body), (tool, bad, _text(body))
+
+
+def test_publish_is_recorded_in_the_audit(client, db_session, a_user, my_resume):
+    from app.models import AgentToolCall
+
+    _call(client, db_session, a_user, "publish_resume", {"resume_id": my_resume.id})
+    row = db_session.query(AgentToolCall).filter(
+        AgentToolCall.tool == "publish_resume").one()
+    assert row.resume_id == my_resume.id and row.outcome == "ok"
+
+
+def test_the_publish_descriptions_name_the_talent_profile_consequence():
+    by_name = {s["name"]: s["description"] for s in specs()}
+    pub, unpub = by_name["publish_resume"], by_name["unpublish_resume"]
+    assert "anyone" in pub and "link" in pub
+    assert "open to matching" in pub and "recruiter" in pub
+    assert "open to matching" in unpub and "website" in unpub
+    assert "not" in unpub.lower().split("open to matching")[0]

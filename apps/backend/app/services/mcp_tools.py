@@ -26,7 +26,9 @@ import dataclasses
 import inspect
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable
+from urllib.parse import quote
 
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -34,7 +36,14 @@ from sqlalchemy.orm import Session
 
 from app.models import Job, JobScore, User
 from app.schemas_editing import IntentIn
-from app.services import family, jobs_tools, resume_access, resume_write
+from app.services import (
+    export_link,
+    family,
+    jobs_tools,
+    resume_access,
+    resume_write,
+    sharing,
+)
 from app.services.revisions import source_hash
 from app.services.starter import default_title, generate_starter, validate_locale
 from app.services.typst_projection import parse_projection
@@ -202,6 +211,37 @@ def _set_resume_title(db: Session, user: User, args: dict) -> dict:
     resume.title = _clean_title(args.get("title"))
     db.commit()
     return {"resume_id": resume.id, "title": resume.title}
+
+
+def _set_public(db: Session, user: User, args: dict, public: bool) -> dict:
+    resume = resume_access.owned_by_user(db, user, _required_str(args, "resume_id"))
+    state = sharing.set_public(db, resume, public)
+    db.commit()
+    return state.model_dump()
+
+
+def _publish_resume(db: Session, user: User, args: dict) -> dict:
+    """Make a resume public through the SHARE door, not `POST .../publish`: that
+    route only pins a revision and creates no link."""
+    return _set_public(db, user, args, True)
+
+
+def _unpublish_resume(db: Session, user: User, args: dict) -> dict:
+    """Delete the share row; leave the pinned revision, as the website does."""
+    return _set_public(db, user, args, False)
+
+
+def _export_resume(db: Session, user: User, args: dict) -> dict:
+    """A ten-minute signed link to the PDF. Compiles nothing here."""
+    resume = resume_access.owned_by_user(db, user, _required_str(args, "resume_id"))
+    token, expiry = export_link.mint(resume.id)
+    return {
+        # The public path, behind the site's /api rewrite; resolve it against the
+        # origin this MCP endpoint was reached on.
+        "url": f"/api/v1/resumes/export/{quote(token, safe='')}",
+        "expires_at": datetime.fromtimestamp(expiry, timezone.utc).isoformat(),
+        "filename": export_link.pdf_filename(resume.title),
+    }
 
 
 def _catalogue_tool(shared: dict) -> Tool:
@@ -415,6 +455,70 @@ REGISTRY: dict[str, Tool] = {
             },
         },
         handler=_set_resume_title,
+    ),
+    "publish_resume": Tool(
+        spec={
+            "name": "publish_resume",
+            "description": "Make one of the signed-in user's resumes public: "
+            "creates a link that anyone who has it can open, with no sign-in, "
+            "and returns it as `token` (the page is /s/<token> on the site). It "
+            "publishes the revision last pinned, or pins the current draft if "
+            "none is; `unpublished_changes` says whether later edits are not in "
+            "it. Also: if the user has \"open to matching\" on and their "
+            "talent profile points at this resume, publishing re-opens that "
+            "profile to recruiters with credentials. Only call this when the "
+            "user has asked to publish.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "resume_id": {"type": "string", "description": "From list_resumes."}
+                },
+                "required": ["resume_id"],
+                "additionalProperties": False,
+            },
+        },
+        handler=_publish_resume,
+    ),
+    "unpublish_resume": Tool(
+        spec={
+            "name": "unpublish_resume",
+            "description": "Withdraw the public link of one of the signed-in "
+            "user's resumes; the old link stops working. It does NOT close the "
+            "recruiter-facing talent profile: that stays readable to "
+            "credentialed recruiters for as long as the user has \"open to "
+            "matching\" on, and only the user can turn that off, on the "
+            "website. Do not tell the user their resume is fully private after "
+            "this.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "resume_id": {"type": "string", "description": "From list_resumes."}
+                },
+                "required": ["resume_id"],
+                "additionalProperties": False,
+            },
+        },
+        handler=_unpublish_resume,
+    ),
+    "export_resume": Tool(
+        spec={
+            "name": "export_resume",
+            "description": "Get a download link for one of the signed-in user's "
+            "resumes as a PDF of its current draft. Returns `url` (a path on "
+            "the same site as this MCP endpoint), `expires_at` (the link works "
+            "for 10 minutes) and `filename`. Anyone holding the link can "
+            "download that PDF until it expires, so do not post it anywhere. "
+            "It does not publish the resume.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "resume_id": {"type": "string", "description": "From list_resumes."}
+                },
+                "required": ["resume_id"],
+                "additionalProperties": False,
+            },
+        },
+        handler=_export_resume,
     ),
     "list_resumes": Tool(
         spec={

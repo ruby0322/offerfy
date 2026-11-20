@@ -41,6 +41,7 @@ from app.schemas_editing import EditOut, IntentIn, ProjectionOut
 from app.services.ats import analyze_pdf
 from app.services.chat_messages import persist_template_switch
 from app.services.emitters import emitter_for
+from app.services.export_link import pdf_filename, resume_id_for
 from app.services.family import create_tailor, family_master, family_tailors
 from app.services.jobs.applications import link_tailor
 from app.services.extract import (
@@ -864,6 +865,31 @@ def export_pdf(
         content=data,
         media_type="application/pdf",
         headers={"Content-Disposition": 'attachment; filename="resume.pdf"'},
+    )
+
+
+# Public, and unlisted: a route in /api/openapi.json is a route described on the
+# open web, and this one is reachable without a credential. The token is NOT a
+# ResumeShare token (that is a state the user chose to be in, with a table, a
+# revoke and an OG image); it is a signed `resume_id|expiry` minted by the
+# `export_resume` agent tool. Signature, then expiry, then the row: a missing
+# resume is a 404 before anything is compiled, because a signature outlives the
+# row it names.
+@router.get("/v1/resumes/export/{token}", include_in_schema=False)
+def export_by_token(token: str, db: Session = Depends(get_db)):
+    resume_id = resume_id_for(token)
+    if resume_id is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    resume = db.get(Resume, resume_id)
+    if resume is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    data = compile_typst(resume.typst_source, "pdf")
+    return RawResponse(
+        content=data,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{pdf_filename(resume.title)}"'
+        },
     )
 
 
