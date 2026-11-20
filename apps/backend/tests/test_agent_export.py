@@ -15,7 +15,9 @@ from tests.test_mcp_tools import _call, _caller, _is_tool_error, _text
 
 
 def _token(resume_id: str, expiry: int, secret: str | None = None) -> str:
-    return _sign(f"{resume_id}|{expiry}", secret or get_settings().auth_token_secret)
+    return _sign(
+        f"export|{resume_id}|{expiry}", secret or get_settings().auth_token_secret
+    )
 
 
 def _fetch(client, token: str):
@@ -76,8 +78,61 @@ def test_a_tampered_export_token_is_refused(client, my_resume):
 def test_extending_the_expiry_of_a_real_token_is_refused(client, my_resume):
     good = _token(my_resume.id, int(time.time()) + 300)
     value, sig = good.rsplit(".", 1)
-    rid, _exp = value.split("|")
-    assert _fetch(client, f"{rid}|9999999999.{sig}").status_code in (403, 404)
+    purpose, rid, _exp = value.split("|")
+    assert _fetch(client, f"{purpose}|{rid}|9999999999.{sig}").status_code in (403, 404)
+
+
+def test_a_signed_value_without_the_export_purpose_is_not_a_token(client, my_resume):
+    """`_sign` and `auth_token_secret` are shared with the session cookie. No
+    confusion is possible today, which is exactly when to make it impossible:
+    an export token says what it is for, and nothing else is one."""
+    secret = get_settings().auth_token_secret
+    expiry = int(time.time()) + 300
+    for value in (
+        f"{my_resume.id}|{expiry}",  # what this token used to look like
+        f"session|{my_resume.id}|{expiry}",
+        my_resume.id,  # the shape of the session cookie's own value
+    ):
+        assert _fetch(client, _sign(value, secret)).status_code in (403, 404), value
+
+
+def test_the_export_route_releases_its_connection_before_the_compile(
+    client, db_session, a_user, my_resume, monkeypatch
+):
+    """Public, unauthenticated, unrate-limited, and every hit is up to 30s of
+    Typst: holding a pool slot across that is how one worker stops answering
+    everything, /healthz included."""
+    from sqlalchemy import event
+
+    from app.db import get_engine
+
+    engine = get_engine()
+    state = {"open": 0}
+    seen = {}
+
+    def out(*_a):
+        state["open"] += 1
+
+    def back(*_a):
+        state["open"] -= 1
+
+    def fake_compile(source, fmt):
+        seen["open_during_compile"] = state["open"]
+        return b"%PDF-1.7\n%%EOF\n"
+
+    out_url = json.loads(
+        _call(client, db_session, a_user, "export_resume", {"resume_id": my_resume.id})
+    )["url"]
+    db_session.commit()  # release what the fixtures left open on this session
+    monkeypatch.setattr("app.routers.resumes.compile_typst", fake_compile)
+    event.listen(engine, "checkout", out)
+    event.listen(engine, "checkin", back)
+    try:
+        assert client.get(_bare(out_url)).status_code == 200
+    finally:
+        event.remove(engine, "checkout", out)
+        event.remove(engine, "checkin", back)
+    assert seen["open_during_compile"] == 0
 
 
 def test_a_token_for_another_resume_id_is_refused(client, db_session, a_user, other_user,

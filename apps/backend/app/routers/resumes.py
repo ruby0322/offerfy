@@ -883,13 +883,17 @@ def export_by_token(token: str, db: Session = Depends(get_db)):
     resume = db.get(Resume, resume_id)
     if resume is None:
         raise HTTPException(status_code=404, detail="Not found")
-    data = compile_typst(resume.typst_source, "pdf")
+    source, title = resume.typst_source, resume.title
+    # Release the pooled connection before the compile, the same order
+    # app/services/resume_write.py uses and for the same reason: a Typst
+    # subprocess can run for 30s, and this route is public, unauthenticated and
+    # unrate-limited, so it is the easiest way to pin a pool slot per request.
+    db.commit()
+    data = compile_typst(source, "pdf")
     return RawResponse(
         content=data,
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="{pdf_filename(resume.title)}"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="{pdf_filename(title)}"'},
     )
 
 

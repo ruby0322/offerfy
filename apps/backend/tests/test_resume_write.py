@@ -281,6 +281,13 @@ def test_edit_resume_refuses_kinds_that_delete_or_reorder(
         body = _raw_call(client, db_session, a_user, "edit_resume", {
             "resume_id": my_resume.id, "hash": proj.hash, "kind": kind, **extra})
         assert _is_tool_error(body), kind
+        # The message is the point: isError alone also passes when the call
+        # failed for some unrelated reason, a bad target id for instance.
+        text = _text(body)
+        assert "kind must be one of" in text, (kind, text)
+        assert kind not in text, (kind, text)
+        for allowed in ("set_arg", "insert_bullet", "insert_section"):
+            assert allowed in text, (kind, text)
     db_session.expire_all()
     assert db_session.get(type(my_resume), my_resume.id).typst_source == before
 
@@ -312,14 +319,18 @@ def test_edit_resume_insert_section_is_accepted_and_changes_the_document(
     assert out["hash"] == source_hash(stored)
 
 
+@pytest.mark.parametrize("over", [1, 5, 4096])
 async def test_an_oversized_source_is_refused_before_the_compile(
-    db_session, my_resume, monkeypatch
+    db_session, my_resume, monkeypatch, over
 ):
+    """`over=1` is the edge that matters: at five bytes over, a `> MAX + 4`
+    mutant of the comparison survives, so only the far side of the cap was
+    pinned."""
     compiled = []
     monkeypatch.setattr(
         resume_write, "_preview_pages", lambda *a, **k: compiled.append(a) or {"pages": []})
     before = my_resume.typst_source
-    big = "= Hi\n" + "x" * resume_write.MAX_SOURCE_BYTES
+    big = "x" * (resume_write.MAX_SOURCE_BYTES + over)
     with pytest.raises(HTTPException) as caught:
         await write_source(
             db_session, my_resume, source=big, expected_hash=source_hash(before))

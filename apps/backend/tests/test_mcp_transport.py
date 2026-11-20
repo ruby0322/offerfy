@@ -7,6 +7,7 @@ test database.
 """
 
 import json
+import sys
 from datetime import datetime, timezone
 
 import pytest
@@ -503,3 +504,94 @@ def test_an_audit_layer_failure_is_a_jsonrpc_internal_error(client, raw_key, mon
     r = _call(client, raw_key, "list_resumes")
     assert r.status_code == 200
     assert r.json()["error"]["code"] == -32603
+
+
+def test_an_internal_error_survives_a_rollback_that_fails(client, raw_key, monkeypatch):
+    """The generic branch exists for pool and database failures, and on exactly
+    those its own `db.rollback()` is what raises. Unguarded, it turned the
+    -32603 the branch promises into an HTTP 500."""
+    from sqlalchemy.orm import Session
+
+    from app.services import mcp_audit
+
+    def broken(*a, **k):
+        raise RuntimeError("audit db down")
+
+    def no_rollback(self, *a, **k):
+        raise RuntimeError("the connection is gone")
+
+    monkeypatch.setattr(mcp_audit, "_stamp_last_used", broken)
+    monkeypatch.setattr(Session, "rollback", no_rollback)
+    r = _call(client, raw_key, "list_resumes")
+    assert r.status_code == 200
+    assert r.json()["error"]["code"] == -32603
+
+
+def test_deeply_nested_json_is_a_parse_error_not_a_500(client, raw_key):
+    """Python's JSON parser raises RecursionError, not ValueError, past the
+    recursion limit, so this reached the endpoint as an unhandled exception."""
+    # Well past where the C scanner gives up: it has headroom of its own, so a
+    # few thousand levels still parse (and would answer "Invalid request").
+    nesting = sys.getrecursionlimit() * 20
+    content = b"[" * nesting + b"]" * nesting
+    r = client.post(
+        MCP,
+        headers={**_bearer(raw_key), "Content-Type": "application/json"},
+        content=content,
+    )
+    assert r.status_code == 200
+    assert r.json()["error"]["code"] == -32700
+
+
+def _checkout_watch(request) -> dict:
+    """Counts connections checked out of the pool, and the peak."""
+    from sqlalchemy import event
+
+    from app.db import get_engine
+
+    engine = get_engine()
+    state = {"open": 0, "peak": 0}
+
+    def out(*_a):
+        state["open"] += 1
+        state["peak"] = max(state["peak"], state["open"])
+
+    def back(*_a):
+        state["open"] -= 1
+
+    event.listen(engine, "checkout", out)
+    event.listen(engine, "checkin", back)
+    request.addfinalizer(lambda: event.remove(engine, "checkout", out))
+    request.addfinalizer(lambda: event.remove(engine, "checkin", back))
+    return state
+
+
+@pytest.mark.parametrize(
+    "tool,args",
+    [
+        ("list_resumes", {}),
+        ("get_resume", {"resume_id": "@resume"}),
+        ("create_resume", {"locale": "en"}),
+        ("set_resume_title", {"resume_id": "@resume", "title": "Renamed"}),
+        ("publish_resume", {"resume_id": "@resume"}),
+    ],
+)
+def test_a_tools_call_never_holds_two_pool_connections(
+    client, db_session, my_resume, raw_key, request, tool, args
+):
+    """app/concurrency.py caps in-flight requests at 32 against a 40-slot pool
+    *on the assumption that a request holds one connection*. This endpoint used
+    to hold the request session's connection across `check_quota`,
+    `_stamp_last_used` and `record`, each of which opens its own -- so around
+    ten concurrent /mcp calls with the gate otherwise full exceeded the pool,
+    and pool_timeout=3 turned that into 500s for the whole worker.
+    """
+    args = {k: (my_resume.id if v == "@resume" else v) for k, v in args.items()}
+    # Release whatever the fixtures left open on the test's own session, so the
+    # only connections counted below are the request's.
+    db_session.commit()
+    state = _checkout_watch(request)
+    r = _call(client, raw_key, tool, args)
+    assert "error" not in r.json(), r.text
+    assert r.json()["result"]["isError"] is False, r.text
+    assert state["peak"] == 1, f"{tool} peaked at {state['peak']} connections"

@@ -15,10 +15,31 @@ from app.services.jobs_tools import catalogue_specs
 from app.services.mcp_tools import specs
 
 
+def _token_for(client, db, user) -> str:
+    """One key per user per test, minted on first use.
+
+    `_raw_call` used to mint on every call while MAX_LIVE_KEYS is 5, so any
+    test making a sixth tool call as one user hit the cap -- which Task 8
+    worked around with its own `_caller` instead of fixing the shared helper.
+    The cache hangs off the `client` object, which the fixture replaces for
+    every test along with the database, so a token can never outlive the rows
+    it was minted in.
+    """
+    cache = getattr(client, "_agent_tokens", None)
+    if cache is None:
+        cache = {}
+        client._agent_tokens = cache
+    raw = cache.get(user.id)
+    if raw is None:
+        _, raw = mint_agent_key(db, user=user, label="t")
+        db.commit()
+        cache[user.id] = raw
+    return raw
+
+
 def _raw_call(client, db, user, name, args) -> dict:
-    """Mint a key for `user`, post one tools/call, return the JSON-RPC response."""
-    _, raw = mint_agent_key(db, user=user, label="t")
-    db.commit()
+    """Post one tools/call as `user` and return the JSON-RPC response."""
+    raw = _token_for(client, db, user)
     r = client.post(
         "/mcp",
         headers={"Authorization": f"Bearer {raw}"},
@@ -74,6 +95,44 @@ def test_read_job_on_an_unknown_id_is_a_tool_error(client, db_session, a_user):
     )
 
 
+def test_a_missing_posting_is_a_404_and_another_refusal_is_a_400(
+    client, db_session, a_user
+):
+    """The two branches of the catalogue wrapper's status mapping. It used to
+    pick between them with `startswith("No posting")`, so rewording that
+    sentence for a model's benefit would have made every missing posting a 400
+    with nothing to notice."""
+    from fastapi import HTTPException
+
+    from app.services.mcp_tools import REGISTRY
+
+    handler = REGISTRY["read_job"].handler
+    with pytest.raises(HTTPException) as missing:
+        handler(db_session, a_user, {"job_id": "no-such-posting"})
+    assert missing.value.status_code == 404
+    with pytest.raises(HTTPException) as other:
+        handler(db_session, a_user, {"job_id": ""})
+    assert other.value.status_code == 400
+
+
+def test_every_tool_is_classified_for_the_audit_log(client):
+    """A tool added later must not default to invisible in the user's log: the
+    two sets have to cover the registry exactly, so adding a tool without
+    deciding which side it is on fails here."""
+    from app.services.mcp_tools import (
+        AUDIT_PINNED_TOOLS,
+        AUDIT_UNPINNED_TOOLS,
+        REGISTRY,
+    )
+
+    assert AUDIT_PINNED_TOOLS | AUDIT_UNPINNED_TOOLS == set(REGISTRY)
+    assert not AUDIT_PINNED_TOOLS & AUDIT_UNPINNED_TOOLS
+    # And the classification is the right way round for the write tools.
+    assert {"publish_resume", "put_resume_source", "set_job_preferences"} <= (
+        AUDIT_PINNED_TOOLS
+    )
+
+
 def test_the_mcp_job_specs_are_the_catalogue_specs(client):
     """One search_jobs in this codebase, not two."""
     listed = {s["name"]: s for s in specs()}
@@ -108,15 +167,48 @@ def test_list_matches_never_shows_another_persons_scores(
 
 
 def test_list_matches_limit_is_capped(client, db_session, a_user, a_job, another_job):
+    """The cap needs MORE scored rows than the cap, or it passes with no cap at
+    all: with two rows in the table, `limit: 10**6` returns two either way."""
     from app.services.jobs_tools import SEARCH_LIMIT_MAX
+    from tests.conftest import _job_with_facets
 
-    db_session.add_all([_score(a_user, a_job, 0.4), _score(a_user, another_job, 0.9)])
+    scores = [_score(a_user, a_job, 0.4), _score(a_user, another_job, 0.9)]
+    for n in range(SEARCH_LIMIT_MAX):  # SEARCH_LIMIT_MAX + 2 scored rows in all
+        job = _job_with_facets(db_session, f"stripe:cap-{n}", f"Engineer {n}")
+        scores.append(_score(a_user, job, 0.5))
+    db_session.add_all(scores)
     db_session.commit()
     one = json.loads(_call(client, db_session, a_user, "list_matches", {"limit": 1}))
     assert len(one["items"]) == 1
     assert one["items"][0]["job_id"] == another_job.id
     many = json.loads(_call(client, db_session, a_user, "list_matches", {"limit": 10**6}))
-    assert len(many["items"]) <= SEARCH_LIMIT_MAX
+    assert len(many["items"]) == SEARCH_LIMIT_MAX
+
+
+@pytest.mark.parametrize("tool", ["list_matches", "search_jobs"])
+def test_an_infinite_limit_falls_back_to_the_default(
+    client, db_session, a_user, a_job, tool
+):
+    """JSON's `1e999` parses to float("inf"), and `int(inf)` raises
+    OverflowError -- which neither `except (TypeError, ValueError)` caught, so
+    the agent got "The tool failed unexpectedly" where the constraint says a
+    malformed limit falls back to the default."""
+    db_session.add(_score(a_user, a_job, 0.9))
+    _, raw = mint_agent_key(db_session, user=a_user, label="t")
+    db_session.commit()
+    # Posted as raw bytes: `1e999` is valid JSON that Python parses to inf, but
+    # the client's own encoder refuses to serialise a float that far out.
+    body = (
+        '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":'
+        '{"name":"%s","arguments":{"limit":1e999}}}' % tool
+    )
+    r = client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {raw}", "Content-Type": "application/json"},
+        content=body.encode(),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["result"]["isError"] is False, r.text
 
 
 def test_list_matches_hides_a_posting_that_has_closed(
@@ -268,16 +360,23 @@ def test_list_resumes_shows_only_my_own(client, db_session, a_user, other_user):
 
 
 def test_list_resumes_is_newest_first(client, db_session, a_user):
+    """Three rows, timestamped so the answer is neither id order nor its
+    reverse: with two rows an implementation that sorted by the random uuid
+    alone passed or failed depending on which uuid came out larger, and a test
+    that fails one run in two is worse than none."""
     from datetime import timedelta
 
     from tests.conftest import _resume_for
 
-    old = _resume_for(db_session, a_user, title="Old")
-    new = _resume_for(db_session, a_user, title="New")
-    old.updated_at = new.updated_at - timedelta(days=3)
+    rows = [_resume_for(db_session, a_user, title=f"r{n}") for n in range(3)]
+    rows.sort(key=lambda r: r.id)
+    base = rows[0].updated_at
+    # Middle id newest, lowest id next, highest id oldest.
+    for resume, days in zip(rows, (1, 0, 2)):
+        resume.updated_at = base - timedelta(days=days)
     db_session.commit()
     listed = json.loads(_call(client, db_session, a_user, "list_resumes", {}))["items"]
-    assert [r["title"] for r in listed] == ["New", "Old"]
+    assert [r["title"] for r in listed] == [rows[1].title, rows[0].title, rows[2].title]
 
 
 # --- lifecycle: create, fork, rename ---------------------------------------
@@ -443,9 +542,13 @@ def test_the_resume_router_rejects_an_unknown_locale(client):
 
 
 def _caller(client, db, user):
-    """One key, many calls: `_raw_call` mints a key per call and keys are capped."""
-    _, raw = mint_agent_key(db, user=user, label="t")
-    db.commit()
+    """`_raw_call` bound to one user, for a test that makes several calls.
+
+    Identical to calling `_raw_call` directly now that the key is shared (see
+    `_token_for`); kept because it reads better in a test that calls three
+    tools in a row.
+    """
+    raw = _token_for(client, db, user)
 
     def call(name, args):
         r = client.post(

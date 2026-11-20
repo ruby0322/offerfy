@@ -2,9 +2,16 @@
 
 Every tool call passes through `audited`:
 
-    with audited(key, name) as call:
+    with audited(key_id, user_id, name) as call:
         call.resume_id = args.get("resume_id")
         ...
+
+**Ids, not the ORM object.** The caller hands over `key.id` and `key.user_id`,
+read while the request's transaction was still open, because by the time this
+runs that transaction is deliberately closed (app/routers/mcp.py explains why).
+Touching an expired `AgentApiKey` here would re-acquire a pool connection and
+hold it across all three audit sessions, which is exactly the overlap the split
+exists to prevent.
 
 **Why the write does not ride the request's session.** `get_db` rolls back on
 any exception. A row written on the request session would therefore vanish with
@@ -29,6 +36,13 @@ would feed the count that caused it, so a client looping past 300 would keep
 its window full forever: a permanent lockout of the user by their own script.
 check_quota therefore counts every row except `throttled`. Not every `refused`
 row: a client hammering invalid resume ids must still be throttled.
+
+**And at most one throttled row per key per window.** Excluding them from the
+count is not enough: they are still rows in the range the count walks, so a
+looping client wrote one per request forever, made every later quota check
+slower, and pushed everything the user wants to see out of the 50-row audit
+view. One row discloses "your assistant hit the limit"; the refusal message
+carries the reopen time, so nothing is lost by not writing the rest.
 """
 
 from contextlib import contextmanager
@@ -55,28 +69,67 @@ _RESUME_ID_MAX = 36
 _TOOL_MAX = 64  # AgentToolCall.tool is String(64)
 
 
-def record(
+def _aware(value: datetime) -> datetime:
+    # SQLite hands back naive datetimes; Postgres hands back aware ones.
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _new_row(
     key_id: str, user_id: str, tool: str, resume_id: str | None, outcome: str
-) -> None:
-    """Write one audit row on its own session. Raises if the write fails: a
-    silently lost audit row is the failure this module exists to prevent."""
+) -> AgentToolCall:
     if not isinstance(resume_id, str) or len(resume_id) > _RESUME_ID_MAX:
         resume_id = None
     # `tool` is a client-supplied string for an unknown name, and the column is
     # String(64): on Postgres an over-long value is a failed audit write, the
     # same failure the resume_id coercion above prevents.
-    tool = tool[:_TOOL_MAX]
+    return AgentToolCall(
+        key_id=key_id,
+        user_id=user_id,
+        tool=tool[:_TOOL_MAX],
+        resume_id=resume_id,
+        outcome=outcome,
+    )
+
+
+def record(
+    key_id: str, user_id: str, tool: str, resume_id: str | None, outcome: str
+) -> None:
+    """Write one audit row on its own session. Raises if the write fails: a
+    silently lost audit row is the failure this module exists to prevent."""
     db = get_session_factory()()
     try:
-        db.add(
-            AgentToolCall(
-                key_id=key_id,
-                user_id=user_id,
-                tool=tool,
-                resume_id=resume_id,
-                outcome=outcome,
+        db.add(_new_row(key_id, user_id, tool, resume_id, outcome))
+        db.commit()
+    finally:
+        db.close()
+
+
+def record_throttled(
+    key_id: str, user_id: str, tool: str, *, now: datetime | None = None
+) -> None:
+    """One `throttled` row per key per window, and no more.
+
+    Two concurrent refusals can both find nothing and both write, so this is a
+    bound of "a couple", not exactly one; what it rules out is the unbounded
+    row-per-request a looping client used to produce.
+    """
+    now = now or datetime.now(timezone.utc)
+    db = get_session_factory()()
+    try:
+        already = (
+            db.query(AgentToolCall.id)
+            .filter(
+                AgentToolCall.key_id == key_id,
+                AgentToolCall.outcome == THROTTLED,
+                AgentToolCall.created_at >= now - timedelta(hours=1),
             )
+            .first()
         )
+        if already is not None:
+            return
+        db.add(_new_row(key_id, user_id, tool, None, THROTTLED))
         db.commit()
     finally:
         db.close()
@@ -86,20 +139,31 @@ def check_quota(key_id: str, *, now: datetime | None = None) -> None:
     now = now or datetime.now(timezone.utc)
     db = get_session_factory()()
     try:
-        used = (
-            db.query(func.count(AgentToolCall.id))
+        used, oldest = (
+            db.query(func.count(AgentToolCall.id), func.min(AgentToolCall.created_at))
             .filter(
                 AgentToolCall.key_id == key_id,
                 AgentToolCall.outcome != THROTTLED,
                 AgentToolCall.created_at >= now - timedelta(hours=1),
             )
-            .scalar()
-            or 0
+            .one()
         )
     finally:
         db.close()
-    if used >= QUOTA_PER_HOUR:
-        raise HTTPException(status_code=429, detail="Too many calls")
+    if (used or 0) < QUOTA_PER_HOUR:
+        return
+    # The window slides, so the first slot frees an hour after the oldest call
+    # still being counted. Say so: an agent that is told only "too many calls"
+    # has no way to pick between retrying now and giving up, and retrying now
+    # is what writes the rows record_throttled refuses to write.
+    reopens = (_aware(oldest) if oldest is not None else now) + timedelta(hours=1)
+    raise HTTPException(
+        status_code=429,
+        detail=(
+            f"Too many calls: the limit is {QUOTA_PER_HOUR} an hour for one key. "
+            f"The quota reopens at {reopens.isoformat()}."
+        ),
+    )
 
 
 def _stamp_last_used(key_id: str) -> None:
@@ -122,15 +186,15 @@ class Call:
 
 
 @contextmanager
-def audited(key: AgentApiKey, tool: str) -> Iterator[Call]:
-    # Capture before anything can expire or detach the instance. A refused
-    # call is itself recorded, as throttled so it does not feed its own count.
-    key_id, user_id = key.id, key.user_id
+def audited(key_id: str, user_id: str, tool: str) -> Iterator[Call]:
+    # The ids are read by the caller while its transaction is still open; see
+    # the module docstring. A refused call is itself recorded, as throttled so
+    # it does not feed its own count, and at most once per window.
     call = Call()
     try:
         check_quota(key_id)
     except HTTPException:
-        record(key_id, user_id, tool, None, THROTTLED)
+        record_throttled(key_id, user_id, tool)
         raise
     _stamp_last_used(key_id)
     try:

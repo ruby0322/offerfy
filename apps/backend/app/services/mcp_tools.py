@@ -142,7 +142,8 @@ _EDIT_FIELDS = ("hash", "kind", "unit", "expect", "value", "text", "marks", "tar
 
 async def _edit_resume(db: Session, user: User, args: dict) -> dict:
     """One structured field edit. Makes no model call."""
-    resume = resume_access.owned_by_user(db, user, _required_str(args, "resume_id"))
+    resume_id = _required_str(args, "resume_id")
+    resume = resume_access.owned_by_user(db, user, resume_id)
     if args.get("kind") not in _EDIT_KINDS:
         raise HTTPException(
             status_code=400, detail=f"kind must be one of: {', '.join(_EDIT_KINDS)}"
@@ -155,12 +156,18 @@ async def _edit_resume(db: Session, user: User, args: dict) -> dict:
     out = await resume_write.apply_edit(db, resume, intent)
     # No rendered pages: they are megabytes of SVG an assistant cannot use. The new
     # projection carries the unit ids a follow-up edit needs.
-    return {"resume_id": resume.id, "hash": out["hash"], "projection": out["projection"]}
+    #
+    # `resume_id`, not `resume.id`: the write committed, so the instance is
+    # expired and reading an attribute off it would re-acquire a pool
+    # connection to fetch a value the argument already carried (and would hold
+    # it while the audit row is written -- see app/routers/mcp.py).
+    return {"resume_id": resume_id, "hash": out["hash"], "projection": out["projection"]}
 
 
 async def _put_resume_source(db: Session, user: User, args: dict) -> dict:
     """Replace one resume's whole Typst source. Makes no model call."""
-    resume = resume_access.owned_by_user(db, user, _required_str(args, "resume_id"))
+    resume_id = _required_str(args, "resume_id")
+    resume = resume_access.owned_by_user(db, user, resume_id)
     expected = _required_str(args, "hash")
     source = args.get("typst_source")
     if not isinstance(source, str):
@@ -168,7 +175,8 @@ async def _put_resume_source(db: Session, user: User, args: dict) -> dict:
     out = await resume_write.write_source(
         db, resume, source=source, expected_hash=expected
     )
-    return {"resume_id": resume.id, "hash": out["hash"]}
+    # `resume_id`, not `resume.id`: see `_edit_resume`.
+    return {"resume_id": resume_id, "hash": out["hash"]}
 
 
 def _clean_title(value: Any) -> str:
@@ -275,7 +283,9 @@ def _catalogue_tool(shared: dict) -> Tool:
     def handler(db: Session, user: User, args: dict) -> dict:
         payload = json.loads(jobs_tools.catalogue_handlers(db)[handler_key](args))
         if "error" in payload:
-            missing = payload["error"].startswith("No posting")
+            # The handler's own sentinel, not the start of its sentence: that
+            # match turned a reworded message into a silent 400.
+            missing = payload.get("code") == jobs_tools.ERROR_NOT_FOUND
             raise HTTPException(status_code=404 if missing else 400, detail=payload["error"])
         return payload
 
@@ -290,7 +300,10 @@ def _list_matches(db: Session, user: User, args: dict) -> dict:
     """
     try:
         limit = int(args.get("limit") or jobs_tools.SEARCH_LIMIT_DEFAULT)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError too: JSON's `1e999` parses to float("inf"), and
+        # `int(inf)` raises none of the other two. A malformed limit falls back
+        # to the default, as `jobs_tools.search` does.
         limit = jobs_tools.SEARCH_LIMIT_DEFAULT
     limit = max(1, min(jobs_tools.SEARCH_LIMIT_MAX, limit))
     rows = (
@@ -703,6 +716,40 @@ REGISTRY: dict[str, Tool] = {
         handler=_get_resume,
     ),
 }
+
+
+#: The tools whose audit rows stay visible however much later traffic there is
+#: (app/routers/account.py::CALL_LOG_PINNED_LIMIT). Every tool that changes
+#: something the user owns, plus `export_resume`, which changes nothing but
+#: hands out a link to the PDF -- a disclosure the person is entitled to see
+#: for the same reason as a publish. `tests/test_mcp_tools.py` asserts that
+#: every name in REGISTRY is on one side of this line or the other, so a tool
+#: added later cannot default to invisible.
+AUDIT_PINNED_TOOLS = frozenset(
+    {
+        "create_resume",
+        "create_tailor",
+        "edit_resume",
+        "put_resume_source",
+        "set_resume_title",
+        "publish_resume",
+        "unpublish_resume",
+        "export_resume",
+        "set_job_preferences",
+    }
+)
+
+#: The read-only rest, named rather than derived so the test above can fail.
+AUDIT_UNPINNED_TOOLS = frozenset(
+    {
+        "search_jobs",
+        "read_job",
+        "list_matches",
+        "list_resumes",
+        "get_resume",
+        "get_job_preferences",
+    }
+)
 
 
 def specs() -> list[dict]:

@@ -32,14 +32,19 @@ Wire facts this module relies on:
     name is still dispatched inside `audited`, so it is recorded as `refused`
     in the user's audit list even though it is rendered as a protocol error.
 
-**Pool connections: this endpoint holds two, not one.** `get_db` keeps the
-request session (one connection) for the request's whole life, and `audited`
-opens a second, short-lived session each time it runs `check_quota`,
-`_stamp_last_used` or `record` (see app/services/mcp_audit.py). app/concurrency.py
-sizes MAX_IN_FLIGHT = 32 against a 40-slot pool on the assumption that a
-request holds one connection; this is an exception to it. The audit sessions
-are brief, so the overlap is small and no number was changed. Look here first
-in a pool incident that involves /mcp.
+**Pool connections: one at a time, and that is load-bearing.**
+app/concurrency.py sizes MAX_IN_FLIGHT = 32 against a 40-slot pool on the
+assumption that a request holds **one** connection, and `audited` opens a
+short-lived session of its own for each of `check_quota`, `_stamp_last_used`
+and `record` (see app/services/mcp_audit.py). Held together with the request
+session's connection those overlap, so around ten concurrent calls with the
+gate otherwise full exceeded the pool and `pool_timeout=3` turned that into
+500s for the whole worker -- the 2026-11-20 incident class. `_tools_call`
+therefore ends the request transaction before entering `audited` and commits
+again as soon as the handler returns, and passes `key.id`/`key.user_id` down
+rather than the ORM instance, which would re-acquire a connection on first
+touch. `tests/test_mcp_transport.py::test_a_tools_call_never_holds_two_pool_connections`
+pins the peak at one. Keep it there.
 
 **Deliberately absent: SSE, `GET /mcp`, `MCP-Session-Id`, resumption.** The
 specification lets a server answer a POST with one `application/json` body and
@@ -172,16 +177,34 @@ def _tools_call(db: Session, user: User, key: AgentApiKey, params: Any) -> dict:
     if not isinstance(args, dict):
         raise _RpcError(INVALID_PARAMS, "params.arguments must be an object")
 
+    # Read while the request's transaction is still open, and before it is
+    # ended below: `audited` must never touch an expired ORM instance, because
+    # loading one would re-acquire a connection and hold it across all three
+    # audit sessions. See the pool note in this module's docstring.
+    key_id, user_id = key.id, key.user_id
+    # Validated here, where the raw argument is read: a string of at most 36
+    # characters, or None. mcp_audit.record coerces again as a backstop, but
+    # this is the check. Read before dispatch so a refusal still records which
+    # resume it was about.
+    rid = args.get("resume_id")
+    resume_id = rid if isinstance(rid, str) and len(rid) <= _RESUME_ID_MAX else None
+
+    # End the request transaction before the audit sessions open. `check_quota`,
+    # `_stamp_last_used` and `record` each take a connection of their own, and
+    # the authentication SELECT left this session holding one; overlapping them
+    # is what put this endpoint over the one-connection-per-request assumption
+    # app/concurrency.py sizes MAX_IN_FLIGHT against. Nothing is written yet, so
+    # there is nothing to commit -- this only releases the connection.
+    db.commit()
+
     try:
-        with audited(key, name) as call:
-            # Validated here, where the raw argument is read: a string of at
-            # most 36 characters, or None. mcp_audit.record coerces again as a
-            # backstop, but this is the check. Set before dispatch so a
-            # refusal still records which resume it was about.
-            rid = args.get("resume_id")
-            call.resume_id = rid if isinstance(rid, str) and len(rid) <= _RESUME_ID_MAX else None
+        with audited(key_id, user_id, name) as call:
+            call.resume_id = resume_id
             try:
                 payload = mcp_tools.call(db, user, name, args)
+                # Land the handler's work and release the connection again
+                # before `audited` writes the `ok` row, for the same reason.
+                db.commit()
             except Exception as exc:
                 # Roll back BEFORE `audited` records the outcome (it does so
                 # as this exception leaves the block). get_db commits when no
@@ -261,7 +284,13 @@ def _dispatch(
     except Exception:
         # The transport or audit layer failed (a handler crash is caught in
         # _tools_call). Nothing of the cause goes to the caller.
-        db.rollback()
+        try:
+            db.rollback()
+        except Exception:
+            # This branch exists for pool and database failures, and on exactly
+            # those the rollback is what raises. Unguarded it answered a 500
+            # instead of the -32603 below. get_db closes the session either way.
+            logger.exception("mcp %s: rollback failed", method)
         logger.exception("mcp %s failed", method)
         return _error(id_, INTERNAL_ERROR, "Internal error")
 
@@ -288,7 +317,10 @@ async def mcp_endpoint(
 
     try:
         body = await request.json()
-    except ValueError:
+    except (ValueError, RecursionError):
+        # RecursionError, not ValueError, is what Python's JSON parser raises on
+        # deeply nested input, and a client that sends it is making a parse
+        # error, not triggering an internal one.
         return _error(None, PARSE_ERROR, "Parse error")
 
     # One message per POST (batching was removed from the protocol).

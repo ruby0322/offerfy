@@ -27,7 +27,8 @@ key look like it had been.
 Plain create_table with no dialect guard, following 042_job_scores.py. No test
 runs alembic; conftest builds the schema from the models with create_all, so
 this file is checked by eye against the model, and by rendering
-`alembic upgrade 042_job_scores:043_agent_api_keys --sql` (head dies offline on sqlite).
+`alembic upgrade 042_job_scores:043_agent_api_keys --sql` (head dies offline
+on sqlite).
 """
 
 from alembic import op

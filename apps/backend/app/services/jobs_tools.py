@@ -73,6 +73,11 @@ READ_JOB_PROFILE_TOOL = "read_my_job_profile"
 # more than a turn can say anything useful about, and every row costs context
 # the resume itself needs.
 SEARCH_LIMIT_DEFAULT = 5
+
+#: The `code` on a catalogue handler's "no such row" refusal. A sentinel rather
+#: than a sentence, because a caller that has to map the refusal onto an HTTP
+#: status (app/services/mcp_tools.py) must not depend on the wording.
+ERROR_NOT_FOUND = "not_found"
 SEARCH_LIMIT_MAX = 10
 
 # Enough of a posting to tailor against. Descriptions run to 200k characters;
@@ -293,15 +298,19 @@ def catalogue_handlers(db: Session) -> dict[str, Callable[[dict], str]]:
 
     def search(args: dict) -> str:
         raw_limit = args.get("limit")
+        # OverflowError as well as the two obvious ones: JSON's `1e999` parses
+        # to float("inf") and `int(inf)` raises neither TypeError nor
+        # ValueError. A malformed limit falls back to the default; it must not
+        # reach the caller as "the tool failed unexpectedly".
         try:
             limit = int(raw_limit) if raw_limit is not None else SEARCH_LIMIT_DEFAULT
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             limit = SEARCH_LIMIT_DEFAULT
         limit = max(1, min(SEARCH_LIMIT_MAX, limit))
         days = args.get("posted_within_days")
         try:
             days = int(days) if days is not None else None
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             days = None
         if days is not None and not 1 <= days <= 90:
             return json.dumps({"error": "posted_within_days must be between 1 and 90"})
@@ -347,8 +356,15 @@ def catalogue_handlers(db: Session) -> dict[str, Callable[[dict], str]]:
             return json.dumps({"error": "job_id is required"})
         job = db.get(Job, job_id)
         if job is None:
+            # `code` as well as `error`: the MCP surface has to tell "no such
+            # posting" (404) from every other refusal (400), and it used to do
+            # that by matching the start of this sentence -- so rewording the
+            # message for a model's benefit silently turned a 404 into a 400.
             return json.dumps(
-                {"error": f"No posting with job_id {job_id}. Call search_jobs first."}
+                {
+                    "code": ERROR_NOT_FOUND,
+                    "error": f"No posting with job_id {job_id}. Call search_jobs first.",
+                }
             )
         facets = db.get(JobFacets, job_id)
         # Keyed by the NORMALIZED name, the way recompute_boilerplate stores
