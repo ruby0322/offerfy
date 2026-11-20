@@ -108,3 +108,109 @@ def db_session(client) -> Session:
         yield session
     finally:
         session.close()
+
+
+# ---------------------------------------------------------------------------
+# Shared fixtures for the self-serve MCP surface (tests/test_agent_*.py and
+# the cookie-authenticated key routes). Built by hand, as test_talent_api.py
+# and test_jobs_api.py do, so a test about auth does not depend on a model call.
+# ---------------------------------------------------------------------------
+
+
+def _user(db, sub: str):
+    from app.models import User
+
+    user = User(google_sub=sub, email=f"{sub}@example.com", locale="en", name=sub)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def _resume_for(db, user, title="Untitled"):
+    """A committed master resume the real compiler accepts."""
+    from app.models import Resume
+    from app.services.starter import generate_starter
+
+    resume = Resume(
+        title=title,
+        typst_source=generate_starter("zh-TW"),
+        source="create",
+        locale="zh-TW",
+        user_id=user.id,
+        kind="master",
+    )
+    db.add(resume)
+    db.commit()
+    db.refresh(resume)
+    return resume
+
+
+def _job_with_facets(db, source_id: str, title: str):
+    from datetime import datetime, timezone
+
+    from app.models import Job, JobFacets
+
+    now = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
+    job = Job(
+        source="greenhouse",
+        source_id=source_id,
+        company="Stripe",
+        title=title,
+        location="Remote",
+        remote=True,
+        apply_url="https://example.com/apply",
+        source_url="https://example.com/job",
+        description_text="Build things",
+        description_html="<p>Build things</p>",
+        posted_at=now,
+        first_seen_at=now,
+        last_seen_at=now,
+        is_active=True,
+    )
+    db.add(job)
+    db.flush()
+    db.add(
+        JobFacets(
+            job_id=job.id,
+            seniority="senior",
+            function="engineering",
+            description_hash="h" * 64,
+        )
+    )
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+@pytest.fixture
+def a_user(db_session):
+    return _user(db_session, "agent-user-a")
+
+
+@pytest.fixture
+def other_user(db_session):
+    return _user(db_session, "agent-user-b")
+
+
+@pytest.fixture
+def signed_in(client, a_user):
+    from app.deps import SESSION_COOKIE, _sign
+
+    client.cookies.set(SESSION_COOKIE, _sign(a_user.id, get_settings().auth_token_secret))
+    yield a_user
+
+
+@pytest.fixture
+def my_resume(db_session, a_user):
+    return _resume_for(db_session, a_user)
+
+
+@pytest.fixture
+def a_job(db_session):
+    return _job_with_facets(db_session, "stripe:agent-1", "Payments Engineer")
+
+
+@pytest.fixture
+def another_job(db_session):
+    return _job_with_facets(db_session, "stripe:agent-2", "Platform Engineer")

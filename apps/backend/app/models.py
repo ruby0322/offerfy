@@ -1668,7 +1668,47 @@ class TalentApiKey(Base):
     )
 
 
-DISCLOSURE_PURPOSES = ("talent_introduction",)
+class AgentApiKey(Base):
+    """A credential a signed-in user mints for their own AI assistant.
+
+    Self-serve and per-user: the holder acts as the user who minted it, on that
+    user's own account, through the MCP surface. This is a different door from
+    TalentApiKey above, which an operator issues by hand to an outside
+    organisation to read profiles. The two share no table, no token prefix
+    (ofa_ here, ofk_ there) and no hash function.
+
+    key_hash is unsalted SHA-256 of the raw token, for the same reason as
+    TalentApiKey.key_hash: the secret is 256 bits from secrets.token_urlsafe,
+    so stretching buys nothing and lookup stays one indexed equality. Do not
+    "fix" this to bcrypt.
+
+    user_id cascades: a token is personal data and goes with the account.
+    revoked_at and last_used_at are mutable credential state, not a ledger.
+    """
+
+    __tablename__ = "agent_api_keys"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+DISCLOSURE_PURPOSES =("talent_introduction",)
 DISCLOSURE_SCOPES = ("summary", "full")
 
 
