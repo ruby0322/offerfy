@@ -1708,6 +1708,38 @@ class AgentApiKey(Base):
     )
 
 
+class AgentToolCall(Base):
+    """One MCP tool call made with an AgentApiKey: the audit trail and the quota.
+
+    Written on its own session (see app.services.mcp_audit), never the request's,
+    so refusals and errors are recorded too. Deliberately holds no arguments:
+    they carry resume content. Only the tool name, which resume it was about
+    (resume_id is a plain string, not a foreign key, so the record outlives the
+    resume) and the outcome ("ok", "refused" or "error"; no CHECK constraint,
+    matching JobScore.outcome).
+
+    Both foreign keys cascade: the rows go with the key and with the account.
+    created_at takes a Python-side default so a test or backfill can set it; a
+    server default would make every row look current to the hourly quota.
+    """
+
+    __tablename__ = "agent_tool_calls"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    key_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("agent_api_keys.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    tool: Mapped[str] = mapped_column(String(64), nullable=False)
+    resume_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, index=True
+    )
+
+
 DISCLOSURE_PURPOSES = ("talent_introduction",)
 DISCLOSURE_SCOPES = ("summary", "full")
 
