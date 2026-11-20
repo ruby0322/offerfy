@@ -338,6 +338,14 @@ def _set_job_preferences(db: Session, user: User, args: dict) -> dict:
         raise HTTPException(
             status_code=400, detail=f"Unknown argument: {', '.join(k[:64] for k in unknown)}"
         )
+    # Two validations on purpose, in this order: these checks run FIRST and give
+    # an agent a plain, argument-named message ("target_functions must be a list
+    # of strings"); JobPreferenceIn then rejects what is well-typed but not in the
+    # taxonomy ("Invalid preferences: <field>"). Pydantic would also reject every
+    # wrong type here and also name the field, so deleting these checks changes
+    # only the error text, not the outcome. That is why the tests assert the
+    # EXACT text: a substring check passes under either path, which is how five
+    # mutants of these checks once survived. Do not drop one of the two.
     for name in ("target_functions", "target_locations"):
         value = args.get(name, [])
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
@@ -373,7 +381,12 @@ REGISTRY: dict[str, Tool] = {
             "row carries the posting plus tier, fit_score, reason and gap. "
             "Only postings that are still open are listed, so a match that "
             "has since closed does not appear. Returns nothing for postings "
-            "not yet scored; it never triggers scoring.",
+            "not yet scored; it never triggers scoring. An empty list does "
+            "NOT mean the user has no matches: it usually means nothing has "
+            "been scored yet, which is expected right after they first saved "
+            "job preferences (scoring happens in Offerfy's next scheduled "
+            "pass). Do not present an empty result as a finding; say matches "
+            "are not ready yet.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -604,8 +617,11 @@ REGISTRY: dict[str, Tool] = {
             "to keep. A missing list becomes empty, a missing target_seniority "
             "or remote_required becomes unset, and a missing activity becomes "
             "actively_looking. `first_save` in the result is true when this was "
-            "their first ever save. Only call this when the user has "
-            "asked to change their preferences. Makes no model call.",
+            "their first ever save. Saving does NOT score anything: scored "
+            "matches appear only after Offerfy's next scheduled scoring pass, "
+            "so list_matches will be empty right after a save. Do not tell the "
+            "user they have no matches because of that. Only call this when "
+            "the user has asked to change their preferences. Makes no model call.",
             "parameters": {
                 "type": "object",
                 "properties": {

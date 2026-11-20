@@ -845,6 +845,14 @@ def test_set_description_leads_with_the_replace_semantics():
     assert "replace" in first and "clear" in first
 
 
+def test_descriptions_say_an_empty_match_list_may_just_be_unscored():
+    by_name = {s["name"]: s["description"] for s in specs()}
+    # Saving cannot score (scoring is a model call), so an agent must be told
+    # not to read the empty list that follows as "no matches".
+    assert "saving does not score anything" in by_name["set_job_preferences"].lower()
+    assert "not mean the user has no matches" in by_name["list_matches"].lower()
+
+
 def test_no_preference_tool_can_spend_the_users_allowance():
     names = {s["name"] for s in specs()}
     assert {"get_job_preferences", "set_job_preferences"} <= names
