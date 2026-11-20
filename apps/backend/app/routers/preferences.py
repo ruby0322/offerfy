@@ -10,6 +10,7 @@ from app.deps import require_user
 from app.jobs.match_sweep import count_matches
 from app.models import JobPreference, User
 from app.schemas_jobs import JobPreferenceIn, JobPreferenceOut, ResumeFactsRefreshOut
+from app.services import preferences_write
 from app.services.jobs.preferences import current_or_seeded
 from app.services.metering import metered, preflight
 from app.services.profile import record_build_spend
@@ -20,10 +21,6 @@ router = APIRouter()
 
 def _split(text: str) -> list[str]:
     return [p for p in text.split("|") if p]
-
-
-def _pipe(values: list[str]) -> str:
-    return f"|{'|'.join(values)}|" if values else ""
 
 
 def preference_out(
@@ -62,20 +59,7 @@ def put_job_preferences(
 ):
     """Replace the preferences wholesale. This is not a patch: a field omitted
     from the body is cleared (activity returns to its default)."""
-    # Mutate the loaded row in place: updated_at's onupdate fires only on an
-    # UPDATE, so delete-and-reinsert would reset it to creation time.
-    row = current_or_seeded(db, user)
-    # No row before this write: the client starts the first run on this flag.
-    first_save = row not in db
-    if first_save:
-        db.add(row)
-    row.target_functions = _pipe(body.target_functions)
-    row.target_locations = _pipe(body.target_locations)
-    row.target_seniority = body.target_seniority
-    row.remote_required = body.remote_required
-    row.activity = body.activity
-    db.commit()
-    db.refresh(row)
+    row, first_save = preferences_write.save(db, user, body)
     return preference_out(db, user, row, first_save=first_save)
 
 

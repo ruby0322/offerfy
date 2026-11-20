@@ -5,6 +5,8 @@ the tool tests of later tasks: keep their shapes stable.
 """
 
 import json
+
+import pytest
 from datetime import datetime, timezone
 
 from app.models import JobScore
@@ -699,3 +701,151 @@ def test_publish_of_a_pinned_but_unshared_resume_pins_the_current_draft(
     db_session.refresh(my_resume)
     assert out["public"] is True and out["unpublished_changes"] is False
     assert published_source(db_session, my_resume) == my_resume.typst_source
+
+
+# ---- job preferences ----------------------------------------------------------
+
+
+def _prefs(call, name="get_job_preferences", args=None):
+    return json.loads(_text(call(name, args or {})))
+
+
+def test_get_returns_the_seed_before_the_first_save(client, db_session, a_user):
+    from app.models import JobPreference
+    from tests.test_job_preferences_api import _facts
+
+    _facts(db_session, a_user, roles=[{"title": "Staff Backend Engineer"}],
+           locations=["Taipei, Taiwan"])
+    call = _caller(client, db_session, a_user)
+    out = _prefs(call)
+    assert out["target_functions"] == ["backend"]
+    assert out["target_locations"] == ["tw"]
+    assert out["updated_at"] is None
+    assert out["first_save"] is False
+    # Reading never stores: a row would mean "the user has edited this".
+    assert db_session.query(JobPreference).count() == 0
+
+
+def test_set_then_get_round_trips_every_field(client, db_session, a_user):
+    call = _caller(client, db_session, a_user)
+    saved = _prefs(call, "set_job_preferences", {
+        "target_functions": ["backend"], "target_locations": ["tw"],
+        "target_seniority": "senior", "remote_required": True, "activity": "browsing",
+    })
+    assert saved["first_save"] is True
+    out = _prefs(call)
+    assert out["target_functions"] == ["backend"]
+    assert out["target_locations"] == ["tw"]
+    assert out["target_seniority"] == "senior"
+    assert out["remote_required"] is True
+    assert out["activity"] == "browsing"
+    assert out["first_save"] is False  # a read never says so
+
+
+def test_first_save_is_true_once_then_false(client, db_session, a_user):
+    call = _caller(client, db_session, a_user)
+    assert _prefs(call, "set_job_preferences", {"target_functions": ["backend"]})[
+        "first_save"] is True
+    assert _prefs(call, "set_job_preferences", {"target_functions": ["design"]})[
+        "first_save"] is False
+
+
+def test_set_replaces_wholesale_rather_than_patching(client, db_session, a_user):
+    call = _caller(client, db_session, a_user)
+    _prefs(call, "set_job_preferences", {
+        "target_functions": ["backend"], "target_locations": ["tw"],
+        "target_seniority": "senior", "remote_required": True, "activity": "paused",
+    })
+    _prefs(call, "set_job_preferences", {"target_functions": ["design"]})
+    out = _prefs(call)
+    assert out["target_functions"] == ["design"]
+    assert out["target_locations"] == []
+    assert out["target_seniority"] is None
+    assert out["remote_required"] is None
+    assert out["activity"] == "actively_looking"
+
+
+def test_set_updates_the_row_in_place(client, db_session, a_user):
+    from app.models import JobPreference
+
+    call = _caller(client, db_session, a_user)
+    _prefs(call, "set_job_preferences", {"target_functions": ["backend"]})
+    first = db_session.query(JobPreference).one()
+    first_id, first_stamp = first.id, first.updated_at
+    _prefs(call, "set_job_preferences", {"target_functions": ["design"]})
+    db_session.expire_all()
+    row = db_session.query(JobPreference).one()
+    assert row.id == first_id  # not deleted and re-inserted
+    assert row.updated_at > first_stamp
+
+
+def test_preferences_are_per_user(client, db_session, a_user, other_user):
+    from app.models import JobPreference
+
+    _prefs(_caller(client, db_session, a_user), "set_job_preferences",
+           {"target_functions": ["backend"]})
+    out = _prefs(_caller(client, db_session, other_user))
+    assert out["target_functions"] == []
+    assert db_session.query(JobPreference).filter_by(user_id=other_user.id).count() == 0
+
+
+@pytest.mark.parametrize("args,expected", [
+    ({"target_functions": "backend"}, "target_functions must be a list of strings"),
+    ({"target_functions": [1]}, "target_functions must be a list of strings"),
+    ({"target_locations": "tw"}, "target_locations must be a list of strings"),
+    ({"target_locations": [None]}, "target_locations must be a list of strings"),
+    ({"target_functions": None}, "target_functions must be a list of strings"),
+    ({"target_seniority": 3}, "target_seniority must be a string"),
+    ({"remote_required": "yes"}, "remote_required must be a boolean"),
+    ({"remote_required": 1}, "remote_required must be a boolean"),
+    ({"activity": 5}, "activity must be a string"),
+    # Well-typed but not in the taxonomy: the model's validators, mapped to a 400.
+    ({"activity": "retired"}, "Invalid preferences: activity"),
+    ({"target_functions": ["no-such-function"]}, "Invalid preferences: target_functions"),
+    ({"target_seniority": "unknown"}, "Invalid preferences: target_seniority"),
+    # A typo would otherwise read as "omitted" and clear the field it meant.
+    ({"target_function": ["backend"]}, "Unknown argument: target_function"),
+])
+def test_set_rejects_a_bad_argument_by_name_and_writes_nothing(
+    client, db_session, a_user, args, expected
+):
+    call = _caller(client, db_session, a_user)
+    _prefs(call, "set_job_preferences", {"target_functions": ["backend"]})
+    body = call("set_job_preferences", args)
+    assert _is_tool_error(body), body
+    assert _text(body) == expected
+    assert _prefs(call)["target_functions"] == ["backend"]
+
+
+def test_a_bad_first_set_leaves_no_row(client, db_session, a_user):
+    from app.models import JobPreference
+
+    body = _caller(client, db_session, a_user)("set_job_preferences",
+                                               {"remote_required": "yes"})
+    assert _is_tool_error(body)
+    assert db_session.query(JobPreference).count() == 0
+
+
+def test_explicit_empty_and_null_are_accepted(client, db_session, a_user):
+    call = _caller(client, db_session, a_user)
+    _prefs(call, "set_job_preferences", {"target_functions": ["backend"],
+                                         "target_seniority": "senior",
+                                         "remote_required": True})
+    _prefs(call, "set_job_preferences", {"target_functions": [], "target_locations": [],
+                                         "target_seniority": None,
+                                         "remote_required": None})
+    out = _prefs(call)
+    assert out["target_functions"] == [] and out["target_seniority"] is None
+    assert out["remote_required"] is None
+
+
+def test_set_description_leads_with_the_replace_semantics():
+    spec = next(s for s in specs() if s["name"] == "set_job_preferences")
+    first = spec["description"].split(".")[0].lower()
+    assert "replace" in first and "clear" in first
+
+
+def test_no_preference_tool_can_spend_the_users_allowance():
+    names = {s["name"] for s in specs()}
+    assert {"get_job_preferences", "set_job_preferences"} <= names
+    assert not any("refresh" in n or "facts" in n for n in names)

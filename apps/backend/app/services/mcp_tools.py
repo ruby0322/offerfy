@@ -36,14 +36,17 @@ from sqlalchemy.orm import Session
 
 from app.models import Job, JobScore, User
 from app.schemas_editing import IntentIn
+from app.schemas_jobs import JobPreferenceIn
 from app.services import (
     export_link,
     family,
     jobs_tools,
+    preferences_write,
     resume_access,
     resume_write,
     sharing,
 )
+from app.services.jobs.preferences import current_or_seeded
 from app.services.revisions import pin_current_draft, source_hash
 from app.services.starter import default_title, generate_starter, validate_locale
 from app.services.typst_projection import parse_projection
@@ -310,6 +313,54 @@ def _list_matches(db: Session, user: User, args: dict) -> dict:
     }
 
 
+def _preferences_out(db: Session, user: User, row, first_save: bool = False) -> dict:
+    # Imported here: the router module pulls in the metering and profile stack.
+    from app.routers.preferences import preference_out
+
+    return preference_out(db, user, row, first_save=first_save).model_dump()
+
+
+def _get_job_preferences(db: Session, user: User, args: dict) -> dict:
+    """The saved preferences, or the computed seed. Never stores: a row is the
+    "the user has edited this" marker, so a read must not create one."""
+    return _preferences_out(db, user, current_or_seeded(db, user))
+
+
+_PREFERENCE_FIELDS = ("target_functions", "target_locations", "target_seniority",
+                      "remote_required", "activity")
+
+
+def _set_job_preferences(db: Session, user: User, args: dict) -> dict:
+    """Replace the preferences wholesale. An absent field is cleared, not kept."""
+    unknown = sorted(set(args) - set(_PREFERENCE_FIELDS))
+    if unknown:
+        # A typo'd name would otherwise read as "omitted" and clear that field.
+        raise HTTPException(
+            status_code=400, detail=f"Unknown argument: {', '.join(k[:64] for k in unknown)}"
+        )
+    for name in ("target_functions", "target_locations"):
+        value = args.get(name, [])
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            raise HTTPException(
+                status_code=400, detail=f"{name} must be a list of strings"
+            )
+    seniority = args.get("target_seniority")
+    if seniority is not None and not isinstance(seniority, str):
+        raise HTTPException(status_code=400, detail="target_seniority must be a string")
+    remote = args.get("remote_required")
+    if remote is not None and not isinstance(remote, bool):
+        raise HTTPException(status_code=400, detail="remote_required must be a boolean")
+    if "activity" in args and not isinstance(args["activity"], str):
+        raise HTTPException(status_code=400, detail="activity must be a string")
+    try:
+        body = JobPreferenceIn(**args)
+    except ValidationError as exc:
+        fields = ", ".join(sorted({str(e["loc"][0]) for e in exc.errors() if e["loc"]}))
+        raise HTTPException(status_code=400, detail=f"Invalid preferences: {fields}")
+    row, first_save = preferences_write.save(db, user, body)
+    return _preferences_out(db, user, row, first_save)
+
+
 _CATALOGUE = {spec["name"]: _catalogue_tool(spec) for spec in jobs_tools.catalogue_specs()}
 
 REGISTRY: dict[str, Tool] = {
@@ -527,6 +578,61 @@ REGISTRY: dict[str, Tool] = {
             },
         },
         handler=_export_resume,
+    ),
+    "get_job_preferences": Tool(
+        spec={
+            "name": "get_job_preferences",
+            "description": "Read the signed-in user's saved job preferences: the "
+            "functions, countries, seniority, remote requirement and activity "
+            "that select which postings are scored for them. Before they have "
+            "ever saved, this returns a suggestion computed from their resume "
+            "(`updated_at` is null) and stores nothing.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+        handler=_get_job_preferences,
+    ),
+    "set_job_preferences": Tool(
+        spec={
+            "name": "set_job_preferences",
+            "description": "Replaces ALL of the signed-in user's job preferences "
+            "and clears every field you do not supply; it is not a patch. "
+            "Call get_job_preferences first and send back the fields you want "
+            "to keep. A missing list becomes empty, a missing target_seniority "
+            "or remote_required becomes unset, and a missing activity becomes "
+            "actively_looking. `first_save` in the result is true when this was "
+            "their first ever save. Only call this when the user has "
+            "asked to change their preferences. Makes no model call.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target_functions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Job functions, e.g. backend, design.",
+                    },
+                    "target_locations": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Lowercase two-letter country codes, e.g. tw.",
+                    },
+                    "target_seniority": {
+                        "type": ["string", "null"],
+                        "description": "One seniority level, e.g. senior.",
+                    },
+                    "remote_required": {"type": ["boolean", "null"]},
+                    "activity": {
+                        "type": "string",
+                        "enum": ["actively_looking", "browsing", "paused"],
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+        handler=_set_job_preferences,
     ),
     "list_resumes": Tool(
         spec={
