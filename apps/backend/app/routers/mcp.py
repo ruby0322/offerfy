@@ -304,7 +304,10 @@ async def mcp_endpoint(
         return _error(id_ if has_id else None, INVALID_REQUEST, "Invalid request")
 
     # Version and header validation before any dispatch; this one check
-    # replaces Task 4's "header must equal 2025-11-25".
+    # replaces Task 4's "header must equal 2025-11-25". It runs after the body
+    # parses on purpose: the header is compared with the body's _meta, so an
+    # unparseable body is a Parse error, and a notification with a bad version
+    # is a 400 (the rejection is mandatory and HTTP must answer something).
     try:
         mcp_protocol.check_version(request, body)
     except mcp_protocol.ProtocolError as exc:

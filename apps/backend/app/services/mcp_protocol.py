@@ -102,11 +102,12 @@ def era_of(request, body) -> str:
 
 
 def _mismatch(detail: str) -> ProtocolError:
-    # `supported` rides along (the spec does not ask for it here) so a client
-    # that probes with a header/body disagreement still learns what to send.
-    return ProtocolError(
-        400, HEADER_MISMATCH, f"HeaderMismatch: {detail}", {"supported": list(SUPPORTED)}
-    )
+    # No `data`: streamable-http "Server Validation" (2026-07-28) gives
+    # HeaderMismatch (-32020) only a code and message, and the versions list
+    # is specified only for the -32022 error (lifecycle, "Protocol Version
+    # Negotiation"). A payload field invented here is one more thing for a
+    # client to mis-parse.
+    return ProtocolError(400, HEADER_MISMATCH, f"HeaderMismatch: {detail}")
 
 
 def check_version(request, body) -> None:

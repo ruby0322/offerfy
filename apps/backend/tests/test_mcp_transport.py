@@ -395,16 +395,42 @@ def test_a_throttled_call_is_a_tool_error_with_the_reason(client, raw_key, monke
     assert "Too many calls" in json.dumps(r.json())
 
 
-def test_an_unsupported_protocol_version_header_is_400(client, raw_key):
-    from app.services.mcp_tools import PROTOCOL_VERSION
+_VKEY = "io.modelcontextprotocol/protocolVersion"
 
-    body = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
-    bad = client.post(MCP, headers={**_bearer(raw_key), "MCP-Protocol-Version": "2026-07-28"},
-                      json=body)
-    assert bad.status_code == 400
-    assert PROTOCOL_VERSION in bad.json()["error"]["data"]["supported"]
-    ok = client.post(MCP, headers={**_bearer(raw_key), "MCP-Protocol-Version": PROTOCOL_VERSION},
-                     json=body)
+
+def _versioned_ping(client, raw_key, *, header, meta):
+    return client.post(
+        MCP,
+        headers={**_bearer(raw_key), "MCP-Protocol-Version": header},
+        json={"jsonrpc": "2.0", "id": 1, "method": "ping",
+              "params": {"_meta": {_VKEY: meta}}},
+    )
+
+
+def test_an_unknown_protocol_version_is_the_modern_unsupported_error(client, raw_key):
+    """Header and _meta agree, so only the unknown value can be what trips."""
+    from app.services.mcp_protocol import SUPPORTED
+
+    r = _versioned_ping(client, raw_key, header="1999-01-01", meta="1999-01-01")
+    assert r.status_code == 400
+    err = r.json()["error"]
+    assert err["code"] == -32022
+    assert err["data"]["supported"] == list(SUPPORTED)
+    assert err["data"]["requested"] == "1999-01-01"
+
+
+def test_a_header_that_disagrees_with_the_body_version_is_a_header_mismatch(client, raw_key):
+    """Both values are supported, so only the disagreement can be what trips."""
+    from app.services.mcp_protocol import LEGACY_VERSION, MODERN_VERSION
+
+    r = _versioned_ping(client, raw_key, header=MODERN_VERSION, meta=LEGACY_VERSION)
+    assert r.status_code == 400
+    err = r.json()["error"]
+    assert err["code"] == -32020
+    assert "HeaderMismatch" in err["message"]
+    # data.supported is specified only for -32022 (versioning page).
+    assert "data" not in err
+    ok = _versioned_ping(client, raw_key, header=LEGACY_VERSION, meta=LEGACY_VERSION)
     assert ok.status_code == 200
 
 
