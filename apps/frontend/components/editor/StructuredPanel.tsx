@@ -130,11 +130,11 @@ function lookup(
  *
  * `title: "*x*"` prints the asterisks in the PDF -- a string argument cannot hold
  * formatting -- so this row is deliberately not something the selection popover can
- * reach, and it says so rather than letting someone try.
+ * reach. It offers no formatting rather than carrying a note about why a person
+ * cannot have it: the row is a plain input, which is the whole of what it says.
  */
 function ArgRow({
   unit,
-  hintId,
   label,
   readOnlyReason,
   notice,
@@ -144,7 +144,6 @@ function ArgRow({
   onFocusUnit,
 }: {
   unit: ProjectionUnit;
-  hintId: string;
   /** What the field is called: the translated label, or the raw key when it has none. */
   label: string;
   readOnlyReason: string | null;
@@ -253,7 +252,6 @@ function ArgRow({
         className="rr-input min-w-0 flex-1 basis-48 text-base md:text-sm"
         value={draft}
         readOnly={!!readOnlyReason}
-        aria-describedby={readOnlyReason ? undefined : hintId}
         onChange={(event) => {
           const next = event.target.value;
           setDraft(next);
@@ -886,8 +884,6 @@ export default function StructuredPanel({
         .map((bullet) => ({ bullet, unit: lookup(projected, bullet.unit) }))
         .filter((row): row is { bullet: ProjectionBlock; unit: ProjectionUnit } => row.unit !== null);
       const own = lookup(projected, raw.unit);
-      const hintId = `${raw.id}-arg-hint`;
-      const styleHintId = `${raw.id}-style-hint`;
       const refused = unitNotices[`struct:${raw.id}`];
 
       // A bare paragraph or bullet is one line and nothing else: no card around it.
@@ -920,7 +916,6 @@ export default function StructuredPanel({
                 <ArgRow
                   key={unit.id}
                   unit={unit}
-                  hintId={hintId}
                   label={argLabel(unit)}
                   readOnlyReason={readOnlyReason(unit)}
                   notice={unitNotices[unit.id]}
@@ -930,9 +925,6 @@ export default function StructuredPanel({
                   onFocusUnit={onFocusUnit}
                 />
               ))}
-              <p id={hintId} className="text-xs text-muted-foreground">
-                {t("fieldsArgHint")}
-              </p>
             </div>
           ) : null}
           {own ? line(own) : null}
@@ -958,7 +950,6 @@ export default function StructuredPanel({
                   <ArgRow
                     key={unit.id}
                     unit={unit}
-                    hintId={styleHintId}
                     label={argLabel(unit)}
                     readOnlyReason={readOnlyReason(unit)}
                     notice={unitNotices[unit.id]}
@@ -968,9 +959,6 @@ export default function StructuredPanel({
                     onFocusUnit={onFocusUnit}
                   />
                 ))}
-                <p id={styleHintId} className="text-xs text-muted-foreground">
-                  {t("fieldsArgHint")}
-                </p>
               </div>
             </details>
           ) : null}

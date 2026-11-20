@@ -1034,7 +1034,6 @@
     "fieldsHeading": "Section title",
     "fieldsBullet": "Bullet",
     "fieldsPara": "Text",
-    "fieldsArgHint": "This kind of field holds plain text only — no bold, no links.",
     "fieldsLabelAuthor": "Full name",
     "fieldsLabelLocation": "Location",
     "fieldsLabelEmail": "Email",
