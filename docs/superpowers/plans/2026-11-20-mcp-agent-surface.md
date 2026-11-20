@@ -495,6 +495,126 @@ git commit -m "feat(agent): MCP streamable-HTTP endpoint with a tool registry"
 
 ---
 
+### Task 4b: The modern era — `server/discover` and per-request versioning
+
+**Added 2026-11-20, after Task 4.** The design deferred the wire format to the
+specification, and the specification has moved an era past what the design
+assumed. Runs before Task 5, while the transport is fresh. Tasks 5–10 register
+tools in the same registry and are unaffected either way.
+
+**Why this is not optional.** `modelcontextprotocol.io/specification/versioning`
+says the current revision is **2026-07-28**, which is *stateless*: no
+`initialize`, the protocol version travels as per-request metadata, and
+`server/discover` replaces the handshake — "Servers **MUST** implement it."
+Revisions through 2025-11-25 are "legacy". Task 4 built legacy. The
+backward-compatibility matrix is explicit about what that costs:
+
+- *Dual-era client, legacy server:* "Works … the modern request returns a `4xx`
+  without a recognized modern error body, and the client falls back to
+  `initialize`." But that probe is a **MAY** and the body inspection a
+  **SHOULD** — it is other people's optional code.
+- *Modern client, legacy server:* "**Fails.** The server may reject the request
+  with an implementation-defined error, stay silent, or even process an
+  era-ambiguous method under legacy semantics."
+
+A feature whose entire purpose is "a user connects their assistant" cannot rest
+on a client-side MAY. Support both eras on the one endpoint.
+
+**Files:**
+- Create: `app/services/mcp_protocol.py`
+- Modify: `app/routers/mcp.py`
+- Test: `tests/test_mcp_protocol.py` (new)
+
+**Interfaces:**
+- Produces:
+  - `MODERN_VERSION = "2026-07-28"`, `LEGACY_VERSION = "2025-11-25"`,
+    `SUPPORTED = (MODERN_VERSION, LEGACY_VERSION)`
+  - `era_of(request, body) -> str` — `"modern"` or `"legacy"`, decided by the
+    `MCP-Protocol-Version` header and `_meta["io.modelcontextprotocol/protocolVersion"]`;
+    a body whose method is `initialize` with no version header is legacy.
+  - `check_version(request, body) -> None` — raises the two errors below.
+  - `discover_result() -> dict` — the `server/discover` payload.
+- Keeps Task 4's `initialize`, `tools/list` and `tools/call` working unchanged
+  for legacy callers. The registry, the audit wrapper and every tool are shared.
+
+**Error codes, exactly:**
+- `-32022` `"Unsupported protocol version"`, with `data.supported` (the list) and
+  `data.requested`. **This must be a recognized modern error**, because that is
+  the signal a dual-era client uses to stay modern instead of falling back.
+- `HeaderMismatch` + HTTP 400 when the `MCP-Protocol-Version` header and the
+  body's `_meta` version disagree — the spec makes that a MUST.
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+def test_server_discover_names_both_supported_versions(client, db_session, a_user):
+    out = _rpc(client, db_session, a_user, "server/discover", MODERN_VERSION)
+    assert out["result"]["supportedVersions"] == list(SUPPORTED)
+    assert out["result"]["capabilities"]["tools"]
+
+def test_a_modern_tools_list_works_without_any_handshake(client, db_session, a_user):
+    """The whole point of the modern era: no initialize, ever."""
+    out = _rpc(client, db_session, a_user, "tools/list", MODERN_VERSION)
+    assert {t["name"] for t in out["result"]["tools"]} == {s["name"] for s in specs()}
+
+def test_the_legacy_handshake_still_works(client, db_session, a_user):
+    """Task 4's path must not regress."""
+    out = _rpc(client, db_session, a_user, "initialize", None)
+    assert out["result"]["protocolVersion"] == LEGACY_VERSION
+
+def test_an_unsupported_version_is_a_recognized_modern_error(client, db_session, a_user):
+    out = _rpc(client, db_session, a_user, "tools/list", "1999-01-01")
+    assert out["error"]["code"] == -32022
+    assert out["error"]["data"]["supported"] == list(SUPPORTED)
+    assert out["error"]["data"]["requested"] == "1999-01-01"
+
+def test_a_header_body_version_mismatch_is_rejected(client, db_session, a_user):
+    r = _raw_rpc(client, db_session, a_user, "tools/list",
+                 header_version=MODERN_VERSION, body_version=LEGACY_VERSION)
+    assert r.status_code == 400
+    assert "HeaderMismatch" in json.dumps(r.json())
+
+def test_a_modern_tool_call_is_audited_like_a_legacy_one(client, db_session, a_user):
+    """One registry, one audit path, two eras."""
+```
+
+`_rpc(client, db, user, method, version)` mints a key and posts one request,
+setting both the `MCP-Protocol-Version` header and the body's `_meta` version
+when `version` is not `None`; `_raw_rpc` lets the two disagree.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `cd apps/backend && .venv/bin/pytest tests/test_mcp_protocol.py -v`
+Expected: FAIL — no `server/discover`, no version checking
+
+- [ ] **Step 3: Implement `app/services/mcp_protocol.py`**
+
+The module docstring carries the two matrix rows quoted above and the URLs, so
+the next person does not have to re-derive why both eras exist.
+
+- [ ] **Step 4: Wire it into `app/routers/mcp.py`**
+
+Version check first, then dispatch. `server/discover` is modern-only;
+`initialize` is legacy-only and, per the spec, an error returned to an
+`initialize` request **SHOULD** name the supported versions. `tools/list` and
+`tools/call` serve both eras off the same registry and the same `audited`
+wrapper. Do not duplicate the dispatch per era.
+
+- [ ] **Step 5: Run the tests, then the whole transport suite**
+
+Run: `cd apps/backend && .venv/bin/pytest tests/test_mcp_protocol.py tests/test_mcp_transport.py -v`
+Expected: PASS, with Task 4's tests unchanged.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add apps/backend/app/services/mcp_protocol.py apps/backend/app/routers/mcp.py \
+  apps/backend/tests/test_mcp_protocol.py
+git commit -m "feat(agent): serve both MCP protocol eras"
+```
+
+---
+
 ### Task 5: Job tools — reuse the surface that exists
 
 **Files:**
