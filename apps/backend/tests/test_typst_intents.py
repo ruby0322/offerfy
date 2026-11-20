@@ -1,11 +1,13 @@
 """Intents: `set_arg` and `set_line` (value), then the five structural ones."""
 
 import hashlib
+from types import SimpleNamespace
 
 import pytest
 
 from app.schemas_editing import IntentIn, MarkOut
 from app.services.emitters import deterministic_pairs, emitter_for
+from app.services.emitters.base import EmitResult
 from app.services.typst_intents import (
     PLACEHOLDER, IntentError, apply_intent, normalize_blanks)
 from app.services.typst_projection import line_unit, parse_projection, serialize_unit
@@ -348,13 +350,27 @@ def test_insert_item_into_a_bullet_list_adds_a_bullet():
     assert out == src + f"- {PLACEHOLDER}\n"
 
 
+# A headed section whose only content is a call the projection cannot see into: there is
+# no block to copy the shape of, and the section is not empty either, so the emitter
+# fallback is out too. `synthetic-tier-b`'s Skills section used to serve here, until its
+# `#grid` cells became projected content and gave it a block to copy.
+NOTHING_TO_COPY_SRC = '''#import "@preview/basic-resume:0.2.9": *
+
+== Skills
+
+#mystery("Open to relocation")
+'''
+
+
 def test_insert_item_is_refused_where_there_is_nothing_to_copy():
-    src = read("synthetic-tier-b"); p = parse_projection(src)
-    empty = next(s for s in p.sections if s.title_unit and not s.blocks)
-    refused(src, "insert_item", target=empty.id)
-    refused(src, "insert_item", target="s0")        # the preamble holds only the show rule
-    refused(src, "insert_item", target="nope")
-    refused(src, "insert_item")
+    src = NOTHING_TO_COPY_SRC
+    p = parse_projection(src)
+    assert p.sections[-1].title_unit and not p.sections[-1].blocks
+    refused(src, "insert_item", target=p.sections[-1].id)
+    tier_b = read("synthetic-tier-b")
+    refused(tier_b, "insert_item", target="s0")   # the preamble holds only the show rule
+    refused(tier_b, "insert_item", target="nope")
+    refused(tier_b, "insert_item")
 
 
 def test_insert_section_appends_a_heading_and_a_placeholder():
@@ -733,10 +749,21 @@ def test_the_gap_is_measured_between_adjacent_siblings_only():
 
 
 def test_an_entry_with_an_unnamed_value_cannot_be_copied_blank():
-    for call in ('#cvitem("Role at Acme", company: "Acme")', '#cvitem([Role], company: "Acme")'):
-        src = f"== A\n\n{call}\n- x\n"
-        err = refused(src, "insert_item", target="s1")
-        assert "unnamed" in err.detail
+    # A positional STRING is the shape that stays refused: it is text with no key to
+    # make a field of, so a copy would carry "Role at Acme" into the new entry with
+    # nothing to clear it from.
+    src = '== A\n\n#cvitem("Role at Acme", company: "Acme")\n- x\n'
+    err = refused(src, "insert_item", target="s1")
+    assert "unnamed" in err.detail
+
+    # A positional CONTENT BLOCK is not. It used to be refused alongside the string, and
+    # that was right while the projection made no unit of what is inside it -- it does
+    # now, line by line, whether a key names the block or not, so the copy can blank it.
+    block = '== A\n\n#cvitem([Role at Acme], company: "Acme")\n- x\n'
+    out = structural(block, "insert_item", target="s1")
+    assert out.count("Role at Acme") == 1
+    assert f"#cvitem([{PLACEHOLDER}], company: \"{PLACEHOLDER}\")" in out, out
+
     # the refusal is about the copied block only: a fully keyed one is copied
     keyed = '== A\n\n#cvitem(role: "Role at Acme", company: "Acme")\n- x\n'
     out = structural(keyed, "insert_item", target="s1")
@@ -837,11 +864,24 @@ def test_insert_item_into_an_empty_section_without_an_emitter_is_refused():
             parse_projection(other), "Experience").id)
 
 
-def test_insert_item_does_not_fill_a_section_the_projection_cannot_see_into():
-    # `Skills` here holds a #grid: not empty, merely unprojected. Nothing is appended.
+def test_insert_item_reads_a_section_by_what_the_projection_can_see():
+    """`Skills` in `synthetic-tier-b` holds a `#grid` of content blocks. That used to be
+    content the projection could not see, so the button was refused for having nothing to
+    copy; the cells are projected now, so the grid is an item like any other and a copy
+    of it with blank cells is what the person asked for.
+
+    A call the projection still cannot see into -- its content a positional string, with
+    no key and no brackets -- is refused exactly as before.
+    """
     src = read("synthetic-tier-b")
     p = parse_projection(src)
-    refused(src, "insert_item", target=section_named(p, "Skills").id)
+    out = structural(src, "insert_item", target=section_named(p, "Skills").id)
+    assert out.count("#grid(") == 2
+    assert out.count(PLACEHOLDER) == 2
+    assert out.count("SQL, dbt, Airflow") == 1   # nothing of the copied grid survives
+
+    refused(NOTHING_TO_COPY_SRC, "insert_item",
+            target=parse_projection(NOTHING_TO_COPY_SRC).sections[-1].id)
 
 
 def test_emit_parse_round_trips_for_every_pinned_emitter():            # Invariant 2
@@ -861,8 +901,11 @@ def test_emit_parse_round_trips_for_every_pinned_emitter():            # Invaria
                 continue
             out = out[:u.span[0]] + serialize_unit(u) + out[u.span[1]:]
         assert out == source, name
-    # ats-friendly-resume's `[#"url"]` link label is the one such unit in the corpus
-    assert opaque_seen == 1
+    # Three in the corpus, every one of them the project-URL line the emitters write as
+    # `#link("https://" + "x")[#"x"]`: ats-friendly-resume's `[#"url"]` label, and
+    # acorn-resume's two, which sit inside a `details: [..]` block and so are projected
+    # (read-only, because the serialiser cannot rebuild `#"x"`) rather than invisible.
+    assert opaque_seen == 3
 
 
 def test_an_escape_the_range_already_has_is_written_back_as_it_was():
@@ -878,19 +921,9 @@ def test_an_escape_the_range_already_has_is_written_back_as_it_was():
     assert serialize_unit(line_unit("a // b")) == "a /\\/ b"      # canonical stays canonical
 
 
-def test_insert_item_refuses_for_an_emitter_whose_entries_are_not_markup():
-    # clean-print-cv keeps its entries in a data dict: there is no entry to write as text
-    name, version = next(pair for pair in PAIRS if pair[0] == "clean-print-cv")
-    for title in ("Experience", "Skills"):         # an item, and a free-form bullet
-        refused(f'#import "@preview/{name}:{version}": *\n\n== {title}\n\n',
-                "insert_item", target="s1")
-
-
 def test_the_first_item_of_an_emitter_has_one_placeholder_per_field():
     for name, version in PAIRS:
         src = (f'#import "@preview/{name}:{version}": *\n\n== Projects\n\n')
-        if name == "clean-print-cv":
-            continue
         out = structural(src, "insert_item", target="s1")
         assert f"{PLACEHOLDER}, {PLACEHOLDER}" not in out, name
         assert f"{PLACEHOLDER}{PLACEHOLDER}" not in out, name
@@ -941,12 +974,11 @@ def test_every_placeholder_of_a_first_item_lands_in_a_field_the_form_can_reach()
     got = {}
     for name, version in PAIRS:
         for kind in ("work", "education", "project", "bullet"):
-            try:
-                body = _emitter_snippet(
-                    f'#import "@preview/{name}:{version}": *\n', kind, PLACEHOLDER)
-            except IntentError:
-                assert name == "clean-print-cv", (name, kind)
-                continue
+            # No `except IntentError` here any more: reaching every field is the bar
+            # for being in the registry at all (see `emitters/__init__.py`), so a pair
+            # that refuses a kind fails this test rather than being excused by name.
+            body = _emitter_snippet(
+                f'#import "@preview/{name}:{version}": *\n', kind, PLACEHOLDER)
             assert PLACEHOLDER in body, (name, kind)
             assert _unreachable(body, PLACEHOLDER) == 0, (name, kind)
             got[name, kind] = body.count(PLACEHOLDER)
@@ -958,8 +990,11 @@ def test_every_placeholder_of_a_first_item_lands_in_a_field_the_form_can_reach()
         ("basic-resume", "project"): 6, ("basic-resume", "bullet"): 1,
         ("ats-friendly-resume", "work"): 6, ("ats-friendly-resume", "education"): 6,
         ("ats-friendly-resume", "project"): 5, ("ats-friendly-resume", "bullet"): 1,
-        ("acorn-resume", "work"): 5, ("acorn-resume", "education"): 6,
-        ("acorn-resume", "project"): 1, ("acorn-resume", "bullet"): 1,
+        # acorn-resume keeps its bullets now. They live in `details: [..]`, which the
+        # projection reads, so `_OPTIONAL` no longer has to give them up to make the
+        # entry reachable: work 5 -> 6, project 1 -> 2.
+        ("acorn-resume", "work"): 6, ("acorn-resume", "education"): 6,
+        ("acorn-resume", "project"): 2, ("acorn-resume", "bullet"): 1,
     }
 
 
@@ -1024,7 +1059,7 @@ def test_a_placeholder_is_checked_like_any_other_value():
     assert structural(src, "insert_item", target=skills) == src + f"- {PLACEHOLDER}\n"
 
 
-def test_each_insert_item_refusal_names_which_one_it_was():
+def test_each_insert_item_refusal_names_which_one_it_was(monkeypatch):
     """`unsupported` covers four quite different things here, and the panel cannot word
     them in the person's language off one English sentence -- it was showing the
     positional case's sentence ("entries hold text the form cannot blank out") for all
@@ -1050,17 +1085,27 @@ def test_each_insert_item_refusal_names_which_one_it_was():
                   target=section_named(parse_projection(none), "Experience").id)
     assert err.reason == "no_emitter", err.detail
 
-    # 3. a template whose own entries put fields where the form cannot reach them
-    odd = empty.replace("basic-resume:0.2.9", "clean-print-cv:0.1.0")
-    err = refused(odd, "insert_item",
-                  target=section_named(parse_projection(odd), "Experience").id)
+    # 3. a template whose own entries put fields where the form cannot reach them.
+    #    Stubbed rather than taken from the registry: every registered emitter writes
+    #    entries the form can reach (that is the bar for being in it at all -- see
+    #    `emitters/__init__.py`), and `clean-print-cv`, the pair that used to stand
+    #    here, was removed from the registry for failing it. The branch still guards
+    #    the next emitter, so it is still tested; it just has nothing real to test on.
+    def positional_only(_content):
+        return EmitResult(source='#import "@preview/x:1.0.0": *\n\n== Experience\n\n'
+                                 f'#entry("{PLACEHOLDER}")\n')
+
+    monkeypatch.setattr(
+        "app.services.typst_intents.emitter_for",
+        lambda name, version: SimpleNamespace(emit=positional_only))
+    err = refused(empty, "insert_item",
+                  target=section_named(parse_projection(empty), "Experience").id)
     assert err.reason == "template_shape", err.detail
+    monkeypatch.undo()
 
     # 4. a section holding content the projection cannot read, so nothing to copy
-    tier_b = read("synthetic-tier-b")
-    grid = next(s for s in parse_projection(tier_b).sections
-                if s.title_unit and not s.blocks)
-    err = refused(tier_b, "insert_item", target=grid.id)
+    err = refused(NOTHING_TO_COPY_SRC, "insert_item",
+                  target=parse_projection(NOTHING_TO_COPY_SRC).sections[-1].id)
     assert err.reason == "nothing_to_copy", err.detail
 
     # A refusal with nothing to distinguish carries no reason, and the panel then shows
@@ -1146,19 +1191,44 @@ KEYED_BLOCK_SRC = '''#import "@preview/basic-resume:0.2.10": *
 '''
 
 
-def test_a_keyed_content_block_stops_an_item_copy_like_a_positional_one():
-    """`details: [...]` is content the projection makes no unit of. The guard tested
-    `key == POSITIONAL`, and a keyed block has a key -- so `insert_item` copied the
-    previous entry's bullets into the new entry, where no field could clear them."""
-    p = parse_projection(KEYED_BLOCK_SRC)
-    # The premise: the block's bullets really are unreachable.
-    assert p.report.skipped_args.get("details") == 2
-    assert all(len(b.bullets) == 0 for s in p.sections for b in s.blocks)
+def test_a_keyed_content_block_is_copied_blank_one_line_at_a_time():
+    """`details: [...]` is how acorn-resume carries every entry's bullets.
 
-    e = refused(KEYED_BLOCK_SRC, "insert_item",
-                target=section_named(p, "Experience").id)
-    # The reason code stays `positional`: the frontend words its sentence from it
-    # (`StructuredPanel.tsx`), and this batch does not touch the frontend.
+    It went through two wrong answers before this one. First the copy carried the
+    previous entry's bullets into the new entry, where no field could clear them and
+    they printed in the PDF. Then it was refused outright, which was honest while the
+    projection made no unit of those lines -- but the fix was to project them, not to
+    withdraw the button, and acorn-resume is the one template in the registry that puts
+    every bullet it has in there.
+
+    Blanked line by line, not block by block: replacing the whole `[...]` with one word
+    would leave `details: [（待填）]`, a paragraph where its siblings have bullets.
+    """
+    p = parse_projection(KEYED_BLOCK_SRC)
+    # The premise: the block's bullets are reachable, under their own key.
+    assert "details" not in p.report.skipped_args
+    bullets = [u for u in p.units.values() if u.role == "bullet"]
+    assert [u.value for u in bullets] == ["Shipped the thing", "Learned the thing"]
+    assert all(u.editable for u in bullets)
+
+    out = structural(KEYED_BLOCK_SRC, "insert_item",
+                     target=section_named(p, "Experience").id)
+    assert out.endswith(
+        f'#work(\n'
+        f'  title: "{PLACEHOLDER}",\n'
+        f'  company: "{PLACEHOLDER}",\n'
+        f'  details: [\n'
+        f'    - {PLACEHOLDER}\n'
+        f'  ],\n'
+        f')\n'), out
+    # Nothing of the copied entry's own words survives into the new one.
+    assert out.count("Learned the thing") == 1
+
+    # A positional value is still refused, and still under the reason code the frontend
+    # words its sentence from (`StructuredPanel.tsx`): it has no key to make a field of,
+    # so there is nothing to blank it from.
+    e = refused(KEYED_BLOCK_SRC.replace('title: "Intern"', '"Intern", title: "Intern"'),
+                "insert_item", target=section_named(p, "Experience").id)
     assert e.reason == "positional"
 
 

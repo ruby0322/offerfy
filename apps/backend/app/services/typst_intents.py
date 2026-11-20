@@ -247,30 +247,60 @@ def _insert_bullet(source: str, projection: Projection, intent: IntentIn) -> str
     return normalize_blanks(out, at=pos + len(lead) + len(new))
 
 
-def _has_unprojectable_content(source: str, block: Block) -> bool:
-    """Whether the call holds content the projection makes no unit of: a positional value
-    of any shape, or a content block under any key. A copy would carry the previous
-    entry's text into the new one, where nothing can reach it to clear it.
+def _call_content(source: str, block: Block) -> tuple[bool, list[tuple[int, int]]]:
+    """(whether the call holds a positional value nothing can reach, the inner spans of
+    its content blocks).
 
-    The old name and docstring over-claimed, which is how this survived review: it said
-    "a positional string or content block" while the body tested `a.key == POSITIONAL`
-    only. A KEYED content block -- `details: [...]` -- has a key, so the guard never
-    fired for it, `insert_item` copied the previous entry's bullets into the new entry,
-    and they printed in the PDF with no field to clear them from.
+    The first is what stops a copy: `#cvitem("Role", "Company")` has text with no key to
+    make a field of, so a copy carries the previous entry's words into the new one with
+    nothing to clear them from.
+
+    A content block is not that any more. `details: [- a\n- b]` -- how acorn-resume
+    carries every entry's bullets -- used to be in the same bucket, and the refusal it
+    caused was the honest answer while the projection made no unit of its lines. It does
+    now (`typst_projection._args` records the span, `_build` projects the markup inside
+    it), so the lines have fields and `_blank_item` blanks them one by one, which keeps
+    each line's `- ` marker where replacing the whole block with one word would not.
     """
     call = _HASH_CALL.match(source, block.outer[0])
     if call is None:
-        return False
+        return False, []
     open_idx = call.end() - 1
     found: list[_Arg] = []
     _args(source, open_idx, _close_of(source, open_idx), found)
-    return any(a.key == POSITIONAL or a.kind == "content" for a in found)
+    return (any(a.key == POSITIONAL and a.kind != "content" for a in found),
+            [(a.start, a.end) for a in found if a.kind == "content"])
+
+
+def _every_line_projected(
+    source: str, spans: list[tuple[int, int]], projection: Projection, block: Block
+) -> bool:
+    """Whether every non-blank line inside `spans` is covered by one of `block`'s body
+    units -- the condition under which blanking those units blanks all of the text.
+
+    `_body_lines` projects a content block's lines but not all of them: a `= heading`, a
+    `/ Term:` item or a marker with nothing after it is counted in the report and left
+    alone. One of those inside an entry would survive a copy with its own words still in
+    it, so a block holding one is refused instead.
+    """
+    units = [projection.units[u].span for u in block.body_units]
+    for lo, hi in spans:
+        pos = lo
+        for text in source[lo:hi].split("\n"):
+            start, end = pos, pos + len(text)
+            pos = end + 1
+            if text.strip() and not any(a < end and start < b for a, b in units):
+                return False
+    return True
 
 
 def _blank_item(source: str, projection: Projection, last: Block, ph: str) -> str:
     """A copy of `last` with its text replaced, without the blank lines that follow it."""
     if last.kind == "comp":
-        if _has_unprojectable_content(source, last):
+        opaque, bodies = _call_content(source, last)
+        if last.body is not None:
+            bodies.append(last.body)
+        if opaque or not _every_line_projected(source, bodies, projection, last):
             raise IntentError(
                 "unsupported",
                 "this template's entries carry unnamed values that cannot be blanked",
@@ -291,9 +321,13 @@ def _blank_item(source: str, projection: Projection, last: Block, ph: str) -> st
                 # applies to an arg unit's value, which keeps the round-trip `_splice`
                 # relies on.
                 cuts.append((*unit.span, _escape(ph)))
-        if last.body is not None and last.body[1] <= end:
-            # A `#ident(...)[...]` body is MARKUP, not a literal.
-            cuts.append((*last.body, markup_value(ph)))
+        for uid in last.body_units:
+            # A line inside a content block is MARKUP, not a literal. Each line is cut
+            # on its own rather than the block as a whole, so a `- ` marker, a nested
+            # `#link(..)[..]` and the indentation all stay where the template put them.
+            span = projection.units[uid].span
+            if start <= span[0] and span[1] <= end:
+                cuts.append((*span, markup_value(ph)))
         text = source[start:end]
         for a, b, written in sorted(set(cuts), reverse=True):
             text = text[:a - start] + written + text[b - start:]
@@ -360,7 +394,9 @@ def _section_body(emitter, probe: ResumeContent) -> str:
 
 def _unreachable(body: str, ph: str) -> int:
     """How many placeholders in `body` sit where the projection offers no field: a
-    positional argument, an embedded `#"..."` label, a bullet inside `details: [..]`."""
+    positional argument, or an embedded `#"..."` label (code inside markup, which the
+    line parser cannot rebuild and so leaves read-only). A bullet inside `details: [..]`
+    used to be one of these and is not any more -- see `_call_content`."""
     doc = parse_projection(f'#import "@preview/x:1"\n\n== T\n\n{body}')
     reachable = sum(u.value.count(ph) for u in doc.units.values() if u.editable)
     return body.count(ph) - reachable

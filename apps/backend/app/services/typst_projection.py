@@ -10,8 +10,15 @@ report and left alone, never promoted to a unit.
 What counts as structure is a *shape*, not a name. `#ident(` with balanced
 parentheses is a component block whether it is `#work`, `#edu` or a helper nobody
 has an emitter for; a template's function names are not a list this module carries.
-A block exists only if at least one of its arguments is editable; `#pagebreak()` and
-`#grid(...)` are recorded in `report.structures` instead.
+A block exists only if it holds something the form can show -- an editable argument,
+a `[...]` content block in its argument list, or a trailing `[...]` body; a call that
+holds none of those, like `#pagebreak()`, is recorded in `report.structures` instead.
+
+A `[...]` content block is markup wherever it sits, so it projects line by line
+wherever it sits: as a trailing body (`#align(center)[..]`), under a key
+(`details: [- a\n- b]`, how acorn-resume carries every entry's bullets) or
+positionally (a `#grid` cell). The brackets are the same brackets; only what precedes
+them differs, and the form shows the lines inside either way.
 
 Continuation lines are the other trap. A construct that opens a bracket on one line
 and closes it on a later one -- a multi-line `#let data = (...)` -- owns every line
@@ -280,9 +287,16 @@ def _index(src: str) -> list[_Line]:
 class _Arg:
     key: str
     kind: str  # literal | ident | content | other
-    start: int = 0  # literal: inner span
+    start: int = 0  # literal and content: inner span
     end: int = 0
     ident: str = ""
+    # Whether the value carries text a reader of the PDF sees: a string literal anywhere
+    # in it, and nothing else. It is what `_build`'s tier grade asks of a skipped
+    # argument whose key is not a layout setting -- `font-size: 11pt`,
+    # `link-style: (underline: true)` and `top: 0.15em` are layout that no list of style
+    # key names ever got around to naming, and the grade said they were hidden content.
+    # See `_build` for why both tests are needed and neither is enough.
+    has_text: bool = False
 
 
 def _unescape(slice_: str) -> str:
@@ -293,6 +307,30 @@ def _escape(value: str) -> str:
     return re.sub(r'(["\\])', r"\\\1", value)
 
 
+def _literal_list(src: str, open_idx: int, close: int) -> list[tuple[int, int]] | None:
+    """Inner spans of a `("a", "b")` list, or `None` if any element is not a literal.
+
+    All-or-nothing on purpose. A flat list of strings is N values under one key, which
+    the form can show as N fields of that name; `(("mailto:" + e, e), (github, "..."))`
+    is a list of RECORDS, where the second half of a pair means nothing without the
+    first and a field per literal would offer "mailto:" as something to type over. A
+    record needs key paths to project at all -- the same thing a dict-shaped template
+    needs, and the same reason neither is projected here yet.
+    """
+    items: list[tuple[int, int]] = []
+    i, end = open_idx + 1, close - 1
+    while i < end:
+        if src[i] in " \t\r\n,":
+            i += 1
+            continue
+        if src[i] != '"':
+            return None
+        j = _string_end(src, i)
+        items.append((i + 1, j - 1))
+        i = j
+    return items or None
+
+
 def _args(
     src: str, open_idx: int, close: int, out: list[_Arg], nested: bool = False
 ) -> None:
@@ -300,7 +338,20 @@ def _args(
 
     A value that is itself a call (`dates: dates-helper(start-date: "...")`) is
     flattened one level, so its keyed arguments are collected as if they were the
-    block's own. Positional arguments are ignored: they have no key to label a field.
+    block's own. A positional value gets no field of its own -- there is no key to
+    label one with -- but it is still recorded, under `POSITIONAL`, because content
+    the form cannot show must not be silent.
+
+    A content block (`details: [- a\n- b]`, `#pad(top: .., [..])`) carries its INNER
+    span, so the caller can project the markup inside it the same way it projects the
+    markup inside a trailing `#call(..)[..]` body. Both are markup in an argument
+    list; only the brackets differ.
+
+    A flat list of string literals under a content key (`technologies: ("Rust", "Go")`)
+    becomes one literal argument per element, all under that key. Under a STYLE key it
+    does not: `font: ("Inria Sans", "Noto Serif CJK TC")` is one setting with ordered
+    fallbacks, not two values, and offering the CJK fallback as a field to type over is
+    how a résumé stops rendering Chinese.
     """
     end = close - 1
     i = open_idx + 1
@@ -318,7 +369,7 @@ def _args(
             if key:
                 out.append(_Arg(key, "literal", v + 1, j - 1))
             else:  # `#cvitem("Role", "Company")`: content with no key to label it
-                out.append(_Arg(POSITIONAL, "other"))
+                out.append(_Arg(POSITIONAL, "other", has_text=True))
             i = j
             continue
         call = None if nested else _CALL_VALUE.match(src, v)
@@ -338,20 +389,23 @@ def _args(
                 j += 1
         j = min(j, end)
         raw = src[v:j].strip()
-        if not key:
-            if src[v] == "[":  # a positional content block, e.g. a grid cell
-                out.append(_Arg(POSITIONAL, "content"))
+        if src[v] == "[":
+            # A content block, keyed (`details: [- a\n- b]`, how several templates
+            # carry an entry's bullets) or positional (`#pad(top: .., [..])`, a grid
+            # cell). Either way it is markup, and its inner span is what projects it.
+            cl = _close_of(src, v)
+            out.append(_Arg(key or POSITIONAL, "content", v + 1, cl - 1, has_text=True))
+        elif not key:
+            pass  # a positional identifier or number labels nothing and shows nothing
+        elif _BARE_IDENT.fullmatch(raw):
+            out.append(_Arg(key, "ident", ident=raw))
         else:
-            if _BARE_IDENT.fullmatch(raw):
-                out.append(_Arg(key, "ident", ident=raw))
-            elif raw.startswith("["):
-                # A KEYED content block (`details: [- a\n- b]`, how several templates
-                # carry an entry's bullets). It is content the projection makes no unit
-                # of, exactly like a positional one -- but it has a key, so the key
-                # alone cannot tell it from a number or a style value. `kind` can.
-                out.append(_Arg(key, "content"))
+            items = (None if src[v] != "(" or is_style_key(key)
+                     else _literal_list(src, v, _close_of(src, v)))
+            if items is None:
+                out.append(_Arg(key, "other", has_text='"' in raw))
             else:
-                out.append(_Arg(key, "other"))
+                out.extend(_Arg(key, "literal", a, b) for a, b in items)
         i = max(j, v + 1)
 
 
@@ -663,6 +717,8 @@ class _RawBlock:
     args: list[_Arg]
     unit: tuple[int, int] | None = None  # a loose bullet/paragraph: its text range
     body: tuple[int, int] | None = None
+    # inner spans of the content blocks inside the argument list, in source order
+    arg_bodies: list[tuple[int, int]] = field(default_factory=list)
     bullets: list[tuple[int, int, int, int]] = field(default_factory=list)
     # each bullet: (line start, end of its line incl. newline, text start, text end)
 
@@ -735,6 +791,9 @@ def parse_projection(source: str) -> Projection:
     lines = _index(src)
     structures: Counter[str] = Counter()
     skipped: Counter[str] = Counter()
+    # The subset of `skipped` carrying text a reader sees -- what the tier grade turns
+    # on. See `_Arg.has_text`.
+    text_skipped: Counter[str] = Counter()
 
     lets: dict[str, tuple[int, int]] = {}
     for line in lines:
@@ -811,10 +870,15 @@ def parse_projection(source: str) -> Projection:
                 body = (call_end + 1, body_end - 1)
         # A leaf is a string literal (even "") or a name bound to a literal #let.
         leaves = [a for a in args if _resolves(src, a, lets)]
+        # A content block is projected line by line (`arg_bodies` below), so it is not
+        # skipped -- it is the one shape here that used to be reported and lost.
+        arg_bodies = [(a.start, a.end) for a in args if a.kind == "content"]
         for a in args:
-            if a not in leaves:
+            if a.kind != "content" and a not in leaves:
                 skipped[a.key] += 1
-        if not leaves and body is None:
+                if a.has_text:
+                    text_skipped[a.key] += 1
+        if not leaves and body is None and not arg_bodies:
             structures["#show" if head else f"#{call.group(1)}"] += 1
             continue
 
@@ -844,10 +908,10 @@ def parse_projection(source: str) -> Projection:
         sections[-1].blocks.append(
             _RawBlock("show" if head else "comp", call.group(1), line.start,
                       content_end, outer_end, notes, leaves, bullets=bullets,
-                      body=body)
+                      body=body, arg_bodies=arg_bodies)
         )
 
-    return _build(src, sections, lets, structures, skipped)
+    return _build(src, sections, lets, structures, skipped, text_skipped)
 
 
 def _resolves(src: str, arg: _Arg, lets: dict[str, tuple[int, int]]) -> bool:
@@ -859,7 +923,7 @@ def _resolves(src: str, arg: _Arg, lets: dict[str, tuple[int, int]]) -> bool:
     return False
 
 
-def _build(src, raw_sections, lets, structures, skipped) -> Projection:
+def _build(src, raw_sections, lets, structures, skipped, text_skipped) -> Projection:
     n = len(src)
     units: dict[str, Unit] = {}
     let_units: dict[str, str] = {}
@@ -895,9 +959,15 @@ def _build(src, raw_sections, lets, structures, skipped) -> Projection:
                     if a.ident not in let_units:
                         let_units[a.ident] = make_unit(a.key, *lets[a.ident])
                     ids.append(let_units[a.ident])
+            # Every content block this call holds, in source order: the ones inside
+            # the argument list (`details: [..]`) and the trailing `[..]` body alike.
+            # They project identically, so they share one list of units -- which is
+            # also why no consumer needed changing when the first kind was added.
+            bodies = sorted(rb.arg_bodies + ([rb.body] if rb.body else []))
             body_units = tuple(
                 make_line(a, b, role)
-                for a, b, role in _body_lines(src, rb.body, structures))
+                for span in bodies
+                for a, b, role in _body_lines(src, span, structures))
             bullets = tuple(
                 Block(f"{rs.id}i{bi}b{bj}", "bullet", None, (ls, le), le,
                       unit=make_line(ts, te, "bullet"))
@@ -923,15 +993,28 @@ def _build(src, raw_sections, lets, structures, skipped) -> Projection:
     if not editable:
         tier = "C"
     elif len(editable) < len(units) or any(
-            n and not is_style_key(key) for key, n in skipped.items()):
+            n and not is_style_key(key) for key, n in text_skipped.items()):
         # Content the form cannot show is as much a Tier B reason as a unit it cannot
         # write: "A" must mean every content unit is editable.
         #
-        # EVERY non-style skipped argument, not just `(positional)`. A skipped `details:`
-        # was recorded in the report and then ignored here, so a document hiding a whole
-        # entry's bullets still graded "A" -- the grade claimed full coverage while the
-        # form showed half a résumé, and nothing failed. A style key (`font`, `margin`,
-        # `accent-color`) is not content and never forced B; that part is unchanged.
+        # A skipped argument counts only if it carries text a reader sees AND its key
+        # is not a layout setting. Each test catches what the other cannot, and the
+        # key test alone is what used to decide this:
+        #
+        #   `font-size: 11pt`, `author-font-size`, `link-style: (underline: true)`,
+        #   `top: 0.15em`, `color-enabled: true` -- layout, but `is_style_key`'s list
+        #   (`font`/`paper`/`lang`/`margin`/`size`/`leading` plus `-color`/`-position`/
+        #   `-font`) does not name them, so they read as hidden content and graded two
+        #   of the three templates in the registry B for holding nothing but settings.
+        #   `has_text` answers all five without naming any of them: none is quoted.
+        #
+        #   `font: ("New Computer Modern", "Noto Serif CJK TC")` -- a quoted value that
+        #   is still layout, which `has_text` alone would read as hidden content and
+        #   grade every document in the corpus B. `is_style_key` answers that one.
+        #
+        # The grade is what this projection claims about its own coverage, so claiming
+        # "the form hides part of this résumé" over a margin was the same class of
+        # defect as the reverse, just in the direction that looks cautious.
         tier = "B"
     else:
         tier = "A"

@@ -318,9 +318,15 @@ def test_unserialisable_line_is_read_only():
     src = read("synthetic-tier-b")
     p = parse_projection(src)
     bad = [u for u in p.units.values() if not u.editable]
-    assert len(bad) == 1 and bad[0].kind == "line"
+    # Three: the footnote line, and the two `#grid` cells, whose text is now projected
+    # (they are content blocks in an argument list) and whose trailing `\ ` line break
+    # the line parser cannot rebuild. Read-only is the promise -- a unit the serialiser
+    # would change is never offered as editable -- and showing the text read-only is
+    # what the person gets instead of the cells being invisible.
+    assert len(bad) == 3 and {u.kind for u in bad} == {"line"}
     assert bad[0].opaque == ("#footnote[Quarterly review, 2022.]",)
-    assert serialize_unit(bad[0]) != _slice(src, bad[0])
+    assert [u.opaque for u in bad[1:]] == [("\\ ",), ("\\ ",)]
+    assert all(serialize_unit(u) != _slice(src, u) for u in bad)
     assert p.tier == "B"
 
 
@@ -457,14 +463,21 @@ def test_marks_fixture_heading_carries_bold_and_a_link():
 
 def test_unprojected_content_inside_a_component_is_not_tier_a():
     p = parse_projection(read("synthetic-tier-b"))
-    assert p.report.skipped_args.get("(positional)") == 3   # two grid cells and a tag
+    # One: the `#tag("Open to relocation")` string. The two `#grid` cells used to be
+    # counted here too; they are content blocks, so they are projected now and the
+    # report has nothing to say about them.
+    assert p.report.skipped_args.get("(positional)") == 1
     assert p.tier == "B"
 
 
 def test_positional_strings_and_blocks_are_counted_but_identifiers_are_not():
     src = '== A\n#cvitem("Role", "Company")\n#align(left)[Hi]\n#box(1pt, [cell])\n'
     p = parse_projection(src)
-    assert p.report.skipped_args["(positional)"] == 3   # 2 strings + 1 block, not `left`
+    # The two strings. Not `left` and not `1pt` -- a positional identifier or number
+    # labels nothing and shows nothing. Not `[cell]` either: a positional content block
+    # is markup, and markup is projected line by line whether a key names it or not.
+    assert p.report.skipped_args["(positional)"] == 2
+    assert [u.value for u in p.units.values() if u.role] == ["A", "Hi", "cell"]
     assert p.tier == "B"
     only_ident = parse_projection('== A\n#align(left)[Hi]\n')
     assert "(positional)" not in only_ident.report.skipped_args
@@ -587,10 +600,11 @@ def test_a_stored_empty_link_makes_its_unit_read_only_and_does_not_break_the_par
     assert len(hit) == 1 and hit[0].editable is False
 
 
-def test_a_skipped_non_style_argument_is_not_tier_a():
-    """Only a skipped *positional* argument forced Tier B, so a skipped `details:` was
-    recorded in the report and then ignored by the grade. The document claimed every
-    content unit was editable while the form showed none of that entry's bullets."""
+def test_a_keyed_content_block_is_projected_not_skipped():
+    """`details: [...]` is how acorn-resume carries every entry's bullets. It used to be
+    recorded as a skipped argument and lost -- the form showed an entry's title, company
+    and dates and none of what the person actually did there. It is markup in an
+    argument list, so it projects exactly as a trailing `#call(..)[..]` body does."""
     src = '''#import "@preview/basic-resume:0.2.10": *
 
 = Ada Lovelace
@@ -602,20 +616,49 @@ def test_a_skipped_non_style_argument_is_not_tier_a():
   company: "Northwind",
   details: [
     - Shipped the thing
+    - Shipped another thing
   ],
 )
 '''
     p = parse_projection(src)
-    assert p.report.skipped_args.get("details") == 1
-    # Every unit it DID make is editable, which is why the old condition fell through.
+    assert "details" not in p.report.skipped_args
+    block = p.sections[-1].blocks[0]
+    assert [p.units[u].value for u in block.body_units] == [
+        "Shipped the thing", "Shipped another thing"]
+    assert all(p.units[u].role == "bullet" for u in block.body_units)
+    assert all(u.editable for u in p.units.values())
+    assert p.tier == "A"
+
+
+def test_a_skipped_argument_carrying_text_is_not_tier_a():
+    """A value the form cannot show is as much a Tier B reason as a unit it cannot write.
+    A list of records is the shape that stays unreachable: the second half of a pair
+    means nothing without the first, so there is no field to offer for either."""
+    src = ('== A\n#header(name: "Ada", '
+           'contacts: (("mailto:a@b.c", "a@b.c"), ("https://x.dev", "x.dev")))\n')
+    p = parse_projection(src)
+    assert p.report.skipped_args.get("contacts") == 1
+    # Every unit it DID make is editable, which is why the grade must not come from that
+    # alone -- it would read "A" over a header whose four contact values are invisible.
     assert all(u.editable for u in p.units.values())
     assert p.tier == "B", "content the form cannot show must not grade A"
 
 
-def test_a_skipped_style_argument_still_grades_a():
-    """The other half of the same rule: a style key is not content and never forced B.
-    `synthetic-en` skips `font` and `author-position` and must stay Tier A."""
+def test_a_skipped_layout_argument_still_grades_a():
+    """The other half of the same rule, in both its halves. A key `is_style_key` names
+    (`font: ("X", "Y")`) is layout even though it is quoted; a value with no quoted text
+    in it (`font-size: 11pt`, `link-style: (underline: true)`) is layout even though no
+    list of key names reaches it. Either test alone grades a clean document B."""
     p = parse_projection(read("synthetic-en"))
     assert set(p.report.skipped_args) == {"font", "author-position"}
     assert all(is_style_key(k) for k in p.report.skipped_args)
     assert p.tier == "A"
+
+    styled = parse_projection(
+        '== A\n#work(title: "T", font-size: 11pt, link-style: (underline: true), '
+        'top: 0.15em, color-enabled: true)\n')
+    assert set(styled.report.skipped_args) == {
+        "font-size", "link-style", "top", "color-enabled"}
+    assert not any(is_style_key(k) for k in styled.report.skipped_args), \
+        "none of these is in STYLE_KEYS -- the value is what answers for them"
+    assert styled.tier == "A"
