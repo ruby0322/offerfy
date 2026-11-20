@@ -14,7 +14,10 @@
 
 - **No new Python dependencies.** `requirements.txt` stays 14 lines. The JSON-RPC envelope is hand-written; do not add the `mcp` SDK.
 - **No tool may call a model.** `tests/test_metering.py::test_billable_call_sites_are_wrapped` must not gain an entry because of this work. If it does, a tool was added that should not exist.
-- **Every new router carries `include_in_schema=False`.** `create_app()` passes no `openapi_url` and the Next rewrite publishes `/api/openapi.json`; a route in that document is a route described on the open web.
+- **Every new route carries `include_in_schema=False`,** whether it sits on a new router or on an existing one. `create_app()` passes no `openapi_url` and the Next rewrite publishes `/api/openapi.json`; a route in that document is a route described on the open web.
+- **A tool handler holds an `InFlightGate` slot for its whole life, so no handler may sleep, poll, or retry.** The base commit added `app/concurrency.py`: `InFlightGate` is the outermost middleware, `MAX_IN_FLIGHT` is 32 per worker, and a request over `GATE_TIMEOUT` is shed with a 503. Releasing the database connection before a compile — which this plan mandates — protects the pool, not the gate. Do not add a retry loop, a backoff, or a wait of any kind inside a tool.
+- **Do not touch `application.add_middleware(InFlightGate)` in `app/main.py`.** It is an unrelated production fix and must stay outermost.
+- **`typst` is not on PATH in this worktree.** The binary is `apps/backend/.tools/typst`, reached through a symlink to the main checkout, as are `.venv` and `apps/frontend/node_modules`. Run every command from this worktree.
 - **Token prefix is `ofa_`.** Never `ofk_` (that is `TalentApiKey`). The two credentials share no table, no prefix and no hash namespace.
 - **Hashing is unsalted SHA-256** of the raw token, in a function of this module's own — do not call `hash_talent_key`, and do not substitute bcrypt.
 - **`require_agent_caller` has no fallthrough.** Session cookie, guest cookie and admin account all get 401. Every failure is the same 401 with detail `"Credential required"` and header `WWW-Authenticate: Bearer`.
