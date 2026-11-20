@@ -52,6 +52,7 @@ THROTTLED = "throttled"
 # caller (the MCP dispatch) is expected to validate resume_id where it reads the
 # arguments, and to reject a malformed one before it gets here.
 _RESUME_ID_MAX = 36
+_TOOL_MAX = 64  # AgentToolCall.tool is String(64)
 
 
 def record(
@@ -61,6 +62,10 @@ def record(
     silently lost audit row is the failure this module exists to prevent."""
     if not isinstance(resume_id, str) or len(resume_id) > _RESUME_ID_MAX:
         resume_id = None
+    # `tool` is a client-supplied string for an unknown name, and the column is
+    # String(64): on Postgres an over-long value is a failed audit write, the
+    # same failure the resume_id coercion above prevents.
+    tool = tool[:_TOOL_MAX]
     db = get_session_factory()()
     try:
         db.add(

@@ -32,10 +32,10 @@ Wire facts this module relies on:
     -32602 invalid params, -32603 internal.
   * Two kinds of error. A tool that runs and fails is a tool *result* with
     `isError: true`, so the model can read it and adapt. A malformed envelope
-    is a JSON-RPC `error`. Both ride HTTP 200. The specification files an
-    unknown tool name under protocol errors (-32602); this surface deliberately
-    reports it as a tool error instead, so it passes through `audited` and
-    shows up in the user's audit list like any other refused call.
+    or an unknown tool name is a JSON-RPC `error` (-32602 for the name, which
+    is a parameter of a method that exists). Both ride HTTP 200. An unknown
+    name is still dispatched inside `audited`, so it is recorded as `refused`
+    in the user's audit list even though it is rendered as a protocol error.
 
 **Deliberately absent: SSE, `GET /mcp`, `MCP-Session-Id`, resumption.** The
 specification lets a server answer a POST with one `application/json` body and
@@ -47,9 +47,13 @@ and the snapshot streams were just fixed for. A session id would add server
 state for nothing, since the bearer token already identifies the caller on
 every request.
 
-Origin is not validated: the credential is a bearer token in the Authorization
-header, never an ambient cookie, so a page that rebinds DNS to this host has
-nothing to ride.
+**Origin.** The credential is a bearer token in the Authorization header,
+never an ambient cookie, so the DNS-rebinding threat the specification has in
+mind has nothing to ride here. The MUST is honoured regardless: a present
+`Origin` must be in ALLOWED_ORIGINS or the answer is 403. An absent `Origin`
+is allowed, which is every desktop, CLI and server-side connector client. A
+rejected value is logged at warning level so an unanticipated client is one
+grep away.
 
 include_in_schema=False on the router: the Next rewrite publishes
 /api/openapi.json, and a route in that document is a route described on the
@@ -85,9 +89,10 @@ METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 
-# AgentToolCall.tool is String(64); a longer name could only be an attack on
-# the audit write, and no tool is named that long.
-_TOOL_NAME_MAX = 64
+# Browser origins allowed to POST here: the hosted assistant and the site
+# itself. Deliberately a constant, not an env var, so it stays greppable.
+ALLOWED_ORIGINS = frozenset({"https://claude.ai", "https://offerfy.cc"})
+
 _RESUME_ID_MAX = 36
 
 
@@ -144,7 +149,7 @@ def _tools_call(db: Session, user: User, key: AgentApiKey, params: Any) -> dict:
     if not isinstance(params, dict):
         raise _RpcError(INVALID_PARAMS, "params must be an object")
     name = params.get("name")
-    if not isinstance(name, str) or not name or len(name) > _TOOL_NAME_MAX:
+    if not isinstance(name, str) or not name:
         raise _RpcError(INVALID_PARAMS, "params.name must be a tool name")
     args = params.get("arguments", {})
     if args is None:
@@ -161,6 +166,9 @@ def _tools_call(db: Session, user: User, key: AgentApiKey, params: Any) -> dict:
             rid = args.get("resume_id")
             call.resume_id = rid if isinstance(rid, str) and len(rid) <= _RESUME_ID_MAX else None
             payload = mcp_tools.call(db, user, name, args)
+    except mcp_tools.UnknownTool as exc:
+        # Audited as `refused` above; rendered as a protocol error.
+        raise _RpcError(INVALID_PARAMS, str(exc.detail))
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail)
         return _text_result(detail, is_error=True)
@@ -196,6 +204,18 @@ async def mcp_endpoint(
     db: Session = Depends(get_db),
 ):
     user, key = caller
+
+    origin = request.headers.get("origin")
+    if origin is not None and origin not in ALLOWED_ORIGINS:
+        logger.warning("mcp: rejected Origin %r", origin[:200])
+        return JSONResponse(
+            {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": INVALID_REQUEST, "message": "Origin not allowed"},
+            },
+            status_code=403,
+        )
 
     # Required by the transport specification: an unsupported version header
     # is a 400. A modern-only client probing this server relies on it to fall

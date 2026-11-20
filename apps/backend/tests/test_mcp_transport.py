@@ -219,10 +219,44 @@ def test_list_resumes_never_shows_another_users_or_a_guests(
     assert "Not yours" not in json.dumps(r.json())
 
 
-def test_an_unknown_tool_is_a_tool_error_not_a_crash(client, raw_key):
+def test_an_unknown_tool_is_a_jsonrpc_error_and_is_audited(client, db_session, raw_key):
     r = _call(client, raw_key, "drop_database", id=4)
     assert r.status_code == 200
-    assert r.json()["result"]["isError"] is True
+    body = r.json()
+    assert body["error"]["code"] == -32602
+    assert "result" not in body
+    assert [(x.tool, x.outcome) for x in _audit_rows(db_session)] == [
+        ("drop_database", "refused")
+    ]
+
+
+def test_an_overlong_tool_name_does_not_break_the_audit_write(client, db_session, raw_key):
+    r = _call(client, raw_key, "t" * 500)
+    assert r.json()["error"]["code"] == -32602
+    rows = _audit_rows(db_session)
+    assert [(x.tool, x.outcome) for x in rows] == [("t" * 64, "refused")]
+
+
+def test_an_allowlisted_origin_passes(client, raw_key):
+    for origin in ("https://claude.ai", "https://offerfy.cc"):
+        r = client.post(MCP, headers={**_bearer(raw_key), "Origin": origin},
+                        json={"jsonrpc": "2.0", "id": 1, "method": "ping"})
+        assert r.status_code == 200, origin
+
+
+def test_an_absent_origin_passes(client, raw_key):
+    r = _rpc(client, raw_key, {"jsonrpc": "2.0", "id": 1, "method": "ping"})
+    assert r.status_code == 200
+
+
+def test_an_unlisted_origin_is_403_and_logged(client, raw_key, caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="app.routers.mcp"):
+        r = client.post(MCP, headers={**_bearer(raw_key), "Origin": "https://evil.example"},
+                        json={"jsonrpc": "2.0", "id": 1, "method": "ping"})
+    assert r.status_code == 403
+    assert "https://evil.example" in caplog.text
 
 
 def test_a_malformed_body_is_a_jsonrpc_error(client, raw_key):
@@ -296,7 +330,7 @@ def test_a_bad_resume_id_records_none_and_does_not_crash(client, db_session, raw
 
 def test_a_refused_call_is_recorded_with_its_resume_id(client, db_session, raw_key):
     r = _call(client, raw_key, "drop_database", {"resume_id": "abc"})
-    assert r.json()["result"]["isError"] is True
+    assert r.json()["error"]["code"] == -32602
     rows = _audit_rows(db_session)
     assert [(r.tool, r.resume_id, r.outcome) for r in rows] == [("drop_database", "abc", "refused")]
 

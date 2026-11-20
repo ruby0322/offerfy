@@ -39,6 +39,11 @@ PROTOCOL_VERSION = "2025-11-25"
 SERVER_INFO = {"name": "offerfy", "title": "Offerfy", "version": "1.0.0"}
 
 
+class UnknownTool(HTTPException):
+    """No such tool. An HTTPException so `audited` records it as refused; the
+    transport renders it as a JSON-RPC protocol error rather than a tool error."""
+
+
 @dataclass(frozen=True)
 class Tool:
     spec: dict
@@ -95,7 +100,7 @@ def specs() -> list[dict]:
 def call(db: Session, user: User, name: str, args: dict) -> dict:
     tool = REGISTRY.get(name)
     if tool is None:
-        raise HTTPException(status_code=400, detail=f"Unknown tool: {name}")
+        raise UnknownTool(status_code=400, detail=f"Unknown tool: {name[:64]}")
     if inspect.iscoroutinefunction(tool.handler):
         return asyncio.run(tool.handler(db, user, args))
     return tool.handler(db, user, args)
