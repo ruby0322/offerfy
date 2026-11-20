@@ -1,23 +1,18 @@
 """POST /mcp: a signed-in user's own AI assistant, over MCP Streamable HTTP.
 
-**Built against MCP revision 2025-11-25** (services/mcp_tools.PROTOCOL_VERSION),
-read on 2026-11-20 from the published specification:
+**Serves both protocol eras off this one endpoint**: the legacy revision
+2025-11-25 (an `initialize` handshake) and the modern 2026-07-28 (stateless:
+no handshake, `server/discover`, the version in every request's `_meta` and in
+the `MCP-Protocol-Version` header). Version validation, era detection and the
+`server/discover` payload live in app/services/mcp_protocol.py, which also
+records why both are needed; dispatch is shared. Read on 2026-11-20 from:
   https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle
   https://modelcontextprotocol.io/specification/2025-11-25/basic/transports
+  https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http
   https://modelcontextprotocol.io/specification/2026-07-28/server/tools
-The tools page is the 2026-07-28 text, which is the one the site serves as
-"latest"; the tools/list and tools/call shapes used here (`name`,
-`description`, `inputSchema`; `content` blocks and `isError`) are the same in
-both revisions.
-
-Why 2025-11-25 and not 2026-07-28: the newer revision is stateless (no
-`initialize`, a `server/discover` method, per-request `_meta`, `resultType` on
-every result). It was published after the clients this is meant for were built,
-and says a modern-only server cannot be reached by a client that opens with
-`initialize`. A client that tries the modern form first gets this server's 400
-on the unsupported `MCP-Protocol-Version` header, which the newer revision
-defines as the signal to fall back to `initialize`. Supporting the newer
-revision as well is additive: one more method and one more header value.
+The tools/list and tools/call shapes (`name`, `description`, `inputSchema`;
+`content` blocks and `isError`) are the same in both; a modern result
+additionally carries `resultType: "complete"`.
 
 Wire facts this module relies on:
   * initialize result: `protocolVersion`, `capabilities`, `serverInfo`
@@ -81,7 +76,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.deps import require_agent_caller
 from app.models import AgentApiKey, User
-from app.services import mcp_tools
+from app.services import mcp_protocol, mcp_tools
 from app.services.mcp_audit import audited
 
 logger = logging.getLogger(__name__)
@@ -110,15 +105,20 @@ class _ToolCrash(Exception):
 
 
 class _RpcError(Exception):
-    def __init__(self, code: int, message: str):
+    def __init__(self, code: int, message: str, data: dict | None = None, status: int = 200):
         self.code = code
         self.message = message
+        self.data = data
+        self.status = status
 
 
-def _error(id_: Any, code: int, message: str) -> JSONResponse:
-    return JSONResponse(
-        {"jsonrpc": "2.0", "id": id_, "error": {"code": code, "message": message}}
-    )
+def _error(
+    id_: Any, code: int, message: str, data: dict | None = None, status: int = 200
+) -> JSONResponse:
+    err: dict = {"code": code, "message": message}
+    if data is not None:
+        err["data"] = data
+    return JSONResponse({"jsonrpc": "2.0", "id": id_, "error": err}, status_code=status)
 
 
 def _result(id_: Any, result: dict) -> JSONResponse:
@@ -204,22 +204,58 @@ def _tools_call(db: Session, user: User, key: AgentApiKey, params: Any) -> dict:
     return _text_result(payload, is_error=False, structured=True)
 
 
+def _route(
+    db: Session, user: User, key: AgentApiKey, modern: bool, method: str, params: Any
+) -> dict:
+    """One dispatch for both eras. The era only decides which lifecycle
+    method exists (`initialize` legacy, `server/discover` modern), that a
+    modern result carries `resultType`, and that tools/list carries cache
+    hints. The registry and the `audited` wrapper are shared."""
+    if method == "initialize" and not modern:
+        return _initialize()
+    if method == "server/discover" and modern:
+        return mcp_protocol.discover_result()
+    if method == "ping":
+        return {}
+    if method == "tools/list":
+        out = _tools_list()
+        if modern:
+            # Same registry, same reasoning as server/discover's TTL.
+            out["ttlMs"] = mcp_protocol.DISCOVER_TTL_MS
+            out["cacheScope"] = mcp_protocol.CACHE_SCOPE
+        return out
+    if method == "tools/call":
+        return _tools_call(db, user, key, params)
+    status = 404 if modern else 200  # the spec's 404 is a modern-era rule
+    if method in ("initialize", "server/discover"):
+        # Real, but belongs to the other era. Name the versions we serve (the
+        # spec asks that of an error answering `initialize`).
+        raise _RpcError(
+            METHOD_NOT_FOUND,
+            f"Method not available in this protocol era: {method}",
+            {"supported": list(mcp_protocol.SUPPORTED)},
+            status,
+        )
+    raise _RpcError(METHOD_NOT_FOUND, f"Method not found: {method[:64]}", None, status)
+
+
 def _dispatch(
-    db: Session, user: User, key: AgentApiKey, id_: Any, method: str, params: Any
+    db: Session,
+    user: User,
+    key: AgentApiKey,
+    id_: Any,
+    method: str,
+    params: Any,
+    modern: bool,
 ) -> JSONResponse:
     """Runs on a worker thread: every database call in here blocks."""
     try:
-        if method == "initialize":
-            return _result(id_, _initialize())
-        if method == "ping":
-            return _result(id_, {})
-        if method == "tools/list":
-            return _result(id_, _tools_list())
-        if method == "tools/call":
-            return _result(id_, _tools_call(db, user, key, params))
-        return _error(id_, METHOD_NOT_FOUND, f"Method not found: {method[:64]}")
+        result = _route(db, user, key, modern, method, params)
+        if modern:
+            result.setdefault("resultType", "complete")
+        return _result(id_, result)
     except _RpcError as exc:
-        return _error(id_, exc.code, exc.message)
+        return _error(id_, exc.code, exc.message, exc.data, exc.status)
     except Exception:
         # The transport or audit layer failed (a handler crash is caught in
         # _tools_call). Nothing of the cause goes to the caller.
@@ -248,27 +284,6 @@ async def mcp_endpoint(
             status_code=403,
         )
 
-    # Required by the transport specification: an unsupported version header
-    # is a 400. A modern-only client probing this server relies on it to fall
-    # back to `initialize`. Absent header is accepted.
-    version = request.headers.get("mcp-protocol-version")
-    if version is not None and version != mcp_tools.PROTOCOL_VERSION:
-        return JSONResponse(
-            {
-                "jsonrpc": "2.0",
-                "id": None,
-                "error": {
-                    "code": INVALID_REQUEST,
-                    "message": "Unsupported protocol version",
-                    "data": {
-                        "supported": [mcp_tools.PROTOCOL_VERSION],
-                        "requested": version[:32],
-                    },
-                },
-            },
-            status_code=400,
-        )
-
     try:
         body = await request.json()
     except ValueError:
@@ -287,9 +302,18 @@ async def mcp_endpoint(
         return _error(None, INVALID_REQUEST, "Invalid request id")
     if not isinstance(method, str) or not method:
         return _error(id_ if has_id else None, INVALID_REQUEST, "Invalid request")
+
+    # Version and header validation before any dispatch; this one check
+    # replaces Task 4's "header must equal 2025-11-25".
+    try:
+        mcp_protocol.check_version(request, body)
+    except mcp_protocol.ProtocolError as exc:
+        return _error(id_ if has_id else None, exc.code, exc.message, exc.data, exc.status)
+    modern = mcp_protocol.era_of(request, body) == "modern"
+
     if not has_id:
         return Response(status_code=202)  # a notification: accepted, no reply
 
     return await run_in_threadpool(
-        _dispatch, db, user, key, id_, method, body.get("params")
+        _dispatch, db, user, key, id_, method, body.get("params"), modern
     )

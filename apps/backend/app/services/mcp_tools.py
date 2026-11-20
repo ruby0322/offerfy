@@ -31,9 +31,9 @@ from sqlalchemy.orm import Session
 
 from app.models import Resume, User
 
-# The MCP revision this surface was written against: the 2025-11-25 revision,
-# which opens with an `initialize` handshake. See app/routers/mcp.py for the
-# sources read and why the newer stateless revision is not what is built.
+# The legacy MCP revision (2025-11-25, an `initialize` handshake), which the
+# `initialize` result reports. The modern revision and the full supported set
+# live in app/services/mcp_protocol.py.
 PROTOCOL_VERSION = "2025-11-25"
 
 SERVER_INFO = {"name": "offerfy", "title": "Offerfy", "version": "1.0.0"}
