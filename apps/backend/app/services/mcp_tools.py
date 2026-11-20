@@ -34,8 +34,9 @@ from sqlalchemy.orm import Session
 
 from app.models import Job, JobScore, User
 from app.schemas_editing import IntentIn
-from app.services import jobs_tools, resume_access, resume_write
+from app.services import family, jobs_tools, resume_access, resume_write
 from app.services.revisions import source_hash
+from app.services.starter import default_title, generate_starter
 from app.services.typst_projection import parse_projection
 
 # The legacy MCP revision (2025-11-25, an `initialize` handshake), which the
@@ -148,6 +149,64 @@ async def _put_resume_source(db: Session, user: User, args: dict) -> dict:
         db, resume, source=source, expected_hash=expected
     )
     return {"resume_id": resume.id, "hash": out["hash"]}
+
+
+def _clean_title(value: Any) -> str:
+    """A title as the router's rename accepts it: stripped, non-empty, <= TITLE_MAX."""
+    if not isinstance(value, str) or not value.strip():
+        raise HTTPException(status_code=400, detail="Title is required")
+    clean = value.strip()
+    if len(clean) > family.TITLE_MAX:
+        raise HTTPException(status_code=400, detail="Title is too long")
+    return clean
+
+
+def _create_resume(db: Session, user: User, args: dict) -> dict:
+    """A new blank resume from the static starter. Makes no model call."""
+    # Imported here: the router module pulls in the whole web layer.
+    from app.routers.resumes import _validate_locale
+
+    locale = _validate_locale(args.get("locale"))
+    title = _clean_title(args["title"]) if "title" in args else default_title(locale)
+    resume = resume_access.create_for_user(
+        db,
+        user,
+        title=title,
+        locale=locale,
+        source="create",
+        typst_source=generate_starter(locale),
+    )
+    db.commit()
+    return {"resume_id": resume.id, "title": resume.title, "locale": resume.locale}
+
+
+def _create_tailor(db: Session, user: User, args: dict) -> dict:
+    """Fork a tailor from one of the caller's resumes. A pure copy: no model call."""
+    resume = resume_access.owned_by_user(db, user, _required_str(args, "resume_id"))
+    label = args.get("target_label")
+    if label is not None and not isinstance(label, str):
+        raise HTTPException(status_code=400, detail="target_label must be a string")
+    try:
+        tailor = family.create_tailor(
+            db, resume, title=args.get("title"), target_label=label
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.commit()
+    return {
+        "resume_id": tailor.id,
+        "title": tailor.title,
+        "parent_resume_id": tailor.parent_resume_id,
+        "target_label": tailor.target_label,
+    }
+
+
+def _set_resume_title(db: Session, user: User, args: dict) -> dict:
+    """Rename one of the caller's resumes. Touches the title and nothing else."""
+    resume = resume_access.owned_by_user(db, user, _required_str(args, "resume_id"))
+    resume.title = _clean_title(args.get("title"))
+    db.commit()
+    return {"resume_id": resume.id, "title": resume.title}
 
 
 def _catalogue_tool(shared: dict) -> Tool:
@@ -300,6 +359,67 @@ REGISTRY: dict[str, Tool] = {
             },
         },
         handler=_put_resume_source,
+    ),
+    "create_resume": Tool(
+        spec={
+            "name": "create_resume",
+            "description": "Create a new blank resume for the signed-in user, "
+            "from Offerfy's starter template in the given language. Makes no "
+            "model call. Returns its `resume_id`; read it with get_resume.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Default: a name for the locale."},
+                    "locale": {
+                        "type": "string",
+                        "enum": ["en", "zh-TW", "zh-CN"],
+                        "description": "Default zh-TW.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+        handler=_create_resume,
+    ),
+    "create_tailor": Tool(
+        spec={
+            "name": "create_tailor",
+            "description": "Fork a tailored copy of one of the signed-in user's "
+            "resumes, for a specific role. It is a plain copy of the master's "
+            "current content, so edit it afterwards with edit_resume. Makes "
+            "no model call. Returns the new `resume_id`.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "resume_id": {"type": "string", "description": "From list_resumes."},
+                    "title": {"type": "string", "description": "Name of the tailor."},
+                    "target_label": {
+                        "type": "string",
+                        "description": "What it is aimed at, e.g. a company or role.",
+                    },
+                },
+                "required": ["resume_id", "title"],
+                "additionalProperties": False,
+            },
+        },
+        handler=_create_tailor,
+    ),
+    "set_resume_title": Tool(
+        spec={
+            "name": "set_resume_title",
+            "description": "Rename one of the signed-in user's resumes. Changes "
+            "the title only; the content is untouched.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "resume_id": {"type": "string", "description": "From list_resumes."},
+                    "title": {"type": "string"},
+                },
+                "required": ["resume_id", "title"],
+                "additionalProperties": False,
+            },
+        },
+        handler=_set_resume_title,
     ),
     "list_resumes": Tool(
         spec={

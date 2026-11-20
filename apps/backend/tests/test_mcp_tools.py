@@ -276,3 +276,157 @@ def test_list_resumes_is_newest_first(client, db_session, a_user):
     db_session.commit()
     listed = json.loads(_call(client, db_session, a_user, "list_resumes", {}))["items"]
     assert [r["title"] for r in listed] == ["New", "Old"]
+
+
+# --- lifecycle: create, fork, rename ---------------------------------------
+
+
+def test_create_resume_starts_from_the_starter_and_belongs_to_me(
+    client, db_session, a_user
+):
+    from app.models import Resume
+    from app.services.starter import generate_starter
+
+    out = json.loads(_call(client, db_session, a_user, "create_resume", {"locale": "zh-TW"}))
+    made = db_session.get(Resume, out["resume_id"])
+    assert made.user_id == a_user.id
+    assert made.guest_session_id is None
+    assert made.typst_source == generate_starter("zh-TW")
+
+
+def test_create_resume_uses_the_locales_default_title(client, db_session, a_user):
+    from app.models import Resume
+    from app.services.starter import default_title
+
+    out = json.loads(_call(client, db_session, a_user, "create_resume", {"locale": "en"}))
+    assert db_session.get(Resume, out["resume_id"]).title == default_title("en")
+    assert out["title"] == default_title("en")
+
+
+def test_create_resume_keeps_a_given_title_and_locale(client, db_session, a_user):
+    from app.models import Resume
+
+    out = json.loads(
+        _call(client, db_session, a_user, "create_resume", {"title": "Mine", "locale": "en"})
+    )
+    made = db_session.get(Resume, out["resume_id"])
+    assert (made.title, made.locale) == ("Mine", "en")
+
+
+def test_create_resume_rejects_an_unknown_locale(client, db_session, a_user):
+    from app.models import Resume
+
+    assert _is_tool_error(
+        _raw_call(client, db_session, a_user, "create_resume", {"locale": "klingon"})
+    )
+    assert db_session.query(Resume).filter(Resume.user_id == a_user.id).count() == 0
+
+
+def test_create_resume_rejects_a_bad_title(client, db_session, a_user):
+    for bad in ("", "   ", "x" * 256, 5):
+        assert _is_tool_error(
+            _raw_call(client, db_session, a_user, "create_resume", {"title": bad})
+        ), bad
+
+
+def test_create_tailor_forks_without_calling_a_model(
+    client, db_session, a_user, my_resume
+):
+    from app.models import Resume
+
+    out = json.loads(
+        _call(
+            client, db_session, a_user, "create_tailor",
+            {"resume_id": my_resume.id, "title": "For Acme", "target_label": "Acme"},
+        )
+    )
+    tailor = db_session.get(Resume, out["resume_id"])
+    assert tailor.parent_resume_id == my_resume.id
+    assert tailor.typst_source == my_resume.typst_source
+    assert tailor.user_id == a_user.id
+    assert tailor.title == "For Acme"
+    assert tailor.target_label == "Acme"
+
+
+def test_create_tailor_on_someone_elses_resume_is_not_found(
+    client, db_session, a_user, other_user
+):
+    from tests.conftest import _resume_for
+
+    theirs = _resume_for(db_session, other_user)
+    assert _is_tool_error(
+        _raw_call(
+            client, db_session, a_user, "create_tailor",
+            {"resume_id": theirs.id, "title": "x"},
+        )
+    )
+
+
+def test_create_tailor_ownership_is_checked_before_the_title(
+    client, db_session, a_user, other_user
+):
+    from tests.conftest import _resume_for
+
+    theirs = _resume_for(db_session, other_user)
+    body = _raw_call(
+        client, db_session, a_user, "create_tailor", {"resume_id": theirs.id, "title": ""}
+    )
+    assert "not found" in body["result"]["content"][0]["text"].lower()
+
+
+def test_create_tailor_rejects_a_blank_or_overlong_title(
+    client, db_session, a_user, my_resume
+):
+    # A crash is also reported as a tool error, so check the message: the agent
+    # must be told what was wrong with the title, not "tool failed".
+    for bad, why in (("", "required"), ("   ", "required"), ("x" * 256, "too long")):
+        body = _raw_call(
+            client, db_session, a_user, "create_tailor",
+            {"resume_id": my_resume.id, "title": bad},
+        )
+        assert _is_tool_error(body), bad
+        assert why in body["result"]["content"][0]["text"], bad
+
+
+def test_set_resume_title_renames_and_touches_nothing_else(
+    client, db_session, a_user, my_resume
+):
+    before = (my_resume.typst_source, my_resume.locale, my_resume.kind)
+    _call(
+        client, db_session, a_user, "set_resume_title",
+        {"resume_id": my_resume.id, "title": "  New name  "},
+    )
+    db_session.expire_all()
+    assert my_resume.title == "New name"
+    assert (my_resume.typst_source, my_resume.locale, my_resume.kind) == before
+
+
+def test_set_resume_title_rejects_blank_and_overlong(client, db_session, a_user, my_resume):
+    for bad in ("", "   ", "x" * 256):
+        assert _is_tool_error(
+            _raw_call(
+                client, db_session, a_user, "set_resume_title",
+                {"resume_id": my_resume.id, "title": bad},
+            )
+        ), bad
+
+
+def test_set_resume_title_on_someone_elses_resume_is_not_found(
+    client, db_session, a_user, other_user
+):
+    from tests.conftest import _resume_for
+
+    theirs = _resume_for(db_session, other_user, title="Theirs")
+    assert _is_tool_error(
+        _raw_call(
+            client, db_session, a_user, "set_resume_title",
+            {"resume_id": theirs.id, "title": "Mine now"},
+        )
+    )
+    db_session.expire_all()
+    assert theirs.title == "Theirs"
+
+
+def test_no_tool_can_delete_a_resume(client, db_session, a_user):
+    # A guard, not a proof: it cannot catch a delete tool with another name.
+    assert not [name for name in (s["name"] for s in specs()) if "delete" in name]
