@@ -44,7 +44,9 @@ test("llms.txt says when to use Offerfy and when not to", () => {
   assert.match(body, /Authorization: Bearer ofa_/);
   assert.match(body, /no machine OAuth authorization server/i);
   assert.match(body, /Google sign-in is for humans/i);
-  assert.match(body, /never submit/i);
+  assert.match(body, /Job search queries the public catalogue/);
+  assert.doesNotMatch(body, /own data: job search/i);
+  assert.match(body, /No tool submits an application/);
   assert.doesNotMatch(body, /no public agent API/i);
   assert.doesNotMatch(body, /unauthenticated agent API/i);
   assert.doesNotMatch(body, /self-serve API keys/i);

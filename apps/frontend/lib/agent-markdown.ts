@@ -111,7 +111,7 @@ Canonical: ${SITE_URL}
 
 - A signed-in user generates a token in settings, at ${SITE_URL}/en/settings; no operator is involved
 - Endpoint: ${SITE_URL}/api/mcp, sent with the header Authorization: Bearer ofa_...
-- The tools act only on that user's own data: job search, their scored matches, their resumes, their job preferences. They never submit applications
+- Job search queries the public catalogue; every other tool acts only on that user's own scored matches, resumes and job preferences. No tool submits an application
 
 ## Files
 
