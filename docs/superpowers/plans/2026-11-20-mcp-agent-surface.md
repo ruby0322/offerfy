@@ -626,8 +626,13 @@ git commit -m "feat(agent): serve both MCP protocol eras"
 - Consumes: `jobs_tools._search_spec()`, `jobs_tools._READ_JOB`, `jobs_tools._row()`, `app.services.jobs.search.filtered_query`, `app.models.JobScore`.
 - Produces:
   - In `jobs_tools.py`: `catalogue_specs() -> list[dict]` returning `[_search_spec(), _READ_JOB]`, and `catalogue_handlers(db) -> dict[str, Callable[[dict], str]]` with `search_jobs` and `read_job`. Both are resume-independent. `jobs_tool_specs(resume)` and `jobs_tool_handlers(db, resume, user)` keep their signatures and are rewritten to build on these.
-  - In `mcp_tools.py`: tools `search_jobs`, `get_job`, `list_matches`.
-  - `list_matches(db, user, args) -> dict` reads `JobScore` for `user.id` with `outcome == "scored"`, joined to `Job`, ordered by `fit_score` descending then `scored_at` descending, `limit` capped at `jobs_tools.SEARCH_LIMIT_MAX`. Rows carry `_row(job, facets)` plus `tier`, `fit_score`, `reason`, `gap`.
+  - In `mcp_tools.py`: tools `search_jobs`, `read_job`, `list_matches`.
+  - `list_matches(db, user, args) -> dict` reads `JobScore` for `user.id` with `outcome == "scored"`, joined to `Job`, **restricted to active postings**, ordered by `fit_score` descending then `scored_at` descending, `limit` capped at `jobs_tools.SEARCH_LIMIT_MAX`. Rows carry `_row(job, facets)` plus `tier`, `fit_score`, `reason`, `gap`.
+
+    The active filter matters: the `job_scores` cache outlives a posting's open window, so without it an agent shows the user a closed job as a match. Filtering rather than adding an `is_active` flag matches `GET /v1/jobs`'s own `active=True` default instead of inventing a second convention, and the user's question is "what can I apply to". Say so in the tool description.
+
+  - **The MCP tool is named `read_job`, not `get_job`** — the name the shared spec in `jobs_tools.py` already uses. The plan originally said `get_job`, which would have forced a runtime name mapping and a description rewrite to make the spec-equality test pass; a test that only passes because a transform made it pass is worth nothing, and two descriptions defeat the whole point of reusing one spec.
+  - **No tool description may name another tool.** The roster differs between the chat surface and MCP, so "takes a `job_id` from `search_jobs` or `read_my_job_profile`" is wrong on one of them — and a description is the only thing an agent reads. Word it without naming tools.
   - Three test helpers in `tests/test_mcp_tools.py`, used by Tasks 5 through 10:
     - `_raw_call(client, db, user, name, args) -> dict` — mints a key for `user`, posts one `tools/call`, returns the parsed JSON-RPC response.
     - `_call(...) -> str` — the same, asserting success and returning the text content.
@@ -641,11 +646,11 @@ Do not define a second `search_jobs` spec. `jobs_tools.py` already has one and `
 def test_search_jobs_finds_a_posting_by_keyword(client, db_session, a_user, a_job):
     assert a_job.title in _call(client, db_session, a_user, "search_jobs", {"q": a_job.title})
 
-def test_get_job_returns_the_posting(client, db_session, a_user, a_job):
-    assert a_job.company in _call(client, db_session, a_user, "get_job", {"job_id": a_job.id})
+def test_read_job_returns_the_posting(client, db_session, a_user, a_job):
+    assert a_job.company in _call(client, db_session, a_user, "read_job", {"job_id": a_job.id})
 
-def test_get_job_on_an_unknown_id_is_a_tool_error(client, db_session, a_user):
-    assert _is_tool_error(_raw_call(client, db_session, a_user, "get_job",
+def test_read_job_on_an_unknown_id_is_a_tool_error(client, db_session, a_user):
+    assert _is_tool_error(_raw_call(client, db_session, a_user, "read_job",
                                     {"job_id": "no-such-posting"}))
 
 def test_the_mcp_job_specs_are_the_catalogue_specs(client):
@@ -691,7 +696,7 @@ Expected: PASS, unchanged
 
 - [ ] **Step 5: Register the three tools in `app/services/mcp_tools.py`**
 
-`search_jobs` and `get_job` delegate to `catalogue_handlers`. `list_matches` is new, user-scoped, reads only the cache — it must not call the sweep, the scorer, or `digest.mark_opened`, for the reason `jobs_tools.py`'s docstring already gives about forging an engagement signal.
+`search_jobs` and `read_job` delegate to `catalogue_handlers`. `list_matches` is new, user-scoped, reads only the cache — it must not call the sweep, the scorer, or `digest.mark_opened`, for the reason `jobs_tools.py`'s docstring already gives about forging an engagement signal.
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
