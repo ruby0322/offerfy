@@ -37,6 +37,15 @@ Wire facts this module relies on:
     name is still dispatched inside `audited`, so it is recorded as `refused`
     in the user's audit list even though it is rendered as a protocol error.
 
+**Pool connections: this endpoint holds two, not one.** `get_db` keeps the
+request session (one connection) for the request's whole life, and `audited`
+opens a second, short-lived session each time it runs `check_quota`,
+`_stamp_last_used` or `record` (see app/services/mcp_audit.py). app/concurrency.py
+sizes MAX_IN_FLIGHT = 32 against a 40-slot pool on the assumption that a
+request holds one connection; this is an exception to it. The audit sessions
+are brief, so the overlap is small and no number was changed. Look here first
+in a pool incident that involves /mcp.
+
 **Deliberately absent: SSE, `GET /mcp`, `MCP-Session-Id`, resumption.** The
 specification lets a server answer a POST with one `application/json` body and
 answer GET with 405, and this server pushes nothing: every reply is the
@@ -94,6 +103,10 @@ INTERNAL_ERROR = -32603
 ALLOWED_ORIGINS = frozenset({"https://claude.ai", "https://offerfy.cc"})
 
 _RESUME_ID_MAX = 36
+
+
+class _ToolCrash(Exception):
+    """A handler raised something that is not an HTTPException."""
 
 
 class _RpcError(Exception):
@@ -165,7 +178,23 @@ def _tools_call(db: Session, user: User, key: AgentApiKey, params: Any) -> dict:
             # refusal still records which resume it was about.
             rid = args.get("resume_id")
             call.resume_id = rid if isinstance(rid, str) and len(rid) <= _RESUME_ID_MAX else None
-            payload = mcp_tools.call(db, user, name, args)
+            try:
+                payload = mcp_tools.call(db, user, name, args)
+            except Exception as exc:
+                # Roll back BEFORE `audited` records the outcome (it does so
+                # as this exception leaves the block). get_db commits when no
+                # exception reaches it, and this one is about to be turned
+                # into a 200, so without this a failed tool's flushed writes
+                # would be committed, or a failed flush would break teardown.
+                db.rollback()
+                if isinstance(exc, HTTPException):
+                    raise
+                logger.exception("mcp tool %r crashed", name[:64])
+                raise _ToolCrash() from exc
+    except _ToolCrash:
+        # A handler that ran and blew up: a tool error with generic text, the
+        # real cause logged above. `audited` has recorded it as `error`.
+        return _text_result("The tool failed unexpectedly.", is_error=True)
     except mcp_tools.UnknownTool as exc:
         # Audited as `refused` above; rendered as a protocol error.
         raise _RpcError(INVALID_PARAMS, str(exc.detail))
@@ -192,7 +221,9 @@ def _dispatch(
     except _RpcError as exc:
         return _error(id_, exc.code, exc.message)
     except Exception:
-        # audited has already recorded it as `error`. Say nothing of the cause.
+        # The transport or audit layer failed (a handler crash is caught in
+        # _tools_call). Nothing of the cause goes to the caller.
+        db.rollback()
         logger.exception("mcp %s failed", method)
         return _error(id_, INTERNAL_ERROR, "Internal error")
 

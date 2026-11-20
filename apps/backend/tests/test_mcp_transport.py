@@ -214,9 +214,23 @@ def test_list_resumes_never_shows_another_users_or_a_guests(
 ):
     from tests.conftest import _resume_for
 
+    from app.models import GuestSession, Resume
+
     _resume_for(db_session, other_user, title="Not yours")
+    guest = GuestSession(key_hash="g" * 64)
+    db_session.add(guest)
+    db_session.commit()
+    db_session.add(
+        Resume(title="A guest's", locale="zh-TW", source="create", typst_source="= G",
+               guest_session_id=guest.id)
+    )
+    db_session.commit()
+    _resume_for(db_session, a_user, title="Mine")
     r = _call(client, raw_key, "list_resumes")
-    assert "Not yours" not in json.dumps(r.json())
+    text = json.dumps(r.json())
+    assert "Mine" in text
+    assert "Not yours" not in text
+    assert "A guest's" not in text
 
 
 def test_an_unknown_tool_is_a_jsonrpc_error_and_is_audited(client, db_session, raw_key):
@@ -392,3 +406,72 @@ def test_an_unsupported_protocol_version_header_is_400(client, raw_key):
     ok = client.post(MCP, headers={**_bearer(raw_key), "MCP-Protocol-Version": PROTOCOL_VERSION},
                      json=body)
     assert ok.status_code == 200
+
+
+def _register(monkeypatch, name, handler):
+    from app.services import mcp_tools
+
+    monkeypatch.setitem(
+        mcp_tools.REGISTRY, name,
+        mcp_tools.Tool(spec={"name": name, "description": "d",
+                             "parameters": {"type": "object", "properties": {}}},
+                       handler=handler),
+    )
+
+
+def _titles(db_session):
+    from app.models import Resume
+
+    db_session.expire_all()
+    return {r.title for r in db_session.query(Resume).all()}
+
+
+def _flush_then(exc):
+    def handler(db, user, args):
+        from app.models import Resume
+
+        db.add(Resume(title="Half edit", locale="zh-TW", source="create",
+                      typst_source="= H", user_id=user.id))
+        db.flush()
+        raise exc
+
+    return handler
+
+
+def test_a_refused_tools_flushed_writes_are_rolled_back(
+    client, db_session, raw_key, monkeypatch
+):
+    from fastapi import HTTPException
+
+    _register(monkeypatch, "half", _flush_then(HTTPException(409, "document changed")))
+    r = _call(client, raw_key, "half")
+    assert r.json()["result"]["isError"] is True
+    assert "Half edit" not in _titles(db_session)
+    assert [x.outcome for x in _audit_rows(db_session)] == ["refused"]
+
+
+def test_a_crashing_tool_is_a_tool_error_rolled_back_and_audited(
+    client, db_session, raw_key, monkeypatch
+):
+    _register(monkeypatch, "crash", _flush_then(RuntimeError("secret internal detail")))
+    r = _call(client, raw_key, "crash")
+    assert r.status_code == 200
+    body = r.json()
+    assert "error" not in body
+    assert body["result"]["isError"] is True
+    assert "secret internal detail" not in json.dumps(body)
+    assert "Half edit" not in _titles(db_session)
+    rows = _audit_rows(db_session)
+    assert [(x.tool, x.outcome) for x in rows] == [("crash", "error")]
+
+
+def test_an_audit_layer_failure_is_a_jsonrpc_internal_error(client, raw_key, monkeypatch):
+    from app.services import mcp_audit
+
+    def broken(*a, **k):
+        raise RuntimeError("audit db down")
+
+    monkeypatch.setattr(mcp_audit, "_stamp_last_used", broken)
+    r = _call(client, raw_key, "list_resumes")
+    assert r.status_code == 200
+    assert r.json()["error"]["code"] == -32603
