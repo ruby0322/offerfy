@@ -163,9 +163,11 @@ def require_talent_caller(
     There is deliberately no fallthrough: a session cookie, a guest cookie and
     an admin account all get 401 here. The only thing that opens this door is
     a token minted by an operator, and no route mints one except the admin
-    endpoint -- apps/frontend/lib/agent-markdown.ts tells every agent that
-    reads it there is no public agent API, no machine OAuth server and no
-    self-serve API keys, and that must stay true.
+    endpoint. That is still true of this credential (``ofk_``, TalentApiKey).
+    The self-serve MCP credential a user generates in settings (``ofa_``) is
+    a different table, a different prefix and a different door, and does not
+    open this one. agent-markdown.ts says there is a self-serve MCP server but
+    no machine OAuth server; keep both halves of that accurate.
 
     Every failure is the same 401 with the same message. Which of missing,
     malformed, unknown, revoked or expired it was is not the caller's

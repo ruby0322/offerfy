@@ -39,7 +39,14 @@ test("llms.txt says when to use Offerfy and when not to", () => {
   const body = llmsTxt();
   assert.match(body, /When to use/);
   assert.match(body, /When not to use/);
-  assert.match(body, /no public agent API/i);
+  assert.match(body, /self-serve MCP server/i);
+  assert.match(body, /https:\/\/offerfy\.cc\/api\/mcp/);
+  assert.match(body, /Authorization: Bearer ofa_/);
+  assert.match(body, /no machine OAuth authorization server/i);
+  assert.match(body, /Google sign-in is for humans/i);
+  assert.match(body, /never submit/i);
+  assert.doesNotMatch(body, /no public agent API/i);
+  assert.doesNotMatch(body, /self-serve API keys/i);
   assert.match(body, /https:\/\/offerfy\.cc\/en\/about/);
 });
 
@@ -47,4 +54,10 @@ test("home markdown has an H1 and recovery links", () => {
   const body = marketingMarkdown("home");
   assert.match(body, /^# /m);
   assert.match(body, /https:\/\/offerfy\.cc\/en\/upload/);
+});
+
+test("contact markdown points at settings, not a key desk", () => {
+  const body = marketingMarkdown("contact");
+  assert.match(body, /\/en\/settings/);
+  assert.doesNotMatch(body, /no self-serve API key/i);
 });

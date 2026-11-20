@@ -1630,10 +1630,12 @@ class ResumeContent(Base):
 class TalentApiKey(Base):
     """A credential we issue to one named organisation, by hand.
 
-    Not self-serve, and no route anywhere mints one except the admin endpoint:
-    apps/frontend/lib/agent-markdown.ts tells every agent that reads it there
-    is no public agent API, no machine OAuth server and no self-serve API
-    keys, and all three of those statements have to stay true.
+    Not self-serve, and no route anywhere mints one except the admin endpoint.
+    That rule is unchanged for this credential. The self-serve agent key a
+    user generates in settings for the MCP server is a different table, a
+    different prefix (``ofa_``, not ``ofk_``) and a different door; do not
+    merge the two. There is still no machine OAuth server, and
+    apps/frontend/lib/agent-markdown.ts says so.
 
     key_hash follows GuestSession.key_hash: unsalted SHA-256 of the raw token.
     Correct here for the same reason it is there -- the secret is 256 bits from
