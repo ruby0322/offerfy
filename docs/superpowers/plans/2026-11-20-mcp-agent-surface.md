@@ -364,8 +364,10 @@ Expected: PASS
 
 - [ ] **Step 6: Verify the amended migration**
 
-Run: `cd apps/backend && .venv/bin/alembic upgrade head --sql | grep -c "CREATE TABLE"`
-Expected: both tables present.
+`alembic upgrade head --sql` fails offline on sqlite at revision 002, long before it reaches 043 — Task 1 established this. Render just this revision against a Postgres URL instead:
+
+Run: `cd apps/backend && DATABASE_URL=postgresql://localhost/ignored .venv/bin/alembic upgrade 042_job_scores:043_agent_api_keys --sql`
+Expected: `CREATE TABLE agent_api_keys` and `CREATE TABLE agent_tool_calls`, with columns, nullability, foreign keys and indexes matching the two models.
 
 - [ ] **Step 7: Commit**
 
@@ -1085,6 +1087,19 @@ def test_the_sixth_key_is_a_400(client, signed_in):
     for n in range(5):
         client.post("/v1/me/agent-keys", json={"label": f"k{n}"})
     assert client.post("/v1/me/agent-keys", json={"label": "sixth"}).status_code == 400
+
+def test_a_blank_or_overlong_label_is_a_400(client, signed_in):
+    """`agent_keys.mint_agent_key` stores whatever it is given — Task 1's review
+    confirmed it does not validate. The route is where that is caught."""
+    for bad in ("", "   ", "x" * 256):
+        assert client.post("/v1/me/agent-keys", json={"label": bad}).status_code == 400
+
+def test_a_non_positive_expiry_is_a_400(client, signed_in):
+    """Task 1's review: `expires_in_days=0` silently means "never expires" and a
+    negative value mints an already-dead key. Neither may reach the service."""
+    for bad in (0, -1):
+        assert client.post("/v1/me/agent-keys",
+                           json={"label": "k", "expires_in_days": bad}).status_code == 400
 
 def test_the_call_log_is_mine_only(client, db_session, signed_in, other_user):
     theirs, _ = mint_agent_key(db_session, user=other_user, label="theirs")
