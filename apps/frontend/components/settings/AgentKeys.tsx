@@ -299,7 +299,11 @@ export default function AgentKeys({ matchingOn }: { matchingOn: boolean }) {
                     <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
                       <div className="min-w-0 flex-1 basis-48">
                         <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 break-words text-sm font-medium">
-                          <span>{key.label}</span>
+                          {/* min-w-0 so a long label breaks inside its own
+                              span instead of pushing the badge out of the
+                              cell; CJK labels are ~1.5x wider than the English
+                              ones this card was first laid out with. */}
+                          <span className="min-w-0 break-words">{key.label}</span>
                           {live ? null : (
                             <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
                               {key.revoked_at ? t("revoked") : t("expired")}

@@ -1,7 +1,7 @@
 # 讓使用者把自己的 Offerfy 帳號接到自己的 AI 助理
 
 **Date:** 2026-11-20
-**Status:** draft — awaiting approval
+**Status:** approved — implemented
 **Touches:** backend `app/routers/mcp.py` (new), `app/services/agent_keys.py` (new),
 `app/services/mcp_tools.py` (new), `app/services/mcp_audit.py` (new),
 `app/services/resume_write.py` (new), `app/deps.py`, `app/models.py`,

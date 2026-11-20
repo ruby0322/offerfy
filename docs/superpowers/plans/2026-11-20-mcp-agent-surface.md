@@ -32,6 +32,7 @@
 - **Validate the type of every argument a tool reads.** Every browser-facing route in this codebase has a Pydantic model in front of it, so handlers may assume their arguments are already the right type. **MCP arguments arrive as raw JSON with no model at all** — `args.get("title")` can be a list, a float or a dict, whatever the agent's JSON contained. Measured consequences before this was a rule: `create_tailor` crashed with an `AttributeError` on a float title (rendered to the agent as "The tool failed unexpectedly" with an `error` audit row instead of a usable 400), and `create_resume` silently accepted `[]`, `{}`, `0` and `False` as a locale and made a zh-TW resume, because `locale or "zh-TW"` treats every falsy value as unset. A wrong type is a 400 with a message that says which argument; only an **absent** argument may fall back to a default. Reuse one checker per argument shape rather than writing a second — two paths that validate the same thing differently is how the float-title crash happened while the sibling tool handled it.
 
   One deliberate exception: `search_jobs` and `list_matches` coerce a malformed `limit` to the default rather than refusing, matching what `jobs_tools` has always done for the chat surface. A limit is a hint, not an instruction.
+- **A read and the write it feeds are one surface, and a round-trip test is what pins them.** If a tool's description tells the agent to call another tool first, the pair has to be reviewed together: whatever the read omits is content the writer has to invent, and a hash guard cannot tell an edited document from an invented one, because the agent was handed the hash. Measured consequence on this branch: `get_resume` returned the projection and not `typst_source` while `put_resume_source` — the only way to delete or reorder anything — replaced the whole document. Tasks 6 and 7 each passed review alone, thirteen reviews went by, and an agent asked to remove one bullet would have replaced the user's template, audited `ok`. The test that catches this class is: read through one tool, write it straight back through the other, assert the stored bytes are identical.
 - **Every assertion must be able to fail.** A test that would still pass under the wrong implementation is not coverage, it is decoration — and five of them have already shipped on this branch and been caught in review: a test whose premise a later task invalidated, one that asserted only a status code where the error code was the point, one that deleted a row the foreign key cascaded away so the branch under test was never reached, one that promised a guest case and never created a guest, and one that checked a cap with fewer rows than the cap. Before writing an assertion, ask what wrong code it would catch; if the answer is "none", either strengthen it or delete it. Where a test pins behaviour that is already correct, say so in the report rather than presenting it as RED evidence.
 - **Deploy order:** `alembic upgrade head` → `npm run build:public` → `kill -HUP` API → roll web. The migration runs before any reload because `create_all()` runs on every API start.
 
@@ -731,7 +732,9 @@ git commit -m "feat(agent): job search, posting and scored matches as MCP tools"
   - `resume_access.resumes_of(db, user) -> list[Resume]`
   - `resume_access.owned_by_user(db, user, resume_id) -> Resume` — raises `HTTPException(404, "Resume not found")` for a missing row, another user's row, **and a guest-owned row**.
   - `resume_access.create_for_user(db, user, *, title: str, locale: str, source: str, typst_source: str) -> Resume` — the user-only half of today's `routers/resumes.py::_new_resume`, which stays in the router for its guest branch and calls this one for the signed-in branch. Always sets `user_id` and leaves `guest_session_id` NULL.
-  - `mcp_tools` tools `get_resume` (returns `{resume_id, title, locale, kind, parent_resume_id, target_label, hash, projection}`) and the `list_resumes` from Task 4 rewritten onto `resumes_of`.
+  - `mcp_tools` tools `get_resume` (returns `{resume_id, title, locale, kind, parent_resume_id, target_label, hash, typst_source, projection}`) and the `list_resumes` from Task 4 rewritten onto `resumes_of`.
+
+  > **`typst_source` was missing here, and that was C1.** This line originally listed the projection and no source, while the spec said the projection was returned *in addition to* the document. Task 7 then shipped `put_resume_source`, which replaces the whole document and is the only route to a delete or a reorder, with a description telling the agent to call `get_resume` first — so "remove that bullet" obliged the agent to invent a document, and both guards passed on the invention: the hash was the one it had been handed, and plain Typst compiles. Tasks 6 and 7 each passed review alone because neither reviewer held both halves. The lesson is in the Global Constraints: review a read and the write it feeds as one surface, and pin the pair with a round-trip test.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1350,4 +1353,27 @@ Not a task — the release step, run once the twelve tasks are merged to `main`.
 4. `kill -HUP` the API master. **API first**, because this release adds routes and the old frontend never calls them. Verify by the listener with `ss -ltnpe`, not by worker count.
 5. `ops/rolling-restart-web.sh`
 6. Delete the ISR copy of `/en` and roll twice — the old process revalidates from its stale in-memory entry otherwise.
-7. Smoke: `curl -s localhost:8001/mcp` with a real token (no `/api` prefix on `:8001`), then the settings page in a browser.
+7. Smoke, on `:8001` **and** through the public path. The bare backend check proves the API reloaded; it proves nothing about the route a real client uses, which reaches `/api/mcp` through the Next rewrite.
+
+   a. `curl -s localhost:8001/mcp` with a real token (no `/api` prefix on `:8001`).
+
+   b. One `tools/list` through the public endpoint, which is what an assistant is configured with:
+
+   ```bash
+   curl -s https://offerfy.cc/api/mcp \
+     -H "Authorization: Bearer ofa_…" -H 'Content-Type: application/json' \
+     -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | head -c 400
+   ```
+
+   Expect a JSON-RPC result listing fifteen tools. A 404 here with (a) healthy means the rewrite, not the API.
+
+   c. One export link fetched through the rewrite, because the token contains `|` and `.` and a rewrite can mangle either — and a mangled token is an indistinguishable 404:
+
+   ```bash
+   # url from export_resume, e.g. /api/v1/resumes/export/export%7C<id>%7C<expiry>.<sig>
+   curl -s -o /dev/null -w '%{http_code} %{content_type}\n' "https://offerfy.cc<url>"
+   ```
+
+   Expect `200 application/pdf`. A 404 after a successful mint is the rewrite dropping or re-encoding the separators.
+
+   d. Then the settings page in a browser, in zh-TW: mint a key, read the card, open one key's action log.
