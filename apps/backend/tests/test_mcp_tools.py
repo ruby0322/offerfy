@@ -125,3 +125,154 @@ def test_list_matches_hides_a_posting_that_has_closed(
     db_session.commit()
     rows = json.loads(_call(client, db_session, a_user, "list_matches", {}))["items"]
     assert [r["job_id"] for r in rows] == [a_job.id]
+
+
+# --- resume reads -----------------------------------------------------------------
+
+
+def test_get_resume_returns_the_projection_and_a_hash(
+    client, db_session, a_user, my_resume
+):
+    from app.services.revisions import source_hash
+
+    out = json.loads(
+        _call(client, db_session, a_user, "get_resume", {"resume_id": my_resume.id})
+    )
+    assert out["hash"] == source_hash(my_resume.typst_source)
+    assert out["projection"]["units"]
+    assert out["projection"]["hash"] == out["hash"]
+    assert out["resume_id"] == my_resume.id
+    assert out["title"] == my_resume.title
+    assert out["locale"] == "zh-TW"
+    assert out["kind"] == "master"
+    assert out["parent_resume_id"] is None
+    assert out["target_label"] is None
+
+
+def test_get_resume_reports_a_tailors_parent_and_label(
+    client, db_session, a_user, my_resume
+):
+    from app.models import Resume
+
+    tailor = Resume(
+        title="For Acme", typst_source=my_resume.typst_source, source="create",
+        locale="zh-TW", user_id=a_user.id, kind="tailor",
+        parent_resume_id=my_resume.id, target_label="Acme",
+    )
+    db_session.add(tailor)
+    db_session.commit()
+    out = json.loads(
+        _call(client, db_session, a_user, "get_resume", {"resume_id": tailor.id})
+    )
+    assert (out["kind"], out["parent_resume_id"], out["target_label"]) == (
+        "tailor", my_resume.id, "Acme",
+    )
+
+
+def test_get_resume_without_an_id_is_a_tool_error(client, db_session, a_user):
+    assert _is_tool_error(_raw_call(client, db_session, a_user, "get_resume", {}))
+
+
+def test_an_unknown_resume_id_is_not_found(client, db_session, a_user):
+    assert _is_tool_error(
+        _raw_call(client, db_session, a_user, "get_resume", {"resume_id": "nope"})
+    )
+
+
+def test_another_users_resume_is_not_found(client, db_session, a_user, other_user):
+    from tests.conftest import _resume_for
+
+    theirs = _resume_for(db_session, other_user)
+    assert _is_tool_error(
+        _raw_call(client, db_session, a_user, "get_resume", {"resume_id": theirs.id})
+    )
+
+
+def _guest_resume(db_session, key="g"):
+    from app.models import GuestSession, Resume
+    from app.services.guest import hash_guest_key
+
+    guest = GuestSession(key_hash=hash_guest_key(key))
+    db_session.add(guest)
+    db_session.flush()
+    orphan = Resume(title="Guest draft", locale="en", source="create",
+                    typst_source="= x", guest_session_id=guest.id)
+    db_session.add(orphan)
+    db_session.commit()
+    return orphan
+
+
+def test_a_guest_owned_resume_is_not_found(client, db_session, a_user):
+    """An agent must not reach a resume that belongs to a guest session, even
+    though no user owns it. PINS ALREADY-CORRECT BEHAVIOUR: no earlier code read
+    guest rows."""
+    orphan = _guest_resume(db_session)
+    assert _is_tool_error(
+        _raw_call(client, db_session, a_user, "get_resume", {"resume_id": orphan.id})
+    )
+
+
+def test_not_found_is_identical_for_missing_foreign_and_guest(
+    db_session, a_user, other_user
+):
+    """404 never 403, and the same detail for all three, so the response does
+    not reveal which case it was."""
+    import pytest
+    from fastapi import HTTPException
+
+    from app.services import resume_access
+    from tests.conftest import _resume_for
+
+    theirs = _resume_for(db_session, other_user)
+    orphan = _guest_resume(db_session, "g2")
+    seen = set()
+    for rid in ("missing-id", theirs.id, orphan.id):
+        with pytest.raises(HTTPException) as e:
+            resume_access.owned_by_user(db_session, a_user, rid)
+        seen.add((e.value.status_code, e.value.detail))
+    assert seen == {(404, "Resume not found")}
+
+
+def test_owned_by_user_returns_the_callers_own_row(db_session, a_user, my_resume):
+    from app.services import resume_access
+
+    got = resume_access.owned_by_user(db_session, a_user, my_resume.id)
+    assert got.id == my_resume.id
+
+
+def test_create_for_user_sets_the_user_and_never_a_guest(db_session, a_user):
+    from app.services import resume_access
+
+    r = resume_access.create_for_user(
+        db_session, a_user, title="T", locale="en", source="create", typst_source="= T"
+    )
+    db_session.commit()
+    assert r.user_id == a_user.id
+    assert r.guest_session_id is None
+    assert r.typst_source == "= T"
+
+
+def test_list_resumes_shows_only_my_own(client, db_session, a_user, other_user):
+    from tests.conftest import _resume_for
+
+    _resume_for(db_session, a_user, title="Mine")
+    _resume_for(db_session, other_user, title="Theirs")
+    _guest_resume(db_session, "g3")
+    listed = json.loads(_call(client, db_session, a_user, "list_resumes", {}))["items"]
+    assert [r["title"] for r in listed] == ["Mine"]
+    assert {"id", "title", "kind", "locale", "parent_resume_id", "target_label"} <= set(
+        listed[0]
+    )
+
+
+def test_list_resumes_is_newest_first(client, db_session, a_user):
+    from datetime import timedelta
+
+    from tests.conftest import _resume_for
+
+    old = _resume_for(db_session, a_user, title="Old")
+    new = _resume_for(db_session, a_user, title="New")
+    old.updated_at = new.updated_at - timedelta(days=3)
+    db_session.commit()
+    listed = json.loads(_call(client, db_session, a_user, "list_resumes", {}))["items"]
+    assert [r["title"] for r in listed] == ["New", "Old"]

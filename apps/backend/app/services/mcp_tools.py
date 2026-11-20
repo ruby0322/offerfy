@@ -22,6 +22,7 @@ read and act on ("the document changed, reload it").
 """
 
 import asyncio
+import dataclasses
 import inspect
 import json
 from dataclasses import dataclass
@@ -30,8 +31,10 @@ from typing import Any, Callable
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models import Job, JobScore, Resume, User
-from app.services import jobs_tools
+from app.models import Job, JobScore, User
+from app.services import jobs_tools, resume_access
+from app.services.revisions import source_hash
+from app.services.typst_projection import parse_projection
 
 # The legacy MCP revision (2025-11-25, an `initialize` handshake), which the
 # `initialize` result reports. The modern revision and the full supported set
@@ -53,28 +56,48 @@ class Tool:
 
 
 def _list_resumes(db: Session, user: User, args: dict) -> dict:
-    # PROVISIONAL: Task 6 replaces this with the resume_access service, which
-    # owns "which resumes may this caller see". Until then it is a plain query
-    # on the caller's own rows. It never falls back to guest_session_id: an
-    # agent key belongs to a signed-in user and has no guest identity.
-    rows = (
-        db.query(Resume)
-        .filter(Resume.user_id == user.id)
-        .order_by(Resume.updated_at.desc(), Resume.id)
-        .all()
-    )
+    """The caller's own resumes. Never a guest's: `resumes_of` is user-only."""
+    rows = sorted(resume_access.resumes_of(db, user), key=lambda r: r.id)
+    # Newest first; sorted() is stable, so ties keep the id order above.
+    rows.sort(key=lambda r: r.updated_at.timestamp() if r.updated_at else 0, reverse=True)
     return {
-        "resumes": [
+        "items": [
             {
                 "id": r.id,
                 "title": r.title,
-                "kind": r.kind,
+                "kind": r.kind or "master",
                 "locale": r.locale,
                 "parent_resume_id": r.parent_resume_id,
+                "target_label": r.target_label,
                 "updated_at": r.updated_at.isoformat() if r.updated_at else None,
             }
             for r in rows
         ]
+    }
+
+
+def _get_resume(db: Session, user: User, args: dict) -> dict:
+    """One of the caller's resumes as the structured field view.
+
+    Returns the unit ids and current values an edit intent needs, and the
+    `hash` of the source they were read from, which is how a later edit proves
+    it is editing what it read. A resume that is missing, someone else's, or a
+    guest's is the same 404.
+    """
+    resume_id = args.get("resume_id")
+    if not isinstance(resume_id, str) or not resume_id:
+        raise HTTPException(status_code=400, detail="resume_id is required")
+    resume = resume_access.owned_by_user(db, user, resume_id)
+    projection = dataclasses.asdict(parse_projection(resume.typst_source))
+    return {
+        "resume_id": resume.id,
+        "title": resume.title,
+        "locale": resume.locale,
+        "kind": resume.kind or "master",
+        "parent_resume_id": resume.parent_resume_id,
+        "target_label": resume.target_label,
+        "hash": source_hash(resume.typst_source),
+        "projection": projection,
     }
 
 
@@ -169,7 +192,7 @@ REGISTRY: dict[str, Tool] = {
         spec={
             "name": "list_resumes",
             "description": "List the signed-in user's resumes: id, title, kind "
-            "(master or tailor), locale and last update.",
+            "(master or tailor), locale, target label and last update.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -177,6 +200,25 @@ REGISTRY: dict[str, Tool] = {
             },
         },
         handler=_list_resumes,
+    ),
+    "get_resume": Tool(
+        spec={
+            "name": "get_resume",
+            "description": "Read one of the signed-in user's resumes as its "
+            "structured fields: every editable unit with its id and current "
+            "value, plus a `hash` of the source they were read from. Use the "
+            "ids to describe an edit and the hash to show you are editing what "
+            "you read.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "resume_id": {"type": "string", "description": "From list_resumes."}
+                },
+                "required": ["resume_id"],
+                "additionalProperties": False,
+            },
+        },
+        handler=_get_resume,
     ),
 }
 

@@ -73,6 +73,7 @@ from app.services.revisions import (
     unpublished_changes,
     build_share_state,
 )
+from app.services import resume_access
 from app.services.s3 import delete_object, put_object
 from app.services.sse import SSE_HEADERS, sse_frame
 from app.services.starter import default_title, generate_starter, title_from_filename
@@ -231,6 +232,19 @@ def _new_resume(
     upload_s3_key: str | None = None,
     import_status: str = "idle",
 ) -> Resume:
+    if user is not None:
+        return resume_access.create_for_user(
+            db,
+            user,
+            title=title,
+            locale=locale,
+            source=source,
+            typst_source=typst_source,
+            upload_s3_key=upload_s3_key,
+            import_status=import_status,
+        )
+    if guest is None:
+        raise HTTPException(status_code=500, detail="Missing owner")
     resume = Resume(
         title=title,
         locale=locale,
@@ -238,11 +252,9 @@ def _new_resume(
         typst_source=typst_source,
         upload_s3_key=upload_s3_key,
         import_status=import_status,
-        user_id=user.id if user is not None else None,
-        guest_session_id=None if user is not None else (guest.id if guest else None),
+        user_id=None,
+        guest_session_id=guest.id,
     )
-    if resume.user_id is None and resume.guest_session_id is None:
-        raise HTTPException(status_code=500, detail="Missing owner")
     db.add(resume)
     db.flush()
     set_draft_source(db, resume, typst_source)
@@ -324,14 +336,12 @@ def list_resumes(
     user: User | None = Depends(get_current_user),
 ):
     user, guest = owner_context(request, response, db, user, ensure=False)
-    query = db.query(Resume)
     if user is not None:
-        query = query.filter(Resume.user_id == user.id)
+        rows = resume_access.resumes_of(db, user)
     elif guest is not None:
-        query = query.filter(Resume.guest_session_id == guest.id)
+        rows = db.query(Resume).filter(Resume.guest_session_id == guest.id).all()
     else:
         return []
-    rows = query.all()
     return [
         ResumeListItem(
             id=r.id,
