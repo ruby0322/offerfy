@@ -16,6 +16,7 @@
     "jobs": "职位",
     "employers": "雇主",
     "pricing": "方案",
+    "mcp": "MCP",
     "usageEdits": "本周 AI 编辑 {used} / {limit} 次",
     "usageCredits": "本周额度 {used} / {limit}",
     "usageResets": "周一重置",
