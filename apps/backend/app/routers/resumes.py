@@ -57,7 +57,7 @@ from app.services.tailor_run import snapshot as tailor_snapshot
 from app.services.tailor_run import start_run as start_tailor_run
 from app.services.tailor_runner import job_id_for_tailor, run_tailor
 from app.services.metering import metered, preflight
-from app.services.rate_limit import enforce_guest_rate
+from app.services.rate_limit import enforce_export_download_rate, enforce_guest_rate
 from app.services.resume_content import (
     extract_content,
     record_extract_spend,
@@ -872,22 +872,24 @@ def export_pdf(
 # open web, and this one is reachable without a credential. The token is NOT a
 # ResumeShare token (that is a state the user chose to be in, with a table, a
 # revoke and an OG image); it is a signed `resume_id|expiry` minted by the
-# `export_resume` agent tool. Signature, then expiry, then the row: a missing
+# `export_resume` agent tool. Signature, then budget, then the row: a missing
 # resume is a 404 before anything is compiled, because a signature outlives the
-# row it names.
+# row it names, and a flood costs one signature check rather than a query --
+# see app/services/rate_limit.py for why the link needs a budget at all.
 @router.get("/v1/resumes/export/{token}", include_in_schema=False)
 def export_by_token(token: str, db: Session = Depends(get_db)):
     resume_id = resume_id_for(token)
     if resume_id is None:
         raise HTTPException(status_code=404, detail="Not found")
+    enforce_export_download_rate(resume_id)
     resume = db.get(Resume, resume_id)
     if resume is None:
         raise HTTPException(status_code=404, detail="Not found")
     source, title = resume.typst_source, resume.title
     # Release the pooled connection before the compile, the same order
     # app/services/resume_write.py uses and for the same reason: a Typst
-    # subprocess can run for 30s, and this route is public, unauthenticated and
-    # unrate-limited, so it is the easiest way to pin a pool slot per request.
+    # subprocess can run for 30s, and this route is public and unauthenticated,
+    # so it is the easiest way to pin a pool slot per request.
     db.commit()
     data = compile_typst(source, "pdf")
     return RawResponse(

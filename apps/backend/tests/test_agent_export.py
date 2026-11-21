@@ -10,6 +10,7 @@ import pytest
 from app.config import get_settings
 from app.deps import _sign
 from app.models import ResumeShare
+from app.services import rate_limit
 from tests.conftest import _resume_for
 from tests.test_mcp_tools import _call, _caller, _is_tool_error, _text
 
@@ -99,9 +100,10 @@ def test_a_signed_value_without_the_export_purpose_is_not_a_token(client, my_res
 def test_the_export_route_releases_its_connection_before_the_compile(
     client, db_session, a_user, my_resume, monkeypatch
 ):
-    """Public, unauthenticated, unrate-limited, and every hit is up to 30s of
-    Typst: holding a pool slot across that is how one worker stops answering
-    everything, /healthz included."""
+    """Public, unauthenticated, and every hit is up to 30s of Typst: holding a
+    pool slot across that is how one worker stops answering everything,
+    /healthz included. The budget caps how many such hits one link buys; it does
+    not make holding a connection across one of them any cheaper."""
     from sqlalchemy import event
 
     from app.db import get_engine
@@ -193,3 +195,66 @@ def test_export_resume_id_of_the_wrong_type_is_a_400(client, db_session, a_user)
         body = call("export_resume", {"resume_id": bad})
         assert _is_tool_error(body), bad
         assert "resume_id is required" in _text(body), (bad, _text(body))
+
+
+def _fake_compile(_source, _fmt):
+    """The budget tests care about status codes, not PDF bytes, and ten real
+    compiles is a second and a half of suite time."""
+    return b"%PDF-1.7\n%%EOF\n"
+
+
+def test_one_link_is_served_up_to_its_budget_and_refused_past_it(
+    client, my_resume, monkeypatch
+):
+    """The link needs no credential, so a leaked one is an amplifier for its
+    whole ten minutes and every hit is a Typst compile. The budget is the only
+    lever: it bounds how many compiles one link can buy."""
+    monkeypatch.setattr("app.routers.resumes.compile_typst", _fake_compile)
+    token = _token(my_resume.id, int(time.time()) + 300)
+    for hit in range(rate_limit.EXPORT_DOWNLOAD_LIMIT):
+        assert _fetch(client, token).status_code == 200, hit
+    refused = _fetch(client, token)
+    assert refused.status_code == 429
+    assert refused.headers["retry-after"] == str(int(rate_limit.EXPORT_DOWNLOAD_WINDOW))
+
+
+def test_a_refused_download_compiles_nothing(client, my_resume, monkeypatch):
+    """Where the guard sits is the whole point. A 429 after the compile would
+    cost exactly as much CPU as a 200."""
+    calls = {"n": 0}
+
+    def counted(source, fmt):
+        calls["n"] += 1
+        return _fake_compile(source, fmt)
+
+    monkeypatch.setattr("app.routers.resumes.compile_typst", counted)
+    token = _token(my_resume.id, int(time.time()) + 300)
+    for _ in range(rate_limit.EXPORT_DOWNLOAD_LIMIT + 5):
+        _fetch(client, token)
+    assert calls["n"] == rate_limit.EXPORT_DOWNLOAD_LIMIT
+
+
+def test_re_minting_the_link_does_not_reset_the_budget(client, my_resume, monkeypatch):
+    """The bucket is keyed on the resume, not the token string. `export_resume`
+    mints a fresh token on every call -- a token-keyed bucket would reopen with
+    each mint and bound nothing at all."""
+    monkeypatch.setattr("app.routers.resumes.compile_typst", _fake_compile)
+    base = int(time.time()) + 300
+    for hit in range(rate_limit.EXPORT_DOWNLOAD_LIMIT):
+        # A different expiry is a different signed token for the same resume.
+        assert _fetch(client, _token(my_resume.id, base + hit)).status_code == 200, hit
+    assert _fetch(client, _token(my_resume.id, base + 999)).status_code == 429
+
+
+def test_another_resume_has_its_own_budget(client, db_session, a_user, my_resume,
+                                           monkeypatch):
+    """Spent on one link, not on the site: a flood through one leaked link must
+    not take anyone else's export with it."""
+    monkeypatch.setattr("app.routers.resumes.compile_typst", _fake_compile)
+    second = _resume_for(db_session, a_user, title="Second")
+    db_session.commit()
+    token = _token(my_resume.id, int(time.time()) + 300)
+    for _ in range(rate_limit.EXPORT_DOWNLOAD_LIMIT + 1):
+        _fetch(client, token)
+    assert _fetch(client, token).status_code == 429  # the first one is spent
+    assert _fetch(client, _token(second.id, int(time.time()) + 300)).status_code == 200

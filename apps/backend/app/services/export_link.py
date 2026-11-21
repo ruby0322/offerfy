@@ -8,8 +8,11 @@ checked when `export_resume` minted it, and the link is bearer-style so a downlo
 client needs no credential. Anyone holding it can fetch that one PDF until it
 expires, which is why it is short.
 
-Known gap: the route has no rate limit and every hit is a PDF compile. The ten
-minute TTL bounds it; single-use would need the table this design avoids.
+Every hit is a PDF compile, so the route is budgeted: see
+`rate_limit.EXPORT_DOWNLOAD_LIMIT`, keyed on the resume rather than the token
+precisely because this module mints a fresh token per call. What remains is that
+a leaked link is readable by whoever holds it until it expires. Single-use would
+need the table this design avoids; the ten minute TTL is the bound instead.
 """
 
 import time
