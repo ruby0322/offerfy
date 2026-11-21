@@ -6,7 +6,6 @@ import AccountCard from "@/components/AccountCard";
 import AgentKeys from "@/components/settings/AgentKeys";
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
-import UsageCard from "@/components/UsageCard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Link, useRouter } from "@/i18n/navigation";
@@ -270,7 +269,6 @@ export default function SettingsPage() {
             republish warning, and is null until the consent read returns --
             `=== true` keeps "unknown" from being treated as on. */}
         <AgentKeys matchingOn={granted === true} />
-        <UsageCard />
       </main>
       <Footer variant="app" />
     </div>
