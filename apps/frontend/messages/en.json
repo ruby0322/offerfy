@@ -1867,7 +1867,7 @@
   },
   "agentKeys": {
     "title": "Connect your AI assistant",
-    "notice": "Create a key so your own AI assistant (Claude, ChatGPT, a coding agent) can read and edit your resumes through the Offerfy MCP server. It can also publish a resume as a public link anyone holding it can open, and replace your job preferences. The key acts as you and only on your account. Revoke it any time.",
+    "notice": "Create a key so your own AI assistant (Claude or a coding agent) can read and edit your resumes through the Offerfy MCP server. It can also publish a resume as a public link anyone holding it can open, and replace your job preferences. The key acts as you and only on your account. Revoke it any time.",
     "labelField": "Name for this key",
     "labelPlaceholder": "e.g. Claude on my laptop",
     "generate": "Generate key",
