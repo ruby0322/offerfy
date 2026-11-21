@@ -12,7 +12,7 @@
     "login": "登入",
     "logout": "登出",
     "account": "帳戶",
-    "blog": "Blog",
+    "blog": "部落格",
     "jobs": "職缺",
     "employers": "雇主",
     "pricing": "方案",
@@ -27,7 +27,7 @@
     "google": "Google",
     "login": "登入",
     "tagline": "Offerfy · 找到職缺，對準履歷",
-    "blog": "Blog",
+    "blog": "部落格",
     "jobs": "職缺",
     "about": "關於",
     "contact": "聯絡",
@@ -44,7 +44,7 @@
     "llms": "llms.txt",
     "sitemap": "Sitemap",
     "jobs": "職缺",
-    "blog": "Blog"
+    "blog": "部落格"
   },
   "about": {
     "metaTitle": "關於 · Offerfy",
@@ -70,9 +70,9 @@
     ]
   },
   "blog": {
-    "metaTitle": "Blog · Offerfy",
+    "metaTitle": "部落格 · Offerfy",
     "metaDescription": "Offerfy 的筆記與指南。履歷編輯器、依職缺客製的履歷版本、公開職缺目錄與投遞進度追蹤都已上線；我們不會代為投遞。",
-    "title": "Blog",
+    "title": "部落格",
     "empty": "還沒有文章。",
     "guide": "指南",
     "note": "筆記",
@@ -788,18 +788,10 @@
     "profileDelete": "刪除人才檔案",
     "profileError": "操作失敗，請再試一次。",
     "profileBuildFailed": "目前無法用這份履歷建立人才檔案。請按「重新建立」再試一次。",
-    "usageTitle": "本週 AI 用量",
-    "usageNotice": "編輯、預覽、匯出 PDF 和 ATS 檢查都沒有限制，只有 AI 編輯會計量。",
-    "usageThisWeekEdits": "已使用 {used} / {limit} 次 AI 編輯",
-    "usageThisWeekCredits": "已使用 {used} / {limit} 點額度",
     "usageTier_guest": "訪客",
     "usageTier_registered": "已登入",
     "usageTier_matching": "開放媒合",
-    "usageTierLine": "你的方案：{tier}。",
-    "usageGrantedLine": "已含加贈的 {granted} 點額度。",
-    "usageResetLine": "{date} 重置。",
-    "usageUnmeasured": "本週有 {count} 次模型呼叫未回報 token 數，因此這個數字有一部分是估算。",
-    "usageLearnMore": "用量說明"
+    "usageUnmeasured": "本週有 {count} 次模型呼叫未回報 token 數，因此這個數字有一部分是估算。"
   },
   "picker": {
     "title": "選擇開始方式",

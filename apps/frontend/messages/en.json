@@ -788,18 +788,10 @@
     "profileDelete": "Delete profile",
     "profileError": "That did not work. Try again.",
     "profileBuildFailed": "We could not build a profile from this resume just now. Try Rebuild.",
-    "usageTitle": "AI usage this week",
-    "usageNotice": "Editing, preview, PDF export and ATS checks are unlimited. Only AI edits are metered.",
-    "usageThisWeekEdits": "{used} of {limit} AI edits used",
-    "usageThisWeekCredits": "{used} of {limit} credits used",
     "usageTier_guest": "Guest",
     "usageTier_registered": "Signed in",
     "usageTier_matching": "Open to matching",
-    "usageTierLine": "Your plan: {tier}.",
-    "usageGrantedLine": "Includes {granted} granted credits.",
-    "usageResetLine": "Resets {date}.",
-    "usageUnmeasured": "{count} model calls this week reported no token count, so part of this figure is an estimate.",
-    "usageLearnMore": "How usage works"
+    "usageUnmeasured": "{count} model calls this week reported no token count, so part of this figure is an estimate."
   },
   "picker": {
     "title": "How do you want to start?",

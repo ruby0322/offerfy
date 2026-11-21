@@ -12,7 +12,7 @@
     "login": "登录",
     "logout": "退出",
     "account": "账户",
-    "blog": "Blog",
+    "blog": "博客",
     "jobs": "职位",
     "employers": "雇主",
     "pricing": "方案",
@@ -27,7 +27,7 @@
     "google": "Google",
     "login": "登录",
     "tagline": "Offerfy · 找到职位，对准简历",
-    "blog": "Blog",
+    "blog": "博客",
     "jobs": "职位",
     "about": "关于",
     "contact": "联系",
@@ -44,7 +44,7 @@
     "llms": "llms.txt",
     "sitemap": "Sitemap",
     "jobs": "职位",
-    "blog": "Blog"
+    "blog": "博客"
   },
   "about": {
     "metaTitle": "关于 · Offerfy",
@@ -70,9 +70,9 @@
     ]
   },
   "blog": {
-    "metaTitle": "Blog · Offerfy",
+    "metaTitle": "博客 · Offerfy",
     "metaDescription": "Offerfy 的笔记与指南。简历编辑器、按职位定制的简历版本、公开职位目录与投递进度跟踪都已上线；我们不会代为投递。",
-    "title": "Blog",
+    "title": "博客",
     "empty": "还没有文章。",
     "guide": "指南",
     "note": "笔记",
@@ -788,18 +788,10 @@
     "profileDelete": "删除人才档案",
     "profileError": "操作失败，请再试一次。",
     "profileBuildFailed": "目前无法用这份简历创建人才档案。请按“重新创建”再试一次。",
-    "usageTitle": "本周 AI 用量",
-    "usageNotice": "编辑、预览、导出 PDF 和 ATS 检查都没有限制，只有 AI 编辑会计量。",
-    "usageThisWeekEdits": "已使用 {used} / {limit} 次 AI 编辑",
-    "usageThisWeekCredits": "已使用 {used} / {limit} 点额度",
     "usageTier_guest": "访客",
     "usageTier_registered": "已登录",
     "usageTier_matching": "开放匹配",
-    "usageTierLine": "你的方案：{tier}。",
-    "usageGrantedLine": "已含加赠的 {granted} 点额度。",
-    "usageResetLine": "{date} 重置。",
-    "usageUnmeasured": "本周有 {count} 次模型调用未报告 token 数，因此这个数字有一部分是估算。",
-    "usageLearnMore": "用量说明"
+    "usageUnmeasured": "本周有 {count} 次模型调用未报告 token 数，因此这个数字有一部分是估算。"
   },
   "picker": {
     "title": "选择开始方式",
