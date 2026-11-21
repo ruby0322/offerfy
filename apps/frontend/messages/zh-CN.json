@@ -287,6 +287,29 @@
       "keepBody": "说「记住」，就写回主简历。",
       "returnLabel": "下一轮不用从头来。"
     },
+    "autopilot": {
+      "title": "你在睡，它在找",
+      "lede": "把你自己的 AI 助手接上 Offerfy，它可以整晚翻职位、挑出像你的那几个，针对每一个改一版简历再投出去。早上起来你看到的不是一团黑箱，是一条一条写清楚的记录。",
+      "viewNight": "夜里",
+      "viewMorning": "早上",
+      "nightCaption": "凌晨三点，你在睡。它在做事。",
+      "morningCaption": "你起床，打开来看它做了什么 —— 每一版简历都在你的列表里，几点改的、为哪个职位改的，都看得到。",
+      "did": "简历已改好",
+      "events": [
+        {
+          "role": "后端工程师",
+          "company": "Stripe"
+        },
+        {
+          "role": "平台工程师",
+          "company": "Notion"
+        },
+        {
+          "role": "基础设施工程师",
+          "company": "NVIDIA"
+        }
+      ]
+    },
     "features": {
       "title": "Offerfy 做的四件事",
       "ingestKicker": "精选来源",

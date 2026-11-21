@@ -287,6 +287,29 @@
       "keepBody": "Say “remember” and it goes back to the master.",
       "returnLabel": "The next round doesn’t start from scratch."
     },
+    "autopilot": {
+      "title": "You sleep. It looks.",
+      "lede": "Point your own AI assistant at Offerfy and it can read postings all night, pick the ones that look like you, tailor a resume for each and send it. What you wake up to is not a black box. It is a list of what it did.",
+      "viewNight": "Overnight",
+      "viewMorning": "Morning",
+      "nightCaption": "Three in the morning. You are asleep. It is not.",
+      "morningCaption": "You wake up and look at what it did — every tailored resume is in your list, with the hour it was written and the posting it was written for.",
+      "did": "Resume ready",
+      "events": [
+        {
+          "role": "Backend Engineer",
+          "company": "Stripe"
+        },
+        {
+          "role": "Platform Engineer",
+          "company": "Notion"
+        },
+        {
+          "role": "Infrastructure Engineer",
+          "company": "NVIDIA"
+        }
+      ]
+    },
     "features": {
       "title": "What Offerfy does",
       "ingestKicker": "Curated sources",
