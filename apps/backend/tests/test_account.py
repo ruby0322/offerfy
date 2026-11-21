@@ -612,3 +612,44 @@ def test_a_revoked_keys_call_log_outlives_the_credential(
     rows = client.get(f"{KEYS}/{key.id}/calls")
     assert rows.status_code == 200
     assert [r["tool"] for r in rows.json()] == ["get_resume"]
+
+
+def test_minting_commits_before_it_returns(db_session, a_user):
+    """The row must be durable before the caller holds the token.
+
+    `get_db` commits in FastAPI's dependency teardown, and FastAPI closes that
+    exit stack *after* the response has been sent (`request_response` in
+    fastapi/routing.py awaits the response inside the stack). So a route that
+    only flushes answers the caller with data no other connection can read
+    yet, and the settings card -- which re-reads the list the moment the mint
+    returns -- was told it had no keys. On prod the row became readable about
+    360ms after the 200 arrived.
+
+    Called directly rather than over the TestClient on purpose: a request
+    there runs to completion, teardown included, before `client.post` returns,
+    and the in-memory SQLite database shares one connection, so over HTTP a
+    flushed row and a committed one look exactly alike. An open transaction
+    after the handler returns is the thing that differs, so that is what this
+    asserts.
+    """
+    from app.routers.account import create_agent_key
+    from app.schemas import AgentKeyCreate
+
+    out = create_agent_key(AgentKeyCreate(label="laptop"), db=db_session, user=a_user)
+
+    assert out.token.startswith("ofa_")
+    assert not db_session.in_transaction(), "mint left its insert uncommitted"
+
+
+def test_revoking_commits_before_it_returns(db_session, a_user):
+    """Same contract as the mint above: a re-list that races the teardown
+    commit would show the key live and offer to revoke it a second time."""
+    from app.routers.account import revoke_agent_key
+
+    key, _ = mint_agent_key(db_session, user=a_user, label="leaked")
+    db_session.commit()
+
+    response = revoke_agent_key(key.id, db=db_session, user=a_user)
+
+    assert response.status_code == 204
+    assert not db_session.in_transaction(), "revoke left its write uncommitted"

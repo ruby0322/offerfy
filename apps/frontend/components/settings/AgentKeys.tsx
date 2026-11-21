@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useLocale, useTranslations } from "next-intl";
+import { mergeKnownKeys } from "@/lib/agent-keys";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -114,10 +115,16 @@ export default function AgentKeys({ matchingOn }: { matchingOn: boolean }) {
   /**
    * Re-read the list after a change. Never throws, and never reports a failure
    * of the change itself: the change already succeeded by the time this runs.
+   *
+   * Merged rather than assigned, because the answer can predate the change
+   * that triggered it -- see lib/agent-keys.ts. Assigning it is what made a
+   * freshly minted key render as "no keys yet": the row this component had
+   * just built from the mint was replaced by a list read from before it.
    */
   async function refreshKeys() {
     try {
-      setKeys(await listAgentKeys());
+      const rows = await listAgentKeys();
+      setKeys((prev) => mergeKnownKeys(rows, prev ?? []));
       setStale(false);
     } catch {
       setStale(true);

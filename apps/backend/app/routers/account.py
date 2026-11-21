@@ -225,7 +225,7 @@ def create_agent_key(
         )
     except TooManyKeys as exc:
         raise _bad_request("too_many_keys") from exc
-    return AgentKeyCreated(
+    out = AgentKeyCreated(
         id=key.id,
         label=key.label,
         created_at=key.created_at,
@@ -233,6 +233,21 @@ def create_agent_key(
         expires_at=key.expires_at,
         token=raw,
     )
+    # Committed here rather than left to `get_db`'s teardown, because FastAPI
+    # closes the dependency exit stack *after* the response has gone out:
+    # `request_response` in fastapi/routing.py awaits `response(scope, ...)`
+    # inside the `async with AsyncExitStack()`. A teardown commit therefore
+    # lands after the caller already holds the token, and the settings card
+    # re-reads the list the instant this returns -- a read that was answered
+    # from before the insert, so a key minted seconds ago rendered as "no keys
+    # yet" until the page was reloaded. Measured against prod on 2026-11-22:
+    # the row became readable ~360ms after the 200 arrived.
+    #
+    # The response model is built before the commit on purpose: the session
+    # expires instances on commit, so reading `key.label` afterwards would
+    # issue a second SELECT for values already in hand.
+    db.commit()
+    return out
 
 
 @router.delete(
@@ -250,7 +265,10 @@ def revoke_agent_key(
         # reaching here means a stale tab, not a visible control.)
         raise HTTPException(status_code=404, detail="Key not found")
     key.revoked_at = datetime.now(timezone.utc)
-    db.flush()
+    # Committed before the 204, for the reason spelled out in
+    # `create_agent_key`: a re-list racing the teardown commit would show the
+    # key still live and offer to revoke it again.
+    db.commit()
     return Response(status_code=204)
 
 
