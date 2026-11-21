@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { mergeKnownKeys } from "@/lib/agent-keys";
+import { Link } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -420,6 +421,15 @@ export default function AgentKeys({ matchingOn }: { matchingOn: boolean }) {
           </div>
           <p className="text-xs leading-5 text-muted-foreground">
             {t("howSpace")} {t("howPlaceholder")}
+          </p>
+          {/* The endpoint and the header stay here, where someone who has just
+              minted a key needs them. Anything past those two facts lives on
+              /mcp instead, so the per-client steps exist in one place. */}
+          <p className="text-xs leading-5 text-muted-foreground">
+            {t("howMore")}{" "}
+            <Link href="/mcp" className="underline">
+              {t("howMoreLink")}
+            </Link>
           </p>
         </div>
       </CardContent>

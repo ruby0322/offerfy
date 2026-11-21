@@ -1901,11 +1901,78 @@
     "howHeader": "请在这个请求头里带上密钥",
     "howSpace": "“Bearer”后面有一个空格。少了它，连接会被拒绝。",
     "howPlaceholder": "请把 ofa_… 换成你的密钥。",
+    "howMore": "完整的连接说明、逐个助手的步骤，以及它能做什么：",
+    "howMoreLink": "连接你的 AI 助手",
     "matchingWarning": "你已开启“开放匹配”。助手发布简历时，也会让有资质的招聘者再次看到你的人才档案。",
     "errorTooMany": "你已有 5 把密钥。请先撤销一把再创建。",
     "errorLabel": "请为密钥取个名字，最多 255 字。",
     "errorGeneric": "出了点问题，请重试。",
     "listStale": "已完成，但无法刷新列表。请刷新页面以查看当前的密钥。",
     "loadFailed": "无法加载密钥，请刷新页面。"
+  },
+  "mcp": {
+    "metaTitle": "把你的 AI 助手接上 Offerfy",
+    "metaDescription": "创建一个密钥，把你自己的 AI 助手接上 Offerfy 的 MCP 服务器：搜索职位、读写简历、发布与导出，每个动作都有记录。",
+    "title": "连接你的 AI 助手",
+    "lede": "把你自己的 AI 助手接上 Offerfy，它就能搜索职位、读写你的简历、发布或导出。密钥你自己创建、自己撤销，而它做的每一件事都留下记录。",
+    "promptTitle": "把这段贴给你的助手",
+    "promptHelp": "把 ofa_YOUR_KEY 换成你的密钥，然后整段贴过去。",
+    "promptBody": "请帮我接上 Offerfy 的 MCP 服务器，接上之后你就能读写我的简历、搜索职位。\n\nServer: https://offerfy.cc/api/mcp\nTransport: HTTP（streamable HTTP，不是 SSE）\nHeader: Authorization: Bearer ofa_YOUR_KEY\n\n如果你是 CLI 或写代码的代理，自己加上去就行。Claude Code 是这一行：\n\nclaude mcp add --transport http offerfy https://offerfy.cc/api/mcp --header \"Authorization: Bearer ofa_YOUR_KEY\"\n\n接好之后列出你看到的工具并告诉我有几个，我要确认真的通了。",
+    "copy": "复制",
+    "copied": "已复制",
+    "copyFailed": "复制不了，请手动选取上面那段。",
+    "keyTitle": "先创建一个密钥",
+    "keyBody": "上面那段要有密钥才能用。密钥只会显示一次，之后连我们也找不回来。",
+    "keyCta": "登录后到设置页创建",
+    "clientsTitle": "逐个助手怎么接",
+    "ccTitle": "Claude Code",
+    "ccBody": "一行命令。它会自己存进配置，之后每次调用都带上那个请求头。",
+    "ccCommand": "claude mcp add --transport http offerfy https://offerfy.cc/api/mcp --header \"Authorization: Bearer ofa_YOUR_KEY\"",
+    "webTitle": "claude.ai（网页与桌面版）",
+    "webSteps": [
+      "打开 claude.ai，到 Customize → Connectors → Add → Custom → Web。",
+      "网址填 https://offerfy.cc/api/mcp",
+      "在 Request headers 区块新增一个请求头：名称 Authorization，值是 Bearer 加一个空格再接你的密钥。那个空格少了连接会被拒绝。",
+      "保存，然后在对话里让 Claude 列出 Offerfy 的工具。"
+    ],
+    "webShared": "Team 或 Enterprise 要特别注意：一个连接器的请求头凭证是所有用户共用的，而 Offerfy 的密钥绑在个人账号上。每个人要各自新增自己的连接器 —— 在组织层级设一个大家共用，等于全组织都以同一个人的身份读写那个人的简历。",
+    "gptTitle": "ChatGPT",
+    "gptBody": "现在不行。ChatGPT 只接受 OAuth 或完全不认证，没办法带一个固定的 API key —— OpenAI 自己的文档写的是「nor can it present custom API keys」。我们补上 OAuth 之后就会支持。",
+    "otherTitle": "其他助手，或你自己写的",
+    "otherBody": "没什么特别的，就是一个 HTTP 的 MCP 服务器。同时支持 2025-11-25 和 2026-07-28 两个协议版本。",
+    "otherDetail": "POST https://offerfy.cc/api/mcp\nAuthorization: Bearer ofa_YOUR_KEY\nContent-Type: application/json",
+    "toolsTitle": "它能做什么",
+    "toolsLede": "十五个工具，五组。",
+    "groups": [
+      {
+        "heading": "找职位",
+        "body": "用关键词搜索，或看已经替你算过分数的匹配，也可以读某个职位的细节。"
+      },
+      {
+        "heading": "读写简历",
+        "body": "列出、读取、新建、为某个职位分支出一份、改标题、改单个字段，或整份源码替换。"
+      },
+      {
+        "heading": "发布",
+        "body": "把一份简历变成公开链接，或收回。"
+      },
+      {
+        "heading": "导出",
+        "body": "生成一个十分钟内有效的 PDF 下载链接。"
+      },
+      {
+        "heading": "求职偏好",
+        "body": "读取，或整组替换。"
+      }
+    ],
+    "safetyTitle": "它能动什么、不能动什么",
+    "safetyPoints": [
+      "密钥以你的身份行事，而且只能操作你自己的账号。",
+      "随时可以在设置页撤销，撤销立刻生效。",
+      "每个密钥每小时最多 300 次调用，超过会被拒绝。",
+      "同时最多 5 个有效密钥。",
+      "每一次调用都记下来：哪个工具、什么时候、结果是什么。助手发送的内容不会保留。"
+    ],
+    "auditBoundary": "有一个边界要知道：被记录的是「生成导出链接」这个动作。PDF 的实际下载走的是那条公开链接、不经过 MCP，所以你看得到助手生成了一个链接，看不到那个链接被抓了几次。"
   }
 }

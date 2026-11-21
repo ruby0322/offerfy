@@ -31,7 +31,7 @@ function entry(
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const posts = listPosts();
-  const staticPaths = ["/", "/terms", "/privacy", "/usage", "/pricing", "/blog", "/jobs", "/about", "/contact"];
+  const staticPaths = ["/", "/terms", "/privacy", "/usage", "/pricing", "/blog", "/jobs", "/about", "/contact", "/mcp"];
   const items = staticPaths.map((href) => entry(href));
   // The curated boards. They are the reason those pages exist rather than
   // query strings: a sitemap cannot carry /jobs?seniority=intern.
