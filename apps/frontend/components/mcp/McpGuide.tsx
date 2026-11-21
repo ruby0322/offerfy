@@ -44,7 +44,9 @@ export default async function McpGuide() {
             <h2 className="font-display">{t("keyTitle")}</h2>
             <p>
               {t("keyBody")}{" "}
-              <Link href="/login">{t("keyCta")}</Link>
+              <Link href="/login" className="underline">
+                {t("keyCta")}
+              </Link>
             </p>
           </section>
 
@@ -53,7 +55,11 @@ export default async function McpGuide() {
 
             <h3 className="font-display">{t("ccTitle")}</h3>
             <p>{t("ccBody")}</p>
-            <pre className="overflow-x-auto rounded bg-muted px-3 py-2.5 font-mono text-xs leading-5">
+            {/* Wraps rather than scrolls. A command you are meant to copy, cut
+                off at the right edge of its box with the rest behind a scroll
+                nobody notices, is a command half the readers will paste half
+                of. `pre-wrap` breaks the display, not the string. */}
+            <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded bg-muted px-3 py-2.5 font-mono text-xs leading-5">
               {t("ccCommand")}
             </pre>
 
@@ -70,7 +76,7 @@ export default async function McpGuide() {
 
             <h3 className="font-display">{t("otherTitle")}</h3>
             <p>{t("otherBody")}</p>
-            <pre className="overflow-x-auto rounded bg-muted px-3 py-2.5 font-mono text-xs leading-5">
+            <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded bg-muted px-3 py-2.5 font-mono text-xs leading-5">
               {t("otherDetail")}
             </pre>
           </section>
