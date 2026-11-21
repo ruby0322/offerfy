@@ -9,7 +9,8 @@ export type MarketingPage =
   | "terms"
   | "privacy"
   | "about"
-  | "contact";
+  | "contact"
+  | "mcp";
 
 const MARKETING_SLUGS = new Set<MarketingPage>([
   "jobs",
@@ -18,6 +19,7 @@ const MARKETING_SLUGS = new Set<MarketingPage>([
   "privacy",
   "about",
   "contact",
+  "mcp",
 ]);
 
 function quality(accept: string, type: string): number {
@@ -124,6 +126,7 @@ Canonical: ${SITE_URL}
 - ${SITE_URL}/en/terms
 - ${SITE_URL}/en/jobs
 - ${SITE_URL}/en/blog
+- ${SITE_URL}/en/mcp
 `;
 }
 
@@ -174,6 +177,30 @@ ${links}`;
       return `# About Offerfy
 
 Offerfy carries open technical roles from employer ATS boards and lets you fork a resume aimed at one posting. You edit Typst source in the browser, chat can change that same file, and the PDF updates from the compile. Apply on the employer site.
+${links}`;
+    case "mcp":
+      // The one page on this site whose human version is itself instructions
+      // for an agent, so this twin is the same instructions without the layout.
+      // It stays inside the standing position stated in `llmsTxt`: tools read
+      // and write resumes and read postings, and none of them applies to a job.
+      return `# Connect an AI assistant — Offerfy
+
+Offerfy runs an MCP server. A signed-in user generates their own bearer token in settings at ${SITE_URL}/en/settings and points their own assistant at it; no one here issues tokens, and a token only ever reaches that one user's account.
+
+Endpoint: ${SITE_URL}/api/mcp
+Transport: streamable HTTP. POST with a JSON body, JSON back. No SSE, no GET stream, no session id — a GET is 405.
+Auth: \`Authorization: Bearer <token>\`. Protocol revisions 2025-11-25 and 2026-07-28 are both served off this one endpoint.
+Not available: OAuth, and so not ChatGPT, which cannot present a static key.
+
+A CLI or coding agent can add it without a human in the loop:
+
+    claude mcp add --transport http offerfy ${SITE_URL}/api/mcp --header "Authorization: Bearer <token>"
+
+Fifteen tools. Find work: search_jobs, read_job, list_matches. Resumes: list_resumes, get_resume, create_resume, create_tailor, set_resume_title, edit_resume, put_resume_source. Sharing: publish_resume, unpublish_resume, export_resume. Preferences: get_job_preferences, set_job_preferences.
+
+Every call is recorded against its token — which tool, when, how it came out — and the user can read that log and revoke the token. Limits: 300 calls an hour per token, 5 live tokens per user.
+
+Human version, with per-assistant steps: ${SITE_URL}/en/mcp
 ${links}`;
     case "contact":
       return `# Contact Offerfy
