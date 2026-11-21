@@ -363,3 +363,36 @@ def test_has_consent_many_prefers_the_withdrawal_when_timestamps_tie(
     assert (
         has_consent_many(db_session, [user.id], purpose="talent_introduction") == set()
     )
+
+
+def test_granting_commits_before_it_returns(db_session):
+    """The ledger row must be durable before the response reaches the page.
+
+    The settings card re-reads /v1/me/talent-profile the moment a grant
+    returns, and that endpoint's `consent_granted` is read from this ledger --
+    so a profile answered before the commit contradicts the response that
+    carried the grant. `get_db` commits in FastAPI's dependency teardown,
+    which runs after the response has been sent; the long version of why is
+    in `app.routers.account.create_agent_key`.
+
+    Called directly rather than over the TestClient, for the reason
+    `tests/test_account.py::test_minting_commits_before_it_returns` sets out:
+    over HTTP the request's teardown has already run, and the in-memory
+    database shares one connection, so flushed and committed look alike.
+    """
+    from app.routers.consent import put_consent
+    from app.schemas import ConsentUpdate
+
+    user = User(google_sub="g-consent-commit", email="grant@example.com", locale="en")
+    db_session.add(user)
+    db_session.commit()
+
+    out = put_consent(
+        "talent_introduction",
+        ConsentUpdate(granted=True),
+        db=db_session,
+        user=user,
+    )
+
+    assert out.consents["talent_introduction"] is True
+    assert not db_session.in_transaction(), "the grant was left uncommitted"

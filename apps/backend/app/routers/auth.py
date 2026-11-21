@@ -176,6 +176,14 @@ def google_callback(request: Request, code: str | None = None, db: Session = Dep
     next_path = _safe_next(request.query_params.get("state"))
     redirect = RedirectResponse(next_path or "/dashboard", status_code=302)
     set_session_cookie(redirect, user.id)
+    # Committed before the 302, for the reason spelled out at length in
+    # `account.create_agent_key`: FastAPI closes the dependency exit stack
+    # after the response has gone out, so `get_db`'s teardown commit lands
+    # after the browser is already following this redirect. The page it lands
+    # on reads /v1/auth/me and /v1/dashboard immediately, and a cookie signed
+    # for a user row no other connection can see yet reads as signed out --
+    # a brand-new account bounced to /login by its own sign-up.
+    db.commit()
     return redirect
 
 
@@ -215,8 +223,16 @@ def claim(
             source="claim",
             detail=f"claimed={len(resumes)}",
         )
-    db.flush()
-    return ClaimResponse(claimed=len(resumes))
+    out = ClaimResponse(claimed=len(resumes))
+    # Committed before responding, for the reason in `account.create_agent_key`.
+    # Both callers re-read the moment this returns: the resumes tab lists them
+    # (app/[locale]/dashboard/resumes/page.tsx) and the editor loads one
+    # (components/editor/EditorShell.tsx). `resumes.list_resumes` queries by
+    # user_id and never falls back to the guest branch once a caller is signed
+    # in, so a list answered before this commit is empty -- the person signs in
+    # and their anonymous work appears to have been thrown away.
+    db.commit()
+    return out
 
 
 @router.get("/v1/auth/me", response_model=AuthMe)

@@ -454,6 +454,54 @@ def test_admin_grant_validation_and_scoping(
     )
 
 
+def test_issuing_a_grant_commits_before_it_returns(client, db_session, monkeypatch):
+    """The row must be durable before the response reaches the operator.
+
+    `QuotaGrants` refetches the whole user detail as soon as this returns
+    (`onChanged`, because a grant moves the ceiling shown above the table).
+    `get_db` commits in FastAPI's dependency teardown, which runs *after* the
+    response has been sent, so that refetch could be answered from before the
+    insert: the ceiling unmoved and the grant missing, which invites a second
+    grant that no endpoint can undo. The long version is in
+    `app.routers.account.create_agent_key`.
+
+    Called directly rather than over the TestClient, for the reason
+    `tests/test_account.py::test_minting_commits_before_it_returns` sets out:
+    over HTTP the request's teardown has already run by the time the call
+    returns, and the in-memory database shares one connection, so a flushed
+    row and a committed one look alike. The open transaction is what differs.
+    """
+    from app.routers.admin import admin_issue_grant
+    from app.schemas_admin import AdminQuotaGrantCreate
+
+    admin = _admin(client, db_session, monkeypatch)
+    user = _user(db_session, sub="sub-grant-commit")
+
+    out = admin_issue_grant(
+        user.id,
+        AdminQuotaGrantCreate(credits=50, reason="manual"),
+        db=db_session,
+        admin=admin,
+    )
+
+    assert out.credits == 50
+    assert not db_session.in_transaction(), "the grant was left uncommitted"
+
+
+def test_revoking_a_grant_commits_before_it_returns(client, db_session, monkeypatch):
+    """Same contract as issuing above: the admin page's refetch would otherwise
+    be answered with the grant still live and still raising the ceiling."""
+    from app.routers.admin import admin_revoke_grant
+
+    user = _user(db_session, sub="sub-revoke-commit")
+    grant = _grant(db_session, user)
+
+    out = admin_revoke_grant(user.id, grant.id, db=db_session, _admin=None)
+
+    assert out.revoked_at is not None
+    assert not db_session.in_transaction(), "the revocation was left uncommitted"
+
+
 def test_grants_need_an_admin(client: TestClient, db_session, monkeypatch):
     monkeypatch.setenv("ADMIN_EMAILS", "")
     get_settings.cache_clear()

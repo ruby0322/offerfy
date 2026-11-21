@@ -53,5 +53,14 @@ def put_consent(
         # -- is derived from disclosure_events and discharged by an operator;
         # see app.services.disclosure.pending_obligations.
         delete_profile_for_user(db, user)
+    # The flush stays and is load-bearing: the session is `autoflush=False`,
+    # so without it `_state`'s own read would not see the row just appended.
     db.flush()
-    return _state(db, user)
+    out = _state(db, user)
+    # Committed before responding, for the reason in `account.create_agent_key`.
+    # The settings page re-reads /v1/me/talent-profile the moment a grant
+    # returns, and that endpoint's `consent_granted` is read from this very
+    # ledger -- so a profile answered before this commit contradicts the
+    # response that carried the grant.
+    db.commit()
+    return out

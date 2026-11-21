@@ -1,9 +1,11 @@
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
 from app.deps import SESSION_COOKIE, _sign
-from app.models import User
-from app.routers.auth import _google_picture
+from app.models import GuestSession, Resume, User
+from app.routers.auth import _google_picture, claim, google_callback
+from app.services.guest import GUEST_COOKIE, hash_guest_key
 
 
 def test_google_picture_accepts_https_only():
@@ -272,3 +274,83 @@ def test_absent_google_name_does_not_blank_a_known_name(
     _sign_in_with(client, monkeypatch, {"sub": "g-name", "email": "name@example.com"})
     user = db_session.query(User).filter(User.google_sub == "g-name").one()
     assert user.name == "Chen Wei"
+
+
+# --------------------------------------------------------------------------
+# The commit boundary: a write must be durable before the caller reads back
+#
+# `get_db` commits in FastAPI's dependency teardown, and FastAPI closes that
+# exit stack *after* the response has been sent. Both routes below are read
+# back at once -- the callback by the page the browser is redirected to, the
+# claim by the resume list the dashboard and the editor fetch next -- so each
+# commits before it responds. The long version is in
+# `app.routers.account.create_agent_key`.
+#
+# Both are called directly rather than over the TestClient, for the reason
+# `tests/test_account.py::test_minting_commits_before_it_returns` sets out: a
+# TestClient request runs its own teardown before the call returns, and the
+# in-memory database shares one connection, so flushed and committed look
+# alike over HTTP. The open transaction is the one thing that differs.
+# --------------------------------------------------------------------------
+
+
+def _bare_request(cookie: str | None = None) -> Request:
+    """The smallest ASGI scope `google_callback` and `claim` actually read."""
+    headers = [(b"host", b"testserver")]
+    if cookie:
+        headers.append((b"cookie", cookie.encode()))
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/v1/auth/google/callback",
+            "query_string": b"",
+            "headers": headers,
+            "scheme": "http",
+            "server": ("testserver", 80),
+            "client": ("test", 1),
+            "root_path": "",
+        }
+    )
+
+
+def test_the_google_callback_commits_before_it_redirects(db_session, monkeypatch):
+    """A sign-up's account row must outlive the 302 that carries its cookie."""
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "test-secret")
+    monkeypatch.setenv(
+        "GOOGLE_REDIRECT_URI", "http://testserver/api/v1/auth/google/callback"
+    )
+    get_settings.cache_clear()
+    monkeypatch.setattr("app.routers.auth.httpx.Client", _FakeHttpx)
+
+    response = google_callback(_bare_request(), code="abc", db=db_session)
+
+    assert response.status_code == 302
+    assert not db_session.in_transaction(), "the new account was left uncommitted"
+    get_settings.cache_clear()
+
+
+def test_claiming_commits_before_it_returns(db_session):
+    """`list_resumes` reads by user_id, so an uncommitted claim lists nothing."""
+    user = User(google_sub="g-claim-commit", email="claim@example.com", locale="en")
+    db_session.add(user)
+    raw = "guest-key-for-the-claim-commit-test"
+    guest = GuestSession(key_hash=hash_guest_key(raw), locale="en")
+    db_session.add(guest)
+    db_session.flush()
+    db_session.add(
+        Resume(
+            title="Anonymous draft",
+            typst_source="= CV",
+            source="create",
+            locale="en",
+            guest_session_id=guest.id,
+        )
+    )
+    db_session.commit()
+
+    out = claim(_bare_request(cookie=f"{GUEST_COOKIE}={raw}"), db=db_session, user=user)
+
+    assert out.claimed == 1
+    assert not db_session.in_transaction(), "the claim was left uncommitted"

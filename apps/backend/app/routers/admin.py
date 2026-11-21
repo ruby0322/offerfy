@@ -588,7 +588,15 @@ def admin_issue_grant(
         raise HTTPException(status_code=422, detail=str(exc))
     db.flush()
     active_ids = {row.id for row in active_grants(db, user=user)}
-    return _grant_out(db, grant, active=grant.id in active_ids)
+    out = _grant_out(db, grant, active=grant.id in active_ids)
+    # Committed before responding, for the reason in `account.create_agent_key`.
+    # The grants table refetches the whole user detail as soon as this returns
+    # (`onChanged` in components/admin/QuotaGrants.tsx, because a grant moves
+    # the ceiling shown above it). A detail answered before this commit shows
+    # the ceiling unmoved and the grant missing, which invites the operator to
+    # issue a second one -- and there is no endpoint to edit the first.
+    db.commit()
+    return out
 
 
 @router.delete(
@@ -609,7 +617,11 @@ def admin_revoke_grant(
         raise HTTPException(status_code=404, detail="Not found")
     revoke_grant(db, grant=grant)
     db.flush()
-    return _grant_out(db, grant, active=False)
+    out = _grant_out(db, grant, active=False)
+    # Same contract as `admin_issue_grant` above: the same refetch races the
+    # teardown commit and would show the grant still live.
+    db.commit()
+    return out
 
 
 @router.get("/v1/admin/resumes", response_model=AdminResumeList)
