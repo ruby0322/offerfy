@@ -1902,8 +1902,8 @@
     "howHeader": "請在這個標頭帶上金鑰",
     "howSpace": "「Bearer」後面有一個空格。少了它，連線會被拒絕。",
     "howPlaceholder": "請把 ofa_… 換成你的金鑰。",
-    "howMore": "完整的連接說明、逐個助理的步驟，以及它能做什麼：",
-    "howMoreLink": "連接你的 AI 助理",
+    "howMore": "完整的接法、各家助理的步驟，還有它能做什麼：",
+    "howMoreLink": "接上你的 AI 助理",
     "matchingWarning": "你已開啟「開放媒合」。助理發布履歷時，也會讓有資格的招募者再次看到你的人才檔案。",
     "errorTooMany": "你已有 5 把金鑰。請先撤銷一把再建立。",
     "errorLabel": "請為金鑰取個名字，最多 255 字。",
@@ -1913,67 +1913,67 @@
   },
   "mcp": {
     "metaTitle": "把你的 AI 助理接上 Offerfy",
-    "metaDescription": "產生一把金鑰，把你自己的 AI 助理接上 Offerfy 的 MCP 伺服器：搜尋職缺、讀寫履歷、發布與匯出，每個動作都有紀錄。",
-    "title": "連接你的 AI 助理",
-    "lede": "把你自己的 AI 助理接上 Offerfy，它就能搜尋職缺、讀寫你的履歷、發布或匯出。金鑰你自己產生、自己撤銷，而它做的每一件事都留下紀錄。",
-    "promptTitle": "貼這段給你的助理",
-    "promptHelp": "把 ofa_YOUR_KEY 換成你的金鑰，然後整段貼過去。",
-    "promptBody": "請幫我接上 Offerfy 的 MCP 伺服器，接上之後你就能讀寫我的履歷、搜尋職缺。\n\nServer: https://offerfy.cc/api/mcp\nTransport: HTTP（streamable HTTP，不是 SSE）\nHeader: Authorization: Bearer ofa_YOUR_KEY\n\n如果你是 CLI 或寫程式的代理，自己加上去就行。Claude Code 是這一行：\n\nclaude mcp add --transport http offerfy https://offerfy.cc/api/mcp --header \"Authorization: Bearer ofa_YOUR_KEY\"\n\n接好之後列出你看到的工具並告訴我有幾個，我要確認真的通了。",
+    "metaDescription": "開一組金鑰，把你自己的 AI 助理接上 Offerfy 的 MCP 伺服器：找職缺、改履歷、發布、匯出，而且它做了什麼你都看得到。",
+    "title": "接上你的 AI 助理",
+    "lede": "把你自己的 AI 助理接上 Offerfy，它就能幫你找職缺、改履歷、發布跟匯出。金鑰你自己開、自己撤，它做了什麼你都看得到。",
+    "promptTitle": "把這段貼給你的助理",
+    "promptHelp": "把 ofa_YOUR_KEY 換成你的金鑰，整段貼過去就好。",
+    "promptBody": "請幫我接上 Offerfy 的 MCP 伺服器，接上之後你就能讀寫我的履歷、找職缺。\n\nServer: https://offerfy.cc/api/mcp\nTransport: HTTP（streamable HTTP，不是 SSE）\nHeader: Authorization: Bearer ofa_YOUR_KEY\n\n如果你是 CLI 或寫程式的代理，自己加就好。Claude Code 是這一行：\n\nclaude mcp add --transport http offerfy https://offerfy.cc/api/mcp --header \"Authorization: Bearer ofa_YOUR_KEY\"\n\n接好之後把看到的工具列出來，我要確認真的通了。",
     "copy": "複製",
     "copied": "已複製",
-    "copyFailed": "複製不了，請手動選取上面那段。",
-    "keyTitle": "先產生一把金鑰",
-    "keyBody": "上面那段要有金鑰才能用。金鑰只會顯示一次，之後連我們也找不回來。",
-    "keyCta": "登入後到設定頁產生",
-    "clientsTitle": "逐個助理怎麼接",
+    "copyFailed": "複製不了，直接選取上面那段吧。",
+    "keyTitle": "先開一組金鑰",
+    "keyBody": "上面那段要有金鑰才能用。金鑰只會出現一次，關掉就找不回來了。",
+    "keyCta": "登入後到設定頁開一組",
+    "clientsTitle": "各家助理怎麼接",
     "ccTitle": "Claude Code",
-    "ccBody": "一行命令。它會自己存進設定，之後每次呼叫都帶上那個標頭。",
+    "ccBody": "一行指令搞定。它會自己存起來，之後每次呼叫都帶著。",
     "ccCommand": "claude mcp add --transport http offerfy https://offerfy.cc/api/mcp --header \"Authorization: Bearer ofa_YOUR_KEY\"",
-    "webTitle": "claude.ai（網頁與桌面版）",
+    "webTitle": "claude.ai（網頁跟桌面版）",
     "webSteps": [
-      "打開 claude.ai，到 Customize → Connectors → Add → Custom → Web。",
+      "打開 claude.ai，走 Customize → Connectors → Add → Custom → Web。",
       "網址填 https://offerfy.cc/api/mcp",
-      "在 Request headers 區塊新增一個標頭：名稱 Authorization，值是 Bearer 加一個空格再接你的金鑰。那個空格少了連線會被拒絕。",
-      "存檔，然後在對話裡叫 Claude 列出 Offerfy 的工具。"
+      "在 Request headers 加一個標頭：名稱 Authorization，值是 Bearer 空一格再接你的金鑰。那個空格漏了就連不上。",
+      "存檔，然後在對話裡叫 Claude 把 Offerfy 的工具列出來。"
     ],
-    "webShared": "Team 或 Enterprise 要特別注意：一個連接器的標頭憑證是所有使用者共用的，而 Offerfy 的金鑰綁在個人帳號上。每個人要各自新增自己的連接器 —— 在組織層級設一個大家共用，等於全組織都以同一個人的身分讀寫那個人的履歷。",
+    "webShared": "用 Team 或 Enterprise 要注意：連接器的標頭是整個組織共用的，但 Offerfy 的金鑰是綁個人的。所以每個人要各自加自己的連接器 —— 在組織層級設一組，等於全公司都用同一個人的身分在讀寫那個人的履歷。",
     "gptTitle": "ChatGPT",
-    "gptBody": "現在不行。ChatGPT 只接受 OAuth 或完全不認證，沒辦法帶一個固定的 API key —— OpenAI 自己的文件寫的是「nor can it present custom API keys」。我們補上 OAuth 之後就會支援。",
+    "gptBody": "目前接不了。它只吃 OAuth 或完全不認證，沒辦法帶一組固定的 API key —— OpenAI 自己的文件就是這樣寫的（「nor can it present custom API keys」）。等我們把 OAuth 補上就可以。",
     "otherTitle": "其他助理，或你自己寫的",
-    "otherBody": "沒什麼特別的，就是一個 HTTP 的 MCP 伺服器。同時支援 2025-11-25 和 2026-07-28 兩個協定版本。",
+    "otherBody": "沒什麼特別的，就一個跑在 HTTP 上的 MCP 伺服器。2025-11-25 跟 2026-07-28 兩個協定版本都吃。",
     "otherDetail": "POST https://offerfy.cc/api/mcp\nAuthorization: Bearer ofa_YOUR_KEY\nContent-Type: application/json",
     "toolsTitle": "它能做什麼",
-    "toolsLede": "十五個工具，五組。",
+    "toolsLede": "十五個工具，分五組。",
     "groups": [
       {
         "heading": "找職缺",
-        "body": "用關鍵字搜尋，或看已經替你算過分數的媒合，也可以讀某個職缺的細節。"
+        "body": "用關鍵字搜，或看系統已經幫你算過分數的媒合，也可以單獨讀某個職缺。"
       },
       {
-        "heading": "看與改履歷",
-        "body": "列出、讀取、新建、替某個職缺分支出一份、改標題、改單一欄位，或整份原始碼換掉。"
+        "heading": "改履歷",
+        "body": "列出、打開、新建、針對某個職缺複製一份來改、改標題、改單一欄位，或整份原始碼換掉。"
       },
       {
         "heading": "發布",
-        "body": "把一份履歷變成公開連結，或收回。"
+        "body": "把履歷變成公開連結，或收回來。"
       },
       {
         "heading": "匯出",
-        "body": "產生一個十分鐘內有效的 PDF 下載連結。"
+        "body": "生一個十分鐘內有效的 PDF 下載連結。"
       },
       {
         "heading": "求職偏好",
-        "body": "讀取，或整組替換。"
+        "body": "讀出來，或整組換掉。"
       }
     ],
     "safetyTitle": "它能動什麼、不能動什麼",
     "safetyPoints": [
-      "金鑰以你的身分行事，而且只能動你自己的帳號。",
-      "隨時可以在設定頁撤銷，撤銷立刻生效。",
-      "每把金鑰每小時最多 300 次呼叫，超過會被拒絕。",
-      "同時最多 5 把活金鑰。",
-      "每一次呼叫都記下來：哪個工具、什麼時候、結果是什麼。助理送出的內容不會保留。"
+      "這組金鑰等於你本人，但只動得到你自己的帳號。",
+      "隨時可以在設定頁撤掉，撤了馬上失效。",
+      "每組金鑰每小時最多 300 次，超過就擋。",
+      "同時最多 5 組。",
+      "每一次呼叫都記著：哪個工具、什麼時候、成功還是被擋。助理講了什麼我們不留。"
     ],
-    "auditBoundary": "有一個邊界要知道：被記錄的是「產生匯出連結」這個動作。PDF 的實際下載走的是那條公開連結、不經過 MCP，所以你看得到助理產了一個連結，看不到那個連結被抓了幾次。"
+    "auditBoundary": "有一件事要先講清楚：我們記的是「生了一個匯出連結」這個動作。PDF 真正被下載是走那條公開連結、不經過 MCP，所以你看得到助理生了連結，看不到那個連結被抓了幾次。"
   }
 }

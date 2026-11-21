@@ -106,12 +106,13 @@ test("the Claude Code command is the one the docs give, not a paraphrase", () =>
 
 test("the prompt tells the agent to report back, so the reader gets proof", () => {
   // Without this the reader pastes the block and has no idea whether it worked.
-  // Each locale words it differently, so match on the tool-listing instruction
-  // being present at all rather than on any one phrasing.
+  // Matching on a whole phrase pins the translator's wording rather than the
+  // requirement, and did break once when the zh-TW copy was rewritten to read
+  // less like a translation. The requirement is "tools" and "list", together.
   for (const locale of LOCALES) {
     const body = (messages(locale).promptBody as string).toLowerCase();
     assert.ok(
-      body.includes("list the tools") || body.includes("列出你看到的工具"),
+      /list the tools|工具.{0,8}列|列.{0,8}工具/.test(body),
       `${locale}: the prompt does not ask the agent to report what it found`,
     );
   }
