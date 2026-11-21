@@ -94,6 +94,10 @@ export default function Nav({ variant }: Props) {
         [EMPLOYERS_HREF, t("employers")],
         ["/blog", t("blog")],
         ["/pricing", t("pricing")],
+        // Last, and deliberately: connecting your own assistant is for a
+        // narrower reader than jobs or pricing, and this bar is read
+        // left to right.
+        ["/mcp", t("mcp")],
       ]
     : [];
 
@@ -114,10 +118,11 @@ export default function Nav({ variant }: Props) {
             <BrandMark />
             {t("brand")}
           </Link>
-          {/* Below md every one of these lives in the drawer instead: four
+          {/* Below md every one of these lives in the drawer instead: these
               links plus the brand plus the account cluster overflow a phone
               header, and a header that overflows is a header whose last
-              link cannot be tapped. */}
+              link cannot be tapped. (It said "four" until /mcp made five;
+              the count was never the point, the overflow is.) */}
           {sections.map(([href, text]) => (
             <Link key={href} href={href} className={WIDE_ONLY}>
               {text}

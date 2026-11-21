@@ -16,6 +16,7 @@
     "jobs": "Jobs",
     "employers": "Employers",
     "pricing": "Pricing",
+    "mcp": "MCP",
     "usageEdits": "{used} of {limit} AI edits this week",
     "usageCredits": "{used} of {limit} credits this week",
     "usageResets": "resets Monday",
@@ -285,6 +286,29 @@
       "keepTitle": "Keep what it taught you",
       "keepBody": "Say “remember” and it goes back to the master.",
       "returnLabel": "The next round doesn’t start from scratch."
+    },
+    "autopilot": {
+      "title": "You sleep. It looks.",
+      "lede": "Point your own AI assistant at Offerfy and it can read postings all night, pick the ones that look like you, tailor a resume for each and send it. What you wake up to is not a black box. It is a list of what it did.",
+      "viewNight": "Overnight",
+      "viewMorning": "Morning",
+      "nightCaption": "Three in the morning. You are asleep. It is not.",
+      "morningCaption": "You wake up and look at what it did — every tailored resume is in your list, with the hour it was written and the posting it was written for.",
+      "did": "Resume ready",
+      "events": [
+        {
+          "role": "Backend Engineer",
+          "company": "Stripe"
+        },
+        {
+          "role": "Platform Engineer",
+          "company": "Notion"
+        },
+        {
+          "role": "Infrastructure Engineer",
+          "company": "NVIDIA"
+        }
+      ]
     },
     "features": {
       "title": "What Offerfy does",
@@ -1859,7 +1883,7 @@
   },
   "agentKeys": {
     "title": "Connect your AI assistant",
-    "notice": "Create a key so your own AI assistant (Claude, ChatGPT, a coding agent) can read and edit your resumes through the Offerfy MCP server. It can also publish a resume as a public link anyone holding it can open, and replace your job preferences. The key acts as you and only on your account. Revoke it any time.",
+    "notice": "Create a key so your own AI assistant (Claude or a coding agent) can read and edit your resumes through the Offerfy MCP server. It can also publish a resume as a public link anyone holding it can open, and replace your job preferences. The key acts as you and only on your account. Revoke it any time.",
     "labelField": "Name for this key",
     "labelPlaceholder": "e.g. Claude on my laptop",
     "generate": "Generate key",
@@ -1893,11 +1917,78 @@
     "howHeader": "Send the key in this header",
     "howSpace": "There is a space after “Bearer”. Without it the connection is refused.",
     "howPlaceholder": "Replace ofa_… with your key.",
+    "howMore": "Full connection steps, per assistant, and what it can do:",
+    "howMoreLink": "Connect your AI assistant",
     "matchingWarning": "You have open to matching on. If an assistant publishes a resume, it also re-opens your talent profile to credentialed recruiters.",
     "errorTooMany": "You already have 5 keys. Revoke one to make another.",
     "errorLabel": "Give the key a name of up to 255 characters.",
     "errorGeneric": "Something went wrong. Please try again.",
     "listStale": "The change went through, but the list could not be refreshed. Reload the page to see your current keys.",
     "loadFailed": "Could not load your keys. Please reload."
+  },
+  "mcp": {
+    "metaTitle": "Connect your AI assistant to Offerfy",
+    "metaDescription": "Mint a key and point your own AI assistant at Offerfy's MCP server: search jobs, read and edit resumes, publish and export, with every action logged.",
+    "title": "Connect your AI assistant",
+    "lede": "Point your own AI assistant at Offerfy and it can search jobs, read and edit your resumes, publish and export. You mint the key, you revoke it, and everything it does is written down.",
+    "promptTitle": "Paste this at your assistant",
+    "promptHelp": "Replace ofa_YOUR_KEY with your key, then paste the whole block.",
+    "promptBody": "Please connect to the Offerfy MCP server so you can read and edit my resumes and search jobs.\n\nServer: https://offerfy.cc/api/mcp\nTransport: HTTP (streamable HTTP, not SSE)\nHeader: Authorization: Bearer ofa_YOUR_KEY\n\nIf you are a CLI or coding agent, add it yourself. For Claude Code that is one line:\n\nclaude mcp add --transport http offerfy https://offerfy.cc/api/mcp --header \"Authorization: Bearer ofa_YOUR_KEY\"\n\nOnce connected, list the tools you can see and tell me how many there are, so I know it worked.",
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyFailed": "Could not copy. Select the block above by hand.",
+    "keyTitle": "Mint a key first",
+    "keyBody": "The block above needs a key. It is shown once and we cannot recover it afterwards.",
+    "keyCta": "Sign in, then mint one in Settings",
+    "clientsTitle": "Per assistant",
+    "ccTitle": "Claude Code",
+    "ccBody": "One command. It stores the header and sends it on every call.",
+    "ccCommand": "claude mcp add --transport http offerfy https://offerfy.cc/api/mcp --header \"Authorization: Bearer ofa_YOUR_KEY\"",
+    "webTitle": "claude.ai (web and desktop)",
+    "webSteps": [
+      "In claude.ai, go to Customize → Connectors → Add → Custom → Web.",
+      "Enter https://offerfy.cc/api/mcp as the URL.",
+      "Under Request headers, add one header: name Authorization, value Bearer followed by a space and then your key. Without that space the connection is refused.",
+      "Save, then ask Claude in a conversation to list Offerfy's tools."
+    ],
+    "webShared": "On Team or Enterprise, read this twice: a connector's header credential is shared by everyone who uses it, while an Offerfy key belongs to one account. Each person adds their own connector — one set at the organization level means the whole organization reads and edits one person's resumes as that person.",
+    "gptTitle": "ChatGPT",
+    "gptBody": "Not yet. ChatGPT accepts OAuth or no authentication and cannot carry a fixed API key — OpenAI's own documentation says \"nor can it present custom API keys\". It will work once we add OAuth.",
+    "otherTitle": "Other assistants, or your own",
+    "otherBody": "Nothing special about it: an MCP server over HTTP. It serves both the 2025-11-25 and 2026-07-28 protocol revisions.",
+    "otherDetail": "POST https://offerfy.cc/api/mcp\nAuthorization: Bearer ofa_YOUR_KEY\nContent-Type: application/json",
+    "toolsTitle": "What it can do",
+    "toolsLede": "Fifteen tools, in five groups.",
+    "groups": [
+      {
+        "heading": "Find jobs",
+        "body": "Search by keyword, or read the matches already scored for you, or open one posting in full."
+      },
+      {
+        "heading": "Read and edit resumes",
+        "body": "List, read, create, fork one for a particular job, rename, change a single field, or replace the whole source."
+      },
+      {
+        "heading": "Publish",
+        "body": "Turn a resume into a public link, or take it back."
+      },
+      {
+        "heading": "Export",
+        "body": "Mint a PDF download link that lasts ten minutes."
+      },
+      {
+        "heading": "Job preferences",
+        "body": "Read them, or replace the whole set."
+      }
+    ],
+    "safetyTitle": "What it can and cannot touch",
+    "safetyPoints": [
+      "A key acts as you, and only on your own account.",
+      "Revoke it in Settings at any time; revoking takes effect immediately.",
+      "At most 300 calls an hour per key. Past that, calls are refused.",
+      "At most 5 live keys at once.",
+      "Every call is written down: which tool, when, and how it came out. What the assistant sent is not kept."
+    ],
+    "auditBoundary": "One boundary worth knowing: what gets logged is minting the export link. The PDF download itself goes through that public link rather than through MCP, so you can see that your assistant made a link — not how many times the link was fetched."
   }
 }

@@ -1803,6 +1803,205 @@ textarea {
   }
 }
 
+/* --- the autopilot section -----------------------------------------------
+   One night, read twice, with both readings on screen at once.
+
+   An earlier cut put the two behind a tab strip. Nothing else on this page
+   asks the reader to operate anything, and the strip read like a piece of
+   application UI that had wandered onto a landing page. Side by side the
+   contrast makes the point the switch was there to make, and on a phone the
+   halves stack, so the night still arrives before the morning.
+
+   The two halves are deliberately not symmetrical. The left is a drawing,
+   because nobody watched the night happen; the right is the real list, the
+   same rows the product shows, because the claim is that what you wake up to
+   is the record rather than a picture of one.
+
+   Same rule as the line art above: **the resting state is the finished
+   state.** The rows are opaque by default and only the drawing loops, behind
+   prefers-reduced-motion. */
+.landing-autopilot-lede {
+  max-width: 46rem;
+  margin: 0 0 1.35rem;
+  color: var(--ink-soft, var(--ink));
+}
+
+.landing-autopilot {
+  display: grid;
+  grid-template-columns: 1fr;
+  border: 1px solid var(--rule);
+  background: var(--sheet, var(--paper));
+}
+
+@media (min-width: 768px) {
+  .landing-autopilot {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: stretch;
+  }
+}
+
+.landing-autopilot-half {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 1.35rem 1.45rem 1.5rem;
+  min-width: 0;
+}
+
+/* The passage of the night: a rule between the halves on a wide screen, and
+   across them once they stack. */
+.landing-autopilot-seam {
+  display: block;
+  height: 1px;
+  background: var(--rule);
+}
+
+@media (min-width: 768px) {
+  .landing-autopilot-seam {
+    width: 1px;
+    height: auto;
+  }
+}
+
+.landing-autopilot-caption {
+  margin: 0 0 0.35rem;
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: var(--ink-soft, var(--ink));
+}
+
+/* The same box the feature figures sit in, so the drawing reads as one of
+   that family rather than as loose line work on the panel. */
+.landing-autopilot-figure {
+  border: 1px solid var(--rule);
+  background: var(--sheet, var(--paper));
+  padding: 0.75rem;
+  margin-top: auto;
+  margin-bottom: auto;
+}
+
+.landing-autopilot-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.landing-autopilot-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.1rem 0.65rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+}
+
+@media (min-width: 768px) {
+  /* Four cells, so four columns. With three the last one wrapped under the
+     timestamp instead of sitting at the right edge, which is where a status
+     belongs and where the eye goes looking for it. */
+  .landing-autopilot-row {
+    grid-template-columns: auto 1fr auto auto;
+    align-items: baseline;
+  }
+}
+
+.landing-autopilot-row-when {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  color: var(--ink-soft, var(--ink));
+  opacity: 0.75;
+}
+
+.landing-autopilot-row-role {
+  font-size: 0.88rem;
+  color: var(--ink);
+}
+
+.landing-autopilot-row-company {
+  grid-column: 2;
+  font-size: 0.78rem;
+  color: var(--ink-soft, var(--ink));
+  opacity: 0.8;
+}
+
+.landing-autopilot-row-did {
+  grid-column: 2;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  color: var(--clay);
+}
+
+@media (min-width: 768px) {
+  .landing-autopilot-row-company,
+  .landing-autopilot-row-did {
+    grid-column: auto;
+  }
+
+  .landing-autopilot-row-did {
+    justify-self: end;
+  }
+}
+
+@keyframes landing-autopilot-land {
+  0%,
+  8% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  22%,
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes landing-autopilot-travel {
+  0%,
+  10% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  25% {
+    opacity: 1;
+  }
+  55%,
+  100% {
+    transform: translateX(26px);
+    opacity: 0;
+  }
+}
+
+@keyframes landing-autopilot-nudge {
+  0%,
+  40%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Only the drawing moves. The list beside it is content, and a list whose
+     items fade out and back every few seconds reads as a page still loading
+     -- which is exactly how the first cut of this section looked. */
+  .landing-art-autopilot-row {
+    animation: landing-autopilot-land 3.8s ease-out infinite;
+  }
+
+  .landing-art-autopilot-travel {
+    animation: landing-autopilot-travel 3.8s ease-in-out infinite;
+  }
+
+  .landing-art-autopilot-agent {
+    animation: landing-autopilot-nudge 3.8s ease-in-out infinite;
+  }
+}
+
 /* --- the feature rows ----------------------------------------------------
    Rows, not a card grid: each of these needs a paragraph to be believed, and
    four paragraphs in four cards is a wall.

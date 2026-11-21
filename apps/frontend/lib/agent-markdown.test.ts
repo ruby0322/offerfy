@@ -64,3 +64,66 @@ test("contact markdown points at settings, not a key desk", () => {
   assert.match(body, /\/en\/settings/);
   assert.doesNotMatch(body, /no self-serve API key/i);
 });
+
+/** The fifteen tools the MCP surface exposes, as the page and llms.txt name them. */
+const MCP_TOOLS = [
+  "search_jobs",
+  "read_job",
+  "list_matches",
+  "list_resumes",
+  "get_resume",
+  "create_resume",
+  "create_tailor",
+  "set_resume_title",
+  "edit_resume",
+  "put_resume_source",
+  "publish_resume",
+  "unpublish_resume",
+  "export_resume",
+  "get_job_preferences",
+  "set_job_preferences",
+];
+
+test("the mcp page resolves in every path form", () => {
+  for (const path of ["/mcp", "/mcp/", "/en/mcp", "/zh-TW/mcp", "/zh-CN/mcp"]) {
+    assert.equal(marketingPage(path), "mcp", path);
+  }
+});
+
+test("mcp markdown carries what an agent needs to connect itself", () => {
+  const body = marketingMarkdown("mcp");
+  assert.match(body, /https:\/\/offerfy\.cc\/api\/mcp(?![\w-])/);
+  // And every mention of it is well formed, not just one. The page names the
+  // endpoint three times -- the Endpoint: line, the command, the host's own
+  // llms.txt section -- and a mutation check showed that breaking one of them
+  // left the test green, because `match` is satisfied by any single occurrence.
+  // A broken instruction is broken wherever it sits.
+  assert.deepEqual(
+    [...body.matchAll(/\/api\/mcp[\w-]+/g)].map((m) => m[0]),
+    [],
+    "an endpoint mention has something appended to it",
+  );
+  assert.match(body, /Authorization: Bearer/);
+  // The point of this page for an agent reader: it can act on it.
+  assert.match(body, /claude mcp add --transport http/);
+});
+
+test("mcp markdown names all fifteen tools", () => {
+  const body = marketingMarkdown("mcp");
+  for (const tool of MCP_TOOLS) {
+    assert.ok(body.includes(tool), `missing ${tool}`);
+  }
+  assert.equal(MCP_TOOLS.length, 15);
+});
+
+test("mcp markdown keeps the standing denial: Offerfy does not apply for you", () => {
+  // `llmsTxt` tells every agent not to say Offerfy submits applications. A page
+  // about handing an agent the keys is exactly where that could drift.
+  const body = marketingMarkdown("mcp");
+  assert.doesNotMatch(body, /submits? (an )?application/i);
+  assert.ok(!MCP_TOOLS.some((t) => /appl/i.test(t)), "no tool should imply applying");
+});
+
+test("llms.txt lists the mcp page among its files", () => {
+  assert.match(llmsTxt(), /\/en\/mcp/);
+});
