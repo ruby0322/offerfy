@@ -1630,10 +1630,12 @@ class ResumeContent(Base):
 class TalentApiKey(Base):
     """A credential we issue to one named organisation, by hand.
 
-    Not self-serve, and no route anywhere mints one except the admin endpoint:
-    apps/frontend/lib/agent-markdown.ts tells every agent that reads it there
-    is no public agent API, no machine OAuth server and no self-serve API
-    keys, and all three of those statements have to stay true.
+    Not self-serve, and no route anywhere mints one except the admin endpoint.
+    That rule is unchanged for this credential. The self-serve agent key a
+    user generates in settings for the MCP server is a different table, a
+    different prefix (``ofa_``, not ``ofk_``) and a different door; do not
+    merge the two. There is still no machine OAuth server, and
+    apps/frontend/lib/agent-markdown.ts says so.
 
     key_hash follows GuestSession.key_hash: unsalted SHA-256 of the raw token.
     Correct here for the same reason it is there -- the secret is 256 bits from
@@ -1665,6 +1667,83 @@ class TalentApiKey(Base):
     )
     last_used_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+
+
+class AgentApiKey(Base):
+    """A credential a signed-in user mints for their own AI assistant.
+
+    Self-serve and per-user: the holder acts as the user who minted it, on that
+    user's own account, through the MCP surface. This is a different door from
+    TalentApiKey above, which an operator issues by hand to an outside
+    organisation to read profiles. The two share no table, no token prefix
+    (ofa_ here, ofk_ there) and no hash function.
+
+    key_hash is unsalted SHA-256 of the raw token, for the same reason as
+    TalentApiKey.key_hash: the secret is 256 bits from secrets.token_urlsafe,
+    so stretching buys nothing and lookup stays one indexed equality. Do not
+    "fix" this to bcrypt.
+
+    user_id cascades: a token is personal data and goes with the account.
+    revoked_at and last_used_at are mutable credential state, not a ledger.
+    """
+
+    __tablename__ = "agent_api_keys"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class AgentToolCall(Base):
+    """One MCP tool call made with an AgentApiKey: the audit trail and the quota.
+
+    Written on its own session (see app.services.mcp_audit), never the request's,
+    so refusals and errors are recorded too. Deliberately holds no arguments:
+    they carry resume content. Only the tool name, which resume it was about
+    (resume_id is a plain string, not a foreign key, so the record outlives the
+    resume) and the outcome ("ok", "refused", "error" or "throttled"; no CHECK
+    constraint, matching JobScore.outcome). "throttled" is the quota's own
+    refusal and is the one outcome the quota does not count.
+
+    Both foreign keys cascade: the rows go with the key and with the account.
+    created_at takes a Python-side default so a test or backfill can set it; a
+    server default would make every row look current to the hourly quota.
+    """
+
+    __tablename__ = "agent_tool_calls"
+    # The quota query (WHERE key_id = ? AND created_at >= ?) runs on every tool
+    # call; this composite serves it. user_id (settings page) and created_at
+    # keep their single-column indexes.
+    __table_args__ = (Index("ix_agent_tool_calls_key_created", "key_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    key_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("agent_api_keys.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    tool: Mapped[str] = mapped_column(String(64), nullable=False)
+    resume_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, index=True
     )
 
 

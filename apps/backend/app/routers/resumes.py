@@ -23,7 +23,6 @@ from app.schemas import (
     AtsReport,
     CompileBody,
     FamilyMember,
-    LOCALES,
     PreviewPages,
     ResumeCreate,
     ResumeFamilyOut,
@@ -42,6 +41,7 @@ from app.schemas_editing import EditOut, IntentIn, ProjectionOut
 from app.services.ats import analyze_pdf
 from app.services.chat_messages import persist_template_switch
 from app.services.emitters import emitter_for
+from app.services.export_link import pdf_filename, resume_id_for
 from app.services.family import create_tailor, family_master, family_tailors
 from app.services.jobs.applications import link_tailor
 from app.services.extract import (
@@ -51,14 +51,13 @@ from app.services.extract import (
 from app.services.import_run import ImportAlreadyRunning, snapshot as import_snapshot, start_run
 from app.services.import_runner import run_import
 from app.services.tailor_run import TailorRunAlreadyRunning
-from app.services.typst_intents import IntentError, apply_intent
-from app.services.typst_anchors import anchor_bands
+from app.services.resume_write import _preview_pages, apply_edit
 from app.services.typst_projection import parse_projection
 from app.services.tailor_run import snapshot as tailor_snapshot
 from app.services.tailor_run import start_run as start_tailor_run
 from app.services.tailor_runner import job_id_for_tailor, run_tailor
 from app.services.metering import metered, preflight
-from app.services.rate_limit import enforce_guest_rate
+from app.services.rate_limit import enforce_export_download_rate, enforce_guest_rate
 from app.services.resume_content import (
     extract_content,
     record_extract_spend,
@@ -73,12 +72,17 @@ from app.services.revisions import (
     unpublished_changes,
     build_share_state,
 )
+from app.services import resume_access
 from app.services.s3 import delete_object, put_object
 from app.services.sse import SSE_HEADERS, sse_frame
-from app.services.starter import default_title, generate_starter, title_from_filename
+from app.services.starter import (
+    default_title,
+    generate_starter,
+    title_from_filename,
+    validate_locale,
+)
 from app.services.templates import apply_prompt, is_supported
 from app.services.typst_compile import (
-    compile_preview_pages,
     compile_typst,
 )
 
@@ -183,13 +187,6 @@ def _schedule_tailor(resume_id: str, run_id: str, model: str | None = None) -> N
     task.add_done_callback(_tailor_tasks.discard)
 
 
-def _validate_locale(locale: str | None) -> str:
-    value = locale or "zh-TW"
-    if value not in LOCALES:
-        raise HTTPException(status_code=400, detail="locale must be en, zh-TW, or zh-CN")
-    return value
-
-
 def _iso(dt: datetime | None) -> str | None:
     if dt is None:
         return None
@@ -231,6 +228,19 @@ def _new_resume(
     upload_s3_key: str | None = None,
     import_status: str = "idle",
 ) -> Resume:
+    if user is not None:
+        return resume_access.create_for_user(
+            db,
+            user,
+            title=title,
+            locale=locale,
+            source=source,
+            typst_source=typst_source,
+            upload_s3_key=upload_s3_key,
+            import_status=import_status,
+        )
+    if guest is None:
+        raise HTTPException(status_code=500, detail="Missing owner")
     resume = Resume(
         title=title,
         locale=locale,
@@ -238,11 +248,9 @@ def _new_resume(
         typst_source=typst_source,
         upload_s3_key=upload_s3_key,
         import_status=import_status,
-        user_id=user.id if user is not None else None,
-        guest_session_id=None if user is not None else (guest.id if guest else None),
+        user_id=None,
+        guest_session_id=guest.id,
     )
-    if resume.user_id is None and resume.guest_session_id is None:
-        raise HTTPException(status_code=500, detail="Missing owner")
     db.add(resume)
     db.flush()
     set_draft_source(db, resume, typst_source)
@@ -257,7 +265,7 @@ def create_resume(
     db: Session = Depends(get_db),
     user: User | None = Depends(get_current_user),
 ):
-    locale = _validate_locale(body.locale)
+    locale = validate_locale(body.locale)
     _, guest = owner_context(request, response, db, user, ensure=True)
     if user is None and guest is None:
         raise HTTPException(status_code=401, detail="Guest session required")
@@ -286,7 +294,7 @@ async def upload_resume(
     db: Session = Depends(get_db),
     user: User | None = Depends(get_current_user),
 ):
-    locale_v = _validate_locale(locale)
+    locale_v = validate_locale(locale)
     filename = file.filename or "upload.bin"
     if not allowed_upload(filename):
         raise HTTPException(status_code=400, detail="Unsupported file type")
@@ -324,14 +332,12 @@ def list_resumes(
     user: User | None = Depends(get_current_user),
 ):
     user, guest = owner_context(request, response, db, user, ensure=False)
-    query = db.query(Resume)
     if user is not None:
-        query = query.filter(Resume.user_id == user.id)
+        rows = resume_access.resumes_of(db, user)
     elif guest is not None:
-        query = query.filter(Resume.guest_session_id == guest.id)
+        rows = db.query(Resume).filter(Resume.guest_session_id == guest.id).all()
     else:
         return []
-    rows = query.all()
     return [
         ResumeListItem(
             id=r.id,
@@ -759,22 +765,6 @@ def compile_resume(
     return RawResponse(content=data, media_type="application/pdf")
 
 
-def _preview_pages(source: str, with_bands: bool = False) -> PreviewPages:
-    pages = compile_preview_pages(source)
-    if with_bands and pages["text_layers"]:
-        # Where each line unit sits, for the editor to highlight. Best effort like the
-        # text layer: a preview without bands is still a preview, and the eval is a
-        # second subprocess that must not turn a good compile into a failed request.
-        try:
-            bands = anchor_bands(
-                source, parse_projection(source), layers=pages["text_layers"])
-            pages["bands"] = {
-                uid: [dataclasses.asdict(b) for b in rows] for uid, rows in bands.items()}
-        except Exception:
-            logger.warning("anchor bands unavailable", exc_info=True)
-    return PreviewPages(**pages)
-
-
 @router.get("/v1/resumes/{resume_id}/preview", response_model=PreviewPages)
 def preview(
     resume_id: str,
@@ -828,73 +818,9 @@ async def edit(
     ones the stored text actually has.
     """
     resume = _owned_resume(resume_id, request, response, db, user, ensure=True)
-    current = resume.typst_source
-    if body.hash != source_hash(current):
-        raise _edit_error(409, "stale_hash", "The document changed; reload it.")
-    try:
-        candidate = apply_intent(current, parse_projection(current), body)
-    except IntentError as exc:
-        raise _edit_error(400, exc.code, exc.detail, exc.reason)
-
-    # Release the pool connection before the compile: the SELECT above opened a
-    # transaction, and three 30s subprocess timeouts (SVG, PDF and the anchor eval; 90s
-    # worst case) must not hold a slot (a starved pool takes down even /healthz). Everything needed is already in
-    # plain strings; the object is only re-read after the compile, below.
-    db.commit()
-
-    # The compile is the gate and the preview in one: `compile_preview_pages`
-    # (via `_preview_pages`) raises HTTPException on a source typst rejects. Off
-    # the event loop for the same reason `switch_template` does it.
-    try:
-        preview = await asyncio.to_thread(_preview_pages, candidate, True)
-    except HTTPException as exc:
-        if exc.status_code != 400:
-            # Typst missing (503), timed out (504) or silent (500): not the
-            # person's edit breaking the document.
-            raise
-        first = str(exc.detail).strip().splitlines()[:1]
-        raise _edit_error(400, "compile_failed", first[0] if first else "")
-
-    # A chat edit or a second tab can land while the compile runs; re-read and
-    # re-check rather than overwrite it. This is what makes releasing the
-    # connection above safe.
-    db.refresh(resume)
-    if source_hash(resume.typst_source) != body.hash:
-        raise _edit_error(409, "stale_hash", "The document changed; reload it.")
-
-    # Never coalesced. `set_draft_source` merges into the latest revision inside
-    # its window whoever wrote it, and the request's hash cannot say whose that
-    # was: it equals the latest revision's hash whenever the draft is in sync.
-    # So "coalesce only when hash == latest.content_hash" always coalesces, and
-    # a field edit right after a chat reply would rewrite the reply's revision.
-    # No `restamp_content`: the snapshot did not change, the Typst did, so
-    # re-keying it would make a snapshot without this edit claim to describe the
-    # edited document, and the next template switch would emit the old text. Left
-    # alone it is stale, and that switch re-extracts.
-    set_draft_source(db, resume, candidate, coalesce=False)
-    db.commit()
-    return EditOut(
-        hash=source_hash(candidate),
-        typst_source=candidate,
-        projection=ProjectionOut.model_validate(
-            dataclasses.asdict(parse_projection(candidate))
-        ),
-        preview=preview,
-    )
-
-
-def _edit_error(status: int, code: str, detail: str, reason: str = "") -> HTTPException:
-    """A refusal the client can word for itself.
-
-    `detail` is one English sentence from the service; `reason` is the machine-readable
-    half, present where a code covers several quite different refusals (`unsupported`
-    covers four for `insert_item` alone) and the client has to pick the sentence in the
-    person's own language. Absent when there is nothing to distinguish.
-    """
-    body = {"code": code, "detail": detail}
-    if reason:
-        body["reason"] = reason
-    return HTTPException(status_code=status, detail=body)
+    # The guards, the compile gate and the write live in `resume_write`, shared with
+    # the MCP tools. This handler only resolves ownership and shapes the response.
+    return EditOut(**await apply_edit(db, resume, body))
 
 
 @router.get("/v1/resumes/{resume_id}/preview.svg", response_model=PreviewPages)
@@ -939,6 +865,37 @@ def export_pdf(
         content=data,
         media_type="application/pdf",
         headers={"Content-Disposition": 'attachment; filename="resume.pdf"'},
+    )
+
+
+# Public, and unlisted: a route in /api/openapi.json is a route described on the
+# open web, and this one is reachable without a credential. The token is NOT a
+# ResumeShare token (that is a state the user chose to be in, with a table, a
+# revoke and an OG image); it is a signed `resume_id|expiry` minted by the
+# `export_resume` agent tool. Signature, then budget, then the row: a missing
+# resume is a 404 before anything is compiled, because a signature outlives the
+# row it names, and a flood costs one signature check rather than a query --
+# see app/services/rate_limit.py for why the link needs a budget at all.
+@router.get("/v1/resumes/export/{token}", include_in_schema=False)
+def export_by_token(token: str, db: Session = Depends(get_db)):
+    resume_id = resume_id_for(token)
+    if resume_id is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    enforce_export_download_rate(resume_id)
+    resume = db.get(Resume, resume_id)
+    if resume is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    source, title = resume.typst_source, resume.title
+    # Release the pooled connection before the compile, the same order
+    # app/services/resume_write.py uses and for the same reason: a Typst
+    # subprocess can run for 30s, and this route is public and unauthenticated,
+    # so it is the easiest way to pin a pool slot per request.
+    db.commit()
+    data = compile_typst(source, "pdf")
+    return RawResponse(
+        content=data,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{pdf_filename(title)}"'},
     )
 
 

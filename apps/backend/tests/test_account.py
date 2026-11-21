@@ -249,3 +249,366 @@ def test_auth_me_carries_the_handle_and_the_name(client: TestClient, db_session)
     body = client.get("/v1/auth/me").json()["user"]
     assert body["username"] == "ruby"
     assert body["display_name"] == "Ruby!"
+
+
+# --------------------------------------------------------------------------
+# Agent keys: the cookie-authenticated management routes
+# --------------------------------------------------------------------------
+
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+from app.models import AgentApiKey, AgentToolCall  # noqa: E402
+from app.services.agent_keys import key_for_token, mint_agent_key  # noqa: E402
+
+KEYS = "/v1/me/agent-keys"
+
+
+def _bearer(raw):
+    return {"Authorization": f"Bearer {raw}"}
+
+
+def test_no_agent_key_route_is_in_the_published_schema(client: TestClient):
+    """Global Constraint: every new route carries include_in_schema=False,
+    whether it sits on a new router or on an existing one. The Next rewrite
+    publishes /api/openapi.json. The sibling account route is listed, so this
+    cannot pass by the document being empty."""
+    paths = client.app.openapi()["paths"]
+    assert not [p for p in paths if "agent-keys" in p]
+    assert "/v1/me/account" in paths
+
+
+def test_agent_key_routes_require_a_cookie(client: TestClient):
+    assert client.get(KEYS).status_code == 401
+    assert client.post(KEYS, json={"label": "k"}).status_code == 401
+    assert client.delete(f"{KEYS}/x").status_code == 401
+    assert client.get(f"{KEYS}/x/calls").status_code == 401
+
+
+def test_minting_returns_the_token_once(client, signed_in):
+    made = client.post(KEYS, json={"label": "laptop"}).json()
+    assert made["token"].startswith("ofa_")
+    assert made["label"] == "laptop"
+    listed = client.get(KEYS).json()
+    assert len(listed) == 1
+    assert listed[0]["id"] == made["id"]
+    assert "token" not in listed[0]
+    assert "key_hash" not in listed[0]
+    # No other field may smuggle the secret back either.
+    assert made["token"] not in str(listed)
+
+
+def test_an_agent_token_cannot_mint_another(client, db_session, a_user):
+    _, raw = mint_agent_key(db_session, user=a_user, label="k")
+    db_session.commit()
+    assert (
+        client.post(KEYS, json={"label": "second"}, headers=_bearer(raw)).status_code
+        == 401
+    )
+    # Nor read: the whole surface is cookie-only.
+    assert client.get(KEYS, headers=_bearer(raw)).status_code == 401
+    assert db_session.query(AgentApiKey).count() == 1
+
+
+def test_i_cannot_revoke_someone_elses_key(client, db_session, signed_in, other_user):
+    theirs, _ = mint_agent_key(db_session, user=other_user, label="theirs")
+    db_session.commit()
+    assert client.delete(f"{KEYS}/{theirs.id}").status_code == 404
+    db_session.refresh(theirs)
+    assert theirs.revoked_at is None
+
+
+def test_revoking_my_key_kills_it_and_frees_a_slot(client, db_session, signed_in):
+    made = [client.post(KEYS, json={"label": f"k{n}"}).json() for n in range(5)]
+    assert client.delete(f"{KEYS}/{made[0]['id']}").status_code == 204
+    listed = client.get(KEYS).json()
+    # Still listed, and marked: the log of a key you have just revoked is the
+    # log you most want to read. It no longer counts against the cap, though.
+    revoked = [row for row in listed if row["revoked_at"] is not None]
+    assert [row["id"] for row in revoked] == [made[0]["id"]]
+    assert len([row for row in listed if row["revoked_at"] is None]) == 4
+    # The revoked token no longer authenticates, and a slot is free again.
+    assert key_for_token(db_session, made[0]["token"]) is None
+    assert client.post(KEYS, json={"label": "again"}).status_code == 200
+    # Revoking twice answers like revoking something that is not there.
+    assert client.delete(f"{KEYS}/{made[0]['id']}").status_code == 404
+
+
+def test_the_sixth_key_is_a_400(client, signed_in):
+    for n in range(5):
+        assert client.post(KEYS, json={"label": f"k{n}"}).status_code == 200
+    assert client.post(KEYS, json={"label": "sixth"}).status_code == 400
+    assert len(client.get(KEYS).json()) == 5
+
+
+def test_a_blank_or_overlong_label_is_a_400(client, signed_in):
+    for bad in ("", "   ", "x" * 256):
+        assert client.post(KEYS, json={"label": bad}).status_code == 400
+    assert client.get(KEYS).json() == []
+    # The boundary itself is fine.
+    assert client.post(KEYS, json={"label": "x" * 255}).status_code == 200
+
+
+def test_a_non_positive_expiry_is_a_400(client, signed_in):
+    for bad in (0, -1):
+        resp = client.post(KEYS, json={"label": "k", "expires_in_days": bad})
+        assert resp.status_code == 400
+    assert client.get(KEYS).json() == []
+
+
+def test_the_call_log_is_mine_only(client, db_session, signed_in, other_user):
+    theirs, _ = mint_agent_key(db_session, user=other_user, label="theirs")
+    db_session.commit()
+    assert client.get(f"{KEYS}/{theirs.id}/calls").status_code == 404
+
+
+def test_the_call_log_is_newest_first_and_carries_no_arguments(
+    client, db_session, signed_in, a_user, other_user
+):
+    mine, _ = mint_agent_key(db_session, user=a_user, label="mine")
+    theirs, _ = mint_agent_key(db_session, user=other_user, label="theirs")
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for n, tool in enumerate(["list_resumes", "publish_resume"]):
+        db_session.add(
+            AgentToolCall(
+                key_id=mine.id,
+                user_id=a_user.id,
+                tool=tool,
+                resume_id="r-1" if n else None,
+                outcome="ok",
+                created_at=t0 + timedelta(minutes=n),
+            )
+        )
+    db_session.add(
+        AgentToolCall(
+            key_id=theirs.id, user_id=other_user.id, tool="their_tool", outcome="ok"
+        )
+    )
+    db_session.commit()
+    rows = client.get(f"{KEYS}/{mine.id}/calls").json()
+    assert [r["tool"] for r in rows] == ["publish_resume", "list_resumes"]
+    assert rows[0]["resume_id"] == "r-1" and rows[1]["resume_id"] is None
+    assert set(rows[0]) == {"id", "tool", "resume_id", "outcome", "created_at"}
+
+
+def test_the_call_log_is_capped(client, db_session, signed_in, a_user):
+    key, _ = mint_agent_key(db_session, user=a_user, label="busy")
+    for _n in range(75):
+        db_session.add(
+            AgentToolCall(key_id=key.id, user_id=a_user.id, tool="t", outcome="ok")
+        )
+    db_session.commit()
+    assert len(client.get(f"{KEYS}/{key.id}/calls").json()) == 50
+
+
+def test_a_revoked_keys_log_is_still_readable(client, db_session, signed_in, a_user):
+    """The anti-goal is "the user does not know what the agent did", and
+    revoking is what they do when they suspect it did something. Hiding the key
+    hid the answer."""
+    made = client.post(KEYS, json={"label": "suspect"}).json()
+    db_session.add(
+        AgentToolCall(
+            key_id=made["id"], user_id=a_user.id, tool="publish_resume",
+            resume_id="r-1", outcome="ok",
+        )
+    )
+    db_session.commit()
+    assert client.delete(f"{KEYS}/{made['id']}").status_code == 204
+    rows = client.get(f"{KEYS}/{made['id']}/calls").json()
+    assert [r["tool"] for r in rows] == ["publish_resume"]
+
+
+def test_the_list_bounds_how_many_retired_keys_it_shows(
+    client, db_session, signed_in, a_user
+):
+    from app.routers.account import RETIRED_KEYS_LISTED
+
+    for n in range(RETIRED_KEYS_LISTED + 4):
+        key, _ = mint_agent_key(db_session, user=a_user, label=f"old-{n}")
+        key.revoked_at = datetime.now(timezone.utc) - timedelta(minutes=n)
+        db_session.commit()
+    live, _ = mint_agent_key(db_session, user=a_user, label="current")
+    db_session.commit()
+    listed = client.get(KEYS).json()
+    assert len(listed) == RETIRED_KEYS_LISTED + 1
+    assert listed[0]["id"] == live.id  # live first, then newest-retired first
+    assert listed[1]["label"] == "old-0"
+
+
+def test_a_key_is_retired_when_it_was_revoked_not_when_it_would_have_expired():
+    """A key revoked today with an expiry thirty days out stopped working
+    today. Ordering it by the later stamp would sort it ahead of every key
+    retired in between, which is what decides who falls off the bounded list.
+
+    Also the mixed-timezone case: one stamp read back from SQLite (naive)
+    beside one assigned in this session (aware) is what comparison refuses.
+    """
+    from app.routers.account import _retired_at
+
+    key = AgentApiKey(
+        user_id="u",
+        key_hash="h",
+        label="l",
+        revoked_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        expires_at=datetime(2026, 3, 1),  # naive, and later than the revoke
+    )
+    assert _retired_at(key) == datetime(2026, 1, 2, tzinfo=timezone.utc)
+    # And when the expiry is the earlier of the two, that is when it stopped.
+    key.expires_at = datetime(2026, 1, 1)
+    assert _retired_at(key) == datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+
+def test_retired_keys_are_ordered_by_when_they_stopped_working(
+    client, db_session, signed_in, a_user
+):
+    """`older` was revoked ten days ago but carries an expiry a month out;
+    `newer` was revoked yesterday. Ordering on the later of a key's two stamps
+    puts `older` first, on the strength of a date that has not happened."""
+    now = datetime.now(timezone.utc)
+    older, _ = mint_agent_key(db_session, user=a_user, label="older")
+    older.revoked_at = now - timedelta(days=10)
+    older.expires_at = now + timedelta(days=30)
+    newer, _ = mint_agent_key(db_session, user=a_user, label="newer")
+    newer.revoked_at = now - timedelta(days=1)
+    db_session.commit()
+    assert [row["label"] for row in client.get(KEYS).json()] == ["newer", "older"]
+
+
+def test_an_expired_key_is_listed_and_marked_but_does_not_authenticate(
+    client, db_session, signed_in, a_user
+):
+    key, raw = mint_agent_key(db_session, user=a_user, label="lapsed")
+    key.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db_session.commit()
+    listed = client.get(KEYS).json()
+    assert [(r["id"], r["revoked_at"]) for r in listed] == [(key.id, None)]
+    assert listed[0]["expires_at"] is not None
+    assert key_for_token(db_session, raw) is None
+
+
+def test_a_publish_stays_in_the_log_behind_a_wall_of_reads(
+    client, db_session, signed_in, a_user
+):
+    """At the quota's 300 calls an hour one flat limit of 50 scrolled a publish
+    out of view in minutes -- the one row this table exists for."""
+    from app.routers.account import CALL_LOG_LIMIT
+
+    key, _ = mint_agent_key(db_session, user=a_user, label="busy")
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    db_session.add(
+        AgentToolCall(
+            key_id=key.id, user_id=a_user.id, tool="publish_resume",
+            resume_id="r-1", outcome="ok", created_at=t0,
+        )
+    )
+    for n in range(CALL_LOG_LIMIT * 2):
+        db_session.add(
+            AgentToolCall(
+                key_id=key.id, user_id=a_user.id, tool="search_jobs", outcome="ok",
+                created_at=t0 + timedelta(minutes=n + 1),
+            )
+        )
+    db_session.commit()
+    rows = client.get(f"{KEYS}/{key.id}/calls").json()
+    assert "publish_resume" in [r["tool"] for r in rows]
+    # Still newest first, and still only one row per call.
+    stamps = [r["created_at"] for r in rows]
+    assert stamps == sorted(stamps, reverse=True)
+    assert len({r["id"] for r in rows}) == len(rows)
+    assert rows[-1]["tool"] == "publish_resume"
+
+
+def test_a_publish_survives_a_wall_of_the_users_own_editing(
+    client, db_session, signed_in, a_user
+):
+    """The reason disclosures get a window of their own. `edit_resume` is
+    pinned too, so with one shared window an assistant doing a long editing
+    session pushed the publish out of the changes half, and the reads pushed it
+    out of the recent half -- leaving the log unable to answer the one question
+    it exists for."""
+    from app.routers.account import CALL_LOG_LIMIT, CALL_LOG_PINNED_LIMIT
+
+    key, _ = mint_agent_key(db_session, user=a_user, label="busy")
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    db_session.add(
+        AgentToolCall(
+            key_id=key.id, user_id=a_user.id, tool="publish_resume",
+            resume_id="r-1", outcome="ok", created_at=t0,
+        )
+    )
+    later = 0
+    # More edits than the changes window, and more reads than the recent one.
+    for tool, count in (
+        ("edit_resume", CALL_LOG_PINNED_LIMIT + 5),
+        ("get_resume", CALL_LOG_LIMIT + 5),
+    ):
+        for _ in range(count):
+            later += 1
+            db_session.add(
+                AgentToolCall(
+                    key_id=key.id, user_id=a_user.id, tool=tool, outcome="ok",
+                    created_at=t0 + timedelta(minutes=later),
+                )
+            )
+    db_session.commit()
+    rows = client.get(f"{KEYS}/{key.id}/calls").json()
+    assert "publish_resume" in [r["tool"] for r in rows]
+    stamps = [r["created_at"] for r in rows]
+    assert stamps == sorted(stamps, reverse=True)
+    assert len({r["id"] for r in rows}) == len(rows)
+
+
+def test_one_keys_log_does_not_show_my_other_keys_calls(
+    client, db_session, signed_in, a_user
+):
+    first, _ = mint_agent_key(db_session, user=a_user, label="first")
+    second, _ = mint_agent_key(db_session, user=a_user, label="second")
+    for key, tool in ((first, "from_first"), (second, "from_second")):
+        db_session.add(
+            AgentToolCall(key_id=key.id, user_id=a_user.id, tool=tool, outcome="ok")
+        )
+    db_session.commit()
+    rows = client.get(f"{KEYS}/{first.id}/calls").json()
+    assert [r["tool"] for r in rows] == ["from_first"]
+
+
+def test_a_positive_expiry_is_accepted_and_sets_expires_at(client, db_session, signed_in):
+    resp = client.post(KEYS, json={"label": "k", "expires_in_days": 30})
+    assert resp.status_code == 200
+    expires = datetime.fromisoformat(resp.json()["expires_at"])
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    delta = expires - datetime.now(timezone.utc)
+    assert timedelta(days=29, hours=23) < delta <= timedelta(days=30)
+    # And without the field the key does not expire.
+    assert client.post(KEYS, json={"label": "k2"}).json()["expires_at"] is None
+
+
+def test_only_the_cap_is_reported_as_too_many_keys(client, signed_in, monkeypatch):
+    """A different ValueError from the service must not read as a key-limit message."""
+    from app.routers import account as account_router
+
+    def boom(*_a, **_k):
+        raise ValueError("something else entirely")
+
+    monkeypatch.setattr(account_router, "mint_agent_key", boom)
+    with pytest.raises(ValueError, match="something else"):
+        client.post(KEYS, json={"label": "k"})
+
+
+def test_a_revoked_keys_call_log_outlives_the_credential(
+    client, db_session, signed_in, a_user
+):
+    """Deliberate: DELETE on a revoked key is 404, but its log stays readable.
+
+    An audit trail that vanishes when you revoke is useless exactly when you
+    revoke because something looked wrong."""
+    key, _ = mint_agent_key(db_session, user=a_user, label="leaked")
+    db_session.add(
+        AgentToolCall(key_id=key.id, user_id=a_user.id, tool="get_resume", outcome="ok")
+    )
+    db_session.commit()
+    assert client.delete(f"{KEYS}/{key.id}").status_code == 204
+    assert client.delete(f"{KEYS}/{key.id}").status_code == 404
+    rows = client.get(f"{KEYS}/{key.id}/calls")
+    assert rows.status_code == 200
+    assert [r["tool"] for r in rows.json()] == ["get_resume"]

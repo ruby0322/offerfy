@@ -30,19 +30,23 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import Base, get_engine, get_session_factory, reset_engine
 from app.main import app
-from app.services import api_keys
+from app.services import api_keys, rate_limit
 
 
 @pytest.fixture(autouse=True)
 def _clear_settings_cache():
     get_settings.cache_clear()
     api_keys.reset()
+    rate_limit.reset_export_downloads()
     yield
     get_settings.cache_clear()
     # The key-cooldown table is module state in one process, so a test that
     # throttles a key would otherwise make the next test's first attempt start
     # on the second key -- or, with one key configured, look cooled down.
     api_keys.reset()
+    # Same reason: the export link's budget is module state too, and a test that
+    # spends one resume's would otherwise be spending it for whatever runs next.
+    rate_limit.reset_export_downloads()
 
 
 @pytest.fixture
@@ -108,3 +112,109 @@ def db_session(client) -> Session:
         yield session
     finally:
         session.close()
+
+
+# ---------------------------------------------------------------------------
+# Shared fixtures for the self-serve MCP surface (tests/test_agent_*.py and
+# the cookie-authenticated key routes). Built by hand, as test_talent_api.py
+# and test_jobs_api.py do, so a test about auth does not depend on a model call.
+# ---------------------------------------------------------------------------
+
+
+def _user(db, sub: str):
+    from app.models import User
+
+    user = User(google_sub=sub, email=f"{sub}@example.com", locale="en", name=sub)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def _resume_for(db, user, title="Untitled"):
+    """A committed master resume the real compiler accepts."""
+    from app.models import Resume
+    from app.services.starter import generate_starter
+
+    resume = Resume(
+        title=title,
+        typst_source=generate_starter("zh-TW"),
+        source="create",
+        locale="zh-TW",
+        user_id=user.id,
+        kind="master",
+    )
+    db.add(resume)
+    db.commit()
+    db.refresh(resume)
+    return resume
+
+
+def _job_with_facets(db, source_id: str, title: str):
+    from app.models import Job, JobFacets, _utcnow
+
+    # Relative to now: a catalogue posting is live by default, inside the
+    # freshness window search_jobs enforces. A fixed date would age out.
+    now = _utcnow()
+    job = Job(
+        source="greenhouse",
+        source_id=source_id,
+        company="Stripe",
+        title=title,
+        location="Remote",
+        remote=True,
+        apply_url="https://example.com/apply",
+        source_url="https://example.com/job",
+        description_text="Build things",
+        description_html="<p>Build things</p>",
+        posted_at=now,
+        first_seen_at=now,
+        last_seen_at=now,
+        is_active=True,
+    )
+    db.add(job)
+    db.flush()
+    db.add(
+        JobFacets(
+            job_id=job.id,
+            seniority="senior",
+            function="engineering",
+            description_hash="h" * 64,
+        )
+    )
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+@pytest.fixture
+def a_user(db_session):
+    return _user(db_session, "agent-user-a")
+
+
+@pytest.fixture
+def other_user(db_session):
+    return _user(db_session, "agent-user-b")
+
+
+@pytest.fixture
+def signed_in(client, a_user):
+    from app.deps import SESSION_COOKIE, _sign
+
+    client.cookies.set(SESSION_COOKIE, _sign(a_user.id, get_settings().auth_token_secret))
+    yield a_user
+
+
+@pytest.fixture
+def my_resume(db_session, a_user):
+    return _resume_for(db_session, a_user)
+
+
+@pytest.fixture
+def a_job(db_session):
+    return _job_with_facets(db_session, "stripe:agent-1", "Payments Engineer")
+
+
+@pytest.fixture
+def another_job(db_session):
+    return _job_with_facets(db_session, "stripe:agent-2", "Platform Engineer")

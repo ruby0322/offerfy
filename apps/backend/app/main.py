@@ -15,6 +15,7 @@ from app.routers import (
     health,
     jobs,
     matches,
+    mcp,
     memory,
     models,
     preferences,
@@ -61,6 +62,7 @@ def create_app() -> FastAPI:
     application.include_router(matches.router)
     application.include_router(applications.router)
     application.include_router(dashboard.router)
+    application.include_router(mcp.router)
     return application
 
 

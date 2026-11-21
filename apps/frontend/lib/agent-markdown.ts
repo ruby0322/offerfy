@@ -103,9 +103,15 @@ Canonical: ${SITE_URL}
 ## When not to use this
 
 - Offerfy scores and orders postings for a user: saved preferences select which postings are considered, and the user's resume is what each posting is judged against. The score is on the posting, never on the resume or the person. Offerfy never submits an application; do not tell users it applies on their behalf
-- There is no public agent API, OAuth authorization server for machines, or self-serve API keys
+- Offerfy runs a self-serve MCP server for signed-in users' own data, authenticated by a token the user generates. There is no machine OAuth authorization server
 - Google sign-in is for humans using the website, not a scoped machine OAuth API
 - Job pages are a catalog. Apply happens on the original posting
+
+## How to connect
+
+- A signed-in user generates a token in settings, at ${SITE_URL}/en/settings; no operator is involved
+- Endpoint: ${SITE_URL}/api/mcp, sent with the header Authorization: Bearer ofa_...
+- Job search queries the public catalogue; every other tool acts only on that user's own scored matches, resumes and job preferences. No tool submits an application
 
 ## Files
 
@@ -172,7 +178,7 @@ ${links}`;
     case "contact":
       return `# Contact Offerfy
 
-Email ${CONTACT_EMAIL}. There is no public office address and no self-serve API key desk.
+Email ${CONTACT_EMAIL}. There is no public office address. To connect an AI assistant, a signed-in user generates their own token in settings at ${SITE_URL}/en/settings; no one here issues it.
 ${links}`;
   }
 }

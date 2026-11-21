@@ -1,6 +1,9 @@
 from pathlib import Path
 
+from fastapi import HTTPException
+
 from app.config import get_settings
+from app.schemas import LOCALES
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 STARTER_PATH = BACKEND_ROOT / "typst" / "starter.typ"
@@ -135,3 +138,13 @@ def resolve_font_paths() -> list[str]:
         return [p for p in settings.typst_font_paths.split(":") if p]
     fonts = BACKEND_ROOT / "fonts"
     return [str(fonts)] if fonts.is_dir() else []
+
+
+def validate_locale(locale: str | None) -> str:
+    """The locale a new resume is made in; unset means zh-TW. A 400 if unknown."""
+    # None and "" mean unset (the router's contract). Anything else that is not a
+    # known string, e.g. a JSON [] or 0 from an MCP caller, is the caller's mistake.
+    value = "zh-TW" if locale is None or locale == "" else locale
+    if not isinstance(value, str) or value not in LOCALES:
+        raise HTTPException(status_code=400, detail="locale must be en, zh-TW, or zh-CN")
+    return value

@@ -10,6 +10,10 @@ provider-neutral specs plus a handler factory closing over the request's
   read_job            -- one posting in full, for tailoring against it.
   read_my_job_profile -- the signed-in person's own job context.
 
+The catalogue half (`catalogue_specs` / `catalogue_handlers`: search_jobs and
+read_job) is shared with the MCP surface (services/mcp_tools.py) and must stay
+resume-independent: no resume, no user, only a session.
+
 Why tools and not a prompt block: the role card is rebuilt and re-sent on
 every turn, so putting postings or a digest in it would charge every
 conversation about margins for job data it never looks at.
@@ -69,6 +73,11 @@ READ_JOB_PROFILE_TOOL = "read_my_job_profile"
 # more than a turn can say anything useful about, and every row costs context
 # the resume itself needs.
 SEARCH_LIMIT_DEFAULT = 5
+
+#: The `code` on a catalogue handler's "no such row" refusal. A sentinel rather
+#: than a sentence, because a caller that has to map the refusal onto an HTTP
+#: status (app/services/mcp_tools.py) must not depend on the wording.
+ERROR_NOT_FOUND = "not_found"
 SEARCH_LIMIT_MAX = 10
 
 # Enough of a posting to tailor against. Descriptions run to 200k characters;
@@ -110,9 +119,10 @@ def _search_spec() -> dict[str, Any]:
         "description": (
             "Search Offerfy's job catalogue: roughly 21,000 postings pulled "
             "straight from ~90 employers' own Greenhouse, Lever, Ashby, "
-            "SmartRecruiters and Workday boards. Use this instead of "
-            "web_search for roles -- only a catalogue posting has a job_id "
-            "you can pass to read_job and an apply_url that works. "
+            "SmartRecruiters and Workday boards. This is the authoritative "
+            "source for roles: take postings from here rather than from the "
+            "web -- only a catalogue posting has a job_id to read it in full "
+            "and an apply_url that works. "
             "Returns at most "
             f"{SEARCH_LIMIT_MAX} postings, newest first, plus the total "
             "number that matched.\n"
@@ -211,8 +221,8 @@ _READ_JOB = {
         "Read one catalogue posting in full, including its description with "
         "the company's repeated boilerplate removed. Call this before "
         "tailoring a resume for a role, and tailor from this text rather than "
-        "from the job title. Takes a job_id from search_jobs or from "
-        "read_my_job_profile. A posting that has closed is still returned, "
+        "from the job title. Takes a job_id from a job search or "
+        "any other list of postings. A posting that has closed is still returned, "
         "flagged with is_active=false or stale=true -- tell the person rather "
         "than presenting it as open."
     ),
@@ -249,7 +259,7 @@ def jobs_tool_specs(resume: Resume) -> list[dict]:
     model that calls it from a stale transcript gets an explanation instead of
     "unknown tool".
     """
-    specs: list[dict] = [_search_spec(), _READ_JOB]
+    specs: list[dict] = catalogue_specs()
     if resume.user_id is not None:
         specs.append(_READ_JOB_PROFILE)
     return specs
@@ -278,20 +288,29 @@ def _facets_for(db: Session, job_ids: list[str]) -> dict[str, JobFacets]:
     return {row.job_id: row for row in rows}
 
 
-def jobs_tool_handlers(
-    db: Session, resume: Resume, user: User | None
-) -> dict[str, Callable[[dict], str]]:
+def catalogue_specs() -> list[dict]:
+    """The resume-independent tools: the catalogue search and the posting read."""
+    return [_search_spec(), _READ_JOB]
+
+
+def catalogue_handlers(db: Session) -> dict[str, Callable[[dict], str]]:
+    """Handlers for `catalogue_specs`. They need a session and nothing else."""
+
     def search(args: dict) -> str:
         raw_limit = args.get("limit")
+        # OverflowError as well as the two obvious ones: JSON's `1e999` parses
+        # to float("inf") and `int(inf)` raises neither TypeError nor
+        # ValueError. A malformed limit falls back to the default; it must not
+        # reach the caller as "the tool failed unexpectedly".
         try:
             limit = int(raw_limit) if raw_limit is not None else SEARCH_LIMIT_DEFAULT
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             limit = SEARCH_LIMIT_DEFAULT
         limit = max(1, min(SEARCH_LIMIT_MAX, limit))
         days = args.get("posted_within_days")
         try:
             days = int(days) if days is not None else None
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             days = None
         if days is not None and not 1 <= days <= 90:
             return json.dumps({"error": "posted_within_days must be between 1 and 90"})
@@ -337,8 +356,15 @@ def jobs_tool_handlers(
             return json.dumps({"error": "job_id is required"})
         job = db.get(Job, job_id)
         if job is None:
+            # `code` as well as `error`: the MCP surface has to tell "no such
+            # posting" (404) from every other refusal (400), and it used to do
+            # that by matching the start of this sentence -- so rewording the
+            # message for a model's benefit silently turned a 404 into a 400.
             return json.dumps(
-                {"error": f"No posting with job_id {job_id}. Call search_jobs first."}
+                {
+                    "code": ERROR_NOT_FOUND,
+                    "error": f"No posting with job_id {job_id}. Call search_jobs first.",
+                }
             )
         facets = db.get(JobFacets, job_id)
         # Keyed by the NORMALIZED name, the way recompute_boilerplate stores
@@ -368,6 +394,12 @@ def jobs_tool_handlers(
         )
         return json.dumps(payload, ensure_ascii=False)
 
+    return {SEARCH_JOBS_TOOL: search, READ_JOB_TOOL: read_job}
+
+
+def jobs_tool_handlers(
+    db: Session, resume: Resume, user: User | None
+) -> dict[str, Callable[[dict], str]]:
     def read_profile(_args: dict) -> str:
         if user is None:
             return json.dumps(
@@ -423,11 +455,7 @@ def jobs_tool_handlers(
             ensure_ascii=False,
         )
 
-    return {
-        SEARCH_JOBS_TOOL: search,
-        READ_JOB_TOOL: read_job,
-        READ_JOB_PROFILE_TOOL: read_profile,
-    }
+    return {**catalogue_handlers(db), READ_JOB_PROFILE_TOOL: read_profile}
 
 
 def _digest_payload(digest) -> dict[str, Any]:

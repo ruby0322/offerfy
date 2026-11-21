@@ -1,9 +1,10 @@
 """Credentials for the talent read API.
 
 Issued by an operator and by nobody else. No route mints one except the admin
-endpoint, there is no OAuth server, and there is no self-serve door --
-apps/frontend/lib/agent-markdown.ts tells every agent that reads it exactly
-that, and those statements have to stay true.
+endpoint, and there is no self-serve door to *this* credential. (Users do mint
+their own ``ofa_`` keys for the MCP server, in services/agent_keys.py: another
+table, another prefix, another door. There is still no machine OAuth server.)
+apps/frontend/lib/agent-markdown.ts describes both, and has to stay accurate.
 """
 
 from __future__ import annotations

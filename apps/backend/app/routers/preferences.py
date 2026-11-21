@@ -10,38 +10,13 @@ from app.deps import require_user
 from app.jobs.match_sweep import count_matches
 from app.models import JobPreference, User
 from app.schemas_jobs import JobPreferenceIn, JobPreferenceOut, ResumeFactsRefreshOut
-from app.services.jobs.preferences import current_or_seeded
+from app.services import preferences_write
+from app.services.jobs.preferences import current_or_seeded, preference_out
 from app.services.metering import metered, preflight
 from app.services.profile import record_build_spend
 from app.services.resume_facts import build_facts, facts_state
 
 router = APIRouter()
-
-
-def _split(text: str) -> list[str]:
-    return [p for p in text.split("|") if p]
-
-
-def _pipe(values: list[str]) -> str:
-    return f"|{'|'.join(values)}|" if values else ""
-
-
-def preference_out(
-    db: Session, user: User, row: JobPreference, first_save: bool = False
-) -> JobPreferenceOut:
-    return JobPreferenceOut(
-        target_functions=_split(row.target_functions),
-        target_locations=_split(row.target_locations),
-        target_seniority=row.target_seniority,
-        remote_required=row.remote_required,
-        activity=row.activity,
-        # A transient seed has no row yet, hence no timestamp. null, never "":
-        # an empty string in a timestamp field trips the first client that
-        # parses it.
-        updated_at=row.updated_at.isoformat() if row.updated_at else None,
-        facts_state=facts_state(db, user),
-        first_save=first_save,
-    )
 
 
 @router.get("/v1/me/job-preferences", response_model=JobPreferenceOut)
@@ -62,20 +37,7 @@ def put_job_preferences(
 ):
     """Replace the preferences wholesale. This is not a patch: a field omitted
     from the body is cleared (activity returns to its default)."""
-    # Mutate the loaded row in place: updated_at's onupdate fires only on an
-    # UPDATE, so delete-and-reinsert would reset it to creation time.
-    row = current_or_seeded(db, user)
-    # No row before this write: the client starts the first run on this flag.
-    first_save = row not in db
-    if first_save:
-        db.add(row)
-    row.target_functions = _pipe(body.target_functions)
-    row.target_locations = _pipe(body.target_locations)
-    row.target_seniority = body.target_seniority
-    row.remote_required = body.remote_required
-    row.activity = body.activity
-    db.commit()
-    db.refresh(row)
+    row, first_save = preferences_write.save(db, user, body)
     return preference_out(db, user, row, first_save=first_save)
 
 

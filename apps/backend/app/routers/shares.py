@@ -1,5 +1,3 @@
-import secrets
-
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import Response as RawResponse
 from sqlalchemy.orm import Session
@@ -12,8 +10,10 @@ from app.deps import (
 )
 from app.models import Resume, ResumeShare, User
 from app.schemas import PreviewPages, PublicShareOut, ShareState, ShareUpdate
+from app.services.export_link import pdf_filename
 from app.services.og_image import compose_og_png, og_cache_get, og_cache_put, og_etag
-from app.services.revisions import build_share_state, pin_current_draft, published_source
+from app.services.revisions import build_share_state, published_source
+from app.services.sharing import set_public
 from app.services.typst_compile import (
     compile_preview_pages,
     compile_typst,
@@ -43,15 +43,6 @@ def _share_state(db: Session, resume: Resume) -> ShareState:
     return build_share_state(db, resume)
 
 
-def _new_token(db: Session) -> str:
-    for _ in range(8):
-        token = secrets.token_urlsafe(16)
-        exists = db.query(ResumeShare.id).filter(ResumeShare.token == token).one_or_none()
-        if exists is None:
-            return token
-    raise HTTPException(status_code=500, detail="Could not allocate share token")
-
-
 def _resume_for_token(token: str, db: Session) -> Resume:
     share = db.query(ResumeShare).filter(ResumeShare.token == token).one_or_none()
     if share is None:
@@ -63,10 +54,7 @@ def _resume_for_token(token: str, db: Session) -> Resume:
 
 
 def _pdf_disposition(title: str) -> str:
-    raw = "".join(
-        ch if ch.isascii() and (ch.isalnum() or ch in " -_") else "_" for ch in title
-    ).strip("._ ") or "resume"
-    return f'attachment; filename="{raw}.pdf"'
+    return f'attachment; filename="{pdf_filename(title)}"'
 
 
 @router.get("/v1/resumes/{resume_id}/share", response_model=ShareState)
@@ -93,21 +81,7 @@ def put_share(
 ):
     resume = _owned_resume(resume_id, request, response, db, user)
     _require_user_owned(resume, user)
-    share = db.query(ResumeShare).filter(ResumeShare.resume_id == resume.id).one_or_none()
-    if body.public:
-        if share is None:
-            share = ResumeShare(resume_id=resume.id, token=_new_token(db))
-            db.add(share)
-            db.flush()
-        if resume.published_revision_id is None:
-            pin_current_draft(db, resume)
-        out = _share_state(db, resume)
-        db.commit()
-        return out
-    if share is not None:
-        db.delete(share)
-        db.flush()
-    out = _share_state(db, resume)
+    out = set_public(db, resume, body.public)
     db.commit()
     return out
 

@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -618,3 +619,44 @@ class TalentProfileStatus(BaseModel):
     # opportunistically and must not refuse the choice, so without this the
     # person sees "no profile yet" and cannot tell that anything went wrong.
     build_error: str | None = None
+
+
+class AgentKeyCreate(BaseModel):
+    """Plain types, no Field constraints: a constraint here would answer 422,
+    and the route's contract is a 400 for every refusal it makes itself."""
+
+    label: str
+    expires_in_days: int | None = None
+
+
+class AgentKeyOut(BaseModel):
+    """A credential as listed. Deliberately has no token and no hash: the raw
+    value exists only in the mint response, and the hash is not for clients.
+
+    `revoked_at` is here because the list includes retired keys: a person who
+    has just revoked a key is exactly the person who wants to read its log.
+    With `expires_at`, it is what tells the card to mark a key retired instead
+    of offering to revoke it again.
+    """
+
+    id: str
+    label: str
+    created_at: datetime
+    last_used_at: datetime | None = None
+    expires_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
+class AgentKeyCreated(AgentKeyOut):
+    token: str
+
+
+class AgentToolCallOut(BaseModel):
+    """One line of the disclosure log. No arguments: none are stored, because
+    they carry resume content."""
+
+    id: str
+    tool: str
+    resume_id: str | None = None
+    outcome: str
+    created_at: datetime
