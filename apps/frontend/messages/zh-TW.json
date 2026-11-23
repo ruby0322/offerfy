@@ -287,29 +287,6 @@
       "keepBody": "說「記住」，就寫回主履歷。",
       "returnLabel": "下一輪不用從頭來。"
     },
-    "autopilot": {
-      "title": "你在睡，它在找",
-      "lede": "把你自己的 AI 助理接上 Offerfy，它可以整晚翻職缺、挑出像你的那幾個，針對每一個改一版履歷再投出去。早上起來你看到的不是一團黑箱，是一條一條寫清楚的紀錄。",
-      "viewNight": "夜裡",
-      "viewMorning": "早上",
-      "nightCaption": "凌晨三點，你在睡。它在做事。",
-      "morningCaption": "你起床，打開來看它做了什麼 —— 每一版履歷都在你的列表裡，幾點改的、為哪個職缺改的，都看得到。",
-      "did": "履歷已改好",
-      "events": [
-        {
-          "role": "後端工程師",
-          "company": "Stripe"
-        },
-        {
-          "role": "平台工程師",
-          "company": "Notion"
-        },
-        {
-          "role": "基礎設施工程師",
-          "company": "NVIDIA"
-        }
-      ]
-    },
     "features": {
       "title": "Offerfy 做的四件事",
       "ingestKicker": "精選來源",

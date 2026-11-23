@@ -1,6 +1,5 @@
 import Footer from "@/components/Footer";
 import Nav from "@/components/Nav";
-import Autopilot from "@/components/landing/Autopilot";
 import CompanyWall from "@/components/landing/CompanyWall";
 import Faq from "@/components/landing/Faq";
 import Features from "@/components/landing/Features";
@@ -28,12 +27,6 @@ export default async function LandingPage({ params }: Props) {
         <Hero />
         <CompanyWall />
         <TheLoop />
-        {/* The loop is the mechanic; autopilot is who can run it for you,
-            which only makes sense once the loop itself has been described.
-            It also earns the four features below it: having just seen an
-            assistant do the work, the reader is asking what the work runs
-            on. */}
-        <Autopilot />
         {/* These four are what each step of the loop actually runs on. The
             questions come after them because they are all follow-ups to a
             claim made above, and the CTA comes last because it is the only
