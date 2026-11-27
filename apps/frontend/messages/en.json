@@ -414,6 +414,7 @@
     "matchCount": "{count, plural, one {# match} other {# matches}}",
     "matchEmpty": "Tell us what you want next to see matching roles.",
     "matchNone": "No live roles match your search right now.",
+    "matchNeedsResume": "Matching reads your saved resume. Save one first, then tell us what you want next.",
     "editPreferences": "Edit preferences",
     "browseRoles": "Browse all roles",
     "headingMatches": "Matches",

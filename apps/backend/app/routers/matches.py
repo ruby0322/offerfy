@@ -102,11 +102,17 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db, get_session_factory
 from app.deps import require_user
-from app.jobs.build_digests import _ceiling_uusd, _over_ceiling, saved_preference
+from app.jobs.build_digests import (
+    _ceiling_uusd,
+    _over_ceiling,
+    build_for_user,
+    saved_preference,
+)
 from app.jobs.match_sweep import count_matches
 from app.jobs.score_sweep import SWEEP_CAP, sweep_user
 from app.models import JobScore, User
 from app.schemas_jobs import FirstRunOut, MatchProgressOut, MatchesSeenOut
+from app.services import usage
 from app.services.resume_facts import bundle
 
 logger = logging.getLogger(__name__)
@@ -206,11 +212,32 @@ async def _run(user_id: str, claimed: datetime) -> None:
         # Commits its own scores; rolls back and re-raises on a fault.
         bought = await sweep_user(session, user=user, cap=SWEEP_CAP)
         if bought is None:
-            # Progress has no "running" to say so, so this line is the only
-            # signal behind a person sitting at "0 of N" forever.
             logger.warning(
                 "first run bought nothing, facts unbuildable: user=%s", user_id
             )
+        # The other half of the run, and the reason progress reports `running`
+        # rather than a row count: the overview's left column is the weekly
+        # digest, and it used to be weekly ONLY. Someone who saved a preference
+        # on a Friday got an empty "this week's picks" until Monday 05:00 --
+        # four days of a card that reads as broken, on the one screen this
+        # whole design exists to make pay off. The scores the sweep has just
+        # committed are exactly what the digest ranks, so this costs the prose
+        # call and nothing else.
+        #
+        # This week's period_start, the same one `build_digests.main` uses, so
+        # Monday's run REPLACES this digest (see `_write`) instead of
+        # colliding with it or leaving two records of one week.
+        #
+        # Its own try: the sweep has already committed, so a digest fault must
+        # not be logged as a scoring fault and must not take the scores with
+        # it. `build_for_user` rolls its own transaction back before raising.
+        try:
+            await build_for_user(
+                session, user=user, period_start=usage.window_start()
+            )
+        except Exception:
+            logger.exception("first run digest failed: user=%s", user_id)
+            session.rollback()
     except Exception:
         logger.exception("first run failed: user=%s", user_id)
         session.rollback()
@@ -307,4 +334,28 @@ def get_progress(db: Session = Depends(get_db), user: User = Depends(require_use
     pref = saved_preference(db, user)
     expected = min(count_matches(db, pref), SWEEP_CAP) if pref is not None else 0
     scored = _scored_count(db, user)
-    return MatchProgressOut(scored=scored, expected=expected)
+    return MatchProgressOut(
+        scored=scored, expected=expected, running=_claim_is_live(user),
+    )
+
+
+def _claim_is_live(user: User, now: datetime | None = None) -> bool:
+    """Whether a first run is still working for this person.
+
+    A claim this old is one `_claim_first_run` would hand to the next caller,
+    so reporting it as live would keep a client waiting on a worker that is
+    never coming back. That is the bound on how wrong this answer can be: a
+    pass whose process died is reported as running for at most
+    FIRST_RUN_CLAIM_TTL, and the client's own poll limit is shorter than that.
+
+    Compared naively on both sides because SQLite stores what it was given
+    without a zone, which is the same trap `_claim_first_run` avoids by doing
+    its comparison in the database.
+    """
+    claimed = user.first_run_started_at
+    if claimed is None:
+        return False
+    now = datetime.now(timezone.utc) if now is None else now
+    bare = claimed if claimed.tzinfo is None else claimed.astimezone(timezone.utc).replace(tzinfo=None)
+    cutoff = (now - FIRST_RUN_CLAIM_TTL).replace(tzinfo=None)
+    return bare > cutoff

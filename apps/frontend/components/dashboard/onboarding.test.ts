@@ -9,6 +9,7 @@ import {
   firstRunNotice,
   needsFactsBuild,
   pollVerdict,
+  readiness,
   removeValue,
   withDeadline,
 } from "./onboarding";
@@ -37,22 +38,72 @@ test("a new account's card builds the facts its own chips come from", () => {
   assert.equal(needsFactsBuild({ facts_state: "fresh" }), false);
 });
 
-test("polling waits while nothing is scored, finishes when the count is in", () => {
-  assert.equal(pollVerdict({ scored: 0, expected: 15, polls: 1 }), "wait");
-  assert.equal(pollVerdict({ scored: 15, expected: 15, polls: 3 }), "done");
-  // Capped expected, more rows than expected: still finished.
-  assert.equal(pollVerdict({ scored: 20, expected: 15, polls: 3 }), "done");
+test("polling waits while the claim is held and finishes when it is released", () => {
+  assert.equal(pollVerdict({ scored: 0, expected: 15, polls: 1, running: true }), "wait");
+  assert.equal(pollVerdict({ scored: 15, expected: 15, polls: 3, running: false }), "done");
 });
 
-test("nothing expected means nothing to wait for", () => {
-  assert.equal(pollVerdict({ scored: 0, expected: 0, polls: 1 }), "done");
+test("the scores landing is not the end of the run", () => {
+  // The bug this closes: `scored >= expected` is satisfied the moment the
+  // scores commit, while the run is still building the digest that fills the
+  // other half of the card. Stopping there reloaded into an empty
+  // "this week's picks" and never asked again.
+  assert.equal(
+    pollVerdict({ scored: 15, expected: 15, polls: 3, running: true }),
+    "wait",
+  );
 });
 
-test("the client gives up on its own: a run that died leaves scored < expected forever", () => {
-  assert.equal(pollVerdict({ scored: 0, expected: 15, polls: MAX_POLLS - 1 }), "wait");
-  assert.equal(pollVerdict({ scored: 0, expected: 15, polls: MAX_POLLS }), "stop");
-  // A late success on the last poll is still a success, not a timeout.
-  assert.equal(pollVerdict({ scored: 15, expected: 15, polls: MAX_POLLS }), "done");
+test("nothing expected still waits for the run to let go", () => {
+  // An empty pool is not an empty run: it still has a digest to write, and
+  // the claim is what says when that is done.
+  assert.equal(pollVerdict({ scored: 0, expected: 0, polls: 1, running: true }), "wait");
+  assert.equal(pollVerdict({ scored: 0, expected: 0, polls: 1, running: false }), "done");
+});
+
+test("the client gives up on its own: a died worker holds the claim", () => {
+  assert.equal(
+    pollVerdict({ scored: 0, expected: 15, polls: MAX_POLLS - 1, running: true }),
+    "wait",
+  );
+  assert.equal(
+    pollVerdict({ scored: 0, expected: 15, polls: MAX_POLLS, running: true }),
+    "stop",
+  );
+  // A release on the last poll is a success, not a timeout.
+  assert.equal(
+    pollVerdict({ scored: 15, expected: 15, polls: MAX_POLLS, running: false }),
+    "done",
+  );
+});
+
+test("an API that cannot answer `running` falls back to the old rule", () => {
+  // Web and the API are rolled separately on this host, and the frontend can
+  // be the one that ships first. `null` is "this API does not know", and the
+  // right behaviour then is the rule that was designed for an API that could
+  // not answer it -- not to guess, which either ends the wait early or spends
+  // every poll on a run that finished.
+  assert.equal(pollVerdict({ scored: 0, expected: 15, polls: 1, running: null }), "wait");
+  assert.equal(pollVerdict({ scored: 15, expected: 15, polls: 1, running: null }), "done");
+  assert.equal(
+    pollVerdict({ scored: 0, expected: 15, polls: MAX_POLLS, running: null }),
+    "stop",
+  );
+});
+
+test("the first gate named is the resume, not the preference", () => {
+  // Telling someone to say what they want next, when the real blocker is
+  // that matching cannot read any resume, names the second gate while the
+  // first one is shut.
+  const none = { has_master: false, published: false };
+  const unpublished = { has_master: true, published: false };
+  assert.equal(readiness(none, false), "no_resume");
+  assert.equal(readiness(none, true), "no_resume");
+  // A master that matching cannot read is the same blocker: matching reads
+  // resume_facts.default_source, which wants a published_revision_id.
+  assert.equal(readiness(unpublished, true), "no_resume");
+  assert.equal(readiness(READY, false), "no_preference");
+  assert.equal(readiness(READY, true), "ready");
 });
 
 test("every refusal reason has its own sentence; an already-scored account has none", () => {

@@ -635,7 +635,18 @@ export async function markMatchesSeen(): Promise<void> {
   await apiJson<{ seen_at?: string }>("/api/v1/me/matches/seen", { method: "POST" });
 }
 
-export type MatchProgress = { scored: number; expected: number };
+export type MatchProgress = {
+  scored: number;
+  expected: number;
+  /**
+   * Whether a first-run claim is still held, and what the client stops on.
+   * `null` means this API did not answer -- it is older than the field, and
+   * `pollVerdict` falls back to the rule that predates it rather than
+   * guessing. Not defaulted to a boolean here for that reason: `false` would
+   * end the wait before the scores land and `true` would spend every poll.
+   */
+  running: boolean | null;
+};
 
 /**
  * Binary, not gradual: `scored` reads 0 until the pass commits once. There is
@@ -643,7 +654,11 @@ export type MatchProgress = { scored: number; expected: number };
  */
 export async function fetchMatchProgress(): Promise<MatchProgress> {
   const raw = await apiJson<Partial<MatchProgress>>("/api/v1/me/matches/progress");
-  return { scored: raw.scored ?? 0, expected: raw.expected ?? 0 };
+  return {
+    scored: raw.scored ?? 0,
+    expected: raw.expected ?? 0,
+    running: typeof raw.running === "boolean" ? raw.running : null,
+  };
 }
 
 export async function refreshResumeFacts(): Promise<ResumeFactsRefresh> {

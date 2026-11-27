@@ -86,7 +86,7 @@ function listing(over: Partial<JobListItem> = {}): JobListItem {
   };
 }
 
-const base = { digest: null, matchCount: 0, hasPreference: true };
+const base = { digest: null, matchCount: 0, readiness: "ready" as const };
 
 test("an empty right column with a saved preference says nothing matches", () => {
   const html = render(
@@ -100,13 +100,51 @@ test("an empty right column without a preference points at the card", () => {
   const html = render(
     createElement(MatchesBlock, {
       ...base,
-      hasPreference: false,
+      readiness: "no_preference",
       arrivals: [],
       matches: [],
     }),
   );
   assert.ok(html.includes(d.matchEmpty), html);
   assert.ok(!html.includes(d.matchNone), html);
+});
+
+test("with no readable resume the card names that, not the preference", () => {
+  // The gate the person actually has to pass. Asking them what they want
+  // next, while matching cannot read any resume, names the second gate while
+  // the first one is shut -- and the answer they give changes nothing.
+  const html = render(
+    createElement(MatchesBlock, {
+      ...base,
+      readiness: "no_resume",
+      arrivals: [],
+      matches: [],
+    }),
+  );
+  assert.ok(html.includes(d.matchNeedsResume), html);
+  assert.ok(!html.includes(d.matchEmpty), html);
+  assert.ok(!html.includes(d.matchNone), html);
+});
+
+test("the picks column says what has to happen before there are any", () => {
+  // It used to draw a greyed example and nothing else, so the one screen a
+  // new account lands on showed an empty-looking column with no account of
+  // why it was empty or when it would fill. The sentence that answers that
+  // existed, on the Matches tab, where this reader is not.
+  const ready = render(createElement(MatchesBlock, { ...base, arrivals: [], matches: [] }));
+  assert.ok(ready.includes(d.sampleBadge), ready);
+  assert.ok(ready.includes(d.picksNoneYet), ready);
+
+  const noResume = render(
+    createElement(MatchesBlock, {
+      ...base,
+      readiness: "no_resume",
+      arrivals: [],
+      matches: [],
+    }),
+  );
+  assert.ok(noResume.includes(d.matchNeedsResume), noResume);
+  assert.ok(!noResume.includes(d.picksNoneYet), noResume);
 });
 
 test("arrivals fill the right column and the heading calls them new", () => {

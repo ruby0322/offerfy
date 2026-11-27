@@ -104,18 +104,38 @@ export type PollVerdict = "wait" | "done" | "stop";
 /**
  * What to do after the `polls`-th read of the progress endpoint.
  *
- * `scored < expected` means "not finished as far as we can see", never "still
- * working": the server has no running flag, so a run that died leaves it true
- * forever. Stopping is therefore this side's decision, by count. The count is
- * binary (0 until the pass commits once, then the final number), which is why
- * the screen shows an indeterminate indicator and never a fraction.
+ * **The claim is what finishes, not the row count.** `scored >= expected` was
+ * the old rule, and it is satisfied the moment the SCORES land -- while the
+ * run is still building the digest that fills the other half of the card. The
+ * client reloaded into a dashboard with an empty "this week's picks" and
+ * stopped asking. `running` is the server's claim on this person
+ * (`users.first_run_started_at`), taken before the task is scheduled and
+ * released in its `finally`, so it covers both halves and covers a failure of
+ * either.
+ *
+ * Still bounded here. A worker that died without releasing holds the claim
+ * until the server's TTL, which is longer than this many polls, so the count
+ * is the backstop and the reason there is a "stop" at all.
+ *
+ * Progress stays indeterminate on screen: `scored` is 0 until the pass commits
+ * once and then jumps, so there is no fraction worth drawing.
  */
 export function pollVerdict(p: {
   scored: number;
   expected: number;
   polls: number;
+  /** null when the API did not answer: see the fallback below. */
+  running: boolean | null;
 }): PollVerdict {
-  if (p.scored >= p.expected) return "done";
+  // Web and the API roll separately here, and the frontend can be the one
+  // that ships first. An API with no `running` to give gets the rule that was
+  // written for an API with no `running` to give -- guessing either ends the
+  // wait before the scores land or spends every poll on a run that is over.
+  if (p.running === null) {
+    if (p.scored >= p.expected) return "done";
+  } else if (!p.running) {
+    return "done";
+  }
   return p.polls >= MAX_POLLS ? "stop" : "wait";
 }
 
@@ -168,6 +188,30 @@ export function addValue(list: string[], value: string): string[] {
 export function removeValue(list: string[], value: string): string[] {
   const lower = value.toLowerCase();
   return list.filter((v) => v.toLowerCase() !== lower);
+}
+
+/**
+ * What still has to happen before this person can have matches at all.
+ *
+ * The card used to say "tell us what you want next" to someone whose actual
+ * blocker was that matching cannot read any resume -- naming the second gate
+ * while the first one was shut. Matching reads
+ * `resume_facts.default_source`, which only considers a master carrying a
+ * `published_revision_id`, so "saved a resume" and "matching can read it" are
+ * the same condition here and `published` is the one to test.
+ *
+ * Ordered, not a set: there is no point asking for a preference from someone
+ * who has no resume to judge against, and the two sentences would contradict
+ * each other on screen.
+ */
+export type Readiness = "no_resume" | "no_preference" | "ready";
+
+export function readiness(
+  health: Pick<ResumeHealth, "has_master" | "published">,
+  hasPreference: boolean,
+): Readiness {
+  if (!health.has_master || !health.published) return "no_resume";
+  return hasPreference ? "ready" : "no_preference";
 }
 
 /** A save that says nothing would start a run over every posting. */

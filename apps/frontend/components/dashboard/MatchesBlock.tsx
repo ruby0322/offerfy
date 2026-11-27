@@ -5,6 +5,7 @@ import MatchRow from "./MatchRow";
 import SamplePick from "./SamplePick";
 import { Link } from "@/i18n/navigation";
 import { arrivalState } from "./arrivals";
+import type { Readiness } from "./onboarding";
 import { uniqueByJob, type Digest } from "@/lib/digest";
 import type { MatchArrival } from "@/lib/dashboard";
 import type { JobListItem } from "@/lib/jobs";
@@ -61,8 +62,14 @@ type Props = {
   /** The current match set, newest first (dash.matches). */
   matches: JobListItem[];
   matchCount: number;
-  /** A saved preference exists; before that the empty list points at the card. */
-  hasPreference: boolean;
+  /**
+   * What still has to happen before this person can have anything here, in
+   * order. It replaces a `hasPreference` boolean, which could only name the
+   * second of the two gates: matching reads a saved resume, so someone
+   * without one was being asked what they want next while the answer could
+   * not change anything.
+   */
+  readiness: Readiness;
 };
 
 const PICKS = 3;
@@ -102,10 +109,21 @@ export default function MatchesBlock({
   arrivals,
   matches,
   matchCount,
-  hasPreference,
+  readiness,
 }: Props) {
   const t = useTranslations("dashboard");
   const format = useFormatter();
+
+  // One sentence for both columns, because both are empty for the same reason
+  // and two different accounts of it would read as two different problems.
+  // `null` once nothing is outstanding: the columns then say what is true of
+  // their own contents instead.
+  const blocked =
+    readiness === "no_resume"
+      ? t("matchNeedsResume")
+      : readiness === "no_preference"
+        ? t("matchEmpty")
+        : null;
 
   // One row per posting before the slice: `items` is one row per
   // (posting, track), so a posting in both tracks used to take two of these
@@ -191,8 +209,19 @@ export default function MatchesBlock({
             // yet, so show the shape of one. A real quiet week (a digest
             // exists, with no items) keeps the plain sentence -- an example
             // there would read as a pick that went missing.
+            //
+            // The sentence under it is the part that was missing. The example
+            // says what a pick looks like and nothing about when this reader
+            // gets one, so the column read as broken to exactly the person it
+            // was built to reassure. `picksNoneYet` already said the right
+            // thing on the Matches tab, which is not the screen they land on.
             digest === null ? (
-              <SamplePick />
+              <>
+                <SamplePick />
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {blocked ?? t("picksNoneYet")}
+                </p>
+              </>
             ) : (
               <p className="mt-2 text-sm text-muted-foreground">{t("picksEmpty")}</p>
             )
@@ -224,11 +253,11 @@ export default function MatchesBlock({
             {isNew ? t("freshHeading") : t("standingHeading")}
           </p>
           {fresh.length === 0 ? (
-            // Someone who has already said what they want is not asked to say
-            // it again: with a saved preference an empty list means nothing
-            // matches, not that they have told us nothing.
+            // Someone who has already done both steps is not asked to do them
+            // again: with a readable resume and a saved preference an empty
+            // list means nothing matches, not that they have told us nothing.
             <p className="mt-2 text-sm text-muted-foreground">
-              {hasPreference ? t("matchNone") : t("matchEmpty")}
+              {blocked ?? t("matchNone")}
             </p>
           ) : (
             <ul className="mt-1">

@@ -7,6 +7,7 @@ import CreditsStrip from "@/components/dashboard/CreditsStrip";
 import MatchesBlock from "@/components/dashboard/MatchesBlock";
 import NextActionBand from "@/components/dashboard/NextActionBand";
 import OnboardingCard from "@/components/dashboard/OnboardingCard";
+import { readiness } from "@/components/dashboard/onboarding";
 import OngoingTable from "@/components/dashboard/OngoingTable";
 import ResumesBlock from "@/components/dashboard/ResumesBlock";
 import { arrivalHeadline, strongArrivalCount } from "@/components/dashboard/arrivals";
@@ -213,7 +214,9 @@ export default function DashboardPage() {
             arrivals={dash.arrivals}
             matches={dash.matches}
             matchCount={dash.match_count}
-            hasPreference={hasSavedPreference(dash.preference)}
+            // Both gates, in order, rather than just the preference: the card
+            // has to be able to name the resume when that is what is missing.
+            readiness={readiness(dash.resume_health, hasSavedPreference(dash.preference))}
           />
           <section className="rr-card px-5 py-4">
             <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">

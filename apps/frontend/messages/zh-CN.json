@@ -414,6 +414,7 @@
     "matchCount": "{count, plural, other {# 个匹配的职位}}",
     "matchEmpty": "告诉我们你下一步想做什么，就能看到匹配的职位。",
     "matchNone": "目前没有符合你条件的职位。",
+    "matchNeedsResume": "匹配要读你保存的简历。先保存一份，再告诉我们你想找什么。",
     "editPreferences": "编辑偏好",
     "browseRoles": "浏览所有职位",
     "headingMatches": "匹配的职位",

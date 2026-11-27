@@ -354,8 +354,13 @@ class MatchesSeenOut(BaseModel):
 class MatchProgressOut(BaseModel):
     scored: int
     expected: int
-    # No `running`: it is not derivable from rows, so the server cannot answer
-    # it truthfully. See the docstring of routers/matches.get_progress.
+    # Whether a first-run claim is still held. This field used to be absent,
+    # with a comment saying it was not derivable from rows -- which was true
+    # of rows and false of the claim: `users.first_run_started_at` is written
+    # before the task is scheduled and cleared in its `finally`. It is what
+    # the client stops on, because `scored >= expected` is satisfied when the
+    # SCORES land and the run also builds a digest after that.
+    running: bool
 
 
 class ResumeFactsRefreshOut(BaseModel):

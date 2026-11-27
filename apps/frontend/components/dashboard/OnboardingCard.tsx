@@ -254,7 +254,14 @@ export default function OnboardingCard({ pref, onDone }: Props) {
         if (!alive.current) return;
         // A failed read is one wasted poll, not the end: the count is bounded
         // either way, and a flaky network should not look like a dead run.
-        const progress = await fetchMatchProgress().catch(() => ({ scored: 0, expected: 1 }));
+        // `running: true` is the safe guess precisely because of that bound --
+        // a dropped read must not be mistaken for the run letting go, which
+        // would reload the page out from under a pass still working.
+        const progress = await fetchMatchProgress().catch(() => ({
+          scored: 0,
+          expected: 1,
+          running: true as boolean | null,
+        }));
         const verdict = pollVerdict({ ...progress, polls });
         if (verdict === "done") {
           await finish();

@@ -54,6 +54,21 @@ def _wait_for(user_id, n, seconds=5):
     return False
 
 
+def _wait_for_digest(user_id, seconds=5):
+    from app.models import Digest
+
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        s = get_session_factory()()
+        try:
+            if s.query(Digest).filter(Digest.user_id == user_id).count():
+                return True
+        finally:
+            s.close()
+        time.sleep(0.05)
+    return False
+
+
 def test_the_first_put_reports_first_save_and_later_ones_do_not(client, db_session):
     _signed_in(client, db_session, sub="sub-fs")
     body = {"target_functions": ["backend"], "target_locations": ["tw"],
@@ -101,12 +116,12 @@ def test_the_first_run_is_refused_once_scores_exist(client, db_session, monkeypa
 def test_progress_counts_rows_against_the_expected_pool(client, db_session, monkeypatch):
     user = _ready_user(db_session, client, postings=3)
     before = client.get("/v1/me/matches/progress").json()
-    assert before == {"scored": 0, "expected": 3}
+    assert before == {"scored": 0, "expected": 3, "running": False}
     Seams(monkeypatch)
     client.post("/v1/me/matches/first-run")
     assert _wait_for(user.id, 3)
     assert client.get("/v1/me/matches/progress").json() == {
-        "scored": 3, "expected": 3,
+        "scored": 3, "expected": 3, "running": False,
     }
 
 
@@ -374,3 +389,157 @@ def test_releasing_does_not_clear_a_newer_claim(db_session):
     assert _release_first_run(db_session, user.id, old) is False
     db_session.expire_all()
     assert db_session.get(User, user.id).first_run_started_at is not None
+
+
+# --------------------------------------------------------------------------
+# the digest half
+# --------------------------------------------------------------------------
+
+
+def _digest_seam(monkeypatch):
+    """Stub the digest's own prose call.
+
+    `Seams` patches the sweep's `write_reasons`; `build_digests` imported the
+    same name into its own module, so the digest's call is a second seam and
+    an unpatched one would reach a provider.
+    """
+    from app.jobs import build_digests
+    from app.services.jobs.reasons import Prose, ProseRun
+
+    async def fake_prose(db, *, user, facts, scored, jobs):
+        run = ProseRun(model="gpt-6-luna")
+        run.prose = [
+            Prose(job_id=s.job_id, reason=f"Reason for {s.job_id}.", gap=None)
+            for s in scored
+        ]
+        return run
+
+    monkeypatch.setattr(build_digests, "write_reasons", fake_prose)
+
+
+def test_the_first_run_builds_this_week_s_digest_too(client, db_session, monkeypatch):
+    """The left column of the overview is the digest, and it was weekly only.
+
+    A person who saves a preference on a Friday had an empty "this week's
+    picks" until the following Monday 05:00 -- four days of a card that looks
+    broken, on the one screen the whole first-run design exists to make pay
+    off. The scores the sweep just wrote are exactly what the digest ranks, so
+    building it here costs the prose call and nothing else.
+    """
+    from app.models import Digest
+    from app.services import usage
+
+    user = _ready_user(db_session, client)
+    Seams(monkeypatch)
+    _digest_seam(monkeypatch)
+    assert client.post("/v1/me/matches/first-run").json()["started"] is True
+    assert _wait_for(user.id, 3)
+    assert _wait_for_digest(user.id)
+
+    session = get_session_factory()()
+    try:
+        rows = session.query(Digest).filter(Digest.user_id == user.id).all()
+        assert len(rows) == 1
+        # This week's, not a week of its own: `_write` replaces on
+        # (user_id, period_start), so Monday's run rebuilds over it rather
+        # than colliding with it or leaving two records of one week.
+        # Compared without zones: SQLite hands back what it was given, so the
+        # stored value is naive while window_start() is aware. The same trap
+        # _claim_is_live documents.
+        stored = rows[0].period_start
+        stored = stored if stored.tzinfo is None else stored.astimezone(timezone.utc).replace(tzinfo=None)
+        assert stored == usage.window_start().replace(tzinfo=None)
+        assert rows[0].status == "full"
+    finally:
+        session.close()
+
+
+def test_a_digest_that_cannot_be_built_does_not_lose_the_scores(
+    db_session, monkeypatch, caplog
+):
+    """The two halves of the run are independent, and the paid half comes first.
+
+    The sweep commits its own scores before this is reached, so a digest that
+    raises must not take them with it -- and must not strand the claim either.
+    """
+    import logging
+
+    from app.routers import matches as mod
+
+    user = _user(db_session)
+    _pref(db_session, user)
+    _facts(db_session, user)
+    _posting(db_session)
+    Seams(monkeypatch)
+
+    async def bought_two(db, *, user, cap):
+        db.add(JobScore(
+            user_id=user.id, job_id=_posting(db).id, facts_input_hash="h" * 64,
+            description_hash="d" * 64, model="m", tier="Strong fit", fit_score=0.9,
+            outcome="scored", scored_at=datetime.now(timezone.utc),
+        ))
+        db.commit()
+        return 1
+
+    async def boom(db, **kwargs):
+        raise RuntimeError("digest down")
+
+    monkeypatch.setattr(mod, "sweep_user", bought_two)
+    monkeypatch.setattr(mod, "build_for_user", boom)
+
+    now = datetime.now(timezone.utc)
+    assert mod._claim_first_run(db_session, user, now) is True
+    with caplog.at_level(logging.WARNING):
+        asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+            mod._run(user.id, now)
+        )
+    db_session.expire_all()
+    # The scores the sweep committed are still there...
+    assert db_session.query(JobScore).filter(JobScore.user_id == user.id).count() == 1
+    # ...the claim is back, so a retry is possible...
+    assert db_session.get(User, user.id).first_run_started_at is None
+    # ...and the failure is not silent.
+    assert any("digest" in r.message.lower() for r in caplog.records), caplog.text
+
+
+def test_a_claim_older_than_the_ttl_is_not_reported_as_running(db_session, client):
+    """Otherwise the client waits on a worker that is never coming back.
+
+    A claim this old is one `_claim_first_run` would hand to the next caller,
+    so calling it live would be a different answer from the one the endpoint
+    that takes claims gives. That is the bound on how wrong `running` can be.
+    """
+    from datetime import timedelta
+
+    from app.routers import matches as mod
+
+    user = _signed_in(client, db_session, sub=f"sub-fr-ttl-{time.monotonic_ns()}")
+    _pref(db_session, user)
+    stale = datetime.now(timezone.utc) - mod.FIRST_RUN_CLAIM_TTL - timedelta(seconds=1)
+    user.first_run_started_at = stale
+    db_session.commit()
+    assert client.get("/v1/me/matches/progress").json()["running"] is False
+    # And the endpoint that hands out claims agrees it is free.
+    assert mod._claim_first_run(db_session, user, datetime.now(timezone.utc)) is True
+
+
+def test_progress_says_whether_the_claim_is_still_held(db_session, monkeypatch, client):
+    """What the client stops on.
+
+    It used to stop on `scored >= expected`, which is true the moment the
+    SCORES land -- before the digest is built. The client then reloaded into a
+    dashboard whose left column was still empty, which is the bug this pair of
+    changes exists to close. The claim covers both halves: it is taken before
+    the task is scheduled and released in its `finally`.
+    """
+    user = _signed_in(client, db_session, sub=f"sub-fr-run-{time.monotonic_ns()}")
+    _pref(db_session, user)
+    assert client.get("/v1/me/matches/progress").json()["running"] is False
+
+    from app.routers import matches as mod
+
+    assert mod._claim_first_run(db_session, user, datetime.now(timezone.utc)) is True
+    assert client.get("/v1/me/matches/progress").json()["running"] is True
+
+    mod._release_first_run(db_session, user.id, db_session.get(User, user.id).first_run_started_at)
+    assert client.get("/v1/me/matches/progress").json()["running"] is False
