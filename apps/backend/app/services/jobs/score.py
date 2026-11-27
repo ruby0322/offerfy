@@ -285,6 +285,12 @@ async def _score_pair(
             provider=api_keys.OPENAI,
             headers=headers,
             json=_body(model, facts_text, job),
+            # Wait out a throttled pool rather than losing the pair. Nobody is
+            # holding an HTTP response open on this: the sweep is a timer job,
+            # and the first-run endpoint schedules a background task the client
+            # polls. The wait is bounded by the pool (MAX_RETRY_WAIT) and taken
+            # once, so a pass can grow by seconds, not minutes.
+            retry_wait=api_keys.MAX_RETRY_WAIT,
         )
         try:
             data = resp.json()

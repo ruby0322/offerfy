@@ -351,6 +351,183 @@ def test_post_reads_retry_after_off_the_response(pool):
     assert api_keys._cooling[credential.fingerprint] - time.monotonic() <= 7.0
 
 
+class ScriptedHeaders(RecordingClient):
+    """`RecordingClient`, but each answer carries its own headers.
+
+    The case under test needs two keys to fail differently in one chain: one
+    with no `Retry-After` (so it cools for the default minute) and one that
+    asks for a couple of seconds. A single `headers` for the whole script
+    cannot say that, and it is the difference between a wait worth taking and
+    one that is not.
+    """
+
+    def __init__(self, script: list[tuple[int, dict]]):
+        super().__init__([status for status, _ in script])
+        self.script_headers = [headers for _, headers in script]
+
+    async def post(self, url, headers=None, json=None, **kwargs):
+        self.response_headers = (
+            self.script_headers.pop(0) if self.script_headers else {}
+        )
+        return await super().post(url, headers=headers, json=json, **kwargs)
+
+
+@pytest.fixture
+def slept(monkeypatch):
+    """Record the in-request waits instead of taking them.
+
+    `api_keys._sleep` exists as a named seam for exactly this. Patching
+    `asyncio.sleep` itself would also slow the loop the test is running on.
+    """
+    waits: list[float] = []
+
+    async def record(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr(api_keys, "_sleep", record)
+    return waits
+
+
+def test_post_waits_once_for_a_key_that_is_about_to_come_back(pool, slept):
+    # Failover has nothing left to try when every key in the pool is
+    # throttled, and time is the only thing that can still help. Observed in
+    # production 2026-11-27: one key out of credits (a 429 with no
+    # `Retry-After`, so the default minute) and one rate limited for six
+    # seconds, so every pair that reached the second key during its window was
+    # simply lost.
+    # The two keys are deliberately the other way round from production here:
+    # the one asking for a SHORT wait is the one tried FIRST, so "retry the
+    # key recovering soonest" and "retry the key we happened to try last" give
+    # different answers and the assertion below can tell them apart.
+    pool("sk-a,sk-b")
+    client = ScriptedHeaders([
+        (429, {"retry-after": "2"}),    # sk-a: rate limited, back in two
+        (429, {}),                      # sk-b: no credits, cools for a minute
+        (200, {}),                      # the retry, which must go to sk-a
+    ])
+    response = asyncio.run(
+        api_keys.post(
+            client, "https://example.test/v1/responses",
+            provider=api_keys.OPENAI, headers={}, json={"model": "m"},
+            retry_wait=8.0,
+        )
+    )
+    assert response.status_code == 200
+    # Waited for the two seconds, not the minute.
+    assert len(slept) == 1 and 0 < slept[0] <= 2.0
+    # And spent the wait on the key it was waiting for.
+    assert client.bearers() == ["Bearer sk-a", "Bearer sk-b", "Bearer sk-a"]
+
+
+def test_post_does_not_wait_longer_than_the_cap(pool, slept):
+    """`MAX_RETRY_WAIT` holds even when the caller offers more than that.
+
+    The budget is passed as a number far above the cap on purpose -- the two
+    production callers pass `MAX_RETRY_WAIT` itself, so a cap that only worked
+    because the caller asked for less would be no cap at all.
+    """
+    pool("sk-a,sk-b")
+    seconds = str(int(api_keys.MAX_RETRY_WAIT) + 600)
+    client = ScriptedHeaders([
+        (429, {"retry-after": seconds}), (429, {"retry-after": seconds}),
+    ])
+    response = asyncio.run(
+        api_keys.post(
+            client, "https://example.test/v1/responses",
+            provider=api_keys.OPENAI, headers={}, json={"model": "m"},
+            retry_wait=float(seconds),
+        )
+    )
+    assert response.status_code == 429
+    assert slept == [] and len(client.sent) == 2
+
+
+def test_post_does_not_wait_longer_than_the_caller_allows(pool, slept):
+    # The other bound: the vendor's wait is inside the cap, but this caller
+    # said it could only spare a second.
+    pool("sk-a,sk-b")
+    client = ScriptedHeaders([(429, {"retry-after": "5"}), (429, {"retry-after": "5"})])
+    response = asyncio.run(
+        api_keys.post(
+            client, "https://example.test/v1/responses",
+            provider=api_keys.OPENAI, headers={}, json={"model": "m"},
+            retry_wait=1.0,
+        )
+    )
+    assert response.status_code == 429
+    assert slept == [] and len(client.sent) == 2
+
+
+def test_post_without_a_budget_never_waits(pool, slept):
+    """The four callers that pass no budget keep today's behaviour exactly.
+
+    Stated as its own test because the wait is latency, and latency added to a
+    path nobody asked to slow down is a regression even when it buys a
+    success.
+    """
+    pool("sk-a,sk-b")
+    client = ScriptedHeaders([(429, {"retry-after": "1"}), (429, {"retry-after": "1"})])
+    assert post(client).status_code == 429
+    assert slept == [] and len(client.sent) == 2
+
+
+def test_post_does_not_wait_out_a_rejected_key(pool, slept):
+    # A 401 is a key the provider will not accept at all; it is not coming
+    # back in two seconds, and its cooldown is the long one.
+    pool("sk-a,sk-b")
+    client = ScriptedHeaders([(401, {"retry-after": "1"}), (401, {"retry-after": "1"})])
+    response = asyncio.run(
+        api_keys.post(
+            client, "https://example.test/v1/responses",
+            provider=api_keys.OPENAI, headers={}, json={"model": "m"},
+            retry_wait=8.0,
+        )
+    )
+    assert response.status_code == 401
+    assert slept == [] and len(client.sent) == 2
+
+
+# Which `api_keys.post` call sites ask to be held still, and why. The pool's
+# own tests cover what a budget does; this covers whether the two callers that
+# should have one still do -- a regression nothing else would notice, because
+# losing the wait does not fail anything, it just quietly drops pairs again.
+WAITING_CALLERS = {
+    # Both callers of each are timer jobs (the sweep and the weekly digest),
+    # so no HTTP response is held open. A first run reaches the scoring one
+    # through a background task the client polls.
+    "services/jobs/score.py",
+    "services/jobs/reasons.py",
+}
+
+
+def test_only_the_timer_job_callers_wait_on_a_throttled_pool():
+    """Fails if a `post` call site gains or loses `retry_wait`.
+
+    **Do not make this pass by editing `WAITING_CALLERS` alone.** Adding a
+    path here says "a person can wait seconds for this call". That is true of
+    a timer job and false of anything behind a request someone is watching, so
+    decide that first and record it after.
+    """
+    import re
+    from pathlib import Path
+
+    app = Path(__file__).resolve().parents[1] / "app"
+    waiting: set[str] = set()
+    sites: set[str] = set()
+    for path in app.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        rel = path.relative_to(app).as_posix()
+        for match in re.finditer(r"api_keys\.post\(", text):
+            sites.add(rel)
+            # The call's own argument list, to its closing parenthesis.
+            tail = text[match.end() : text.find("\n    )", match.end())]
+            if "retry_wait" in tail:
+                waiting.add(rel)
+    # The five single-request callers named in this module's docstring.
+    assert len(sites) == 5, sorted(sites)
+    assert waiting == WAITING_CALLERS, sorted(waiting)
+
+
 def test_post_refuses_to_send_a_request_with_no_credential(pool):
     """Every caller checks `configured` first, so this is a programming error
     -- and it must not go out as a request with no key, which reads as an

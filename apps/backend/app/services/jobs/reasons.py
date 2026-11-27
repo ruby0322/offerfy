@@ -847,6 +847,11 @@ async def _write_call(*, url: str, headers: dict, body: dict) -> tuple[dict, dic
                 provider=api_keys.OPENAI,
                 headers=headers,
                 json=body,
+                # Same reasoning as the scoring call: both callers of
+                # `write_reasons` are timer jobs. Losing this one leaves a
+                # posting with a score and no sentence, which is the state
+                # 2026-11-27 left ten of them in.
+                retry_wait=api_keys.MAX_RETRY_WAIT,
             )
             try:
                 data = resp.json()

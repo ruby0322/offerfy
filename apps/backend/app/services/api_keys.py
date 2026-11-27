@@ -31,6 +31,14 @@ The policy, deliberately narrow:
     one behaves exactly like today's single key: one attempt, and the
     provider's own error surfaced to the caller.
 
+  * **Waiting is opt-in, bounded, and once.** Failover answers "this key is
+    throttled" and has nothing left to offer when the whole pool is; only time
+    helps then. So a caller that can afford to be held still passes
+    `retry_wait` to `post` and gets one wait, for the key recovering soonest,
+    capped at `MAX_RETRY_WAIT` however long `Retry-After` asked for. A caller
+    that passes nothing is not slowed down at all -- which is why this is a
+    parameter and not a policy applied to all five of them.
+
 Transport failures are not a credential fault and do not rotate. A connection
 reset says nothing about the key, and retrying on a second account would
 double a timeout the caller is already waiting out.
@@ -44,6 +52,7 @@ configured list and by a short digest, never by the secret.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import re
@@ -76,6 +85,17 @@ COOLDOWN_REJECTED = 900.0
 # a cliff: a proxy that returns a day's worth of seconds must not take a key
 # out of the pool until the process restarts.
 MAX_COOLDOWN = 900.0
+# The longest an in-request wait may be, whatever `Retry-After` asked for.
+# Deliberately a different number from MAX_COOLDOWN and far smaller: a
+# cooldown only reorders the pool for calls that come later, while this holds
+# the caller still. Seconds are worth waiting out; a minute is not, because
+# there may be a person behind the call -- the scoring pass runs on the API's
+# event loop for a first run, behind a client that stops asking at 40s.
+MAX_RETRY_WAIT = 8.0
+
+# The in-request wait, named so a test can watch it without patching
+# `asyncio.sleep` for the loop the caller is running on.
+_sleep = asyncio.sleep
 
 # How each vendor wants its credential presented. Anthropic takes `x-api-key`,
 # not a bearer token -- an Authorization header there is only correct for an
@@ -225,6 +245,28 @@ def rotation(provider: str) -> tuple[Credential, ...]:
     return tuple(healthy) + tuple(credential for _, credential in cooling)
 
 
+def _soonest_recovery(provider: str) -> float | None:
+    """Seconds until the first key of this pool can be used again.
+
+    0.0 when one of them is usable now -- a cooldown that ran out while the
+    rotation was being walked -- and None when the provider has no keys. Only
+    meaningful after every key has answered with a fault; before that the
+    answer is always 0.0 and says nothing.
+    """
+    pool = keys(provider)
+    if not pool:
+        return None
+    now = time.monotonic()
+    waits: list[float] = []
+    with _lock:
+        for secret in pool:
+            deadline = _cooling.get(_fingerprint(provider, secret))
+            if deadline is None or deadline <= now:
+                return 0.0
+            waits.append(deadline - now)
+    return min(waits)
+
+
 def _retry_after_seconds(value: Any) -> float | None:
     """`Retry-After` as seconds, or None if it is not a number of them.
 
@@ -307,6 +349,7 @@ async def post(
     provider: str,
     headers: dict[str, str] | None = None,
     json: Any = None,
+    retry_wait: float = 0.0,
 ) -> httpx.Response:
     """One POST, carrying the provider's credential, failing over on a fault.
 
@@ -314,6 +357,13 @@ async def post(
     their own handling for a provider error, and replacing it with an
     exception here would mean rewriting five of them. Transport errors are
     raised through untouched, for the reason in the module docstring.
+
+    `retry_wait` is how long this caller is willing to be held still if the
+    WHOLE pool comes back throttled, which is the one case failover cannot
+    help with. Default 0 is the old behaviour exactly: no wait, the provider's
+    error straight back. Given a budget, one wait is taken -- for the key
+    recovering soonest, never longer than `MAX_RETRY_WAIT`, and never for a
+    rejected key, which is not coming back in seconds.
 
     Only for a single request/response. The streaming chat path cannot use
     this (its failure arrives inside a context manager it has to keep open),
@@ -344,4 +394,29 @@ async def post(
                 response.status_code,
             )
     assert response is not None  # pool is non-empty, so the loop ran
+    # Every key answered with a fault. Failover is out of moves, so the only
+    # thing that can still turn this into an answer is time -- and only when
+    # the vendor said the wait is short. One attempt, on the key coming back
+    # soonest; if that one faults too, it is cooled like any other and the
+    # caller gets the error, so this can add at most `MAX_RETRY_WAIT` and one
+    # request to a call that was failing anyway.
+    if retry_wait > 0 and response.status_code in THROTTLED:
+        delay = _soonest_recovery(provider)
+        if delay is not None and delay <= min(retry_wait, MAX_RETRY_WAIT):
+            logger.info(
+                "waiting %.1fs for a %s key to come back after status=%s",
+                delay, provider, response.status_code,
+            )
+            await _sleep(delay)
+            credential = rotation(provider)[0]
+            response = await client.post(
+                url, headers={**(headers or {}), **credential.header()}, json=json
+            )
+            if not should_rotate(response.status_code):
+                return response
+            penalize(
+                credential,
+                status=response.status_code,
+                retry_after=response.headers.get("retry-after"),
+            )
     return response
