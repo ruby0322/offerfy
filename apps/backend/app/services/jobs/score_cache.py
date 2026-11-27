@@ -41,8 +41,13 @@ question.
 `cap` bounds PURCHASES, not the pool returned. Cached rows come back whatever
 the cap is, and they come back after a provider fault too: 29 real judgements
 plus one posting that could not be bought is a pool the digest can still rank.
-On a fault `score_candidates` returns nothing it bought (a half-scored pool
-would rank survivors against postings never judged), so nothing is written.
+A PARTIAL PURCHASE IS KEPT. `score_candidates` hands back the pairs it did get
+answered along with the fault, and they are written here, because a row is per
+(person, posting) and a fault that stopped a pass early is the same thing to
+this cache as a cap that ended it early -- `stale_pairs` finds the remainder
+next pass either way. Discarding them was the old rule at both levels, and it
+meant a provider having a bad minute produced nothing at all: on 2026-11-27 a
+pass got ten answers and wrote none of them.
 
 TRANSACTIONS. Nothing in this module commits. `write_back`, `record_prose` and
 `cached_scores` all write into the caller's session and leave the commit to the
@@ -395,22 +400,26 @@ async def cached_scores(db, *, user, facts, jobs, cap: int) -> ScoreRun:
         run.usage = bought.usage
         run.error = bought.error
         bought_model = bought.model
-        if bought.error is None:
-            by_id = {str(j.id): j for j in to_buy}
-            for item in bought.scored:
-                write_back(
-                    db, user=user, facts=facts, job=by_id[item.job_id],
-                    model=bought.model, scored=item,
-                    description_hash=_hash_of(hashes, item.job_id),
-                )
-                bought_scored.append(item)
-            for job_id in bought.refused:
-                write_back(
-                    db, user=user, facts=facts, job=by_id[job_id],
-                    model=bought.model, refused=True,
-                    description_hash=_hash_of(hashes, job_id),
-                )
-                bought_refused.append(job_id)
+        # Written whether or not `error` is set: what came back was answered
+        # and paid for, and a pair that was never reached is simply absent
+        # here and still stale, which is the same state a cap leaves it in.
+        # This used to be gated on `bought.error is None`, the second of two
+        # places that threw a partial purchase away.
+        by_id = {str(j.id): j for j in to_buy}
+        for item in bought.scored:
+            write_back(
+                db, user=user, facts=facts, job=by_id[item.job_id],
+                model=bought.model, scored=item,
+                description_hash=_hash_of(hashes, item.job_id),
+            )
+            bought_scored.append(item)
+        for job_id in bought.refused:
+            write_back(
+                db, user=user, facts=facts, job=by_id[job_id],
+                model=bought.model, refused=True,
+                description_hash=_hash_of(hashes, job_id),
+            )
+            bought_refused.append(job_id)
 
     rows = [fresh[str(j.id)] for j in jobs if str(j.id) in fresh]
     run.scored = [_as_scored(r) for r in rows if r.outcome != "refused"] + bought_scored

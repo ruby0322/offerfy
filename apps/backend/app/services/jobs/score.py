@@ -311,9 +311,11 @@ async def _score_pair(
 async def score_candidates(db, *, user, facts, jobs, concurrency: int = 4) -> ScoreRun:
     """Score each job against `facts`. Never raises on a provider fault.
 
-    A fault sets `error` and leaves `scored` empty: a half-scored pool would
-    rank the survivors against postings that were never judged. Once one pair
-    has failed, pairs not yet started are skipped rather than paid for.
+    A fault sets `error` and keeps whatever was answered. These are per-pair
+    judgements and nothing here ranks them, so discarding a pair the provider
+    has already answered -- and been paid for -- buys nothing back. Once one
+    pair has failed, pairs not yet started are skipped rather than paid for: a
+    fault still stops the spending, it just no longer undoes it.
     """
     settings = get_settings()
     model = (settings.openai_decisions_model or DEFAULT_DECISIONS_MODEL).strip()
@@ -409,13 +411,26 @@ async def score_candidates(db, *, user, facts, jobs, concurrency: int = 4) -> Sc
         "output_tokens": None,
         "reasoning_tokens": None,
     }
-    if failure:
-        run.error = failure[0]
-        return run
+    # Kept whether or not something else in the batch failed. The old rule
+    # emptied `scored` on any fault, and the reason recorded for it -- a
+    # half-scored pool would rank survivors against postings never judged --
+    # does not hold here any more. Nothing in this function ranks, its one
+    # caller is the read-through cache, and that cache's rows are per
+    # (person, posting) and already fill in over several passes. The ranking
+    # the rule was really about happens in `build_digests`, over cached rows,
+    # which has always been a partial pool and logs that it is one.
+    #
+    # The cost of the old rule was not theoretical: on 2026-11-27, with one
+    # API key out of credits and the other rate limited, a pass got ten
+    # answers and eight faults and wrote none of the ten.
     for job in candidates:
         outcome = results.get(str(job.id))
         if outcome == "refused":
             run.refused.append(str(job.id))
         elif isinstance(outcome, Scored):
             run.scored.append(outcome)
+    # First failure wins, and it is still reported: a caller has to be able to
+    # tell a short pool from a complete one.
+    if failure:
+        run.error = failure[0]
     return run

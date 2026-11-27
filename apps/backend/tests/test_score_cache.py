@@ -69,17 +69,25 @@ def _job(db, description_hash="d" * 64):
 class Provider:
     """Stands in for score_candidates and remembers every pool it was sent."""
 
-    def __init__(self, *, refuse=(), error=None, model="decisions-model"):
+    def __init__(self, *, refuse=(), error=None, model="decisions-model", answered=None):
         self.refuse = set(refuse)
         self.error = error
         self.model = model
+        # How many of the pool the provider got through before faulting. None
+        # means "all of it". With a number, `error` is set AND those pairs come
+        # back answered -- the shape a real partial fault has, which the plain
+        # `error` case below cannot express.
+        self.answered = answered
         self.calls: list[list[str]] = []
 
     async def __call__(self, db, *, user, facts, jobs, concurrency=4):
         ids = [str(j.id) for j in jobs]
         self.calls.append(ids)
         run = ScoreRun(model=self.model, usage={"input_tokens": 100 * len(ids)})
-        if self.error:
+        if self.answered is not None:
+            run.error = self.error or "You have no credits remaining."
+            ids = ids[: self.answered]
+        elif self.error:
             run.error = self.error
             return run
         for job_id in ids:
@@ -342,6 +350,44 @@ async def test_a_provider_fault_sets_error_and_still_returns_cached_rows(db_sess
     assert run.error == "Decisions request failed"
     assert [s.job_id for s in run.scored] == [cached.id]
     assert [r.job_id for r in _rows(db_session, user)] == [cached.id]  # nothing half-written
+
+
+async def test_a_partial_purchase_is_written_back_not_thrown_away(db_session, monkeypatch):
+    """A fault must not discard the pairs the provider already answered.
+
+    There were two layers throwing them away -- `score_candidates` emptied
+    `scored`, and this module only wrote back `if bought.error is None` -- so a
+    provider having a bad minute produced nothing at all. In production on
+    2026-11-27 that was ten answered pairs and no rows, which is the difference
+    between a dashboard with matches on it and the empty one that was reported.
+
+    Keeping them is safe precisely because this is a cache: a row is per
+    (person, posting) and nothing ranks inside this function, so a short pass
+    is the same thing as a capped one. `stale_pairs` finds the rest next time,
+    which is what `test_a_broad_preference_fills_in_over_several_passes`
+    already relies on.
+    """
+    user = _user(db_session)
+    facts = _facts(db_session, user)
+    jobs = [_job(db_session) for _ in range(3)]
+    stub = Provider(answered=2)
+    monkeypatch.setattr(score_cache, "score_candidates", stub)
+
+    run = await score_cache.cached_scores(
+        db_session, user=user, facts=facts, jobs=jobs, cap=10
+    )
+
+    answered = {jobs[0].id, jobs[1].id}
+    # Returned to the caller...
+    assert {s.job_id for s in run.scored} == answered
+    # ...and written, so the next pass does not pay for them again.
+    assert {r.job_id for r in _rows(db_session, user)} == answered
+    # The fault is still reported: the caller must know the pool is partial.
+    assert run.error == "You have no credits remaining."
+    # And the pair that was never reached is still owed, not silently dropped.
+    assert [j.id for j in score_cache.stale_pairs(
+        db_session, user=user, facts=facts, jobs=jobs
+    )] == [jobs[2].id]
 
 
 async def test_cap_bounds_purchases_not_the_returned_pool(db_session, provider):

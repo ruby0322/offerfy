@@ -212,6 +212,52 @@ async def test_a_provider_4xx_sets_error_and_scores_nothing(openai_enabled, monk
     assert run.error == "Unknown endpoint /v1/decisions" and run.scored == []
 
 
+class PerPairDecisions(StubDecisions):
+    """Answers some pairs and faults on others, keyed by the posting in the body.
+
+    `StubDecisions` has one status for the whole run, which cannot express the
+    case that matters here: a provider that answers some calls and refuses
+    others. That is not a contrived mixture -- it is what two API keys look
+    like when one is out of credits and the other is rate limited.
+    """
+
+    def __init__(self, fault_on):
+        super().__init__(lambda body: _answers())
+        self.fault_on = set(fault_on)
+
+    async def post(self, url, headers=None, json=None):
+        self.calls.append({"url": url, "headers": headers or {}, "body": json})
+        text = _text_of(json)
+        if any(f"Posting-{job_id}-title" in text for job_id in self.fault_on):
+            return StubResponse(
+                {"error": {"message": "You have no credits remaining."}}, 429
+            )
+        return StubResponse(self.respond(json), 200)
+
+
+async def test_a_fault_keeps_the_pairs_that_were_answered(
+    openai_enabled, monkeypatch, db_session
+):
+    # What this replaces: `scored` was emptied on any fault, so one 429 in a
+    # batch threw away every pair the provider had already answered and been
+    # paid for. Observed in production 2026-11-27 -- ten answers and eight
+    # faults in one pass, nothing written, no matches on the dashboard.
+    #
+    # The pool below is deliberately ordered and run one at a time so the
+    # boundary is exact: a and b are answered, c faults, d is never asked.
+    stub = _install(monkeypatch, PerPairDecisions({"c"}))
+    run = await score_candidates(
+        db_session, user=_user(db_session), facts=_facts(),
+        jobs=[_job("a"), _job("b"), _job("c"), _job("d")], concurrency=1,
+    )
+    assert [s.job_id for s in run.scored] == ["a", "b"]
+    # Still reported. The caller has to know the pool is incomplete -- the
+    # digest says so in its log, and the sweep leaves the rest for next pass.
+    assert run.error == "You have no credits remaining."
+    # And the circuit breaker still holds: `d` was not paid for.
+    assert len(stub.calls) == 3
+
+
 async def test_no_key_is_an_error_not_a_crash(monkeypatch, db_session):
     from app.config import get_settings
 
